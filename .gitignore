@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ComfyUI
+output/
+input/
+custom_nodes/
+models/
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+run_*.py
+fix_*.py
+convert_*.py
+submit_*.py
+
+# ComfyUI temp
+comfyui.log
+*.queue
+
+# Temporary test scripts
+workflows/_*.py
+workflows/test_*.py
+workflows/show_*.py
+workflows/check_*.py
+workflows/*_test.py
+workflows/auto_pipeline.py
+workflows/batch_generate_from_db.py
+
+# API format debug files
+workflows/*_api.json
+
+# Database files
+workflows/文档/*.db
+
+# Python cache
+__pycache__/
+*.pyc

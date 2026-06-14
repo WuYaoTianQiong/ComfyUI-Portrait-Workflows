@@ -1,0 +1,273 @@
+{
+  "last_node_id": 13,
+  "last_link_id": 15,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImagesFromFolderKJ",
+      "pos": [50, 520],
+      "size": [340, 260],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "image", "type": "IMAGE", "links": [8], "slot_index": 0},
+        {"name": "mask", "type": "MASK", "links": [], "slot_index": 1},
+        {"name": "count", "type": "INT", "links": [], "slot_index": 2},
+        {"name": "image_path", "type": "STRING", "links": [], "slot_index": 3}
+      ],
+      "properties": {"Node name for S&R": "LoadImagesFromFolderKJ"},
+      "widgets_values": ["ComfyUI/input/img2img", 768, 1024, "center_crop", 0, 0, false],
+      "title": "📁 批量模式：图片文件夹"
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [50, 280],
+      "size": [315, 200],
+      "flags": {},
+      "order": 0,
+      "mode": 4,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [], "slot_index": 0},
+        {"name": "MASK", "type": "MASK", "links": [], "slot_index": 1}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": [""],
+      "title": "🖼️ 单张模式（备用，默认禁用）"
+    },
+    {
+      "id": 3,
+      "type": "UNETLoader",
+      "pos": [450, 50],
+      "size": [340, 130],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "MODEL", "type": "MODEL", "links": [1], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "UNETLoader"},
+      "widgets_values": ["anima-base-v1.0.safetensors", "default"],
+      "title": "Anima UNET (可换icerealisticAnima.safetensors)"
+    },
+    {
+      "id": 4,
+      "type": "CLIPLoader",
+      "pos": [450, 220],
+      "size": [340, 150],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "CLIP", "type": "CLIP", "links": [2], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "CLIPLoader"},
+      "widgets_values": ["qwen_3_06b_base.safetensors", "stable_diffusion", "default"],
+      "title": "Anima CLIP (Qwen)"
+    },
+    {
+      "id": 5,
+      "type": "VAELoader",
+      "pos": [450, 410],
+      "size": [340, 100],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "VAE", "type": "VAE", "links": [6, 7], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "VAELoader"},
+      "widgets_values": ["qwen_image_vae.safetensors"],
+      "title": "Anima VAE"
+    },
+    {
+      "id": 6,
+      "type": "LoraLoader",
+      "pos": [840, 50],
+      "size": [340, 130],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "link": 1},
+        {"name": "clip", "type": "CLIP", "link": 2}
+      ],
+      "outputs": [
+        {"name": "MODEL", "type": "MODEL", "links": [3], "slot_index": 0},
+        {"name": "CLIP", "type": "CLIP", "links": [4, 5], "slot_index": 1}
+      ],
+      "properties": {"Node name for S&R": "LoraLoader"},
+      "widgets_values": ["Niji_cute_epoch_8.safetensors", 0.8, 0.8],
+      "title": "🎨 LoRA (可选：删除此节点则不加载LoRA)"
+    },
+    {
+      "id": 7,
+      "type": "CLIPTextEncode",
+      "pos": [1240, 50],
+      "size": [430, 200],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"name": "clip", "type": "CLIP", "link": 4}
+      ],
+      "outputs": [
+        {"name": "CONDITIONING", "type": "CONDITIONING", "links": [10], "slot_index": 0}
+      ],
+      "title": "正向提示词",
+      "properties": {"Node name for S&R": "CLIPTextEncode"},
+      "widgets_values": ["masterpiece, best quality, highly detailed, vibrant colors, sharp focus, clean lines, beautiful lighting"],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 8,
+      "type": "CLIPTextEncode",
+      "pos": [1240, 320],
+      "size": [430, 130],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"name": "clip", "type": "CLIP", "link": 5}
+      ],
+      "outputs": [
+        {"name": "CONDITIONING", "type": "CONDITIONING", "links": [11], "slot_index": 0}
+      ],
+      "title": "反向提示词",
+      "properties": {"Node name for S&R": "CLIPTextEncode"},
+      "widgets_values": ["worst quality, low quality, blurry, jpeg artifacts, watermark, text, signature, deformed, bad anatomy, extra limbs, mutated"],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 9,
+      "type": "VAEEncode",
+      "pos": [500, 700],
+      "size": [210, 80],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"name": "pixels", "type": "IMAGE", "link": 8},
+        {"name": "vae", "type": "VAE", "link": 6}
+      ],
+      "outputs": [
+        {"name": "LATENT", "type": "LATENT", "links": [12], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "VAEEncode"}
+    },
+    {
+      "id": 10,
+      "type": "KSampler",
+      "pos": [1720, 200],
+      "size": [315, 262],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "link": 3},
+        {"name": "positive", "type": "CONDITIONING", "link": 10},
+        {"name": "negative", "type": "CONDITIONING", "link": 11},
+        {"name": "latent_image", "type": "LATENT", "link": 12}
+      ],
+      "outputs": [
+        {"name": "LATENT", "type": "LATENT", "links": [13], "slot_index": 0}
+      ],
+      "title": "图生图采样 (denoise=0.4, 调高=风格更强, 调低=更近原图)",
+      "properties": {"Node name for S&R": "KSampler"},
+      "widgets_values": [0, "randomize", 28, 5, "euler_ancestral", "normal", 0.4]
+    },
+    {
+      "id": 11,
+      "type": "VAEDecode",
+      "pos": [2120, 200],
+      "size": [210, 80],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {"name": "samples", "type": "LATENT", "link": 13},
+        {"name": "vae", "type": "VAE", "link": 7}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [14], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "VAEDecode"}
+    },
+    {
+      "id": 12,
+      "type": "ImageScaleBy",
+      "pos": [2420, 200],
+      "size": [315, 130],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 14}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [15], "slot_index": 0}
+      ],
+      "title": "放大输出 (2x)",
+      "properties": {"Node name for S&R": "ImageScaleBy"},
+      "widgets_values": ["lanczos", 2]
+    },
+    {
+      "id": 13,
+      "type": "SaveImage",
+      "pos": [2820, 200],
+      "size": [315, 270],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {"name": "images", "type": "IMAGE", "link": 15}
+      ],
+      "properties": {"Node name for S&R": "SaveImage"},
+      "widgets_values": ["Anima/img2img"]
+    }
+  ],
+  "links": [
+    [1, 3, 0, 6, 0, "MODEL"],
+    [2, 4, 0, 6, 1, "CLIP"],
+    [3, 6, 0, 10, 0, "MODEL"],
+    [4, 6, 1, 7, 0, "CLIP"],
+    [5, 6, 1, 8, 0, "CLIP"],
+    [6, 5, 0, 9, 1, "VAE"],
+    [7, 5, 0, 11, 1, "VAE"],
+    [8, 1, 0, 9, 0, "IMAGE"],
+    [10, 7, 0, 10, 1, "CONDITIONING"],
+    [11, 8, 0, 10, 2, "CONDITIONING"],
+    [12, 9, 0, 10, 3, "LATENT"],
+    [13, 10, 0, 11, 0, "LATENT"],
+    [14, 11, 0, 12, 0, "IMAGE"],
+    [15, 12, 0, 13, 0, "IMAGE"]
+  ],
+  "groups": [
+    {
+      "title": "模型加载 (Anima拆分 + 可选LoRA)",
+      "bounding": [430, 20, 780, 500],
+      "color": "#3f789e"
+    },
+    {
+      "title": "图片输入 (默认批量，单张备用节点已禁用mode=4)",
+      "bounding": [30, 260, 380, 540],
+      "color": "#c0392b"
+    },
+    {
+      "title": "提示词 (可自由修改风格描述)",
+      "bounding": [1220, 20, 470, 470],
+      "color": "#3f789e"
+    }
+  ],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
