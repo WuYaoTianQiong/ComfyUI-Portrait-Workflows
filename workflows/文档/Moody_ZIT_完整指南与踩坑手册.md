@@ -486,6 +486,7 @@ VAEDecode → CodeFormer面部增强(fidelity=0.55) → SeedVR2超分(→4K) →
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-17 | 新增 SageAttention 2 优化章节，显存降低 21-24%，SeedVR2 4K 超分成功执行 |
 | 2026-06-16 | 补充 SeedVR2 踩坑：ComfyUI 版本过低导致加载失败（comfy_api.latest），附解决方法和来源 |
 | 2026-06-14 | 升级至 ZIT V7 FP8，新增 SeedVR2 超分方案，删除全部 V6 旧工作流，重写本文档 |
 | 2026-06-13 | 创建 V6 参考对齐版指南（已归档） |
