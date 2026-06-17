@@ -1,0 +1,14 @@
+{
+  "1": { "class_type": "LoadImage", "inputs": { "image": "input_image.png" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "hunyuan_image", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "hunyuanvideo15_vae_fp16.safetensors" } },
+  "4": { "class_type": "CLIPVisionLoader", "inputs": { "clip_name": "sigclip_vision_patch14_384.safetensors" } },
+  "5": { "class_type": "CLIPVisionEncode", "inputs": { "clip_vision": ["4", 0], "image": ["1", 0], "crop": "center" } },
+  "6": { "class_type": "TextEncodeHunyuanVideo_ImageToVideo", "inputs": { "clip": ["2", 0], "clip_vision_output": ["5", 0], "prompt": "momoka, a cute Japanese girl with short bob hair, slowly lifts a steaming coffee cup to her lips and takes a gentle sip, steam rising, eyes closing in contentment, natural subtle gesture, warm cafe lighting, single continuous shot, no cuts", "image_interleave": 2 } },
+  "7": { "class_type": "HunyuanVideo15ImageToVideo", "inputs": { "positive": ["6", 0], "negative": ["6", 0], "vae": ["3", 0], "width": 704, "height": 1280, "length": 81, "batch_size": 1, "start_image": ["1", 0] } },
+  "8": { "class_type": "UNETLoader", "inputs": { "unet_name": "hunyuanvideo1.5_720p_i2v_cfg_distilled_fp8_scaled.safetensors", "weight_dtype": "fp8_e4m3fn" } },
+  "9": { "class_type": "ModelSamplingSD3", "inputs": { "model": ["8", 0], "shift": 7 } },
+  "10": { "class_type": "KSampler", "inputs": { "model": ["9", 0], "seed": 42, "steps": 20, "cfg": 2.0, "sampler_name": "euler", "scheduler": "sgm_uniform", "positive": ["7", 0], "negative": ["7", 1], "latent_image": ["7", 2], "denoise": 1.0 } },
+  "11": { "class_type": "VAEDecode", "inputs": { "samples": ["10", 0], "vae": ["3", 0] } },
+  "12": { "class_type": "SaveWEBM", "inputs": { "images": ["11", 0], "fps": 16, "codec": "vp9", "filename_prefix": "HY15_I2V_Coffee", "crf": 15 } }
+}
