@@ -2,7 +2,7 @@
   "1": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "moodyRealMix_zitV7GlobalFP8.safetensors",
+      "unet_name": "moodyWild_zibV4Base40steps_fp8.safetensors",
       "weight_dtype": "default"
     }
   },
@@ -28,106 +28,145 @@
     }
   },
   "5": {
-    "class_type": "LoraLoaderModelOnly",
-    "inputs": {
-      "model": ["4", 0],
-      "lora_name": "zit_sda_v1.safetensors",
-      "strength_model": 0.69
-    }
-  },
-  "6": {
     "class_type": "ModelSamplingAuraFlow",
     "inputs": {
-      "model": ["5", 0],
+      "model": ["4", 0],
       "shift": 3.0
     }
   },
-  "7": {
+  "6": {
     "class_type": "EmptyLatentImage",
     "inputs": {
-      "width": 1024,
-      "height": 576,
+      "width": 1536,
+      "height": 864,
       "batch_size": 1
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "【正面提示词】1girl, photorealistic, portrait, detailed face, soft lighting"
     }
   },
   "8": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "clip": ["2", 0],
-      "text": ""
+      "text": "【负面提示词】nsfw, bad anatomy, bad hands, extra fingers, blurry"
     }
   },
   "9": {
-    "class_type": "ConditioningZeroOut",
+    "class_type": "KSampler",
     "inputs": {
-      "conditioning": ["8", 0]
+      "model": ["5", 0],
+      "seed": 1723908475,
+      "steps": 30,
+      "cfg": 4.0,
+      "sampler_name": "euler",
+      "scheduler": "beta",
+      "positive": ["7", 0],
+      "negative": ["8", 0],
+      "latent_image": ["6", 0],
+      "denoise": 1.0
     }
   },
   "10": {
-    "class_type": "KSampler",
+    "class_type": "UNETLoader",
     "inputs": {
-      "model": ["6", 0],
-      "seed": 0,
-      "steps": 9,
-      "cfg": 1.0,
-      "sampler_name": "dpmpp_2m_sde",
-      "scheduler": "beta",
-      "positive": ["8", 0],
-      "negative": ["19", 0],
-      "latent_image": ["7", 0]
+      "unet_name": "moodyRealMix_zitV7GlobalFP8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "11": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["10", 0],
+      "lora_name": "zit_sda_v1.safetensors",
+      "strength_model": 0.35
+    }
+  },
+  "12": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": ["11", 0],
+      "shift": 3.0
     }
   },
   "13": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["12", 0],
+      "seed": 3847291056,
+      "steps": 12,
+      "cfg": 1.0,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "beta",
+      "positive": ["7", 0],
+      "negative": ["8", 0],
+      "latent_image": ["9", 0],
+      "denoise": 0.35
+    }
+  },
+  "14": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["10", 0],
+      "samples": ["13", 0],
       "vae": ["3", 0]
     }
   },
-  "19": {
-    "class_type": "CLIPTextEncode",
+  "15": {
+    "class_type": "FaceRestoreModelLoader",
     "inputs": {
-      "clip": ["2", 0],
-      "text": ""
+      "model_name": "codeformer.pth"
     }
   },
-  "20": {
+  "16": {
+    "class_type": "FaceRestoreCFWithModel",
+    "inputs": {
+      "facerestore_model": ["15", 0],
+      "image": ["14", 0],
+      "facedetection": "retinaface_resnet50",
+      "codeformer_fidelity": 0.55
+    }
+  },
+  "17": {
     "class_type": "SeedVR2LoadDiTModel",
     "inputs": {
       "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
       "device": "cuda:0",
-      "blocks_to_swap": 36,
-      "swap_io_components": true,
+      "blocks_to_swap": 6,
+      "swap_io_components": false,
       "offload_device": "cpu",
-      "cache_model": false,
+      "cache_model": true,
       "attention_mode": "sdpa"
     }
   },
-  "21": {
+  "18": {
     "class_type": "SeedVR2LoadVAEModel",
     "inputs": {
       "model": "ema_vae_fp16.safetensors",
       "device": "cuda:0",
       "encode_tiled": true,
       "encode_tile_size": 1024,
-      "encode_tile_overlap": 128,
+      "encode_tile_overlap": 96,
       "decode_tiled": true,
       "decode_tile_size": 1024,
-      "decode_tile_overlap": 128,
+      "decode_tile_overlap": 96,
       "tile_debug": "false",
       "offload_device": "cpu",
-      "cache_model": false
+      "cache_model": true
     }
   },
-  "22": {
+  "19": {
     "class_type": "SeedVR2VideoUpscaler",
     "inputs": {
-      "image": ["13", 0],
-      "dit": ["20", 0],
-      "vae": ["21", 0],
+      "image": ["16", 0],
+      "dit": ["17", 0],
+      "vae": ["18", 0],
       "seed": 42,
-      "resolution": 2560,
-      "max_resolution": 0,
+      "resolution": 2160,
+      "max_resolution": 3840,
       "batch_size": 1,
       "uniform_batch_size": false,
       "color_correction": "lab",
@@ -139,26 +178,11 @@
       "enable_debug": false
     }
   },
-  "23": {
-    "class_type": "FaceRestoreModelLoader",
-    "inputs": {
-      "model_name": "codeformer.pth"
-    }
-  },
-  "24": {
-    "class_type": "FaceRestoreCFWithModel",
-    "inputs": {
-      "facerestore_model": ["23", 0],
-      "image": ["22", 0],
-      "facedetection": "retinaface_resnet50",
-      "codeformer_fidelity": 0.5
-    }
-  },
-  "25": {
+  "20": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": ["24", 0],
-      "filename_prefix": "V7_SeedVR2_CF"
+      "images": ["19", 0],
+      "filename_prefix": "V7_ZIB_ZIT_CF_SeedVR2"
     }
   }
 }
