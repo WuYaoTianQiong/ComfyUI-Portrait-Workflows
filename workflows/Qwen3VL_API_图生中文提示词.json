@@ -1,0 +1,50 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "2": {
+    "class_type": "ImageScaleBy",
+    "inputs": {
+      "image": ["1", 0],
+      "upscale_method": "lanczos",
+      "scale_by": 1.0
+    }
+  },
+  "3": {
+    "class_type": "QwenVL_ZH_adv",
+    "inputs": {
+      "image": ["2", 0],
+      "model": "Qwen3-VL-8B-Instruct",
+      "quantization": "INT4",
+      "prompt_style": "Stable Diffusion Prompt",
+      "caption_length": "详细",
+      "style_preset": "自动检测",
+      "two_stage": true,
+      "max_new_tokens": 512,
+      "temperature": 0.3,
+      "top_p": 0.9,
+      "top_k": 50,
+      "memory_management": "Keep in Memory",
+      "custom_system_prompt": "",
+      "custom_user_prompt": ""
+    }
+  },
+  "4": {
+    "class_type": "TextCleanZH",
+    "inputs": {
+      "text": ["3", 0],
+      "prompt_style": "Stable Diffusion Prompt",
+      "remove_thinking": true,
+      "add_style_prefix": true
+    }
+  },
+  "5": {
+    "class_type": "ShowText|pysssss",
+    "inputs": {
+      "text": ["4", 0]
+    }
+  }
+}
