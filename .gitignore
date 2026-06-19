@@ -69,6 +69,8 @@ workflows/batch_generate_from_db.py
 
 # Database files
 workflows/文档/*.db
+workflows/文档/*.db-shm
+workflows/文档/*.db-wal
 
 # Python cache
 __pycache__/
