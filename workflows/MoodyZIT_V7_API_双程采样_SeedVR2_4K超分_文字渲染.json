@@ -21,7 +21,7 @@
   },
   "6": {
     "class_type": "EmptyLatentImage",
-    "inputs": { "width": 640, "height": 960, "batch_size": 1 }
+    "inputs": { "width": 768, "height": 1152, "batch_size": 1 }
   },
   "7": {
     "class_type": "CLIPTextEncode",
@@ -53,11 +53,11 @@
   },
   "14": {
     "class_type": "FaceRestoreCFWithModel",
-    "inputs": { "facerestore_model": ["13", 0], "image": ["12", 0], "facedetection": "retinaface_resnet50", "codeformer_fidelity": 0.75 }
+    "inputs": { "facerestore_model": ["13", 0], "image": ["12", 0], "facedetection": "retinaface_resnet50", "codeformer_fidelity": 0.85 }
   },
   "sw": {
     "class_type": "LazySwitchKJ",
-    "inputs": { "switch": false, "on_false": ["12", 0], "on_true": ["14", 0] }
+    "inputs": { "switch": true, "on_false": ["12", 0], "on_true": ["14", 0] }
   },
   "15": {
     "class_type": "SeedVR2LoadDiTModel",
