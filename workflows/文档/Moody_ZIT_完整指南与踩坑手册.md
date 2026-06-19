@@ -1,9 +1,11 @@
 # Moody ZIT V7 写实人像 — 完整指南与踩坑手册
 
-> 最后更新: 2026-06-17
+> 最后更新: 2026-06-18
 > 适用环境: ComfyUI-aki-v2 + RTX 5070 12GB (或同等显卡)
-> 模型: moodyRealMix_zitV7GlobalFP8.safetensors
-> 工作流: MoodyZIT_V7_文生图_写实人像_SeedVR2超分_CodeFormer面部增强.json
+> 模型: moodyRealMix_zitV7GlobalFP8.safetensors (Z-Image-Turbo 6B)
+> 推荐工作流:
+>   - 1080P日常: MoodyZIT_V7_1080P清晰版_API.json (20秒)
+>   - 4K超分: MoodyZIT_V7_API_双程采样_SeedVR2_4K超分_文字渲染.json (~55秒，CodeFormer可选关闭)
 >
 > **本文档包含从零安装到出图的全部内容，新手按顺序执行即可。**
 
@@ -474,6 +476,9 @@ VAEDecode → CodeFormer面部增强(fidelity=0.55) → SeedVR2超分(→4K) →
 
 | 淘汰项 | 淘汰原因 | 替代方案 |
 |--------|---------|---------|
+| 直接高分辨率生成（>960px） | VAE伪影、地面幻觉（鹅卵石/垃圾） | 640×960 + Lanczos |
+| Qwen-Image 文字融合方案 | 两模型素材融合不自然 | MoodyZIT 原生文字渲染 |
+| SeedVR2 @1080P | 低分辨率下降质严重 | Lanczos 或 SeedVR2@2160+ |
 | UltimateSDUpscale 主超分 | 水渍、面部平均化 | SeedVR2 3B FP8 |
 | YOLOv8 ONNX 人脸检测 | 与 Impact-Pack ONNXDetectorProvider 不兼容 | MediaPipeFaceMeshDetectorProvider |
 | moody-wild-v4 / moody-real-V7G | 本地未找到模型文件 | moodyRealMix_zitV7GlobalFP8 |
@@ -482,10 +487,279 @@ VAEDecode → CodeFormer面部增强(fidelity=0.55) → SeedVR2超分(→4K) →
 
 ---
 
+## 十二、2026-06-18 深度测试：分辨率、文字渲染与地面踩坑
+
+> **结论先行**：MoodyZIT V7 的**唯一最佳分辨率就是 640×960**。任何试图直接生成更高分辨率的行为都会导致严重伪影。
+
+### 模型架构真相
+
+| 误解 | 真相 | 影响 |
+|------|------|------|
+| MoodyZIT = Flux 微调 | MoodyZIT = **Z-Image-Turbo 6B** 微调 | 6B小模型，分辨率上限低 |
+| 和其他 Flux 模型一样 | Z-Image-Turbo 原生最高 ~1024×1024 | 640×960 是最优解 |
+| V7 Global 是新版本 | 仅改善非亚洲脸，架构不变 | 分辨率限制依旧 |
+
+> **Z-Image-Turbo 6B vs Flux 12B vs Flux.2 32B**：参数规模差距巨大，不是版本迭代能弥补的。
+
+### 分辨率踩坑（核心！）
+
+**问题**：直接生成 1152×1728 或更高分辨率时出现：
+
+| 现象 | 根因 |
+|------|------|
+| 地面出现**沙子、鹅卵石、树枝** | AI把"水渍地面"错误关联为"池塘/河床" |
+| 地面铺满**垃圾、碎屑** | 训练数据中"雨夜街道"=脏乱差 |
+| 整体像**磨砂玻璃/高斯模糊** | ae.safetensors VAE 在大分辨率下降质 |
+| 出现**电路板马赛克** | VAE 完全崩溃（>1400px） |
+
+**解决**：**死守 640×960**，然后用 Lanczos 无损放大。
+
+```
+640×960 生成(18秒) → VAEDecode → ImageScale(Lanczos) → 1080×1620
+         ↑ 原生舒适区                    ↑ 零AI伪影
+```
+
+| 方案 | 耗时 | 地面 | 清晰度 |
+|------|------|------|--------|
+| 640×960 原生 | 18秒 | ✅ 干净水泥+水渍 | ✅ 锐利 |
+| 640×960 + Lanczos 1080P | ~20秒 | ✅ 同上 | ✅ 可用 |
+| 1152×1728 直接 | 99秒 | ❌ 垃圾+鹅卵石 | ❌ 磨砂 |
+| SeedVR2 @1080P | 39秒 | ⚠️ | ❌ 全图高斯模糊 |
+
+> **SeedVR2 注意**：`resolution` 参数必须 ≥ 2160 才能正常工作。设为 1080 会严重降质。
+
+### 文字渲染重大发现
+
+**MoodyZIT 原生支持中英文文字渲染！**
+
+| 文字类型 | 效果 | 提示词示例 |
+|---------|------|-----------|
+| 英文 | ✅ 清晰 | `clear readable neon text "24H OPEN"` |
+| 中文 | ✅ 清晰 | `Chinese red neon sign "便利店"` |
+
+- ✅ 无需 Qwen-Image
+- ✅ 无需额外插件
+- ✅ 直接写在提示词中即可
+- ⚠️ 必须在 640×960 分辨率下生成，放大后文字仍可读
+
+> **Qwen-Image 对比**：Qwen-Image 2512 文字渲染更强（尤其是特殊字体/排版），但人物质量远不如 MoodyZIT。**不需要融合方案**，MoodyZIT 自己就够了。
+
+**完整提示词示例**（直接贴入节点 7 CLIPTextEncode）：
+```
+Full body shot, rainy night convenience store. Adult Chinese girl, innocent small round face, shy expression. Black long hair messy from rain. Standing in front of convenience store glass door. Chinese red neon sign "便利店" on glass. English "24H OPEN" in white neon below. Wearing light pink slim-fit knit top, white jacket, light blue denim shorts, white sneakers. High quality, photorealistic, sharp focus, 85mm lens.
+```
+
+### 负面提示词（经过多轮验证）
+
+**推荐的负面词模板**（已实测有效）：
+```
+trash, garbage, litter, debris, dirt, mud, gravel, sand, pebbles, 
+stones, pond, river, lake, nature, natural ground, outdoor wilderness, 
+forest, park, garden, moss, soil, rocks, 
+messy, dirty, cluttered, blurry, low quality, deformed, artifacts
+```
+
+### VAE 选型
+
+| VAE | 适用场景 | 640×960 | >1000px | 备注 |
+|-----|---------|---------|---------|------|
+| `ae.safetensors` | 默认 | ✅ | ❌ 伪影 | MoodyZIT 专用 |
+| `flux_ae.safetensors` | 备选 | ✅ | ⚠️ 颜色偏差 | Flux 原生 VAE |
+| `ema_vae_fp16.safetensors` | 仅 SeedVR2 | - | - | 不可单独用于解码 |
+
+### 文字渲染方案选型淘汰记录
+
+| 方案 | 尝试 | 结果 | 结论 |
+|------|------|------|------|
+| Qwen-Image 融合 | MoodyZIT人物+Qwen文字→合成 | 色调/透视不匹配，融合度~70% | ❌ 淘汰 |
+| MoodyZIT 直接文字 | 提示词中写文字描述 | 中英文均清晰 | ✅ 采用 |
+| FluxText 插件 | 阿里场景文字编辑 | 需额外4个模型文件，未测试 | ⚠️ 备选 |
+| ImageScale Lanczos | 640→1080 像素放大 | 零伪影 | ✅ 采用 |
+
+### 模型选型淘汰记录（2026-06-18）
+
+| 模型 | 测试 | 优势 | 淘汰原因 |
+|------|------|------|---------|
+| **Qwen-Image 2512** | 独立文生图 | 文字渲染🥇（远超MoodyZIT） | ❌ 人物质量差（"太丑"）、构图诡异 |
+| **Qwen-Image 融合** | 双模型合成 | 理论上两者兼得 | ❌ 两个模型VAE/潜空间/色调完全不同，融合不自然 |
+| **Qwen-Image Inpainting** | 局部重绘文字 | 可保留人物 | ❌ ControlNet模型补丁未下载 |
+| **FluxText** | 场景文字编辑 | Flux原生兼容 | ⚠️ 需下载4个额外模型+自定义节点，未实际测试 |
+| **FLUX.2** | 32B大模型 | 原生4K+强文字 | ❌ RTX 5070 12GB跑不动（需32GB+） |
+| **直接 1152×1728** | 高分辨率生成 | 一步到位1080P | ❌ VAE伪影+地面幻觉 |
+| **640×960 + Lanczos** | 原生+Lanczos | 20秒1080P | ✅ 当前最优 |
+
+> **核心认知**：MoodyZIT（Z-Image-Turbo 6B）在 640×960 分辨率下是写实人像神器，文字、人物、地面全方位优秀。突破这个分辨率的任何尝试（换VAE、换超分、换模型）都会引入新的问题。**接受限制比强行突破更高效。**
+
+### 最终推荐工作流
+
+**1080P 快速出图**（推荐日常使用）：
+```
+UNETLoader(moodyRealMix_zitV7GlobalFP8)
+CLIPLoader(qwen_3_4b, type=lumina2)
+VAELoader(ae.safetensors)
+LoraLoader(momoka-zib-v2_clean, strength=1.0)
+ModelSamplingAuraFlow(shift=3.0)
+EmptyLatentImage(640×960)
+CLIPTextEncode(prompt + text + negative)
+KSampler(20steps, dpmpp_2m_sde/sgm_uniform, cfg=1.0, seed=813972274184088)
+VAEDecode
+ImageScale(lanczos, 1080×1620)
+SaveImage
+```
+> ⏱️ 约 20 秒/张 | 💾 ~8GB 显存
+
+**4K 超分**（推荐日常使用）：
+```
+640×960 → KSamplerAdvanced(双程12步) → bislerp 1.8x → VAEDecodeTiled
+→ [可选 CodeFormer(fidelity=0.75)] → SeedVR2(resolution=2560, tile=1024)
+```
+> ⏱️ 约 55 秒/张 | 💾 ~8GB 显存 | **CodeFormer 默认关闭**（LazySwitchKJ控制）
+
+### CodeFormer 说明
+
+**CodeFormer 默认关闭**。原因：CodeFormer在任意fidelity下都会显著提亮眼白、磨平虹膜纹理，产生"死鱼眼"效果。对MoodyZIT直接生成的已有好脸的面部是**负优化**。如需开启，将LazySwitchKJ节点的`switch`参数改为`true`。
+
+---
+
+## 十三、2026-06-18 追加：UI格式工作流踩坑、API格式迁移与图生提示词
+
+### UI格式 vs API格式工作流（核心踩坑！）
+
+**这是本次最大的坑。** ComfyUI工作流有两种JSON格式：
+
+| 格式 | 参数传递方式 | 对参数顺序的敏感度 | 典型特征 |
+|------|------------|------------------|---------|
+| **UI格式** | `widgets_values` 数组，按位置匹配 | **极度敏感**，插件更新参数顺序即错位 | 有 `mode`, `color`, `widgets_values` 字段 |
+| **API格式** | `inputs` 键值对，按名称匹配 | **完全不敏感**，顺序无关 | 只有 `class_type` + `inputs` |
+
+**踩坑过程**：
+1. SeedVR2插件从v2.5.x更新到v2.5.24，将 `color_correction` 参数从第6位移到第9位（`prepend_frames`之后）
+2. 旧的UI格式工作流 `widgets_values` 数组仍按旧顺序排列，导致所有后续参数错位
+3. 表现为连锁类型错误：`color_correction: 0 not in ['lab',...]`、`offload_device: False not in ['none','cpu','cuda:0']`、`latent_noise_scale, cpu, could not convert string to float: 'cpu'`、`batch_size: Value 0 smaller than min of 1`
+4. 反复修改 `widgets_values` 顺序无效（ComfyUI可能缓存了旧参数）
+
+**根因**：UI格式的位置参数天然脆弱，插件任何参数顺序变更都会导致错位。
+
+**解决方案**：**全面迁移到API格式工作流**。API格式用命名参数（如 `"color_correction": "lab"`），按名称匹配，不受插件参数顺序变更影响。
+
+**参考工作流为什么不报错**：`MoodyZIT_V7_写实人像_SeedVR2超分_CodeFormer面部增强.json` 本身就是API格式，所以不受影响。
+
+### SeedVR2 插件 v2.5.24 参数顺序变更
+
+**SeedVR2VideoUpscaler 当前参数顺序**（从插件源码 `video_upscaler.py` 确认）：
+
+```
+image, dit, vae, seed, resolution, max_resolution, batch_size,
+uniform_batch_size, temporal_overlap, prepend_frames,
+color_correction, input_noise_scale, latent_noise_scale,
+offload_device, enable_debug
+```
+
+**SeedVR2LoadDiTModel 参数**：
+```
+model, device, blocks_to_swap, swap_io_components,
+offload_device, cache_model, attention_mode
+```
+- `attention_mode` 可选值：`sdpa`, `flash_attn_2`, `flash_attn_3`, `sageattn_2`, `sageattn_3`
+- **重要**：`cache_model=True` 时 `offload_device` 不能为 `"none"`，必须设为 `"cpu"` 或其他
+
+**SeedVR2LoadVAEModel 参数**：
+```
+model, device, encode_tiled, encode_tile_size, encode_tile_overlap,
+decode_tiled, decode_tile_size, decode_tile_overlap,
+tile_debug, offload_device, cache_model
+```
+- `tile_debug` 必须是**字符串** `"false"`，不是布尔值 `false`
+
+### SaveImage 路径变量踩坑
+
+**现象**：`filename_prefix` 使用 `%date:yyyy-MM-dd%` 等Windows环境变量时，API模式提交报错 `[WinError 267] 目录名称无效`。
+
+**原因**：ComfyUI API模式不会展开Windows环境变量，`%date%` 被当作字面目录名。
+
+**解决**：使用简单前缀，如 `"filename_prefix": "ZIT-4K"`。
+
+### 双程采样设计说明
+
+当前工作流使用ZIT V7双程采样（Dual-pass sampling），**不需要传统负面提示词**：
+
+| 参数 | Pass1 (KSamplerAdvanced) | Pass2 (KSamplerAdvanced) |
+|------|-------------------------|-------------------------|
+| steps | 9 | 9 |
+| sampler | dpmpp_2m_sde | dpmpp_2m_sde |
+| scheduler | beta | sgm_uniform |
+| start_at_step | 0 | 4 |
+| end_at_step | 7 | 999 |
+| leftover_noise | enable | disable |
+| 负面条件 | ConditioningZeroOut（归零向量） | 同左 |
+
+`ConditioningZeroOut` 把正向条件向量归零作为负向条件，这是ZIT模型的训练方式。
+
+### SageAttention 安装与兼容性
+
+**RTX 5070 (Blackwell, SM 12.0) 兼容 SageAttention 2.2.0**：
+- 需要 `triton-windows` + `sageattention` 两个包
+- wheel命名规则：`sageattn-{version}+cu{cuda}torch{pytorch}-{python}-{os}.whl`
+- 启动参数：`--use-sage-attention`（添加到 `start_comfyui.bat`）
+- SeedVR2 的 `attention_mode` 设为 `sageattn_2` 可启用
+
+### 批量执行策略
+
+**分阶段执行避免模型反复装载卸载**：
+- **阶段1**：Base图 + CodeFormer面部增强（所有提示词共用ZIT模型）
+- **阶段2**：SeedVR2 4K超分（所有图片共用SeedVR2模型）
+- 每个阶段只装载一次模型，大幅减少I/O开销
+
+**显存监控**：
+- GPU峰值：10.7-11.4GB（4K超分时）
+- 12GB显存刚好够用，`blocks_to_swap=8` 是安全值
+- `cache_model=True` 让模型常驻显存，避免反复加载
+
+### JoyCaption 图生提示词
+
+**插件**：`ComfyUI-JoyCaption`（通过 `comfyui-florence2` 插件加载）
+
+**模型下载**：
+- 模型名：`joycaption-beta-one`（约6-8GB）
+- 放置路径：`models/LLM/llama-joycaption-beta-one/`
+- 国内镜像：`https://hf-mirror.com` 或 `https://huggingface.erdda.com`
+- 首次运行自动下载，也可手动下载
+
+**12GB显存配置**：
+- `memory_management`: `"Keep in Memory"` — 模型常驻显存，首次加载后后续秒出
+- `quantization`: `"Balanced (8-bit)"` — 约8GB显存
+- GGUF量化版（IQ4_XS, 4.48GB）可进一步降低显存和加速加载
+
+**comfyui-florence2 插件真相**：
+- 该插件的 `Florence2ModelLoader` 节点只支持 `llama-joycaption-beta-one` 模型
+- **不支持**微软 Florence-2 小模型（0.7B）
+- 底层用的是JoyCaption大模型，速度不会因"Florence"之名而变快
+
+**预期耗时**：
+- 首次加载（Keep in Memory）：约50-80秒
+- 后续执行：数秒（模型已常驻显存）
+
+### 当前可用工作流清单
+
+| 工作流文件 | 格式 | 用途 | 状态 |
+|-----------|------|------|------|
+| `MoodyZIT_V7_双程采样_CodeFormer面部增强_SeedVR2_4K超分_API.json` | API | 生图+面部增强+4K超分 | ✅ 已验证 |
+| `JoyCaption_图生提示词_API.json` | API | 参考图反推英文提示词 | ✅ 已验证 |
+| `MoodyZIT_V7_写实人像_SeedVR2超分_CodeFormer面部增强.json` | API | 参考工作流（ZIB+ZIT双模型） | ✅ 只读参考 |
+
+**已删除的工作流**：
+- `MoodyZIT_V7_双程采样_CF_SeedVR2_4K_API.json` — 已重命名为上面的4K超分版本
+- `MoodyZIT_V7_双程采样_CF_SeedVR2_4K_v2.json` — UI格式，参数错位，已删除
+- `MoodyZIT_V7_双程采样_CodeFormer面部增强_SeedVR2_4K超分.json` — UI格式，参数错位，已删除
+
+---
+
 ## 十、版本历史
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-18 | **追加章节十三**：UI格式vs API格式工作流踩坑（SeedVR2参数顺序错位）、双程采样设计说明、SaveImage路径变量、SageAttention兼容性、批量执行策略、JoyCaption图生提示词、comfyui-florence2插件真相 |
+| 2026-06-18 | **深度测试章节**：分辨率踩坑（640×960为唯一最优）、文字渲染发现（中英文原生支持）、地面AI偏见修复、VAE选型对比、Qwen-Image方案淘汰、Lanczos 1080P方案确定 |
 | 2026-06-17 | 新增 SageAttention 2 优化章节，显存降低 21-24%，SeedVR2 4K 超分成功执行 |
 | 2026-06-16 | 补充 SeedVR2 踩坑：ComfyUI 版本过低导致加载失败（comfy_api.latest），附解决方法和来源 |
 | 2026-06-14 | 升级至 ZIT V7 FP8，新增 SeedVR2 超分方案，删除全部 V6 旧工作流，重写本文档 |

@@ -1,0 +1,78 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "moodyRealMix_zitV7GlobalFP8.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "4": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "model": ["1", 0], "lora_name": "momoka-zib-v2_clean.safetensors", "strength_model": 1.0 }
+  },
+  "5": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["4", 0], "shift": 2.0 }
+  },
+  "6": {
+    "class_type": "EmptyLatentImage",
+    "inputs": { "width": 640, "height": 960, "batch_size": 1 }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "全身入镜，灯火通明的夜晚便利店街景。成年中国女孩，清纯小圆脸，害羞表情。黑色长发被夜风吹得微乱。站在便利店玻璃门前，玻璃门上有红色发光中文\"便利店\"和白色发光英文\"24H OPEN\"霓虹字样。穿浅粉色修身短袖针织衫、白色短款外套、浅蓝色高腰牛仔短裤和白色运动鞋。便利店明亮暖光，玻璃有细微水雾。脚下是白色光滑瓷砖地面，无纹理图案，一尘不染，反射霓虹灯光。高画质，照片级真实，清晰对焦，85毫米镜头。" }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "" }
+  },
+  "9": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["6", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 12, "cfg": 1.0, "sampler_name": "dpmpp_2m", "scheduler": "beta", "start_at_step": 0, "end_at_step": 10, "return_with_leftover_noise": "enable" }
+  },
+  "10": {
+    "class_type": "LatentUpscaleBy",
+    "inputs": { "samples": ["9", 0], "upscale_method": "bislerp", "scale_by": 1.8 }
+  },
+  "11": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["10", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 12, "cfg": 1.0, "sampler_name": "dpmpp_2m", "scheduler": "beta", "start_at_step": 6, "end_at_step": 999, "return_with_leftover_noise": "disable" }
+  },
+  "12": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": { "samples": ["11", 0], "vae": ["3", 0], "tile_size": 384, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8 }
+  },
+  "13": {
+    "class_type": "FaceRestoreModelLoader",
+    "inputs": { "model_name": "codeformer.pth" }
+  },
+  "14": {
+    "class_type": "FaceRestoreCFWithModel",
+    "inputs": { "facerestore_model": ["13", 0], "image": ["12", 0], "facedetection": "retinaface_resnet50", "codeformer_fidelity": 0.75 }
+  },
+  "sw": {
+    "class_type": "LazySwitchKJ",
+    "inputs": { "switch": false, "on_false": ["12", 0], "on_true": ["14", 0] }
+  },
+  "15": {
+    "class_type": "SeedVR2LoadDiTModel",
+    "inputs": { "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors", "device": "cuda:0", "blocks_to_swap": 8, "swap_io_components": false, "offload_device": "cpu", "cache_model": true, "attention_mode": "sageattn_2" }
+  },
+  "16": {
+    "class_type": "SeedVR2LoadVAEModel",
+    "inputs": { "model": "ema_vae_fp16.safetensors", "device": "cuda:0", "encode_tiled": true, "encode_tile_size": 1024, "encode_tile_overlap": 128, "decode_tiled": true, "decode_tile_size": 1024, "decode_tile_overlap": 128, "tile_debug": "false", "offload_device": "cpu", "cache_model": true }
+  },
+  "17": {
+    "class_type": "SeedVR2VideoUpscaler",
+    "inputs": { "image": ["sw", 0], "dit": ["15", 0], "vae": ["16", 0], "seed": 42, "resolution": 2160, "max_resolution": 4096, "batch_size": 1, "uniform_batch_size": false, "color_correction": "lab", "temporal_overlap": 0, "prepend_frames": 0, "input_noise_scale": 0.04, "latent_noise_scale": 0.0, "offload_device": "cpu", "enable_debug": false }
+  },
+  "18": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["17", 0], "filename_prefix": "MoodyZIT-4K-Final" }
+  }
+}

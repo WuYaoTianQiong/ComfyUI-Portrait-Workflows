@@ -67,9 +67,6 @@ workflows/*_test.py
 workflows/auto_pipeline.py
 workflows/batch_generate_from_db.py
 
-# API format debug files
-workflows/*_api.json
-
 # Database files
 workflows/文档/*.db
 
