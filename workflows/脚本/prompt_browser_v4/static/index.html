@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Browser · 提示词管理器 v3</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/style.css?v=5">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <h1>Prompt Browser</h1>
+    <span class="version">v3</span>
+  </div>
+
+  <div class="header-center">
+    <div class="wf-selector" id="wfSelector">
+      <button class="wf-trigger" id="wfTrigger" title="点击选择工作流">
+        <span class="wf-name" id="wfLabel">选择工作流</span>
+        <span class="wf-caret">▼</span>
+      </button>
+      <div class="wf-popover" id="wfPopover">
+        <div class="wf-popover-header">
+          <span>工作流</span>
+          <div class="wf-actions">
+            <button class="icon-btn" id="wfSortBtn" onclick="toggleWorkflowSort()" title="切换排序">最近</button>
+            <button class="icon-btn" onclick="document.getElementById('wfPicker').click()" title="从文件加载">📁</button>
+            <button class="icon-btn" id="wfRestoreBtn" onclick="restoreHiddenWorkflows()" style="display:none" title="恢复隐藏">↩</button>
+          </div>
+        </div>
+        <div class="wf-popover-list" id="wfPopoverList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="header-right">
+    <div class="status" id="statusBar">
+      <span class="status-dot loading" id="statusDot"></span>
+      <span id="statusText">检查 ComfyUI...</span>
+    </div>
+    <select id="qualitySelect" class="header-select" title="画质" onchange="onQualityChange()">
+      <option value="2K">2K</option>
+      <option value="4K" selected>4K</option>
+      <option value="6K">6K</option>
+      <option value="8K">8K</option>
+      <option value="12K">12K</option>
+    </select>
+    <button class="btn btn-icon" id="orientBtn" onclick="toggleOrientation()" title="横竖屏切换">📱</button>
+    <button class="btn btn-primary" id="runBtn" onclick="onMainAction()" disabled>🚀 跑图</button>
+  </div>
+</header>
+
+<!-- Tab 导航 -->
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="promptTab" onclick="switchTab('promptTab', this)">
+    📝 提示词
+  </button>
+  <button class="tab-btn" data-tab="galleryTab" onclick="switchTab('galleryTab', this)">
+    🖼️ 历史画廊
+    <span class="tab-badge" id="galleryBadge" style="display:none">0</span>
+  </button>
+</nav>
+
+<!-- Tab: 提示词 -->
+<div class="tab-content active" id="promptTab">
+  <div class="container" style="flex:1">
+    <aside class="sidebar" id="sidebar">
+      <div class="toolbar">
+        <button class="btn btn-success" onclick="openCreateModal()">+ 新建</button>
+        <input type="text" id="searchInput" placeholder="搜索提示词、标签、备注..." oninput="debounceSearch()">
+        <select id="tagFilter" onchange="onTagChange()"><option value="">全部标签</option></select>
+        <select id="sortFilter" onchange="onSortChange()" title="排序方式">
+          <option value="newest">最新创建</option>
+          <option value="oldest">最早创建</option>
+          <option value="name_asc">名称 A→Z</option>
+          <option value="name_desc">名称 Z→A</option>
+          <option value="updated">最近更新</option>
+        </select>
+        <span class="count-badge" id="countBadge">0</span>
+      </div>
+
+      <div class="batch-panel" id="batchPanel">
+        <div class="batch-panel-header">
+          <span id="batchPanelTitle">批量任务</span>
+          <button class="btn btn-sm btn-danger" id="batchPanelStop" onclick="batchStop()" style="display:none">停止</button>
+        </div>
+        <div class="batch-panel-progress">
+          <div class="batch-bar-wrap"><div class="batch-bar-fill" id="batchBarFill"></div></div>
+          <span class="batch-progress-text" id="batchProgressText">0/0</span>
+        </div>
+        <div class="batch-items" id="batchItems"></div>
+      </div>
+
+      <div class="prompt-list" id="promptList"></div>
+      <div class="pagination" id="promptPagination"></div>
+
+      <div class="selection-bar" id="selectionBar">
+        <label class="sel-check">
+          <input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll(this.checked)">
+          <span>全选</span>
+        </label>
+        <span class="sel-info" id="selectionInfo">已选 0 项</span>
+        <button class="btn btn-sm btn-ghost" onclick="clearSelection()">清空</button>
+      </div>
+    </aside>
+
+    <div class="resize-handle" id="resizeHandle"></div>
+
+    <main class="main">
+      <div class="detail" id="detailPanel">
+        <div class="placeholder">← 从左侧选择一个提示词</div>
+      </div>
+
+      <div class="output-area" id="outputArea">
+        <div class="output-header">
+          <span id="outputTitle">生成结果</span>
+          <button class="close-output" onclick="closeOutput()">×</button>
+        </div>
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progressFill"></div></div>
+        <div class="progress-info" id="progressInfo"></div>
+        <div class="output-body" id="outputBody"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Tab: 历史画廊 -->
+<div class="tab-content" id="galleryTab">
+  <div class="gallery-container">
+    <div class="gallery-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <span style="font-size:13px;color:var(--muted)">共 <span id="galleryCount">0</span> 张</span>
+      <button class="btn btn-sm btn-ghost" onclick="clearHistory()" title="清空历史">清空</button>
+      <button class="btn btn-sm btn-primary" id="compareBtn" onclick="enterCompareMode()" style="display:none">
+        对比模式 (<span id="compareCount">0</span>)
+      </button>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:var(--muted)">悬停显示勾选框，点击勾选后可进入对比</span>
+    </div>
+    <div class="gallery-grid" id="galleryGrid"></div>
+  </div>
+</div>
+
+<!-- 对比模式工具栏 -->
+<div class="compare-toolbar" id="compareToolbar">
+  <button id="compareSyncBtn" class="active" onclick="setCompareMode('sync')">同步切换</button>
+  <button id="compareSplitBtn" onclick="setCompareMode('split')">分屏对比</button>
+  <span style="color:var(--muted);font-size:11px" id="compareHint">滚轮联动缩放，拖动可单独调整位置</span>
+  <button onclick="exitCompareMode()">退出对比</button>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal: Create / Edit -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">新建提示词</h2>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modalBody">
+      <label>名称<input id="f_name" placeholder="方便识别的名称，如：冰品店打卡"></label>
+      <label>正面提示词<textarea id="f_prompt" rows="4"></textarea></label>
+      <label>负面提示词<textarea id="f_neg" rows="2"></textarea></label>
+      <div class="form-row">
+        <label>步数<input type="number" id="f_steps" placeholder="30"></label>
+        <label>CFG<input type="number" step="0.1" id="f_cfg" placeholder="4.0"></label>
+      </div>
+      <div class="form-row">
+        <label>采样器<input id="f_sampler" placeholder="euler"></label>
+        <label>种子<span class="input-with-btn"><input type="number" id="f_seed" placeholder="0"><button class="btn btn-sm btn-ghost" onclick="document.getElementById('f_seed').value=Math.floor(Math.random()*999999999999999)" title="随机种子">🎲</button></span></label>
+      </div>
+      <div class="form-row">
+        <label>模型<input id="f_model" placeholder="模型名称"></label>
+        <label>标签<input id="f_tags" placeholder="逗号分隔，如：人像,室外"></label>
+      </div>
+      <label>备注<input id="f_note" placeholder="可选备注"></label>
+      <input type="hidden" id="f_id" value="">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-success" id="modalSaveBtn" onclick="savePrompt()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Variation -->
+<div class="modal-overlay" id="varModalOverlay">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <h2>多种子变体生成</h2>
+      <button class="close-btn" onclick="closeVarModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <label>生成数量<input type="number" id="varCount" value="4" min="1" max="50" style="width:120px"></label>
+      <label>起始种子（留空=随机）<input type="number" id="varStartSeed" placeholder="留空自动随机" style="width:200px"></label>
+      <div class="hint">每张图种子 = 起始种子 + 索引。留空则全部随机。</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeVarModal()">取消</button>
+      <button class="btn btn-warning" id="varConfirmBtn" onclick="startVariationRun()">开始生成</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="wfPicker" accept=".json" style="display:none" onchange="pickWorkflowFile(event)">
+
+<script src="/app.js?v=4"></script>
+</body>
+</html>
