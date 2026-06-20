@@ -67,6 +67,8 @@ class GenHistory(BaseModel):
     img_type = TextField(null=True)
     view_url = TextField(null=True)
     preview = TextField(null=True)
+    prompt_params = TextField(null=True)  # JSON: 出图参数（steps, cfg, sampler, seed, model, width, height 等）
+    favorite = BooleanField(default=False)
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
     source = TextField(default="local")
 
@@ -77,11 +79,27 @@ class GenHistory(BaseModel):
         )
 
 
+def _migrate_column(db, table, col, col_def):
+    """如果列不存在则 ALTER TABLE 添加（兼容旧库）。"""
+    try:
+        cursor = db.execute_sql(f"SELECT {col} FROM {table} LIMIT 0")
+        cursor.close()
+    except Exception:
+        try:
+            db.execute_sql(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+        except Exception:
+            pass
+
+
 def init_db():
-    """确保表存在（兼容 v3 schema）。"""
+    """确保表存在，并迁移新列（兼容 v3 旧库）。"""
     db.connect()
-    # Peewee 只创建不存在的表，不修改已有表结构
     db.create_tables([Prompt, GenJob, GenHistory], safe=True)
-    # 兼容旧 schema：如果 v3 库已有表但没有 updated_at 列，Peewee 不报错但也不会加
-    # 这里不做迁移，因为 v3 的 init_db() 已处理过
+
+    # 迁移 GenHistory 新列
+    _migrate_column(db, "gen_history", "prompt_params",
+                     "prompt_params TEXT")
+    _migrate_column(db, "gen_history", "favorite",
+                     "favorite BOOLEAN NOT NULL DEFAULT 0")
+
     db.close()
