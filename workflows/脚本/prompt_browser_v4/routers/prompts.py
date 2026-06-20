@@ -199,11 +199,13 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
         meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
         items.append({
             "id": r.id,
+            "prompt_id": r.prompt_id,
             "filename": r.filename,
             "subfolder": r.subfolder,
             "img_type": r.img_type,
             "view_url": r.view_url,
             "created_at": str(r.created_at) if r.created_at else "",
+            "prompt_name": p.name or "",  # 添加提示词名称
             **meta,
         })
     return {"items": items}
