@@ -1,0 +1,34 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "example.png", "upload": "image" }
+  },
+  "2": {
+    "class_type": "SeedVR2LoadDiTModel",
+    "inputs": { "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors", "device": "cuda:0", "blocks_to_swap": 8, "swap_io_components": false, "offload_device": "cpu", "cache_model": true, "attention_mode": "sageattn_2" }
+  },
+  "3": {
+    "class_type": "SeedVR2LoadVAEModel",
+    "inputs": { "model": "ema_vae_fp16.safetensors", "device": "cuda:0", "encode_tiled": true, "encode_tile_size": 1024, "encode_tile_overlap": 128, "decode_tiled": true, "decode_tile_size": 1024, "decode_tile_overlap": 128, "tile_debug": "false", "offload_device": "cpu", "cache_model": true }
+  },
+  "4": {
+    "class_type": "SeedVR2VideoUpscaler",
+    "inputs": { "image": ["1", 0], "dit": ["2", 0], "vae": ["3", 0], "seed": 42, "resolution": 4096, "max_resolution": 4096, "batch_size": 1, "uniform_batch_size": false, "color_correction": "lab", "temporal_overlap": 0, "prepend_frames": 0, "input_noise_scale": 0.0, "latent_noise_scale": 0.0, "offload_device": "cpu", "enable_debug": false }
+  },
+  "5": {
+    "class_type": "FaceRestoreModelLoader",
+    "inputs": { "model_name": "codeformer.pth" }
+  },
+  "6": {
+    "class_type": "FaceRestoreCFWithModel",
+    "inputs": { "facerestore_model": ["5", 0], "image": ["4", 0], "facedetection": "retinaface_resnet50", "codeformer_fidelity": 0.85 }
+  },
+  "sw": {
+    "class_type": "LazySwitchKJ",
+    "inputs": { "switch": true, "on_false": ["4", 0], "on_true": ["6", 0] }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["sw", 0], "filename_prefix": "4K-Upscaled" }
+  }
+}
