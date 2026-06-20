@@ -14,6 +14,12 @@ router = APIRouter(tags=["历史"])
 COMFYUI_API = settings.comfyui_api
 
 
+def _image_exists(filename: str, subfolder: str, img_type: str) -> bool:
+    """检查图片文件是否实际存在"""
+    meta = get_image_metadata(filename, subfolder or "", img_type or "output")
+    return bool(meta)  # get_image_metadata 文件不存在时返回 {}
+
+
 def _enrich_item(r, prompt_cache=None) -> dict:
     """将 DB 行转为前端字典，含图片元数据和提示词名称"""
     meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
@@ -96,7 +102,17 @@ def list_history(limit: int = Query(50)):
         .limit(limit)
     )
     cache = _build_prompt_cache(rows)
-    return {"items": [_enrich_item(r, cache) for r in rows]}
+    items = []
+    deleted_ids = []
+    for r in rows:
+        if not _image_exists(r.filename, r.subfolder or "", r.img_type or "output"):
+            deleted_ids.append(r.id)
+            continue
+        items.append(_enrich_item(r, cache))
+    # 批量删除已不存在的图片记录
+    if deleted_ids:
+        GenHistory.delete().where(GenHistory.id.in_(deleted_ids)).execute()
+    return {"items": items}
 
 
 @router.api_route("/history_sync", methods=["GET", "POST"])

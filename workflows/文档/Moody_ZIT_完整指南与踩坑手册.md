@@ -739,12 +739,69 @@ tile_debug, offload_device, cache_model
 - 首次加载（Keep in Memory）：约50-80秒
 - 后续执行：数秒（模型已常驻显存）
 
+### 图生中文提示词（Qwen3-VL 方案）
+
+**工作流**：`Qwen3VL_API_图生中文提示词.json`
+
+**插件**：`ComfyUI-Img2PromptZH`（自定义节点包，位于 `custom_nodes/`）
+
+**模型**：`Qwen3-VL-8B-Instruct`（~17.5GB，4个safetensors分片）
+- 放置路径：`models/LLM/Qwen3-VL-8B-Instruct/`
+- 来源：HuggingFace `Qwen/Qwen3-VL-8B-Instruct`
+
+**12GB显存配置**：
+- `quantization`: `"INT4"` — 约5GB模型+3GB推理峰值，12G显存稳定
+- `memory_management`: `"Keep in Memory"` — 模型常驻显存
+- `temperature`: `0.3` — 低随机性，减少幻觉
+- `two_stage`: `true` — 两阶段生成（初稿+优化补充细节）
+- `style_preset`: `"自动检测"` — 自动识别摄影风格
+
+**预期耗时**：
+- 首次加载：约100-150秒（INT4量化+两阶段生成）
+- 后续执行：约100-150秒（模型已常驻显存，但两阶段推理时间不变）
+
+**节点说明**：
+
+| 节点 | 类型 | 用途 |
+|------|------|------|
+| LoadImage | 内置 | 加载输入图片 |
+| ImageScaleBy | 内置 | 图片缩放（默认1.0，Qwen3-VL内部处理分辨率） |
+| QwenVL_ZH_adv | 自定义 | 图生中文提示词核心节点（高级版，可调推理参数） |
+| TextCleanZH | 自定义 | 文本后处理（去思考标签、去特殊token、添加风格前缀） |
+| ShowText\|pysssss | pysssss | 展示生成的中文提示词 |
+
+**提示词输出质量**：
+- 覆盖8个维度：构图/镜头、风格/滤镜、人物描述、服饰/外观、动作/姿态、场景/背景、光影/色调、地面/环境细节
+- 自动检测风格（如 Moody Photography、韩风冷色调等）
+- 包含具体参数（如85mm镜头、5500K色温、浅灰色哑光瓷砖等）
+
+#### 图生提示词选型淘汰记录（2026-06-20）
+
+| 方案 | 测试结果 | 淘汰原因 |
+|------|---------|---------|
+| **JoyCaption (llama-joycaption-beta-one)** | 英文输出正常，中文完全无响应 | 基于Llama3.1，对中文system_prompt/few-shot/user_prompt均无响应，输出始终为纯英文 |
+| **JoyCaption + 英文system_prompt + 中文few-shot** | 仍为纯英文输出 | Llama3.1中文生成能力极弱，无法通过prompt工程绕过 |
+| **Qwen3-VL-8B INT8量化** | OOM | 9.47GB模型+3GB推理峰值超12G显存 |
+| **Qwen3-VL-8B INT4 + max_pixels=384** | 速度未提升，质量下降 | 降低视觉token数对推理速度影响小（瓶颈在生成阶段），但细节识别能力下降导致幻觉增加 |
+| **Qwen3-VL-8B INT4 + temperature=0.6** | 幻觉较多 | 温度过高导致编造细节（如"透明玻璃杯"实为"草莓牛奶杯"）、描述重复、构图矛盾 |
+| **Qwen3-VL-8B INT4 + temperature=0.3** | ✅ 当前最优 | 幻觉显著减少，描述准确紧凑，8维度覆盖完整 |
+
+**关键发现**：
+1. **JoyCaption中文方案彻底不可行**：Llama3.1架构限制，非prompt工程可解决
+2. **Qwen3-VL是2026年6月最佳中文VLM**：原生中文能力最强，INT4量化12G显存可用
+3. **推理速度瓶颈在生成阶段而非图片编码**：降低max_pixels对总耗时影响极小，因为两阶段生成（初稿+优化）的token生成才是主要耗时
+4. **temperature对质量影响巨大**：0.3比0.6幻觉显著减少，描述更准确
+5. **两阶段生成提升细节覆盖**：初稿覆盖主要维度，优化阶段补充缺失的构图/镜头/光影/地面细节
+6. **Python模块修改需重启ComfyUI**：进程级缓存限制，热重载不生效
+7. **工作流JSON必须包含所有新增参数**：节点新增`style_preset`和`two_stage`参数后，旧工作流JSON需同步更新，否则API提交报错"Required input is missing"
+8. **浏览器缓存旧节点定义**：新增参数后需Ctrl+Shift+R强制刷新浏览器，否则前端仍显示旧参数列表
+
 ### 当前可用工作流清单
 
 | 工作流文件 | 格式 | 用途 | 状态 |
 |-----------|------|------|------|
 | `MoodyZIT_V7_双程采样_CodeFormer面部增强_SeedVR2_4K超分_API.json` | API | 生图+面部增强+4K超分 | ✅ 已验证 |
-| `JoyCaption_图生提示词_API.json` | API | 参考图反推英文提示词 | ✅ 已验证 |
+| `Qwen3VL_API_图生中文提示词.json` | API | 图片生成中文SD提示词 | ✅ 已验证 |
 | `MoodyZIT_V7_写实人像_SeedVR2超分_CodeFormer面部增强.json` | API | 参考工作流（ZIB+ZIT双模型） | ✅ 只读参考 |
 
 **已删除的工作流**：
@@ -758,6 +815,7 @@ tile_debug, offload_device, cache_model
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **图生中文提示词**：JoyCaption中文方案淘汰（Llama3.1架构限制）、Qwen3-VL-8B INT4方案确立、temperature=0.3降幻觉、两阶段生成、选型踩坑8条记录同步 |
 | 2026-06-18 | **追加章节十三**：UI格式vs API格式工作流踩坑（SeedVR2参数顺序错位）、双程采样设计说明、SaveImage路径变量、SageAttention兼容性、批量执行策略、JoyCaption图生提示词、comfyui-florence2插件真相 |
 | 2026-06-18 | **深度测试章节**：分辨率踩坑（640×960为唯一最优）、文字渲染发现（中英文原生支持）、地面AI偏见修复、VAE选型对比、Qwen-Image方案淘汰、Lanczos 1080P方案确定 |
 | 2026-06-17 | 新增 SageAttention 2 优化章节，显存降低 21-24%，SeedVR2 4K 超分成功执行 |

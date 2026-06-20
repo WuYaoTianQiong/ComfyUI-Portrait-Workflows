@@ -14,6 +14,8 @@ def _get_image_path(filename: str, subfolder: str, img_type: str) -> Optional[Pa
         return None
     if img_type == "input":
         base_dir = settings.comfyui_root / "input"
+    elif img_type == "temp":
+        base_dir = settings.comfyui_root / "temp"
     else:
         base_dir = settings.comfyui_root / "output"
     if subfolder:
