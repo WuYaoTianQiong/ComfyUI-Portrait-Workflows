@@ -6,7 +6,7 @@
 <title>Prompt Browser · 提示词管理器 v3</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="/style.css?v=5">
+<link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
 
@@ -130,14 +130,28 @@
 <!-- Tab: 历史画廊 -->
 <div class="tab-content" id="galleryTab">
   <div class="gallery-container">
-    <div class="gallery-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <span style="font-size:13px;color:var(--muted)">共 <span id="galleryCount">0</span> 张</span>
+    <div class="gallery-toolbar">
+      <span class="gallery-total">共 <span id="galleryCount">0</span> 张</span>
+      <input type="text" class="gallery-search" id="gallerySearch" placeholder="搜索文件名 / 提示词名称..." oninput="onGallerySearch()">
+      <select class="gallery-sort" id="gallerySort" onchange="onGallerySortChange()">
+        <option value="newest">最新</option>
+        <option value="oldest">最早</option>
+        <option value="size_desc">体积 ↓</option>
+        <option value="size_asc">体积 ↑</option>
+        <option value="res_desc">分辨率 ↓</option>
+        <option value="res_asc">分辨率 ↑</option>
+      </select>
+      <select class="gallery-filter" id="galleryFilter" onchange="onGalleryFilterChange()">
+        <option value="all">全部</option>
+        <option value="favorite">仅收藏</option>
+      </select>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-ghost" id="galleryBatchDel" style="display:none" onclick="batchDeleteHistory()">🗑️ 删除选中</button>
+      <button class="btn btn-sm btn-ghost" id="galleryBatchDl" style="display:none" onclick="batchDownloadHistory()">⬇️ 下载选中</button>
       <button class="btn btn-sm btn-ghost" onclick="clearHistory()" title="清空历史">清空</button>
       <button class="btn btn-sm btn-primary" id="compareBtn" onclick="enterCompareMode()" style="display:none">
-        对比模式 (<span id="compareCount">0</span>)
+        对比 (<span id="compareCount">0</span>)
       </button>
-      <span style="flex:1"></span>
-      <span style="font-size:11px;color:var(--muted)">悬停显示勾选框，点击勾选后可进入对比</span>
     </div>
     <div class="gallery-grid" id="galleryGrid"></div>
   </div>
@@ -208,6 +222,6 @@
 
 <input type="file" id="wfPicker" accept=".json" style="display:none" onchange="pickWorkflowFile(event)">
 
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=8"></script>
 </body>
 </html>

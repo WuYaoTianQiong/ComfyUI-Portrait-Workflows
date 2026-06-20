@@ -25,9 +25,13 @@ let _compareItems = [];  // 对比模式的图片列表
 let _compareZoomSync = false;  // 对比模式缩放同步
 let _lightboxItems = [];  // 单图模式的图片列表（用于导航）
 let _lightboxIndex = 0;  // 单图模式当前索引
+let _suppressRouteUpdate = false;  // 批量操作时抑制中间路由更新
 let _promptPage = 1;      // 当前页码
 let _promptPageSize = 50;  // 每页条数
 let _promptTotal = 0;      // 总条数
+let _gallerySort = "newest";       // 画廊排序
+let _galleryFilter = "all";        // 画廊筛选：all / favorite
+let _gallerySearch = "";           // 画廊搜索关键词
 
 // -------------------------------------------------------------------
 // 通用防抖锁：防止异步操作重复触发
@@ -89,6 +93,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupKeyboard();
   setupUnloadGuard();
 
+  // 初始化路由
+  handleRoute(window.location.pathname);
+
   loadTags();
   loadWorkflows();
   loadPrompts().then(() => {
@@ -110,6 +117,107 @@ document.addEventListener("DOMContentLoaded", () => {
   // 恢复灯箱状态（如刷新前正在查看图片）
   restoreLightboxState();
 });
+
+// -------------------------------------------------------------------
+// 前端路由（纯手动 History API，无第三方依赖）
+// -------------------------------------------------------------------
+
+// 路由处理函数
+function routeGallery() { switchTabByRoute('galleryTab'); }
+
+function routePrompt(params) {
+  // 抑制 switchTab 的 pushState，只由 selectPrompt 推最终 URL
+  _suppressRouteUpdate = true;
+  switchTabByRoute('promptTab');
+  _suppressRouteUpdate = false;
+  if (params && params.id) {
+    const promptId = parseInt(params.id);
+    if (promptId && allPrompts.some(p => p.id === promptId)) {
+      selectPrompt(promptId, true, false, false, true);
+    }
+  }
+}
+
+function routeHistory(params) {
+  // 灯箱是模态覆盖层，不需要切换 Tab
+  if (params && params.id) {
+    const historyId = parseInt(params.id);
+    const checkAndOpen = () => {
+      const item = _historyItems.find(it => it.id === historyId);
+      if (item) {
+        _lightboxItems = _historyItems;
+        _lightboxIndex = _historyItems.findIndex(it => it.id === historyId);
+        _compareMode = 'single';
+        openUnifiedImageModal();
+      } else if (_historyItems.length === 0) {
+        setTimeout(checkAndOpen, 500);
+      }
+    };
+    checkAndOpen();
+  }
+}
+
+// 手动路由解析器
+function handleRoute(path) {
+  // 非灯箱路由时，确保灯箱已关闭
+  if (_compareMode === 'single' && !path.startsWith('/history/')) {
+    closeCompareModal();
+  }
+  
+  if (path === '/' || path === '/gallery') {
+    routeGallery();
+  } else if (path.startsWith('/history/')) {
+    const match = path.match(/\/history\/(\d+)/);
+    if (match) routeHistory({ id: parseInt(match[1]) });
+  } else if (path.startsWith('/prompt/')) {
+    const match = path.match(/\/prompt\/(\d+)/);
+    routePrompt(match ? { id: parseInt(match[1]) } : {});
+  } else if (path === '/prompt') {
+    routePrompt({});
+  } else {
+    routeGallery(); // 兜底
+  }
+}
+
+// 监听浏览器后退/前进按钮
+window.addEventListener('popstate', () => {
+  _suppressRouteUpdate = true;
+  handleRoute(window.location.pathname);
+  _suppressRouteUpdate = false;
+});
+
+function switchTabByRoute(tabId) {
+  const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  if (tabBtn) {
+    switchTab(tabId, tabBtn);
+  }
+}
+
+function updateRoute() {
+  let url = '/gallery';  // 默认
+  
+  // 根据当前状态生成 URL
+  if (_compareMode === 'single') {
+    // 灯箱打开时：/history/123
+    const item = _lightboxItems[_lightboxIndex];
+    if (item) {
+      url = `/history/${item.id}`;
+    }
+  } else if (UiState.get('activeTab', 'galleryTab') === 'promptTab' && selectedId) {
+    // 提示词详情：/prompt/123
+    url = `/prompt/${selectedId}`;
+  } else if (UiState.get('activeTab', 'galleryTab') === 'promptTab') {
+    // 提示词列表：/prompt
+    url = '/prompt';
+  }
+  // 否则：/gallery
+  
+  // 使用原生 History API 更新 URL
+  if (window.location.pathname !== url && !_suppressRouteUpdate) {
+    console.log(`[路由] pushState: ${url}  ←  ${window.location.pathname}`);
+    history.pushState(null, '', url);
+  }
+}
 
 function applyUiState() {
   document.getElementById("searchInput").value = UiState.get("search", "");
@@ -364,6 +472,7 @@ async function selectPrompt(id, fetchDetail = true, shiftKey = false, ctrlKey = 
   updateRunBtn();
   updateSelectionBar();
   UiState.set("selectedId", id);
+  updateRoute();  // 更新路由
   if (!fetchDetail) return;
   try {
     const p = await api(`/api/prompts/${id}`);
@@ -1025,9 +1134,19 @@ function closeOutput() {
 
 async function loadHistory(sync = false) {
   try {
-    const data = sync ? await api("/api/history_sync") : await api("/api/history");
+    let url;
+    if (sync) {
+      url = "/api/history_sync";
+    } else {
+      url = "/api/history?";
+      const params = [];
+      if (_galleryFilter === "favorite") params.push("favorite=1");
+      if (_gallerySort) params.push(`sort=${_gallerySort}`);
+      if (_gallerySearch) params.push(`search=${encodeURIComponent(_gallerySearch)}`);
+      url += params.join("&");
+    }
+    const data = await api(url);
     _historyItems = data.items || [];
-    renderHistory(_historyItems);
     renderGallery(_historyItems);
     updateGalleryBadge();
   } catch (e) {
@@ -1050,9 +1169,16 @@ function buildImageMeta(item) {
 function jumpToPrompt(promptId) {
   // 先关闭对比弹窗（否则会遮住跳转后的内容）
   closeCompareModal();
+  
+  // 批量操作，抑制中间的路由更新，避免历史栈被重复 push 污染
+  _suppressRouteUpdate = true;
   const tabBtn = document.querySelector('.tab-btn[data-tab="promptTab"]');
   if (tabBtn) switchTab("promptTab", tabBtn);
   selectPrompt(promptId, true, false, false, false);
+  _suppressRouteUpdate = false;
+  
+  // 统一推一次最终的 URL
+  updateRoute();
 }
 
 let _promptHistoryItems = [];  // 当前提示词的生成历史（供灯箱使用）
@@ -1125,6 +1251,152 @@ async function clearHistory() {
 }
 
 // -------------------------------------------------------------------
+// 画廊：收藏 / 删除 / 下载 / 重新生成
+// -------------------------------------------------------------------
+
+async function toggleFavorite(id, btn) {
+  try {
+    const r = await api(`/api/history/${id}/favorite`, { method: "POST" });
+    if (r.success) {
+      // 同步更新 _historyItems
+      const item = _historyItems.find(it => it.id === id);
+      if (item) item.favorite = r.favorite;
+      // 同步更新 _lightboxItems
+      const lbItem = _lightboxItems.find(it => it && it.id === id);
+      if (lbItem) lbItem.favorite = r.favorite;
+      // 更新传入的按钮（卡片或灯箱）
+      if (btn) {
+        btn.classList.toggle('active', r.favorite);
+        btn.textContent = r.favorite ? '★' : '☆';
+      }
+      // 若灯箱打开且当前图片匹配，同步更新灯箱头部按钮
+      if (_compareMode === 'single') {
+        const favBtn = document.getElementById('lightboxFavBtn');
+        if (favBtn && _lightboxItems[_lightboxIndex] && _lightboxItems[_lightboxIndex].id === id) {
+          favBtn.classList.toggle('active', r.favorite);
+          favBtn.textContent = r.favorite ? '★' : '☆';
+        }
+      }
+      showToast(r.favorite ? '已收藏' : '已取消收藏', 'info');
+    }
+  } catch (e) {
+    showToast("操作失败: " + e.message, "error");
+  }
+}
+
+// 灯箱：切换收藏（复用 toggleFavorite，仅负责触发）
+function toggleFavoriteFromLightbox() {
+  const item = _lightboxItems[_lightboxIndex];
+  if (!item) return;
+  toggleFavorite(item.id, document.getElementById('lightboxFavBtn'));
+}
+
+async function batchDeleteHistory() {
+  const ids = Array.from(_gallerySelectedIds);
+  if (!ids.length) return;
+  if (!confirm(`确定删除选中的 ${ids.length} 张图片吗？`)) return;
+  try {
+    const r = await api('/api/history/batch_delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    showToast(`已删除 ${r.deleted} 项`, 'success');
+    _gallerySelectedIds.clear();
+    loadHistory(false);
+  } catch (e) {
+    showToast('批量删除失败: ' + e.message, 'error');
+  }
+}
+
+async function downloadHistoryItem(id) {
+  const a = document.createElement('a');
+  a.href = `/api/history/${id}/download`;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function batchDownloadHistory() {
+  const ids = Array.from(_gallerySelectedIds);
+  if (!ids.length) return;
+  showToast(`正在下载 ${ids.length} 张图片...`, 'info');
+  for (const id of ids) {
+    await downloadHistoryItem(id);
+    await new Promise(r => setTimeout(r, 500));
+  }
+  showToast('下载完成', 'success');
+}
+
+async function regenerateFromHistory(promptId) {
+  if (!promptId) {
+    showToast('该图片没有关联的提示词，无法重新生成', 'error');
+    return;
+  }
+  const workflowPath = currentWorkflowPath();
+  if (!workflowPath) {
+    showToast('请先选择工作流', 'error');
+    return;
+  }
+  if (comfyStatus !== 'online') {
+    showToast('ComfyUI 离线，无法生成', 'error');
+    return;
+  }
+  try {
+    const body = {
+      id: promptId,
+      workflow_path: workflowPath,
+      orientation: currentOrientation,
+      quality: getQuality(),
+    };
+    const data = await api('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    showToast(`已重新生成 (job ${data.job_id})`, 'success');
+    if (data.job_id) trackJob(data.job_id);
+  } catch (e) {
+    showToast('重新生成失败: ' + e.message, 'error');
+  }
+}
+
+// -------------------------------------------------------------------
+// 画廊：搜索 / 排序 / 筛选
+// -------------------------------------------------------------------
+
+let _gallerySearchTimer = null;
+
+function onGallerySearch() {
+  clearTimeout(_gallerySearchTimer);
+  _gallerySearchTimer = setTimeout(() => {
+    _gallerySearch = document.getElementById('gallerySearch').value;
+    loadHistory(false);
+  }, 300);
+}
+
+function onGallerySortChange() {
+  _gallerySort = document.getElementById('gallerySort').value;
+  loadHistory(false);
+}
+
+function onGalleryFilterChange() {
+  _galleryFilter = document.getElementById('galleryFilter').value;
+  loadHistory(false);
+}
+
+function updateGalleryActionButtons() {
+  const count = _gallerySelectedIds.size;
+  const batchDel = document.getElementById('galleryBatchDel');
+  const batchDl = document.getElementById('galleryBatchDl');
+  if (batchDel) batchDel.style.display = count >= 1 ? 'inline-flex' : 'none';
+  if (batchDl) batchDl.style.display = count >= 1 ? 'inline-flex' : 'none';
+  updateCompareButton();
+}
+
+// -------------------------------------------------------------------
 // ComfyUI 状态
 // -------------------------------------------------------------------
 
@@ -1183,6 +1455,9 @@ function switchTab(tabId, btn) {
     const btn = document.getElementById('compareBtn');
     if (btn) btn.style.display = 'none';
   }
+
+  // 更新路由
+  updateRoute();
 }
 
 // -------------------------------------------------------------------
@@ -1192,63 +1467,71 @@ function switchTab(tabId, btn) {
 function renderGallery(items) {
   const grid = document.getElementById('galleryGrid');
   const countEl = document.getElementById('galleryCount');
-  
+
   if (!items || !items.length) {
     grid.innerHTML = '<div class="empty-tip">暂无历史图片</div>';
     countEl.textContent = '0';
     return;
   }
-  
+
   countEl.textContent = items.length;
   grid.innerHTML = '';
-  
+
   items.forEach((item, idx) => {
     const div = document.createElement('div');
     div.className = 'gallery-item';
     div.dataset.id = item.id;
     div.dataset.index = idx;
-    
+
     // 缩略图 URL
     const thumbUrl = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=300`;
-    
+
     // 元数据
     const meta = buildImageMeta(item);
-    
+
+    const favClass = item.favorite ? 'active' : '';
+    const favChar = item.favorite ? '★' : '☆';
+    const hasPrompt = item.prompt_id != null;
+
     div.innerHTML = `
       <img src="${thumbUrl}" alt=""
            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
       <div class="gallery-item-placeholder" style="display:none;width:100%;aspect-ratio:1;background:var(--panel-2);align-items:center;justify-content:center;color:var(--muted);font-size:32px">🖼️</div>
-      <div class="gallery-item-meta">${meta}</div>
+      <button class="gallery-item-fav ${favClass}" onclick="event.stopPropagation();toggleFavorite(${item.id},this)" title="收藏">${favChar}</button>
       ${item.prompt_name ? `<div class="gallery-item-prompt" onclick="event.stopPropagation();jumpToPrompt(${item.prompt_id})">📝 ${escHtml(item.prompt_name)}</div>` : ""}
       <div class="gallery-item-check" data-id="${item.id}"></div>
+      <div class="gallery-item-actions">
+        ${hasPrompt ? `<button class="gallery-item-regen" onclick="event.stopPropagation();regenerateFromHistory(${item.prompt_id})" title="重新生成">🔄</button>` : ""}
+        <button class="gallery-item-dl" onclick="event.stopPropagation();downloadHistoryItem(${item.id})" title="下载">⬇️</button>
+      </div>
+      <div class="gallery-item-meta">${meta}</div>
     `;
-    
+
     // 点击勾选框
     const checkEl = div.querySelector('.gallery-item-check');
     checkEl.onclick = (e) => {
       e.stopPropagation();
       toggleGalleryItem(item.id, checkEl);
     };
-    
+
     // 点击图片打开灯箱
     div.onclick = () => {
       if (_gallerySelectedIds.size > 0) {
-        // 如果已有勾选，则切换当前项的勾选状态
         toggleGalleryItem(item.id, checkEl);
       } else {
-        // 否则打开灯箱
         openLightbox(item.view_url, meta, null, idx);
       }
     };
-    
+
     // 恢复勾选状态
     if (_gallerySelectedIds.has(item.id)) {
       checkEl.classList.add('checked');
     }
-    
+
     grid.appendChild(div);
   });
-  
+
+  updateGalleryActionButtons();
   updateCompareButton();
 }
 
@@ -1265,6 +1548,7 @@ function toggleGalleryItem(id, checkEl) {
     checkEl.classList.add('checked');
   }
   updateCompareButton();
+  updateGalleryActionButtons();
 }
 
 function updateCompareButton() {
@@ -1345,12 +1629,19 @@ function openUnifiedImageModal() {
         <div class="compare-modal-title" id="imageModalTitle" style="display:flex;align-items:center;gap:8px">
           <span id="imageModalTitleText">图片查看（<span id="compareModalCount">0</span> 张）</span>
           <span id="compareZoomDisplay" class="compare-zoom-display">100%</span>
+          <span id="lightboxHeaderPrompt" class="lightbox-header-prompt"></span>
         </div>
-        <div class="compare-modal-actions">
+        <div class="compare-modal-actions" id="compareModalActions">
+          <!-- 对比模式按钮 -->
           <button id="compareSyncBtn2" class="active" onclick="setCompareMode('sync')">同步</button>
           <button id="compareSplitBtn2" onclick="setCompareMode('split')">分屏</button>
+          <!-- 单图模式按钮 -->
+          <button id="lightboxFavBtn" class="lightbox-action-btn" style="display:none" onclick="toggleFavoriteFromLightbox()">☆</button>
+          <button id="lightboxDlBtn" class="lightbox-action-btn" style="display:none" onclick="downloadFromLightbox()">⬇️</button>
+          <button id="lightboxRegenBtn" class="lightbox-action-btn" style="display:none" onclick="regenFromLightbox()">🔄</button>
+          <!-- 共用 -->
           <button id="compareResetBtn" onclick="resetImageZoom()">重置</button>
-          <button onclick="closeCompareModal()">✕ 退出</button>
+          <button onclick="closeCompareModal(true)">✕ 退出</button>
         </div>
       </div>
       <div class="compare-modal-body" id="compareModalBody"></div>
@@ -1359,7 +1650,7 @@ function openUnifiedImageModal() {
 
     // ESC 关闭
     overlay.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeCompareModal();
+      if (e.key === 'Escape') closeCompareModal(true);
     });
   }
 
@@ -1369,17 +1660,26 @@ function openUnifiedImageModal() {
   const resetBtn = document.getElementById('compareResetBtn');
   const titleText = document.getElementById('imageModalTitleText');
   const zoomDisplay = document.getElementById('compareZoomDisplay');
+  const favBtn = document.getElementById('lightboxFavBtn');
+  const dlBtn = document.getElementById('lightboxDlBtn');
+  const regenBtn = document.getElementById('lightboxRegenBtn');
 
   if (_compareMode === 'single') {
-    // 单图模式：隐藏同步/分屏按钮，显示重置按钮
+    // 单图模式：隐藏同步/分屏，显示灯箱操作按钮
     syncBtn.style.display = 'none';
     splitBtn.style.display = 'none';
+    favBtn.style.display = '';
+    dlBtn.style.display = '';
+    regenBtn.style.display = '';
     resetBtn.style.display = '';
     titleText.textContent = `图片查看（${_lightboxIndex + 1} / ${_lightboxItems.length}）`;
   } else {
-    // 多图模式：显示所有按钮（同步/分屏/重置）
+    // 多图模式：显示同步/分屏，隐藏灯箱操作按钮
     syncBtn.style.display = '';
     splitBtn.style.display = '';
+    favBtn.style.display = 'none';
+    dlBtn.style.display = 'none';
+    regenBtn.style.display = 'none';
     resetBtn.style.display = '';
     titleText.innerHTML = `对比模式（<span id="compareModalCount">0</span> 张）`;
   }
@@ -1398,7 +1698,7 @@ function openUnifiedImageModal() {
   renderUnifiedImageGrid();
 }
 
-function closeCompareModal() {
+function closeCompareModal(navigateBack = false) {
   const overlay = document.getElementById('compareModal');
   if (overlay) overlay.classList.remove('active');
   document.body.style.overflow = '';
@@ -1420,6 +1720,13 @@ function closeCompareModal() {
 
   // 清除持久化状态
   clearLightboxState();
+
+  // 关闭灯箱后恢复路由
+  // navigateBack=true（用户点击 X/ESC）：回退到上一页
+  // navigateBack=false（由 jumpToPrompt 调用）：不操作 URL，由调用方负责
+  if (navigateBack) {
+    history.back();
+  }
 }
 
 /* ========== 对比模式：手搓轻量缩放拖拽（动画驱动版） ========== */
@@ -1731,31 +2038,125 @@ function renderUnifiedImageGrid() {
     img.src = item.view_url;
     img.alt = item.filename;
     img.draggable = false;
-    // 不设置 transform，交给 _bindCompareInteractions 管理
     wrap.appendChild(img);
 
+    // 构建 label
     const label = document.createElement('div');
     label.className = 'compare-item-label';
-    let labelHtml = buildImageMeta(item);
-    if (item.prompt_name && item.prompt_id) {
-      labelHtml += ` · <span class="lightbox-prompt-link" onclick="jumpToPrompt(${item.prompt_id})">📝 ${escHtml(item.prompt_name)}</span>`;
+    let labelHTML = '';
+
+    if (_compareMode === 'single') {
+      // === 单图模式：详细说明（label: value 格式） ===
+      const rows = [];
+      // 首行：时间
+      if (item.created_at) rows.push(`<div class="label-param-row"><span class="label-param-key">时间：</span><span class="label-param-val">${item.created_at}</span></div>`);
+      // 出图参数
+      const p = item.prompt_params || {};
+      if (p.steps) rows.push(`<div class="label-param-row"><span class="label-param-key">步数：</span><span class="label-param-val">${p.steps}</span></div>`);
+      if (p.cfg_scale) rows.push(`<div class="label-param-row"><span class="label-param-key">CFG：</span><span class="label-param-val">${p.cfg_scale}</span></div>`);
+      if (p.sampler) rows.push(`<div class="label-param-row"><span class="label-param-key">采样器：</span><span class="label-param-val">${escHtml(p.sampler)}</span></div>`);
+      if (p.seed != null) rows.push(`<div class="label-param-row"><span class="label-param-key">种子：</span><span class="label-param-val">${p.seed}</span></div>`);
+      if (p.model) rows.push(`<div class="label-param-row"><span class="label-param-key">模型：</span><span class="label-param-val">${escHtml(p.model)}</span></div>`);
+      if (item.width && item.height) rows.push(`<div class="label-param-row"><span class="label-param-key">分辨率：</span><span class="label-param-val">${item.width}×${item.height}</span></div>`);
+      if (item.file_size) rows.push(`<div class="label-param-row"><span class="label-param-key">文件大小：</span><span class="label-param-val">${formatFileSize(item.file_size)}</span></div>`);
+      labelHTML = rows.length ? rows.join('') : buildImageMeta(item);
+    } else {
+      // === 多图对比模式：保持简洁 ===
+      let parts = [];
+      if (item.prompt_name && item.prompt_id) {
+        parts.push(`<span class="lightbox-prompt-link" onclick="jumpToPrompt(${item.prompt_id})">📝 ${escHtml(item.prompt_name)}</span>`);
+      }
+      if (item.created_at) parts.push(item.created_at);
+      labelHTML = parts.join(' · ') || buildImageMeta(item);
     }
-    label.innerHTML = labelHtml;
-    // 阻断 mousedown 冒泡，防止点击 label 触发图片拖拽
+
+    label.innerHTML = labelHTML;
     label.addEventListener('mousedown', (e) => e.stopPropagation());
     wrap.appendChild(label);
 
     body.appendChild(wrap);
   });
 
-  // 图片状态会在 _bindCompareInteractions 中初始化
+  // 设置顶部提示词名称（单图模式显示，多图模式清空）
+  const headerPrompt = document.getElementById('lightboxHeaderPrompt');
+  if (headerPrompt) {
+    if (_compareMode === 'single' && _lightboxItems.length > 0) {
+      const item = _lightboxItems[_lightboxIndex];
+      // 获取提示词名称（按优先级：item.prompt_name -> allPrompts查找 -> API查询）
+      let promptName = item.prompt_name || '';
+      
+      // 如果prompt_name为空，尝试从allPrompts查找
+      if (!promptName && item.prompt_id) {
+        const found = allPrompts.find(p => p.id === item.prompt_id);
+        promptName = found ? found.name : '';
+      }
+      
+      // 如果还是为空，显示默认文本（但不显示"图片 XXX"）
+      if (!promptName) {
+        promptName = item.prompt_id ? `提示词 #${item.prompt_id}` : `图片 #${item.id}`;
+      }
+      
+      // 确保有内容才显示
+      if (promptName && promptName !== `图片 #${item.id}`) {
+        if (item.prompt_id) {
+          headerPrompt.innerHTML = `<span class="lightbox-prompt-link" onclick="jumpToPrompt(${item.prompt_id})">📝 ${escHtml(promptName)}</span>`;
+        } else {
+          headerPrompt.textContent = `📝 ${promptName}`;
+        }
+        headerPrompt.title = promptName;
+      } else if (promptName === `图片 #${item.id}`) {
+        // 如果是默认文本，不显示提示词名称
+        headerPrompt.innerHTML = '';
+      } else {
+        headerPrompt.innerHTML = '';
+      }
+    } else {
+      headerPrompt.innerHTML = '';
+    }
+  }
 
+  // 单图模式：键盘导航、操作按钮、路由
   if (_compareMode === 'single') {
     setupImageModalKeyboardNav();
+    updateLightboxActions();
+    updateRoute();
   }
 
   // 绑定缩放拖拽交互
   _bindCompareInteractions(body);
+}
+
+// 更新灯箱头部操作按钮状态（单图模式调用）
+function updateLightboxActions() {
+  const item = _lightboxItems[_lightboxIndex];
+  if (!item) return;
+  const favBtn = document.getElementById('lightboxFavBtn');
+  const regenBtn = document.getElementById('lightboxRegenBtn');
+  if (favBtn) {
+    favBtn.textContent = item.favorite ? '★' : '☆';
+    favBtn.title = item.favorite ? '取消收藏' : '收藏';
+  }
+  if (regenBtn) {
+    regenBtn.style.display = item.prompt_id ? '' : 'none';
+  }
+}
+
+
+// 灯箱：下载
+function downloadFromLightbox() {
+  const item = _lightboxItems[_lightboxIndex];
+  if (!item) return;
+  downloadHistoryItem(item.id);
+}
+
+// 灯箱：重新生成
+function regenFromLightbox() {
+  const item = _lightboxItems[_lightboxIndex];
+  if (!item || !item.prompt_id) {
+    showToast('该图片没有关联的提示词，无法重新生成', 'error');
+    return;
+  }
+  regenerateFromHistory(item.prompt_id);
 }
 
 function setupCompareModalZoom() {
