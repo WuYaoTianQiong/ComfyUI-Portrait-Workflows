@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import FileResponse
 
 from config import settings
 from models import init_db, db, GenJob
@@ -120,9 +122,21 @@ app.include_router(history_router, prefix="/api")
 app.include_router(comfyui_router, prefix="/api")
 app.include_router(thumbnail_router, prefix="/api")
 
-# 静态文件
+# SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
+class SPAFallbackMiddleware(BaseHTTPMiddleware):
+    """在静态文件挂载返回 404 后，返回 index.html 以支持前端路由"""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if response.status_code == 404 and not request.url.path.startswith("/api/"):
+            index_file = settings.static_dir / "index.html"
+            if index_file.exists():
+                return FileResponse(index_file)
+        return response
+
+# 静态文件挂载 + SPA Fallback 中间件
 if settings.static_dir.exists():
     app.mount("/", StaticFiles(directory=str(settings.static_dir), html=True), name="static")
+    app.add_middleware(SPAFallbackMiddleware)
 
 
 # ======== 直接运行入口 ========
