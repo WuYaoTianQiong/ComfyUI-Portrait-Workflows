@@ -3,25 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prompt Browser · 提示词管理器 v3</title>
+<title>Prompt Browser · 提示词管理器 v4</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="/style.css?v=6">
+<link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
 
 <header class="app-header">
   <div class="brand">
     <h1>Prompt Browser</h1>
-    <span class="version">v3</span>
+    <span class="version">v4</span>
   </div>
 
   <div class="header-center">
-    <div class="wf-selector" id="wfSelector">
-      <button class="wf-trigger" id="wfTrigger" title="点击选择工作流">
-        <span class="wf-name" id="wfLabel">选择工作流</span>
-        <span class="wf-caret">▼</span>
-      </button>
+      <div class="wf-selector" id="wfSelector">
+        <button class="wf-trigger dropdown-trigger" id="wfTrigger" title="点击选择工作流">
+          <span class="wf-name" id="wfLabel">选择工作流</span>
+          <span class="wf-caret dropdown-arrow">▼</span>
+        </button>
       <div class="wf-popover" id="wfPopover">
         <div class="wf-popover-header">
           <span>工作流</span>
@@ -69,17 +69,62 @@
   <div class="container" style="flex:1">
     <aside class="sidebar" id="sidebar">
       <div class="toolbar">
-        <button class="btn btn-success" onclick="openCreateModal()">+ 新建</button>
-        <input type="text" id="searchInput" placeholder="搜索提示词、标签、备注..." oninput="debounceSearch()">
-        <select id="tagFilter" onchange="onTagChange()"><option value="">全部标签</option></select>
-        <select id="sortFilter" onchange="onSortChange()" title="排序方式">
-          <option value="newest">最新创建</option>
-          <option value="oldest">最早创建</option>
-          <option value="name_asc">名称 A→Z</option>
-          <option value="name_desc">名称 Z→A</option>
-          <option value="updated">最近更新</option>
-        </select>
-        <span class="count-badge" id="countBadge">0</span>
+        <!-- 行1: 新建按钮 + 搜索框 -->
+        <div class="toolbar-row">
+          <button class="btn btn-success btn-new" onclick="openCreateModal()">
+            ＋ 新建
+          </button>
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="搜索提示词、标签、备注..." oninput="debounceSearch()">
+          </div>
+        </div>
+
+        <!-- 行2: 分类 + 标签 (并排) -->
+        <div class="toolbar-row toolbar-row-2">
+          <div class="toolbar-field">
+            <label class="field-label">分类</label>
+            <select id="categorySelect" onchange="onCategoryChange()">
+              <option value="">全部分类</option>
+            </select>
+          </div>
+          <div class="toolbar-field">
+            <label class="field-label">标签</label>
+            <div class="dropdown-wrap">
+              <div class="dropdown-trigger" id="tagSelectorTrigger" onclick="toggleTagSelector()">
+                <span id="tagSelectorLabel">全部</span>
+                <span class="dropdown-arrow">▼</span>
+              </div>
+              <div class="dropdown-menu" id="tagSelectorDropdown">
+                <div class="dropdown-list" id="tagSelectorList"></div>
+                <div class="dropdown-actions">
+                  <button class="btn btn-sm btn-ghost" onclick="manageTags()">管理</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行3: 排序 + 统计 -->
+        <div class="toolbar-row toolbar-row-3">
+          <div class="toolbar-field">
+            <label class="field-label">排序</label>
+            <select id="sortFilter" onchange="onSortChange()">
+              <option value="newest">最新创建</option>
+              <option value="oldest">最早创建</option>
+              <option value="name_asc">名称 A→Z</option>
+              <option value="name_desc">名称 Z→A</option>
+              <option value="updated">最近更新</option>
+              <option value="most_used">使用最多</option>
+            </select>
+          </div>
+          <div class="toolbar-stats">
+            共 <span id="countBadge">0</span> 条
+          </div>
+        </div>
+
+        <!-- 分类管理按钮 (隐藏) -->
+        <button id="manageCategoriesBtn" class="btn btn-sm btn-ghost" onclick="manageCategories()" style="display:none">管理分类</button>
       </div>
 
       <div class="batch-panel" id="batchPanel">
@@ -192,6 +237,27 @@
         <label>标签<input id="f_tags" placeholder="逗号分隔，如：人像,室外"></label>
       </div>
       <label>备注<input id="f_note" placeholder="可选备注"></label>
+      <!-- ======== Phase 1: 添加评级字段 ======== -->
+      <label>评级
+        <div class="rating-input" id="f_rating">
+          <span class="rating-star-input" data-rating="1" onclick="setRating(1)">★</span>
+          <span class="rating-star-input" data-rating="2" onclick="setRating(2)">★</span>
+          <span class="rating-star-input" data-rating="3" onclick="setRating(3)">★</span>
+          <span class="rating-star-input" data-rating="4" onclick="setRating(4)">★</span>
+          <span class="rating-star-input" data-rating="5" onclick="setRating(5)">★</span>
+          <input type="hidden" id="f_rating_value" value="">
+        </div>
+      </label>
+      <!-- ======== Phase 2: 添加分类和标签选择 ======== -->
+      <label>分类
+        <select id="f_category">
+          <option value="">未分类</option>
+        </select>
+      </label>
+      <label>标签（多选）
+        <div class="modal-tags-select" id="f_tags_select"></div>
+      </label>
+      <!-- ============================================= -->
       <input type="hidden" id="f_id" value="">
     </div>
     <div class="modal-footer">
@@ -222,6 +288,56 @@
 
 <input type="file" id="wfPicker" accept=".json" style="display:none" onchange="pickWorkflowFile(event)">
 
-<script src="/app.js?v=8"></script>
+<!-- Modal: 标签管理 -->
+<div class="modal-overlay" id="tagManageModal">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <h2>管理标签</h2>
+      <button class="close-btn" onclick="closeTagManageModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="tag-manage-form">
+        <input type="text" id="newTagName" placeholder="标签名称">
+        <input type="color" id="newTagColor" value="#8b5cf6">
+        <button class="btn btn-success" onclick="createTag()">添加</button>
+      </div>
+      <div class="tag-manage-list" id="tagManageList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 分类管理 -->
+<div class="modal-overlay" id="categoryManageModal">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <h2>管理分类</h2>
+      <button class="close-btn" onclick="closeCategoryManageModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="category-manage-form">
+        <input type="text" id="newCategoryName" placeholder="分类名称">
+        <input type="color" id="newCategoryColor" value="#6366f1">
+        <select id="newCategoryParent"></select>
+        <button class="btn btn-success" onclick="createCategory()">添加</button>
+      </div>
+      <div class="category-manage-list" id="categoryManageList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 按依赖顺序加载模块 -->
+<script src="/utils.js?v=1"></script>
+<script src="/ui.js?v=1"></script>
+<script src="/router.js?v=1"></script>
+<script src="/workflow.js?v=1"></script>
+<script src="/prompt.js?v=1"></script>
+<script src="/generator.js?v=1"></script>
+<script src="/job.js?v=1"></script>
+<script src="/history.js?v=1"></script>
+<script src="/gallery.js?v=1"></script>
+<script src="/imageViewer.js?v=1"></script>
+<script src="/app.js?v=1"></script>
+<script src="/category.js?v=1"></script>
+<script src="/tag.js?v=1"></script>
 </body>
 </html>

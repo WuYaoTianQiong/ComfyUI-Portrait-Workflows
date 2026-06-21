@@ -72,7 +72,18 @@ body {
 .btn-ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 
-.header-select { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+.header-select {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3l3 4 3-4' fill='none' stroke='%238e8e99' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
 
 .btn-icon {
   width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
@@ -98,24 +109,23 @@ body {
 .sel-info { flex: 1; font-size: 12px; color: var(--primary); }
 
 /* Workflow selector */
-.wf-trigger {
-  min-width: 220px;
-  flex: 1;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
+.wf-selector {
+  position: relative;
+  width: 320px;
+  flex-shrink: 0;
 }
-.wf-trigger:hover { border-color: var(--primary); }
-.wf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wf-caret { color: var(--muted); font-size: 10px; }
+/* 继承 .dropdown-trigger，只补充布局需要 */
+.wf-trigger {
+  width: 100%;
+  min-width: 0;
+}
+.wf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
 .wf-popover {
   display: none;
   position: absolute;
@@ -127,8 +137,9 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 50;
+  z-index: 1000;
   flex-direction: column;
+  overflow-y: auto;
 }
 .wf-popover.show { display: flex; }
 .wf-popover-header {
@@ -146,12 +157,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
   cursor: pointer;
   gap: 8px;
+  transition: 0.15s;
+  font-size: 12px;
 }
-.wf-item:hover { background: var(--panel-2); }
+.wf-item:hover { background: var(--panel-hover); }
 .wf-item.active { background: rgba(99,102,241,0.12); color: var(--primary); }
 .wf-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .wf-item-hide {
@@ -186,27 +199,249 @@ body {
 }
 .resize-handle:hover, .resize-handle:active { background: var(--primary); }
 
+/* ===== 工具栏分区布局 ===== */
 .toolbar {
-  padding: 12px;
+  padding: 8px;
   display: flex;
-  gap: 8px;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  overflow: visible;
+  flex-shrink: 0;
 }
-.toolbar input, .toolbar select {
+
+/* 通用区块 */
+.toolbar-section {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+/* 行内区块（排序/统计） */
+.toolbar-section-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-section-row select {
+  flex: 1;
+}
+
+/* 区块标题 */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.section-icon {
+  font-size: 14px;
+}
+
+.section-title {
+  flex: 1;
+}
+
+.section-action {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* 搜索框 */
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  transition: border-color 0.15s;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-box .clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  display: none;
+}
+
+.search-box .clear-btn.show {
+  display: inline-block;
+}
+
+.search-box .clear-btn:hover {
+  color: var(--text);
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+}
+
+.search-icon {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search-box input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* 按钮全宽 */
+.btn-full {
+  width: 100%;
+  justify-content: center;
+}
+
+/* 计数标签 */
+.count-badge {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tag-count {
+  font-size: 10px;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.15);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+
+
+/* ======== 通用下拉组件（可复用）======== */
+/* 触发按钮 - 与 .toolbar-field select 保持完全一致 */
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 5px;
   font-size: 12px;
   outline: none;
+  cursor: pointer;
+  min-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.15s;
 }
-.toolbar input:focus, .toolbar select:focus { border-color: var(--primary); }
-.toolbar input[type="text"] { flex: 1; min-width: 90px; }
-.toolbar select { max-width: 130px; }
-.count-badge { font-size: 11px; color: var(--muted); }
+
+.dropdown-trigger:hover {
+  border-color: var(--primary);
+}
+
+.dropdown-arrow {
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+/* 下拉菜单 */
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  max-height: 360px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.dropdown-menu.show {
+  display: block;
+}
+
+/* 下拉列表 */
+.dropdown-list {
+  padding: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* 下拉项 */
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: 0.15s;
+  font-size: 12px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 不让 checkbox 直接接收点击，统一由父级 div 的 onclick 处理 */
+.dropdown-item input[type="checkbox"] {
+  pointer-events: none;
+}
+
+.dropdown-item:hover {
+  background: var(--panel-hover);
+}
+
+.dropdown-item input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* 下拉项选中态 */
+.dropdown-item.selected {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+/* 标签下拉项内的颜色点与名称（扩展自通用 dropdown-item） */
+.dropdown-item .tag-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dropdown-item .tag-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 下拉底部操作区 */
+.dropdown-actions {
+  padding: 6px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
 
 /* Batch panel */
 
@@ -816,6 +1051,121 @@ body {
   color: #fff;
 }
 
+/* ======= Phase 1: 提示词收藏/置顶/评级样式 ======= */
+
+/* 提示词列表中的指示器容器 */
+.prompt-indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+/* 收藏指示器 */
+.indicator-fav {
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--muted);
+}
+.indicator-fav.active {
+  color: #fbbf24;
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+.indicator-fav:hover {
+  transform: scale(1.2);
+}
+
+/* 置顶指示器 */
+.indicator-pin {
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--muted);
+  font-size: 12px;
+}
+.indicator-pin.active {
+  color: var(--primary);
+  text-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+.indicator-pin:hover {
+  transform: scale(1.2);
+}
+
+/* 评级指示器 */
+.indicator-rating {
+  color: #fbbf24;
+  font-size: 12px;
+}
+
+/* 使用次数 */
+.usage-count {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* 详情面板中的评级控件 */
+.rating-control {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0;
+}
+.rating-star {
+  cursor: pointer;
+  font-size: 20px;
+  color: var(--muted);
+  transition: all 0.2s;
+}
+.rating-star.active {
+  color: #fbbf24;
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+.rating-star:hover {
+  transform: scale(1.2);
+}
+
+/* 模态框中的评级输入 */
+.rating-input {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.rating-star-input {
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--muted);
+  transition: all 0.2s;
+}
+.rating-star-input.active {
+  color: #fbbf24;
+  text-shadow: 0 0 6px rgba(251, 191, 36, 0.5);
+}
+.rating-star-input:hover {
+  transform: scale(1.2);
+}
+
+/* 使用统计 */
+.usage-stat {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+
+/* 详情面板操作按钮优化 */
+.detail-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.detail-actions .btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+/* ========================================== */
+
 /* 缩放指示器（标题栏内联显示） */
 .compare-zoom-display {
   color: var(--muted);
@@ -1003,6 +1353,13 @@ body {
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3l3 4 3-4' fill='none' stroke='%238e8e99' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 22px;
 }
 .gallery-sort:focus, .gallery-filter:focus { border-color: var(--primary); }
 
@@ -1025,6 +1382,128 @@ body {
   color: #facc15;
 }
 
+/* ===== 紧凑工具栏布局（新） ===== */
+.toolbar {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.toolbar-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-new {
+  white-space: nowrap;
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+
+.toolbar-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.field-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar-field select,
+.toolbar-field .dropdown-trigger {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 下拉容器包装：使 dropdown-menu 从 trigger 左侧对齐，而非 toolbar-field */
+.dropdown-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.dropdown-wrap .dropdown-trigger {
+  width: 100%;
+}
+
+.toolbar-field select {
+  /* 与 .dropdown-trigger 保持视觉一致 */
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  min-height: 28px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  /* 自定义下拉箭头 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3l3 4 3-4' fill='none' stroke='%238e8e99' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 22px;
+}
+
+.toolbar-field select:focus,
+.toolbar-field .dropdown-trigger:hover {
+  border-color: var(--primary);
+}
+
+/* 强制 select 不根据选项内容撑大 */
+.toolbar-field select {
+  width: 0;
+}
+
+#tagSelectorLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.toolbar-stats {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 5px 0;
+}
+
+.toolbar-stats #countBadge {
+  color: var(--primary);
+  font-weight: 600;
+  margin: 0 2px;
+}
+
+/* 分类下拉框宽度优化 */
+#categorySelect {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ========== */
+
 @media (max-width: 900px) {
   .sidebar { width: 280px; min-width: 220px; }
   .app-header { gap: 8px; padding: 0 10px; }
@@ -1032,3 +1511,190 @@ body {
   .wf-popover { width: 280px; }
   .header-right .btn { padding: 5px 8px; }
 }
+
+
+
+
+
+/* ======== Phase 2: 标签管理模态框样式 ======== */
+.tag-manage-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tag-manage-form input[type="text"] {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-manage-form input[type="text"]:focus {
+  border-color: var(--primary);
+}
+
+.tag-manage-form input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.tag-manage-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.tag-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.tag-manage-item:last-child {
+  border-bottom: none;
+}
+
+.tag-manage-item .tag-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tag-manage-item .tag-name {
+  flex: 1;
+}
+
+.tag-manage-item .tag-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tag-manage-item .tag-actions {
+  display: flex;
+  gap: 4px;
+}
+/* ===================================== */
+
+/* ======== Phase 2: 分类管理模态框样式 ======== */
+.category-manage-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.category-manage-form input[type="text"] {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  min-width: 120px;
+}
+
+.category-manage-form input[type="text"]:focus {
+  border-color: var(--primary);
+}
+
+.category-manage-form input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.category-manage-form select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  min-width: 100px;
+}
+
+.category-manage-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.category-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.category-manage-item:last-child {
+  border-bottom: none;
+}
+
+.category-manage-item .category-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.category-manage-item .category-name {
+  flex: 1;
+}
+
+.category-manage-item .category-actions {
+  display: flex;
+  gap: 4px;
+}
+/* ===================================== */
+
+/* ======== Phase 2: 模态框标签选择样式 ======== */
+.modal-tags-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.modal-tags-select .tag-option {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: 0.15s;
+  border: 1px solid transparent;
+}
+
+.modal-tags-select .tag-option:hover {
+  background: var(--panel-hover);
+}
+
+.modal-tags-select .tag-option.selected {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+/* ===================================== */
