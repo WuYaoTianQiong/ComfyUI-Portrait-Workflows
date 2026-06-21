@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
-from models import Prompt, GenHistory, db
+from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag
 from services.helpers import get_image_metadata
 
 router = APIRouter(tags=["提示词"])
@@ -26,6 +26,11 @@ class PromptCreate(BaseModel):
     height: Optional[int] = None
     tags: str = ""
     note: str = ""
+    # ======== Phase 1 新增 ========
+    is_favorite: bool = False
+    is_pinned: bool = False
+    rating: Optional[int] = None
+    # ================================
 
 
 class PromptUpdate(BaseModel):
@@ -41,6 +46,11 @@ class PromptUpdate(BaseModel):
     height: Optional[int] = None
     tags: Optional[str] = None
     note: Optional[str] = None
+    # ======== Phase 1 新增 ========
+    is_favorite: Optional[bool] = None
+    is_pinned: Optional[bool] = None
+    rating: Optional[int] = None
+    # ================================
 
 
 class PromptPreview(BaseModel):
@@ -52,6 +62,12 @@ class PromptPreview(BaseModel):
     model: str = ""
     name: str = ""
     created_at: str = ""
+    # ======== Phase 1 新增 ========
+    is_favorite: bool = False
+    is_pinned: bool = False
+    rating: Optional[int] = None
+    usage_count: int = 0
+    # ================================
 
 
 class PromptDetail(BaseModel):
@@ -70,6 +86,13 @@ class PromptDetail(BaseModel):
     note: str
     created_at: str
     updated_at: str
+    # ======== Phase 1 新增 ========
+    is_favorite: bool = False
+    is_pinned: bool = False
+    usage_count: int = 0
+    last_used_at: Optional[str] = None
+    rating: Optional[int] = None
+    # ================================
 
 
 # ---------- Routes ----------
@@ -78,6 +101,8 @@ class PromptDetail(BaseModel):
 def list_prompts(
     search: str = Query(""),
     tag: str = Query(""),
+    category_id: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
     sort: str = Query("newest"),
     page: int = Query(1),
     page_size: int = Query(50),
@@ -94,18 +119,42 @@ def list_prompts(
     if tag:
         query = query.where(Prompt.tags.contains(tag))
 
+    # ======== Phase 2: 添加分类和标签筛选 ========
+    # 按分类筛选
+    if category_id is not None:
+        query = query.join(PromptCategory).where(PromptCategory.category == category_id)
+
+    # 按标签筛选（多选）
+    if tag_ids:
+        tag_id_list = [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
+        if tag_id_list:
+            query = query.join(PromptTag).where(PromptTag.tag.in_(tag_id_list))
+    # ================================================
+
     total = query.count()
 
-    _SORT_MAP = {
-        "newest":      Prompt.id.desc(),
-        "oldest":       Prompt.id.asc(),
-        "name_asc":    Prompt.name.asc(),
-        "name_desc":   Prompt.name.desc(),
-        "updated":      Prompt.updated_at.desc(),
-    }
-    order = _SORT_MAP.get(sort, Prompt.id.desc())
+    total = query.count()
+
+    # ======== Phase 1: 更新排序逻辑 ========
+    # 默认排序：置顶 → 收藏 → 最新
+    if sort == "newest":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+    elif sort == "oldest":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.asc()]
+    elif sort == "name_asc":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.name.asc()]
+    elif sort == "name_desc":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.name.desc()]
+    elif sort == "updated":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.updated_at.desc()]
+    elif sort == "most_used":  # 新增：按使用次数排序
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.usage_count.desc()]
+    else:
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+    # ==========================================
+    
     offset = (page - 1) * page_size
-    rows = query.order_by(order).offset(offset).limit(page_size)
+    rows = query.order_by(*order).offset(offset).limit(page_size)
 
     prompts = []
     for r in rows:
@@ -118,6 +167,12 @@ def list_prompts(
             "model": r.model or "",
             "name": r.name or "",
             "created_at": str(r.created_at) if r.created_at else "",
+            # ======== Phase 1: 返回新字段 ========
+            "is_favorite": r.is_favorite,
+            "is_pinned": r.is_pinned,
+            "rating": r.rating,
+            "usage_count": r.usage_count,
+            # ========================================
         })
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
 
@@ -128,6 +183,31 @@ def get_prompt(prompt_id: int):
     r = Prompt.get_or_none(Prompt.id == prompt_id)
     if r is None:
         raise HTTPException(404, "提示词不存在")
+
+    # ======== Phase 2: 获取分类和标签 ========
+    # 获取关联的分类
+    categories = []
+    for pc in PromptCategory.select().where(PromptCategory.prompt == prompt_id):
+        cat = Category.get_or_none(Category.id == pc.category)
+        if cat:
+            categories.append({
+                "id": cat.id,
+                "name": cat.name,
+                "color": cat.color
+            })
+
+    # 获取关联的标签
+    tags = []
+    for pt in PromptTag.select().where(PromptTag.prompt == prompt_id):
+        tag = Tag.get_or_none(Tag.id == pt.tag)
+        if tag:
+            tags.append({
+                "id": tag.id,
+                "name": tag.name,
+                "color": tag.color
+            })
+    # ================================================
+
     return {
         "id": r.id,
         "name": r.name or "",
@@ -144,13 +224,80 @@ def get_prompt(prompt_id: int):
         "note": r.note or "",
         "created_at": str(r.created_at) if r.created_at else "",
         "updated_at": str(r.updated_at) if r.updated_at else "",
+        # ======== Phase 1: 返回新字段 ========
+        "is_favorite": r.is_favorite,
+        "is_pinned": r.is_pinned,
+        "usage_count": r.usage_count,
+        "last_used_at": str(r.last_used_at) if r.last_used_at else "",
+        "rating": r.rating,
+        # ======== Phase 2: 返回分类和标签 ========
+        "categories": categories,
+        "tags_detail": tags,
+        # ================================================
     }
+
+
+# ======== Phase 1: 添加收藏/置顶切换 API ========
+@router.post("/prompts/{prompt_id}/favorite", response_model=dict)
+def toggle_favorite(prompt_id: int):
+    """切换提示词收藏状态"""
+    r = Prompt.get_or_none(Prompt.id == prompt_id)
+    if r is None:
+        raise HTTPException(404, "提示词不存在")
+    r.is_favorite = not r.is_favorite
+    r.save()
+    return {"success": True, "is_favorite": r.is_favorite}
+
+
+@router.post("/prompts/{prompt_id}/pin", response_model=dict)
+def toggle_pin(prompt_id: int):
+    """切换提示词置顶状态"""
+    r = Prompt.get_or_none(Prompt.id == prompt_id)
+    if r is None:
+        raise HTTPException(404, "提示词不存在")
+    r.is_pinned = not r.is_pinned
+    r.save()
+    return {"success": True, "is_pinned": r.is_pinned}
+
+
+@router.post("/prompts/{prompt_id}/rate", response_model=dict)
+def rate_prompt(prompt_id: int, rating: int = Query(..., ge=1, le=5)):
+    """设置提示词评级（1-5）"""
+    r = Prompt.get_or_none(Prompt.id == prompt_id)
+    if r is None:
+        raise HTTPException(404, "提示词不存在")
+    r.rating = rating
+    r.save()
+    return {"success": True, "rating": r.rating}
+
+
+@router.post("/prompts/{prompt_id}/use", response_model=dict)
+def mark_prompt_used(prompt_id: int):
+    """标记提示词已被使用（增加使用次数）"""
+    r = Prompt.get_or_none(Prompt.id == prompt_id)
+    if r is None:
+        raise HTTPException(404, "提示词不存在")
+    r.usage_count += 1
+    r.last_used_at = datetime.now()
+    r.save()
+    return {"success": True, "usage_count": r.usage_count}
+# =================================================
 
 
 @router.post("/prompts", status_code=201)
 def create_prompt(data: PromptCreate):
     """新建提示词"""
-    r = Prompt.create(**data.model_dump())
+    # ======== Phase 1: 处理新字段 ========
+    data_dict = data.model_dump()
+    # 确保布尔字段有默认值
+    if "is_favorite" not in data_dict:
+        data_dict["is_favorite"] = False
+    if "is_pinned" not in data_dict:
+        data_dict["is_pinned"] = False
+    if "usage_count" not in data_dict:
+        data_dict["usage_count"] = 0
+    # ==========================================
+    r = Prompt.create(**data_dict)
     return {"success": True, "id": r.id}
 
 
@@ -209,18 +356,3 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
             **meta,
         })
     return {"items": items}
-
-
-@router.get("/tags", response_model=dict)
-def list_tags():
-    """获取所有标签"""
-    rows = Prompt.select(Prompt.tags).where(
-        Prompt.tags.is_null(False) & (Prompt.tags != "")
-    )
-    all_tags: set[str] = set()
-    for r in rows:
-        for t in (r.tags or "").split(","):
-            t = t.strip()
-            if t:
-                all_tags.add(t)
-    return {"tags": sorted(all_tags)}
