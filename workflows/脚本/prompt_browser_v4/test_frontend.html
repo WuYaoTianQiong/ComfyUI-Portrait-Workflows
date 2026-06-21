@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase 2 前端功能测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>Phase 2 前端功能测试</h1>
+    
+    <div class="section">
+        <h2>1. 测试 API 连接</h2>
+        <button onclick="testAPI()">测试 API</button>
+        <div id="apiResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>2. 测试标签加载</h2>
+        <button onclick="testTags()">加载标签</button>
+        <div id="tagsResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>3. 测试分类加载</h2>
+        <button onclick="testCategories()">加载分类</button>
+        <div id="categoriesResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>4. 测试提示词加载（带标签详情）</h2>
+        <button onclick="testPrompts()">加载提示词</button>
+        <div id="promptsResult"></div>
+    </div>
+    
+    <script>
+        const API_BASE = 'http://127.0.0.1:8656';
+        
+        async function api(url) {
+            const resp = await fetch(API_BASE + url);
+            return await resp.json();
+        }
+        
+        async function testAPI() {
+            const result = document.getElementById('apiResult');
+            try {
+                const data = await api('/api/tags');
+                result.innerHTML = '<p class="success">✓ API 连接成功</p>';
+                result.innerHTML += '<p>返回标签数量: ' + data.tags.length + '</p>';
+            } catch (e) {
+                result.innerHTML = '<p class="error">✗ API 连接失败: ' + e.message + '</p>';
+            }
+        }
+        
+        async function testTags() {
+            const result = document.getElementById('tagsResult');
+            try {
+                const data = await api('/api/tags');
+                result.innerHTML = '<p class="success">✓ 标签加载成功</p>';
+                result.innerHTML += '<p>标签数量: ' + data.tags.length + '</p>';
+                result.innerHTML += '<pre>' + JSON.stringify(data.tags.slice(0, 5), null, 2) + '</pre>';
+            } catch (e) {
+                result.innerHTML = '<p class="error">✗ 标签加载失败: ' + e.message + '</p>';
+            }
+        }
+        
+        async function testCategories() {
+            const result = document.getElementById('categoriesResult');
+            try {
+                const data = await api('/api/categories');
+                result.innerHTML = '<p class="success">✓ 分类加载成功</p>';
+                result.innerHTML += '<p>分类数量: ' + data.categories.length + '</p>';
+                result.innerHTML += '<pre>' + JSON.stringify(data.categories, null, 2) + '</pre>';
+            } catch (e) {
+                result.innerHTML = '<p class="error">✗ 分类加载失败: ' + e.message + '</p>';
+            }
+        }
+        
+        async function testPrompts() {
+            const result = document.getElementById('promptsResult');
+            try {
+                const data = await api('/api/prompts?page=1&page_size=5');
+                result.innerHTML = '<p class="success">✓ 提示词加载成功</p>';
+                result.innerHTML += '<p>提示词数量: ' + data.prompts.length + '</p>';
+                
+                // 显示第一个提示词的标签详情
+                if (data.prompts.length > 0) {
+                    const firstPrompt = data.prompts[0];
+                    result.innerHTML += '<h3>提示词 #' + firstPrompt.id + ' 的标签详情:</h3>';
+                    
+                    // 获取详细信息
+                    const detail = await api('/api/prompts/' + firstPrompt.id);
+                    result.innerHTML += '<p>tags 字段: ' + detail.tags + '</p>';
+                    result.innerHTML += '<p>tags_detail 数量: ' + detail.tags_detail.length + '</p>';
+                    result.innerHTML += '<pre>' + JSON.stringify(detail.tags_detail, null, 2) + '</pre>';
+                }
+            } catch (e) {
+                result.innerHTML = '<p class="error">✗ 提示词加载失败: ' + e.message + '</p>';
+            }
+        }
+    </script>
+</body>
+</html>
