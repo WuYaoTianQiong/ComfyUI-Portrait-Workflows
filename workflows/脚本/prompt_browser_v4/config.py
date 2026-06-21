@@ -33,7 +33,7 @@ def _resolve_comfyui_root(project_root: Path, env_override: str | None = None) -
 
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
-    port: int = 8654
+    port: int = 8656
     comfyui_api: str = "http://127.0.0.1:8188"
     comfyui_root_env: str | None = None  # 手动覆盖用
 
