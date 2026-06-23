@@ -1,0 +1,54 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "moodyProMix_zitV13FP8.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "4": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "model": ["1", 0], "lora_name": "momoka-zib-v2_clean.safetensors", "strength_model": 0.5 }
+  },
+  "5": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["4", 0], "shift": 3.0 }
+  },
+  "6": {
+    "class_type": "EmptyLatentImage",
+    "inputs": { "width": 640, "height": 960, "batch_size": 1 }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "全身入镜，85mm镜头浅景深人像，超写实古风少女，20岁清纯面容，皮肤白皙透亮，眼眸清澈如水，唇角微扬温柔浅笑，眼神直视镜头带无辜感，丰满好身材，大胸，黑长直发柔顺垂落，两侧各饰一朵立体粉色玫瑰花发饰，发丝自然微卷，发尾轻拂肩头。身着渐变蓝紫汉服，上身是一件紧身抹胸上衣，尺码明显小了两号，厚实的织锦缎面紧紧勒住饱满的胸部，食い込み、締め付け、パツパツ、肉の溢れ、布料被撑得绷紧发亮，表面布满放射状拉伸褶皱从胸口中心向四周扩散，抹胸上衣下缘深深嵌入乳房下缘的软肉中，在乳房底部勒出一道清晰的深沟，乳房下半部从抹胸下缘溢出隆起成圆润的肉弧，抹胸上衣上缘深深陷入乳房上部的软肉中，乳房上半部从上缘鼓出成一团饱满的肉球，乳沟被挤压得极深极窄，两侧乳房紧紧贴合，抹胸上衣两侧边缘深深陷入副乳和腋下的软肉中，腋下皮肤从两侧溢出隆起，抹胸上衣与皮肤交界处形成明显的深陷沟槽，仿佛下一秒布料就要崩裂弹开，但抹胸上衣仍然完整覆盖胸部没有滑落，抹胸上衣上绣有精致的花卉纹样，下摆为粉白渐变底色，绣有红花蓝叶立体刺绣，外披轻盈薄纱广袖，贴合身形显纤细腰线，衣摆拖地铺展于地面。左手轻搭白色书桌边缘，右手自然垂放于身侧，指尖微翘。室内粉色少女房，浅木色地板干净无尘，地面有轻微反光，左侧可见带镜梳妆台，台面摆放Hello Kitty毛绒玩偶与粉色小物，墙面贴有卡通头像墙贴与粉色毛绒挂饰，右侧白色窗帘透入柔和自然光，光源来自右上方窗边，营造梦幻温馨氛围，整体色调冷暖平衡，电影感柔光加持，高细节纹理，古风唯美，少女心爆棚。" }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "flat clothing texture, painted-on clothing, clothing sticker on skin, smooth fabric on chest, no fabric tension, loose fitting, nipple slip, wardrobe malfunction, exposed nipple" }
+  },
+  "9": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["6", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 17, "cfg": 3.0, "sampler_name": "euler", "scheduler": "simple", "start_at_step": 0, "end_at_step": 12, "return_with_leftover_noise": "enable" }
+  },
+  "10": {
+    "class_type": "LatentUpscaleBy",
+    "inputs": { "samples": ["9", 0], "upscale_method": "bislerp", "scale_by": 1.7 }
+  },
+  "11": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["10", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 11, "cfg": 1.0, "sampler_name": "dpmpp_2m_sde", "scheduler": "sgm_uniform", "start_at_step": 5, "end_at_step": 999, "return_with_leftover_noise": "disable" }
+  },
+  "12": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": { "samples": ["11", 0], "vae": ["3", 0], "tile_size": 512, "overlap": 128, "temporal_size": 64, "temporal_overlap": 8 }
+  },
+  "13": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["12", 0], "filename_prefix": "MoodyZIT-Preview" }
+  }
+}

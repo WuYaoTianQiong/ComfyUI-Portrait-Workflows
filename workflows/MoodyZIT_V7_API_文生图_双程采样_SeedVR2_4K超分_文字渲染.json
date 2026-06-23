@@ -17,11 +17,11 @@
   },
   "5": {
     "class_type": "ModelSamplingAuraFlow",
-    "inputs": { "model": ["4", 0], "shift": 1.8 }
+    "inputs": { "model": ["4", 0], "shift": 3.0 }
   },
   "6": {
     "class_type": "EmptyLatentImage",
-    "inputs": { "width": 768, "height": 1152, "batch_size": 1 }
+    "inputs": { "width": 640, "height": 960, "batch_size": 1 }
   },
   "7": {
     "class_type": "CLIPTextEncode",
@@ -33,15 +33,15 @@
   },
   "9": {
     "class_type": "KSamplerAdvanced",
-    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["6", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 12, "cfg": 1.0, "sampler_name": "dpmpp_2m", "scheduler": "beta", "start_at_step": 0, "end_at_step": 10, "return_with_leftover_noise": "enable" }
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["6", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 17, "cfg": 3.0, "sampler_name": "euler", "scheduler": "simple", "start_at_step": 0, "end_at_step": 12, "return_with_leftover_noise": "enable" }
   },
   "10": {
     "class_type": "LatentUpscaleBy",
-    "inputs": { "samples": ["9", 0], "upscale_method": "bicubic", "scale_by": 1.8 }
+    "inputs": { "samples": ["9", 0], "upscale_method": "bislerp", "scale_by": 1.7 }
   },
   "11": {
     "class_type": "KSamplerAdvanced",
-    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["10", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 20, "cfg": 1.0, "sampler_name": "dpmpp_2m", "scheduler": "sgm_uniform", "start_at_step": 0, "end_at_step": 999, "return_with_leftover_noise": "disable" }
+    "inputs": { "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["10", 0], "add_noise": "enable", "noise_seed": 813972274184088, "steps": 11, "cfg": 1.0, "sampler_name": "dpmpp_2m_sde", "scheduler": "sgm_uniform", "start_at_step": 5, "end_at_step": 999, "return_with_leftover_noise": "disable" }
   },
   "12": {
     "class_type": "VAEDecodeTiled",

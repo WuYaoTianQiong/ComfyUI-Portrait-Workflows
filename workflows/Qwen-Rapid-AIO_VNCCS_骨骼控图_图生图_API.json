@@ -1,0 +1,64 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "upload": "image" }
+  },
+  "2": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "QWEN\\Qwen-Rapid-AIO-NSFW-v18.safetensors" }
+  },
+  "3": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["2", 0], "shift": 3 }
+  },
+  "4": {
+    "class_type": "CFGNorm",
+    "inputs": { "model": ["3", 0], "strength": 1 }
+  },
+  "5": {
+    "class_type": "VNCCS_PoseStudio",
+    "inputs": {}
+  },
+  "6": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["1", 0], "vae": ["2", 2] }
+  },
+  "7": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "clip": ["2", 1],
+      "vae": ["2", 2],
+      "image1": ["1", 0],
+      "image2": ["5", 0],
+      "prompt": ""
+    }
+  },
+  "8": {
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "inputs": { "conditioning": ["7", 0], "reference_latents_method": "index_timestep_zero" }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["4", 0],
+      "positive": ["8", 0],
+      "negative": ["8", 0],
+      "latent_image": ["6", 0],
+      "seed": 42,
+      "control_after_generate": "randomize",
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "beta",
+      "denoise": 1
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["9", 0], "vae": ["2", 2] }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["10", 0], "filename_prefix": "V7-Qwen-Rapid" }
+  }
+}
