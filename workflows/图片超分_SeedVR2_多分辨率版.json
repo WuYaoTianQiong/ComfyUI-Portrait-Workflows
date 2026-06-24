@@ -1,0 +1,230 @@
+{
+  "id": "seedvr2-multi-res",
+  "revision": 0,
+  "last_node_id": 10,
+  "last_link_id": 10,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [529, 98],
+      "size": [274, 314],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "image", "name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"localized_name": "choose file to upload", "name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "IMAGE", "name": "IMAGE", "type": "IMAGE", "links": [1]},
+        {"localized_name": "MASK", "name": "MASK", "type": "MASK", "links": []}
+      ],
+      "properties": {"cnr_id": "comfy-core", "ver": "0.3.68", "Node name for S&R": "LoadImage"},
+      "widgets_values": ["example.png", "image"]
+    },
+    {
+      "id": 2,
+      "type": "SeedVR2LoadDiTModel",
+      "pos": [470, 470],
+      "size": [307, 202],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "torch_compile_args", "name": "torch_compile_args", "shape": 7, "type": "TORCH_COMPILE_ARGS", "link": null},
+        {"localized_name": "model", "name": "model", "type": "COMBO", "widget": {"name": "model"}, "link": null},
+        {"localized_name": "device", "name": "device", "type": "COMBO", "widget": {"name": "device"}, "link": null},
+        {"localized_name": "blocks_to_swap", "name": "blocks_to_swap", "shape": 7, "type": "INT", "widget": {"name": "blocks_to_swap"}, "link": null},
+        {"localized_name": "swap_io_components", "name": "swap_io_components", "shape": 7, "type": "BOOLEAN", "widget": {"name": "swap_io_components"}, "link": null},
+        {"localized_name": "offload_device", "name": "offload_device", "shape": 7, "type": "COMBO", "widget": {"name": "offload_device"}, "link": null},
+        {"localized_name": "cache_model", "name": "cache_model", "shape": 7, "type": "BOOLEAN", "widget": {"name": "cache_model"}, "link": null},
+        {"localized_name": "attention_mode", "name": "attention_mode", "shape": 7, "type": "COMBO", "widget": {"name": "attention_mode"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "SEEDVR2_DIT", "name": "SEEDVR2_DIT", "type": "SEEDVR2_DIT", "links": [2]}
+      ],
+      "properties": {"aux_id": "ainvfx/ComfyUI-SeedVR2_VideoUpscaler", "Node name for S&R": "SeedVR2LoadDiTModel"},
+      "widgets_values": ["seedvr2_ema_3b_fp8_e4m3fn.safetensors", "cuda:0", 8, false, "cpu", true, "sageattn_2"]
+    },
+    {
+      "id": 3,
+      "type": "SeedVR2LoadVAEModel",
+      "pos": [466, 750],
+      "size": [312, 298],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "torch_compile_args", "name": "torch_compile_args", "shape": 7, "type": "TORCH_COMPILE_ARGS", "link": null},
+        {"localized_name": "model", "name": "model", "type": "COMBO", "widget": {"name": "model"}, "link": null},
+        {"localized_name": "device", "name": "device", "type": "COMBO", "widget": {"name": "device"}, "link": null},
+        {"localized_name": "encode_tiled", "name": "encode_tiled", "shape": 7, "type": "BOOLEAN", "widget": {"name": "encode_tiled"}, "link": null},
+        {"localized_name": "encode_tile_size", "name": "encode_tile_size", "shape": 7, "type": "INT", "widget": {"name": "encode_tile_size"}, "link": null},
+        {"localized_name": "encode_tile_overlap", "name": "encode_tile_overlap", "shape": 7, "type": "INT", "widget": {"name": "encode_tile_overlap"}, "link": null},
+        {"localized_name": "decode_tiled", "name": "decode_tiled", "shape": 7, "type": "BOOLEAN", "widget": {"name": "decode_tiled"}, "link": null},
+        {"localized_name": "decode_tile_size", "name": "decode_tile_size", "shape": 7, "type": "INT", "widget": {"name": "decode_tile_size"}, "link": null},
+        {"localized_name": "decode_tile_overlap", "name": "decode_tile_overlap", "shape": 7, "type": "INT", "widget": {"name": "decode_tile_overlap"}, "link": null},
+        {"localized_name": "tile_debug", "name": "tile_debug", "shape": 7, "type": "COMBO", "widget": {"name": "tile_debug"}, "link": null},
+        {"localized_name": "offload_device", "name": "offload_device", "shape": 7, "type": "COMBO", "widget": {"name": "offload_device"}, "link": null},
+        {"localized_name": "cache_model", "name": "cache_model", "shape": 7, "type": "BOOLEAN", "widget": {"name": "cache_model"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "SEEDVR2_VAE", "name": "SEEDVR2_VAE", "type": "SEEDVR2_VAE", "links": [3]}
+      ],
+      "properties": {"aux_id": "ainvfx/ComfyUI-SeedVR2_VideoUpscaler", "Node name for S&R": "SeedVR2LoadVAEModel"},
+      "widgets_values": ["ema_vae_fp16.safetensors", "cuda:0", true, 1024, 128, true, 1024, 128, "false", "cpu", false]
+    },
+    {
+      "id": 8,
+      "type": "SeedVR2ResolutionPicker",
+      "pos": [870, 120],
+      "size": [260, 40],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "resolution", "name": "resolution", "type": "COMBO", "widget": {"name": "resolution"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "resolution", "name": "resolution", "type": "INT", "links": [4, 5]}
+      ],
+      "properties": {"Node name for S&R": "SeedVR2ResolutionPicker"},
+      "widgets_values": ["4K (4096)"]
+    },
+    {
+      "id": 4,
+      "type": "SeedVR2VideoUpscaler",
+      "pos": [1250, 450],
+      "size": [270, 386],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "image", "name": "image", "type": "IMAGE", "link": 1},
+        {"localized_name": "dit", "name": "dit", "type": "SEEDVR2_DIT", "link": 2},
+        {"localized_name": "vae", "name": "vae", "type": "SEEDVR2_VAE", "link": 3},
+        {"localized_name": "seed", "name": "seed", "type": "INT", "widget": {"name": "seed"}, "link": null},
+        {"localized_name": "resolution", "name": "resolution", "type": "INT", "link": 4},
+        {"localized_name": "max_resolution", "name": "max_resolution", "type": "INT", "link": 5},
+        {"localized_name": "batch_size", "name": "batch_size", "type": "INT", "widget": {"name": "batch_size"}, "link": null},
+        {"localized_name": "uniform_batch_size", "name": "uniform_batch_size", "type": "BOOLEAN", "widget": {"name": "uniform_batch_size"}, "link": null},
+        {"localized_name": "color_correction", "name": "color_correction", "type": "COMBO", "widget": {"name": "color_correction"}, "link": null},
+        {"localized_name": "temporal_overlap", "name": "temporal_overlap", "shape": 7, "type": "INT", "widget": {"name": "temporal_overlap"}, "link": null},
+        {"localized_name": "prepend_frames", "name": "prepend_frames", "shape": 7, "type": "INT", "widget": {"name": "prepend_frames"}, "link": null},
+        {"localized_name": "input_noise_scale", "name": "input_noise_scale", "shape": 7, "type": "FLOAT", "widget": {"name": "input_noise_scale"}, "link": null},
+        {"localized_name": "latent_noise_scale", "name": "latent_noise_scale", "shape": 7, "type": "FLOAT", "widget": {"name": "latent_noise_scale"}, "link": null},
+        {"localized_name": "offload_device", "name": "offload_device", "shape": 7, "type": "COMBO", "widget": {"name": "offload_device"}, "link": null},
+        {"localized_name": "enable_debug", "name": "enable_debug", "shape": 7, "type": "BOOLEAN", "widget": {"name": "enable_debug"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "IMAGE", "name": "IMAGE", "type": "IMAGE", "links": [7, 8]}
+      ],
+      "properties": {"aux_id": "ainvfx/ComfyUI-SeedVR2_VideoUpscaler", "Node name for S&R": "SeedVR2VideoUpscaler"},
+      "widgets_values": [42, "fixed", 0, 0, 1, false, "lab", 0, 0, 0.0, 0.0, "cpu", false]
+    },
+    {
+      "id": 5,
+      "type": "FaceRestoreModelLoader",
+      "pos": [1250, 880],
+      "size": [320, 60],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "model_name", "name": "model_name", "type": "COMBO", "widget": {"name": "model_name"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "FACERESTORE_MODEL", "name": "FACERESTORE_MODEL", "type": "FACERESTORE_MODEL", "links": [6]}
+      ],
+      "properties": {"cnr_id": "comfyui-facerestore", "ver": "0.0.1", "Node name for S&R": "FaceRestoreModelLoader"},
+      "widgets_values": ["codeformer.pth"]
+    },
+    {
+      "id": 6,
+      "type": "FaceRestoreCFWithModel",
+      "pos": [1616, 450],
+      "size": [320, 120],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "facerestore_model", "name": "facerestore_model", "type": "FACERESTORE_MODEL", "link": 6},
+        {"localized_name": "image", "name": "image", "type": "IMAGE", "link": 7},
+        {"localized_name": "facedetection", "name": "facedetection", "type": "COMBO", "widget": {"name": "facedetection"}, "link": null},
+        {"localized_name": "codeformer_fidelity", "name": "codeformer_fidelity", "type": "FLOAT", "widget": {"name": "codeformer_fidelity"}, "link": null}
+      ],
+      "outputs": [
+        {"localized_name": "IMAGE", "name": "IMAGE", "type": "IMAGE", "links": [9]}
+      ],
+      "properties": {"cnr_id": "comfyui-facerestore", "ver": "0.0.1", "Node name for S&R": "FaceRestoreCFWithModel"},
+      "widgets_values": ["retinaface_resnet50", 0.85]
+    },
+    {
+      "id": 9,
+      "type": "LazySwitchKJ",
+      "pos": [1980, 460],
+      "size": [200, 80],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "switch", "name": "switch", "type": "BOOLEAN", "widget": {"name": "switch"}, "link": null},
+        {"localized_name": "on_false", "name": "on_false", "type": "*", "link": 8},
+        {"localized_name": "on_true", "name": "on_true", "type": "*", "link": 9}
+      ],
+      "outputs": [
+        {"localized_name": "output", "name": "output", "type": "*", "links": [10]}
+      ],
+      "properties": {"Node name for S&R": "LazySwitchKJ"},
+      "widgets_values": [true]
+    },
+    {
+      "id": 7,
+      "type": "SaveImage",
+      "pos": [2240, 450],
+      "size": [270, 270],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {"localized_name": "images", "name": "images", "type": "*", "link": 10},
+        {"localized_name": "filename_prefix", "name": "filename_prefix", "type": "STRING", "widget": {"name": "filename_prefix"}, "link": null}
+      ],
+      "outputs": [],
+      "properties": {"cnr_id": "comfy-core", "ver": "0.3.68", "Node name for S&R": "SaveImage"},
+      "widgets_values": ["Upscaled"]
+    },
+    {
+      "id": 10,
+      "type": "Note",
+      "pos": [530, 1030],
+      "size": [440, 260],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "properties": {"text": ""},
+      "widgets_values": [
+        "📐 使用说明:\n\n1. 点击 '🔧 Resolution Picker' 节点\n2. 在右侧参数面板可以看到 'resolution' 下拉菜单\n3. 从下拉菜单中选择所需分辨率:\n   • 2K (2048)\n   • 4K (4096) - 默认\n   • 6K (6144)\n4. 上传要超分的图片\n5. 点击 'Queue Prompt' 开始处理\n\n💡 提示: 实际输出尺寸取决于输入图像的宽高比"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [1, 1, 0, 4, 0, "IMAGE"],
+    [2, 2, 0, 4, 1, "SEEDVR2_DIT"],
+    [3, 3, 0, 4, 2, "SEEDVR2_VAE"],
+    [4, 8, 0, 4, 4, "INT"],
+    [5, 8, 0, 4, 5, "INT"],
+    [6, 5, 0, 6, 0, "FACERESTORE_MODEL"],
+    [7, 4, 0, 6, 1, "IMAGE"],
+    [8, 4, 0, 9, 1, "*"],
+    [9, 6, 0, 9, 2, "*"],
+    [10, 9, 0, 7, 0, "*"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
