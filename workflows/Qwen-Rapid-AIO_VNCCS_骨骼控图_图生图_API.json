@@ -58,7 +58,57 @@
     "inputs": { "samples": ["9", 0], "vae": ["2", 2] }
   },
   "11": {
+    "class_type": "GetImageSizeAndCount",
+    "inputs": { "image": ["1", 0] }
+  },
+  "12": {
+    "class_type": "BOOLConstant",
+    "inputs": { "value": false }
+  },
+  "13": {
+    "class_type": "SimpleCalculatorKJ",
+    "inputs": {
+      "expression": "max(a, b)",
+      "a": ["11", 0],
+      "b": ["11", 1]
+    }
+  },
+  "14": {
+    "class_type": "SimpleCalculatorKJ",
+    "inputs": {
+      "expression": "min(a, b)",
+      "a": ["11", 0],
+      "b": ["11", 1]
+    }
+  },
+  "15": {
+    "class_type": "LazySwitchKJ",
+    "inputs": {
+      "switch": ["12", 0],
+      "on_false": ["14", 1],
+      "on_true": ["13", 1]
+    }
+  },
+  "16": {
+    "class_type": "LazySwitchKJ",
+    "inputs": {
+      "switch": ["12", 0],
+      "on_false": ["13", 1],
+      "on_true": ["14", 1]
+    }
+  },
+  "17": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "image": ["10", 0],
+      "width": ["15", 0],
+      "height": ["16", 0],
+      "upscale_method": "bilinear",
+      "crop": "disabled"
+    }
+  },
+  "18": {
     "class_type": "SaveImage",
-    "inputs": { "images": ["10", 0], "filename_prefix": "V7-Qwen-Rapid" }
+    "inputs": { "images": ["17", 0], "filename_prefix": "V7-Qwen-Rapid" }
   }
 }

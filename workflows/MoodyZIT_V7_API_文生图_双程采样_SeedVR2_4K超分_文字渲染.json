@@ -69,7 +69,11 @@
   },
   "17": {
     "class_type": "SeedVR2VideoUpscaler",
-    "inputs": { "image": ["sw", 0], "dit": ["15", 0], "vae": ["16", 0], "seed": 42, "resolution": 2560, "max_resolution": 4096, "batch_size": 1, "uniform_batch_size": false, "color_correction": "lab", "temporal_overlap": 0, "prepend_frames": 0, "input_noise_scale": 0.0, "latent_noise_scale": 0.0, "offload_device": "cpu", "enable_debug": false }
+    "inputs": { "image": ["sw", 0], "dit": ["15", 0], "vae": ["16", 0], "seed": 42, "resolution": ["rp", 0], "max_resolution": ["rp", 0], "batch_size": 1, "uniform_batch_size": false, "color_correction": "lab", "temporal_overlap": 0, "prepend_frames": 0, "input_noise_scale": 0.0, "latent_noise_scale": 0.0, "offload_device": "cpu", "enable_debug": false }
+  },
+  "rp": {
+    "class_type": "SeedVR2ResolutionPicker",
+    "inputs": { "resolution": "4K (4096)" }
   },
   "18": {
     "class_type": "SaveImage",
