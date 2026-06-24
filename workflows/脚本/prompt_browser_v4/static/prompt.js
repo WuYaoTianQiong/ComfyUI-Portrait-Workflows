@@ -244,16 +244,14 @@ window.setRating = function(rating) {
   });
 };
 
-window.openCreateModal = function() {
+window.openCreateModal = async function() {
   document.getElementById("modalTitle").textContent = "新建提示词";
   document.getElementById("f_id").value = "";
   ["f_name","f_prompt","f_neg","f_steps","f_cfg","f_sampler","f_seed","f_model","f_tags","f_note"].forEach(id => document.getElementById(id).value = "");
   window.setRating(0);
-  window.loadCategoriesForSelect();
-  window.loadTagsForSelect();
-  const catSelect = document.getElementById("f_category");
-  if (catSelect) catSelect.value = "";
-  document.querySelectorAll("#f_tags_select .tag-option.selected").forEach(el => el.classList.remove("selected"));
+  // 异步加载分类和标签选项（无预选）
+  await window.loadCategoriesForSelect();
+  await window.loadTagsForSelect();
   document.getElementById("modalOverlay").classList.add("active");
 };
 
@@ -275,22 +273,14 @@ window.openEditModal = async function(id) {
     const rating = p.rating || 0;
     window.setRating(rating);
 
-    await window.loadCategoriesForSelect();
-    await window.loadTagsForSelect();
-
+    // 直接传入预选值，共享函数内部处理选中状态
     const categories = p.categories || [];
-    const catSelect = document.getElementById("f_category");
-    if (catSelect && categories.length > 0) {
-      catSelect.value = categories[0].id;
-    }
-
+    const catId = categories.length > 0 ? categories[0].id : null;
     const tagsDetail = p.tags_detail || [];
     const tagIds = tagsDetail.map(t => t.id);
-    document.querySelectorAll("#f_tags_select .tag-option").forEach(el => {
-      if (tagIds.includes(parseInt(el.dataset.tagId))) {
-        el.classList.add("selected");
-      }
-    });
+
+    await window.loadCategoriesForSelect(catId);
+    await window.loadTagsForSelect(tagIds);
 
     document.getElementById("modalOverlay").classList.add("active");
   } catch (e) {
@@ -531,20 +521,18 @@ window.copyPromptText = function(btn, type) {
 // 提示词：分类和标签（Phase 2）
 // -------------------------------------------------------------------
 
-window._currentCategoryId = null;
-window._selectedTags = new Set();
+// window.loadCategories 由 category.js 定义，此处不重复声明
+// window._currentCategoryId 由 category.js 声明
+// window._selectedTags 由 tag.js 声明
 
-window.loadCategories = async function() {
-  // 实现分类加载逻辑
-  console.log("loadCategories called");
+// 加载分类列表到新建/编辑模态框的下拉框（f_category）
+// 复用 category.js 中的共享函数 window.renderCategorySelect
+window.loadCategoriesForSelect = async function(selectedCatId) {
+  await window.renderCategorySelect("f_category", selectedCatId || "");
 };
 
-window.loadCategoriesForSelect = async function() {
-  // 实现分类选择加载逻辑
-  console.log("loadCategoriesForSelect called");
-};
-
-window.loadTagsForSelect = async function() {
-  // 实现标签选择加载逻辑
-  console.log("loadTagsForSelect called");
+// 加载标签列表到新建/编辑模态框的多选区（f_tags_select）
+// 复用 tag.js 中的共享函数 window.renderTagCheckboxes
+window.loadTagsForSelect = async function(selectedTagIds) {
+  await window.renderTagCheckboxes("f_tags_select", selectedTagIds || []);
 };

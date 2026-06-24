@@ -319,12 +319,20 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
 
 @router.delete("/prompts/{prompt_id}")
 def delete_prompt(prompt_id: int):
-    """删除提示词"""
-    r = Prompt.get_or_none(Prompt.id == prompt_id)
-    if r is None:
-        raise HTTPException(404, "提示词不存在")
-    r.delete_instance()
-    return {"success": True}
+    """删除提示词（同时清理关联的分类、标签、生成历史）"""
+    try:
+        r = Prompt.get_or_none(Prompt.id == prompt_id)
+        if r is None:
+            raise HTTPException(404, "提示词不存在")
+        # 先删除关联表中的记录，避免外键约束错误
+        pc = PromptCategory.delete().where(PromptCategory.prompt == prompt_id).execute()
+        pt = PromptTag.delete().where(PromptTag.prompt == prompt_id).execute()
+        gh = GenHistory.delete().where(GenHistory.prompt_id == prompt_id).execute()
+        r.delete_instance()
+        return {"success": True, "deleted": {"prompt_categories": pc, "prompt_tags": pt, "gen_history": gh}}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"删除失败: {type(e).__name__}: {e}")
 
 
 @router.get("/prompts/{prompt_id}/history", response_model=dict)

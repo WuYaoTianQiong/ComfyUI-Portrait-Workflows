@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prompt Browser · 提示词管理器 v4</title>
+<title>提示词管理器</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="stylesheet" href="/style.css?v=8">
@@ -83,7 +83,7 @@
         <!-- 行2: 分类 + 标签 (并排) -->
         <div class="toolbar-row toolbar-row-2">
           <div class="toolbar-field">
-            <label class="field-label">分类</label>
+            <label class="field-label">分类 <button class="btn-sm btn-ghost" style="padding:0 4px;font-size:14px;vertical-align:middle" onclick="manageCategories()" title="管理分类">⚙</button></label>
             <select id="categorySelect" onchange="onCategoryChange()">
               <option value="">全部分类</option>
             </select>

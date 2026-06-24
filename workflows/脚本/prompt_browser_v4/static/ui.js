@@ -46,18 +46,39 @@ window.setupResize = function() {
 window.setupWorkflowPopover = function() {
   const trigger = document.getElementById("wfTrigger");
   const popover = document.getElementById("wfPopover");
+  
   trigger.addEventListener("click", (e) => {
     e.stopPropagation();
     // 互斥：统一由 openDropdown 管理
     window.openDropdown("wfPopover");
     window._wfPopoverOpen = popover.classList.contains("show");
   });
+  
   document.addEventListener("click", (e) => {
     if (!popover.contains(e.target) && !trigger.contains(e.target)) {
       popover.classList.remove("show");
       window._wfPopoverOpen = false;
     }
   });
+  
+  // 捕获阶段拦截 wheel 事件，阻止下拉框滚动穿透到外部
+  document.addEventListener("wheel", (e) => {
+    if (!popover.classList.contains("show")) return;
+    if (!popover.contains(e.target)) return;
+    
+    // 找到实际滚动的元素（popover 或 popover-list）
+    const scrollable = e.target.closest(".wf-popover, .wf-popover-list");
+    if (!scrollable) return;
+    
+    const atTop = scrollable.scrollTop <= 0;
+    const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1;
+    
+    // 滚动到边界时允许传递，否则拦截
+    if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) return;
+    
+    e.preventDefault();
+    scrollable.scrollTop += e.deltaY;
+  }, { passive: false, capture: true });
 };
 
 window.closeWorkflowPopover = function() {
