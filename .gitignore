@@ -82,3 +82,13 @@ workflows/thumbnails/
 .env
 .env.*
 !.env.example
+
+# Temporary directories (experiment/scratch pads)
+temp_*/
+
+# Reasonix cache
+workflows/.reasonix/
+
+# Database backup files
+*_backup_*.db
+*.db.bak
