@@ -8,16 +8,13 @@
 
 | 工作流 | 用途 | 模型 | 骨骼控图 |
 |---|---|---|---|
-| `Work-Fisher_Qwen-AIO_人物姿势编辑_图生图_API.json` | 人物姿势编辑（画幅内） | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose骨骼 |
-| `VNCCS_PoseStudio_QWEN_3D摆姿_API.json` | 3D人偶摆姿 + QWEN生成 | VNCCS_PoseStudio | ✅ VNCCS 3D |
-| `MoodyZIT_V7_API_文生图_双程采样_快速预览_文字渲染.json` | 高质量文生图 | moodyProMix_zitV13FP8 | ❌ |
-| `MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json` | 图生图/局部重绘 | moodyProMix_zitV13FP8 | ❌ |
-| `MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json` | 文生图+SeedVR2超分 | moodyProMix_zitV13FP8 | ❌ |
-| `FLUX2_Klein9B_双程采样_快速预览.json` | Flux2 Klein 文生图 | flux-2-klein 系列 | ❌ |
-| `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` | 图生图 + VNCCS骨骼控图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_API.json` | 文生图 + VNCCS骨骼控图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `MoodyZIT_VNCCS_双程采样_骨骼控图_API.json` | 高质量双程文生图 | moodyProMix_zitV13FP8 | ❌ |
-| `MoodyZIT_ControlNet_骨骼控图_API.json` | 文生图+ControlNet骨骼 | moodyProMix_zitV13FP8 | ⚠️ 缺插件 |
+| `Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json` | DWPose拍照提取骨骼→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 |
+| `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` | VNCCS 3D手动摆姿→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
+| `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_API.json` | VNCCS 3D手动摆姿→文生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
+| `MoodyZIT_V7_API_文生图_双程采样_快速预览_文字渲染.json` | 高质量双程文生图 | moodyProMix_zitV13FP8 | ❌ |
+| `MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json` | 图生图/局部重绘+超分 | moodyProMix_zitV13FP8 | ❌ |
+| `MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json` | 文生图+双程+4K超分 | moodyProMix_zitV13FP8 | ❌ |
+| `FLUX2_Klein9B_双程采样_快速预览.json` | Flux2 Klein 双程文生图 | flux-2-klein 系列 | ❌ |
 
 ---
 
@@ -42,7 +39,7 @@
 
 - 上传人物图 → OpenPose自动识别 → 编辑骨骼 → Queue
 - 提示词越具体、越描述关节位置越好（如"右手举过头顶手腕在头顶高度"）
-- 结合 `VNCCS_PoseStudio_QWEN_3D摆姿_API.json` 的3D人偶可更直观摆姿
+- 结合 `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` 的3D人偶可更直观摆姿
 
 ---
 
@@ -78,8 +75,9 @@
 - 结论：模型错误 + 显存不足
 
 ### 5. MoodyZIT (Flux) + ControlNet
-- 理论可行但未实测（用了moodyProMix Flx系UNet + flux_union_controlnet）
-- 显存临界，可能需要在更低分辨率测试
+- ❌ **已实测，不可行**（2026-06-30）
+- 原因：`comfyui_controlnet_aux` 只含预处理节点，缺少 `ControlNetLoader`/`ControlNetApply` 加载节点，需额外装 FLUX ControlNet 插件
+- 即使装好插件，12G 显存也吃紧
 
 ---
 
@@ -172,11 +170,38 @@
 
 两种模式共用同一套骨骼控图管线（VNCCS → image2 → TextEncodeQwenImageEditPlus），区别仅在 latent 来源。
 
-### 8. API 格式 vs Visual 格式
+### 8. API 格式 vs 标准 Visual 格式
 
-- **API 格式**：`{"1": {"class_type": "...", "inputs": {...}}}` —— 参数按名称匹配，不依赖位置
-- **Visual 格式**：节点数组 + `widgets_values` 位置数组 —— 节点更新后易错位
-- **建议**：新建工作流一律用 API 格式
+- **API 格式**：`{"1": {"class_type": "...", "inputs": {...}}}` —— 参数按名称匹配，不依赖位置。直接 POST `/prompt` 接口
+- **标准 Visual 格式**：节点数组 + `widgets_values` 位置数组 —— 可 Load 加载到 UI，节点更新后易错位
+- **建议**：需 UI 交互的工作流用标准格式，纯脚本调用用 API 格式
+
+### 9. SeedVR2 多分辨率下拉框方案（2026-06-24）
+
+#### 需求
+用 `SeedVR2VideoUpscaler` 超分时，用户需下拉选择 2K/4K/6K，避免手写数字。
+
+#### 实现
+新增自定义节点 `SeedVR2ResolutionPicker`（在 `ComfyUI_essentials/misc.py`）：
+- 下拉选项：`2K (2048)` / `4K (4096)` / `6K (6144)`
+- 输出 `INT` 类型，同时连接到 upscaler 的 `resolution` 和 `max_resolution`
+
+#### 踩坑 1：Manager 节点名冲突
+`ResolutionPicker` 这个名字在 ComfyRegistry 在线数据库中被映射到 `comfyui-flux-continuum` 包。即使本地有节点定义，Manager 也会弹"缺失节点包"警告。
+
+**解决**：重命名为 `SeedVR2ResolutionPicker`，彻底避名冲突。
+
+#### 踩坑 2：标准格式 widgets_values 错位
+V3 的 `io.Int.Input` 中，`control_after_generate` 不再单独占一个 widget value，但链接输入（link input）**仍然占位**。将 `resolution`/`max_resolution` 从 widget 改为 link 后，需在 `widgets_values` 数组中为这些 link 槽位保留 dummy 值。
+
+最终正确的 `widgets_values` 分布（共 13 项）：
+```
+seed 值 → seed 控制器 → resolution(link,dummy) → max_resolution(link,dummy) → batch_size → uniform → color → temporal → prepend → noise → latent → offload → debug
+[42,     "fixed",       0,                     0,                        1,          false,    "lab",  0,         0,          0.0,    0.0,     "cpu",   false]
+```
+
+#### 踩坑 3：API 格式不受影响
+API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR2ResolutionPicker` 只需按正常 JSON 写法，无需操心 `widgets_values` 顺序。
 
 ---
 
