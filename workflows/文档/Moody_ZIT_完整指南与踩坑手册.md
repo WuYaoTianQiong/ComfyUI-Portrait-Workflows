@@ -1,6 +1,17 @@
 # ComfyUI 12G 显存姿势控制踩坑手册
 
-> 2026年6月30日更新，基于 ComfyUI 2026-06-16 版本，RTX 12G VRAM
+> 2026年6月26日更新（Nunchaku/GGUF/AnyPose 折腾全记录），基于 ComfyUI 2026-06-16 版本
+
+## 硬件配置
+
+| 项目 | 规格 |
+|------|------|
+| CPU | Intel Core i5-13600KF |
+| GPU | NVIDIA GeForce RTX 5070 (12GB GDDR7) |
+| 内存 | 32GB DDR5 6400MHz |
+| 存储 | SSD |
+| 系统 | Windows 11 |
+| 启动参数 | `--lowvram`（模型权重自动在 VRAM ↔ RAM 间卸载） |
 
 ---
 
@@ -11,6 +22,9 @@
 | `Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json` | DWPose拍照提取骨骼→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 |
 | `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` | VNCCS 3D手动摆姿→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
 | `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_API.json` | VNCCS 3D手动摆姿→文生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
+| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_Visual.json` | ⭐ **VNCCS图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
+| `千面绘形_DWPose姿态编辑_16x9画幅一键横竖切换_图生图.json` | ⭐ **DWPose图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 |
+| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_API.json` | VNCCS横竖切换(API版) | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
 | `MoodyZIT_V7_API_文生图_双程采样_快速预览_文字渲染.json` | 高质量双程文生图 | moodyProMix_zitV13FP8 | ❌ |
 | `MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json` | 图生图/局部重绘+超分 | moodyProMix_zitV13FP8 | ❌ |
 | `MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json` | 文生图+双程+4K超分 | moodyProMix_zitV13FP8 | ❌ |
@@ -211,3 +225,319 @@ API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR
 2. **Work-Fisher出图 + MoodyZIT Inpaint精修**：姿势图→MoodyZIT图生图去噪0.5~0.7，利用Flux画质优势
 3. **CLIPLoader的qwen_image类型**：ComfyUI已支持，使用CLIPLoader（非DualCLIPLoader）加载Qwen VL模型
 4. **SageAttention加速**：项目根目录有SageAttention源码，可编译安装加速推理
+
+---
+
+## 十、TODO：横竖切换 + 姿势变换两步串联
+
+> 2026-06-26 新增
+
+### 当前限制
+
+| 模式 | 能做什么 | 不能做什么 |
+|------|----------|------------|
+| 横竖切换工作流（稳定版） | ✅ 自动计算宽高、一键切画幅、人物画质保留 | ❌ 躺着→站着等极端姿势变化 |
+| 蒙版锁原图版（实验） | ✅ 100% 保留原图画质 | ❌ 人物完全锁定，姿势无法改变 |
+
+### 根本矛盾
+
+扩散模型的约束：
+- **要改像素 → 必须重绘 → 不可能 100% 保留原画质**
+- **要保画质 → 必须锁像素 → 姿势不能变**
+
+`SetLatentNoiseMask` 让扩展区 AI 填充、原图锁死，但人物姿势也被锁死了。
+
+### 两步串联方案（TODO）
+
+```
+Stage1: 灵犀控骨 VNCCS 工作流（denoise=1）
+  原图 → VNCCS骨骼引导 → 姿势图（画质有损）
+
+Stage2: MoodyZIT 图生图（denoise 0.5~0.7）
+  姿势图 → MoodyZIT 精修画质 → 最终图
+```
+
+两个工作流串成一条线即可：姿势转换 → 画质精修。
+
+**硬件可行性**：32GB DDR5 6400MHz 内存足够容纳一个完整 checkpoint 的卸载中转。ComfyUI 的 `--lowvram` 模式在两步之间自动将 Qwen-Rapid-AIO (26.5GB) 卸到内存，再加载 MoodyZIT 模型 (~8GB)，不会爆显存。
+
+**自动化方式**：编写一个 Python 脚本，通过 ComfyUI API 先后提交两个工作流，第一步出图路径传给第二步的 LoadImage 即可一键跑完。
+
+### 已知问题
+
+- `SetLatentNoiseMask` 当前版本在横竖切换工作流中实测不稳定（躺着的人蒙版锁死后不跟随骨骼变化），需进一步调试蒙版与 VNCCS 骨骼引导的兼容性
+
+---
+
+## 九、横竖画幅一键切换开发踩坑全记录
+
+> 2026-06-26 新增。此为本次开发中耗时最长、踩坑最多的功能。
+
+### 目标
+
+在 VNCCS 骨骼控图和 DWPose 姿态编辑两个图生图工作流中，增加**一键切换横竖画幅**功能：输入横图→切换开关→自动输出竖图（或反过来），画布由 AI 自动填充扩展区域。
+
+### 最终方案（Visual 格式 + 自动计算宽高）
+
+```
+LoadImage ─→ GetImageSizeAndCount(w, h)
+                 │
+      SimpleCalculatorKJ(max)  SimpleCalculatorKJ(min)
+           max=1920                min=1088
+           │                       │
+      ┌────┴──────────┬────────────┘
+      │               │
+      ▼               ▼
+ImageResizeKJv2(横)  ImageResizeKJv2(竖)
+ w=max, h=min        w=min, h=max
+ 1920×1088           1088×1920
+      │               │
+      └───┬───────────┘
+          ▼
+    LazySwitchKJ(切 IMAGE)
+          ▼
+    VAEEncode → KSampler → 出图
+```
+
+**17 个节点**。`BOOLConstant` 复选框：关=竖图，开=横图。**完全自动**，根据输入图实时计算目标尺寸。
+
+### 踩坑 #1：ImageResizeKJv2 的 width/height 是什么类型？
+
+**错误认知**：以为 width/height 是纯 widget（`widgets_values`），不能通过连线动态设置。
+
+**真相**：查看 KJNodes 源码（`image_nodes.py:2907`），`width` 和 `height` 在 `INPUT_TYPES` 的 `required` 字典中，类型 `"INT"` —— **既是 widget 也是标准输入端口，可以被上游节点连线**。
+
+### 踩坑 #2：SimpleCalculatorKJ 输出索引用错
+
+**现象**：按 `["13", 0]` 取 SimpleCalculatorKJ 输出，结果 ImageResizeKJv2 收到浮点数，行为异常（输出正方形）。
+
+**真相**：`SimpleCalculatorKJ` 有 3 个输出槽位：
+
+| 索引 | 类型 |
+|:--:|------|
+| 0 | **FLOAT** ← 之前一直引用这个，错了！ |
+| 1 | **INT** ← 正确的数值输出 |
+| 2 | BOOLEAN |
+
+必须用 `["13", 1]` 取 INT 值。
+
+### 踩坑 #3：GetImageSizeAndCount 输出索引用错
+
+**现象**：`SimpleCalculatorKJ` 收不到正确的宽高数值。
+
+**真相**：`GetImageSizeAndCount` 有 4 个输出：
+
+| 索引 | 名称 | 类型 |
+|:--:|------|------|
+| 0 | image | IMAGE |
+| 1 | width | **INT** ← 宽 |
+| 2 | height | **INT** ← 高 |
+| 3 | count | INT |
+
+之前用 `["11", 0]` 和 `["11", 1]`，实际拿到的是 IMAGE 和 width（INT），缺了 height。正确是 `["11", 1]`（width）和 `["11", 2]`（height）。
+
+### 踩坑 #4：LazySwitchKJ 只有一个输出
+
+**现象**：`ImageResizeKJv2` 的 width/height 引用 `["15", 1]` → 不存在的输出口 → 全乱。
+
+**真相**：`LazySwitchKJ` 只有 **1 个输出**（index 0），类型为 `*`（通配符）。所有引用必须用 `["节点ID", 0]`。
+
+### 踩坑 #5：LazySwitchKJ 传数值 = tensor 地狱
+
+**现象**：`SimpleCalculatorKJ(INT) → LazySwitchKJ → ImageResizeKJv2(width)` → `RuntimeError: Boolean value of Tensor with more than one value is ambiguous`
+
+**原因**：LazySwitchKJ 把上游 INT 包装成 PyTorch tensor，ImageResizeKJv2 内部做 `if width == 0` 判断时，tensor 无法转 bool 就炸。
+
+**解决**：**不要让 LazySwitchKJ 切数值**。改为两个 `ImageResizeKJv2` 各从 `SimpleCalculatorKJ` **直接**接收 INT，`LazySwitchKJ` 只切最终的 IMAGE 输出——IMAGE 类型经过 switch 不会出 tensor 问题。
+
+### 踩坑 #6：API 格式 vs Visual 格式
+
+**现象**：手写 API 格式的 JSON 反复报错/弹窗/不兼容。
+
+**真相**：
+- **API 格式**（`{"1": {"class_type": "...", "inputs": {...}}}`）：适合程序调用（POST `/prompt`），但不适合手动编辑。节点类型的输入/输出名称、连接格式容易写错。
+- **Visual 格式**（`{"nodes": [{...}], "links": [[...]]}`）：由 ComfyUI 导出，格式 100% 正确。**编辑工作流必须基于 Visual 格式**。
+
+**教训**：在 ComfyUI 中先加载 API 工作流 → 调整布局 → 保存为 Visual 格式 → 在此基础上修改 JSON。不要在 API 格式上凭空手写。
+
+### 踩坑 #7：`_meta.title` 兼容性
+
+Visual 格式支持 `_meta: {"title": "中文标题"}` 给节点加自定义标题。API 格式在某些版本中不识别 `_meta`，会导致弹窗。
+
+**教训**：仅在 Visual 格式的工作流中使用 `_meta.title`。
+
+### 踩坑 #8：ImagePadForOutpaint 固定像素 vs 自动计算
+
+曾经尝试用 `ImagePadForOutpaint` + 固定像素（如 600px）做 outpainting：
+- 1920×1088 → 上下各扩 600px → 1920×2288（比例还行）
+- 3416×1928 → 上下各扩 600px → 3416×3128（接近正方形，失败）
+
+**结论**：固定像素方案对不同分辨率的输入图比例失控。必须用 `ImageResizeKJv2(pad)` 配合**动态计算的宽高**。
+
+### 踩坑 #9：Keep Proportion 模式选择
+
+- `"pad"`：缩放后居中，黑边填充 → 人物居中，适合做 letterbox
+- `"crop"`：缩放后裁切 → 可能裁掉人物
+- `"stretch"`：直接拉伸 → 人物变形
+
+**结论**：横竖切换用 `"pad"` 模式，原图等比缩放后居中，AI 只需填充黑边区域。
+
+### 踩坑 #10：denoise 值与人物保留的权衡
+
+- `denoise=1`（完全重绘）：换了画布尺寸后人物会被彻底重绘，服化道全变
+- `denoise=0.4~0.6`：人物大部分保留，但扩展区填充不充分
+
+在两阶段方案中，Stage1 改姿势用 `denoise=1`，Stage2 扩画布用 `SetLatentNoiseMask` 锁定原图区域。但蒙版锁死也锁住了躺着的人物，导致"躺着的人还在、后面站着一个"的 bug。
+
+**最终方案**：`denoise=1` 统一重绘，配合 `VNCCS_PoseStudio` 骨骼引导 + `TextEncodeQwenImageEditPlus` 图文理解。
+
+### 横向对比：所有尝试过的方案
+
+| 方案 | 节点数 | 问题 | 结果 |
+|------|:--:|------|:--:|
+| 固定 16:9 画布(1536×864) | 15 | 比例锁死，不自动 | ❌ |
+| 宽高互换(SimpleCalculatorKJ→LazySwitchKJ数值) | 20 | tensor 报错 | ❌ |
+| ImagePadForOutpaint 固定像素 | 18 | 3416×1928→3416×3128 正方形 | ❌ |
+| ImageResizeKJv2 crop 模式 | 18 | 裁掉人物 | ❌ |
+| SetLatentNoiseMask 锁原图 | 20 | 躺着的人不变+站着一个 | ❌ |
+| 两阶段(先扩画布再改姿) | 27 | 太复杂 | ❌ |
+| **SimpleCalculatorKJ→ImageResizeKJv2 直连** | **17** | **✅ 正确** | ✅ |
+
+### DWPose 工作流横竖切换
+
+`千面绘形_DWPose姿态编辑_16x9画幅一键横竖切换_图生图.json` 使用同一方案：两个 `ImageResizeKJv2` + `LazySwitchKJ` 在 VAEEncode 之前切画布尺寸。
+
+**特殊处理**：DWPose 工作流中，横竖切换在 `VAEEncode` 之前（通过两个 `ImageResizeKJv2` 的 IMAGE 输出切换），而非 latent 层面。这样 TextEncodeQwenImageEditPlus 的 `image1` 参数拿到的是已调整画幅的图片，Qwen 模型能正确理解完整画布构图。
+
+---
+
+## 十一、2026-06-26 Nunchaku / GGUF / AnyPose 全记录
+
+> 历时近 6 小时（16:00~23:00），从 Nunchaku FP4 → 社区 LoRA → GGUF + AnyPose → DWPose，全程采样 + 推荐路线总结。
+
+### 1. 启动脚本与 Python 环境
+
+ComfyUI 自带的嵌入式 Python 路径：
+```
+ComfyUI-aki-v3/python/python.exe  ← Python 3.13，ComfyUI 实际用这个
+```
+所有 `pip install` 必须用这个 Python。启动脚本两种：
+- `启动ComfyUI.bat`：原始版，用嵌入式 Python
+- `启动ComfyUI_Nunchaku.bat`：+设置CUDA DLL PATH
+
+### 2. Nunchaku _C.pyd DLL 加载失败
+
+**报错**：`DLL load failed while importing _C: 找不到指定的模块。`
+**原因**：`_C.pyd`(277MB)编译了CUDA kernel，需要cudart/cublas等DLL在PATH上。
+**解决**：启动前设置PATH包含 `torch\lib` + `nvidia\cuda_runtime\bin` + `nvidia\cublas\bin`
+```python
+os.add_dll_directory("python/Lib/site-packages/torch/lib")
+```
+
+### 3. nunchaku 版本与 LoRA 兼容性
+
+`ComfyUI-QwenImageLoraLoader` 要求 nunchaku ≥ 1.2.0 才支持 FP4(v4) 模型。
+v1.2.1 wheel 命名规则：`nunchaku-版本+cu版本torch版本-cp版本-cp版本-win_amd64.whl`
+示例：`nunchaku-1.2.1+cu13.0torch2.9-cp313-cp313-win_amd64.whl`
+
+### 4. RTX 5070 (Blackwell sm_120) 的 PyTorch 要求
+
+| PyTorch | CUDA | 支持 5070 | nunchaku 版本 |
+|---------|------|-----------|---------------|
+| 2.6.0+cu124 | 12.4 | ❌ sm_120不支持 | 1.0.1+torch2.6 |
+| 2.8.0+cu128 | 12.8 | ✅ | 1.2.1+cu12.8torch2.8 |
+| 2.9.0+cu130 | 13.0 | ✅ | 1.2.1+cu13.0torch2.9 |
+| 2.11.0+cu128 | 12.8 | ✅ (**实测**) | ❌ 无对应wheel |
+
+**结论**：用 torch 2.8/2.9 + nunchaku 1.2.1 匹配的 CUDA 版本。
+
+### 5. CLIPLoader type 参数
+
+Qwen-Image-Edit 必须用 `qwen_image`，不能用 `lumina2`。
+
+### 6. TextEncodeQwenImageEdit vs TextEncodeQwenImageEditPlus
+
+Nunchaku 官方工作流用单图版的 `TextEncodeQwenImageEdit`，不支持 AnyPose 的双图条件注入。官方明确标注 "LoRA support not available now"。
+
+### 7. GGUF 模型存放目录
+
+`UnetLoaderGGUF` 读取 `models/diffusion_models/`，不是 `models/unet/`。
+Q5_0(14.3GB)超12GB显存，换成 Q4_K_M(10.5GB)才能跑。
+
+### 8. LoraLoader CLIP 链
+
+必须串联：CLIPLoader → LoraLoaderA.clip → A.clip_out → LoraLoaderB.clip → B.clip_out → TextEncoder.clip
+每个 LoraLoader 的 CLIP 输入输出不能留空。
+
+### 9. LazySwitchKJ 正确参数
+
+| 错误 | 正确 |
+|------|------|
+| `name: "boolean"` | `name: "switch"` |
+| `name: "image_a"` | `name: "on_true"` |
+| `name: "image_b"` | `name: "on_false"` |
+
+### 10. ImageResizeKJv2 widget_values
+
+当 width/height 通过连线输入时：`["lanczos", "pad"]`
+有效 keep_proportion：`stretch, resize, pad, pad_edge, crop, pillarbox_blur, total_pixels`
+
+### 11. DWPreprocessor vs OpenposePreprocessor
+
+Work-Fisher 工作流使用 `OpenposePreprocessor`（非DWPreprocessor）。
+
+### 12. 推荐路线
+
+| 路线 | 可操作性 | 说明 |
+|------|---------|------|
+| ⭐ **Qwen-Rapid-AIO + DWPose/VNCCS** | ✅ 已验证可行 | 你已有的 Work-Fisher/灵犀控骨工作流 |
+| ⭐ **Nunchaku FP4 图文编辑** | ✅ 已验证可行 | `Nunchaku_图文编辑_横竖切换.json` |
+| ❌ **Nunchaku + AnyPose LoRA** | ❌ 官方不支持双图+LoRA | Nunchaku 文档明确写不支持 |
+| ⚠️ **GGUF + AnyPose** | ⚠️ 理论可行但未验证 | Q4_K_M 模型已就位，待测试 |
+
+---
+
+## 十三、2026-06-27 两阶段精修失败总结
+
+> 尝试将灵犀控骨（姿势控制）与 MoodyZIT（画质精修）合并为一个工作流，折腾 1 小时放弃。
+
+### 根本原因
+
+两个能力分属不同模型体系，合并在一个工作流里需要同时加载两个 UNET，12GB VRAM 不够。`--lowvram` 也无法完美切换。
+
+| 能力 | 模型 | VRAM |
+|------|------|------|
+| 姿势控制 | Qwen-Rapid-AIO-NSFW-v18 (checkpoint) | ~8~10GB |
+| 画质精修 | moodyRealMix_zitV7GlobalFP8 (~8GB) | ~8GB |
+| 合计 | | ~16~18GB > 12GB ❌ |
+
+### 踩坑过程
+
+1. **Denoise 死局**：denoise>0.5 会大量重绘 Stage 1 的姿势细节，denoise<0.4 又看不出画质提升。两头不讨好。
+
+2. **分辨率适配死局**：MoodyZIT (Flux) 有训练锁定的分辨率（640×1136），Stage 1 输出不兼容。降采样→精修→升采样，每一步都损失细节，最终比 Stage 1 还糊。
+
+3. **工作流越改越复杂**：ImageScaleBy → ImageResizeKJv2 → 双 KSampler → 升采样 → 降采样 → ... 每次改动引入新问题，产出越来越差。
+
+### 最终结论
+
+- ⭐ **灵犀控骨_VNCCS骨骼控图_一键横竖切换_图生图_Visual.json** = 当前 12GB 最佳姿势控制方案
+- ⭐ **MoodyZIT_V7_Visual_文生图_双程采样_快速预览_文字渲染.json** = 纯文生图高质量方案（单出）
+- ❌ **不要尝试合并两者**
+
+### 灵犀控骨工作流稳定参数
+
+| 参数 | 值 |
+|------|-----|
+| 模型 | Qwen-Rapid-AIO-NSFW-v18 (CheckpointLoaderSimple) |
+| 采样器 | euler_ancestral |
+| 调度器 | beta |
+| 步数 | 8 |
+| CFG | 1 |
+| Denoise | 1（必须完全重绘姿势才变） |
+| AuraFlow shift | 3 |
+| CFGNorm | 1 |
+| 正面提示词 | `realistic photo, high quality, 真实摄影风格` + 手动追加姿势描述 |
+| 负面提示词 | 由 FluxKontext 自动从正面分离 |
+| 横竖切换 | BOOLConstant 关=竖图 / 开=横图 |
+
