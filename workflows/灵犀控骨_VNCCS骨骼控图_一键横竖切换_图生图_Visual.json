@@ -1,0 +1,1197 @@
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "revision": 0,
+  "last_node_id": 22,
+  "last_link_id": 53,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        130
+      ],
+      "size": [
+        270,
+        339.734375
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            40,
+            41,
+            45
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "MoodyZIT-Preview_00044_.png",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        100,
+        362
+      ],
+      "size": [
+        273.4375,
+        127.75
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            23
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            27
+          ]
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            26,
+            28,
+            37
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "QWEN\\Qwen-Rapid-AIO-NSFW-v18.safetensors"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "ModelSamplingAuraFlow",
+      "pos": [
+        1100,
+        1178
+      ],
+      "size": [
+        270,
+        79.765625
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "ModelSamplingAuraFlow"
+      },
+      "widgets_values": [
+        3
+      ]
+    },
+    {
+      "id": 4,
+      "type": "CFGNorm",
+      "pos": [
+        1470,
+        338
+      ],
+      "size": [
+        270,
+        107.75
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 24
+        }
+      ],
+      "outputs": [
+        {
+          "name": "patched_model",
+          "type": "MODEL",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CFGNorm"
+      },
+      "widgets_values": [
+        1,
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "type": "VNCCS_PoseStudio",
+      "pos": [
+        100,
+        590
+      ],
+      "size": [
+        900,
+        1203.125
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pose_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "shape": 6,
+          "type": "IMAGE",
+          "links": [
+            30
+          ]
+        },
+        {
+          "name": "lighting_prompt",
+          "shape": 6,
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "ComfyUI_VNCCS_Utils",
+        "ver": "1908ddfa8a5084a360783ca596f27678743c5496",
+        "Node name for S&R": "VNCCS_PoseStudio"
+      },
+      "widgets_values": [
+        "{\"mesh\":{\"age\":25,\"gender\":0.5,\"weight\":0.5,\"muscle\":0.5,\"height\":0.5,\"breast_size\":0.5,\"firmness\":0.5,\"penis_len\":0.5,\"penis_circ\":0.5,\"penis_test\":0.5,\"head_size\":1,\"arm_size\":1,\"hand_size\":1,\"foot_size\":1,\"upper_arm_l_length\":0.5,\"upper_arm_r_length\":0.5,\"forearm_l_length\":0.5,\"forearm_r_length\":0.5,\"thigh_l_length\":0.5,\"thigh_r_length\":0.5,\"shin_l_length\":0.5,\"shin_r_length\":0.5,\"spine_length\":0.5},\"export\":{\"view_width\":1024,\"view_height\":1024,\"cam_zoom\":1,\"cam_offset_x\":0,\"cam_offset_y\":0,\"cam_yaw_deg\":0,\"cam_pitch_deg\":0,\"output_mode\":\"LIST\",\"grid_columns\":2,\"bg_color\":[255,255,255],\"debugMode\":false,\"debugPortraitMode\":false,\"debugKeepLighting\":false,\"debugShowSAMHelper\":false,\"debugShowSAMMeshOverlay\":false,\"samApplyCamera\":false,\"keepOriginalLighting\":false,\"user_prompt\":\"\",\"prompt_template\":\"Draw character from image2\\n<lighting>\\n<user_prompt>\",\"skin_type\":\"naked\",\"interface_mode\":\"studio\",\"hand_controls_v2\":true},\"poses\":[{\"bones\":{\"spine_03\":[1.6682477030471685,-0.0017677747396654482,0.02896998538827804],\"neck_01\":[-13.963868946029448,-0.39513533752679936,1.2917363622368818],\"upperarm_l\":[-19.29484860486925,-12.116939807516484,-36.17705815379351],\"upperarm_r\":[-18.086459409408036,11.329796538297478,35.75339566568588],\"lowerarm_l\":[43.484303580424054,18.07194393656505,-10.438667611258863],\"lowerarm_r\":[44.76059946796976,-17.963505752579266,8.776684966754512]},\"modelRotation\":[0,0,0],\"camera\":{\"posX\":0,\"posY\":-1.2786405086517307,\"posZ\":46.003026843070984,\"targetX\":0,\"targetY\":-1.2786405086517334,\"targetZ\":1.0030268430709839},\"cameraParams\":{\"offset_x\":0,\"offset_y\":0,\"zoom\":1,\"yaw_deg\":0,\"pitch_deg\":0},\"prompt\":\"\"}],\"lights\":[{\"type\":\"directional\",\"color\":\"#ffffff\",\"intensity\":2,\"x\":10,\"y\":20,\"z\":30},{\"type\":\"ambient\",\"color\":\"#505050\",\"intensity\":1,\"x\":0,\"y\":0,\"z\":0}],\"activeTab\":0,\"capture_id\":\"vnccs_capture_5\",\"lighting_prompts\":[\"Draw character from image2\\nstrong Pale White lighting coming from the eye-level front\"],\"background_url\":null}",
+        ""
+      ]
+    },
+    {
+      "id": 6,
+      "type": "VAEEncode",
+      "pos": [
+        1840,
+        130
+      ],
+      "size": [
+        225,
+        71.765625
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 25
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            35
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "VAEEncode"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 7,
+      "type": "TextEncodeQwenImageEditPlus",
+      "_meta": {
+        "title": "✏️ 正面提示词输入(骨骼控制+图文理解)"
+      },
+      "pos": [
+        1840,
+        306
+      ],
+      "size": [
+        400,
+        211.71875
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 27
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 28
+        },
+        {
+          "name": "image1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 29
+        },
+        {
+          "name": "image2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 30
+        },
+        {
+          "name": "image3",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            31
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "TextEncodeQwenImageEditPlus"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 8,
+      "type": "FluxKontextMultiReferenceLatentMethod",
+      "pos": [
+        2340,
+        130
+      ],
+      "size": [
+        275.78125,
+        79.75
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 31
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            33,
+            34
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "FluxKontextMultiReferenceLatentMethod"
+      },
+      "widgets_values": [
+        "index_timestep_zero"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "KSampler",
+      "pos": [
+        2715.7818359375,
+        130
+      ],
+      "size": [
+        270,
+        559.65625
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 32
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 33
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 34
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 35
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            36
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "KSampler"
+      },
+      "widgets_values": [
+        1029461975976388,
+        "randomize",
+        8,
+        1,
+        "euler_ancestral",
+        "beta",
+        1
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VAEDecode",
+      "pos": [
+        3085.7818359375,
+        130
+      ],
+      "size": [
+        225,
+        71.765625
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 36
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 37
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            39
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "VAEDecode"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 11,
+      "type": "GetImageSizeAndCount",
+      "_meta": {
+        "title": "📏 读取输入图宽高"
+      },
+      "pos": [
+        1100,
+        130
+      ],
+      "size": [
+        225,
+        143.75
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 45
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            46,
+            48
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            47,
+            49
+          ]
+        },
+        {
+          "name": "count",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "GetImageSizeAndCount"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 12,
+      "type": "BOOLConstant",
+      "_meta": {
+        "title": "🔄 画幅切换 (关=竖图 开=横图)"
+      },
+      "pos": [
+        100,
+        1460
+      ],
+      "size": [
+        270,
+        99.75
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "BOOLEAN",
+          "links": [
+            42
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "BOOLConstant"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 13,
+      "type": "SimpleCalculatorKJ",
+      "_meta": {
+        "title": "🧮 取宽高较大值 (max)"
+      },
+      "pos": [
+        100,
+        1648
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "variables.a",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": 46
+        },
+        {
+          "name": "variables.b",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": 47
+        },
+        {
+          "name": "variables.c",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            50,
+            53
+          ]
+        },
+        {
+          "name": "BOOLEAN",
+          "type": "BOOLEAN",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "SimpleCalculatorKJ"
+      },
+      "widgets_values": [
+        "max(a, b)"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "SimpleCalculatorKJ",
+      "_meta": {
+        "title": "🧮 取宽高较小值 (min)"
+      },
+      "pos": [
+        100,
+        1978
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "variables.a",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": 48
+        },
+        {
+          "name": "variables.b",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": 49
+        },
+        {
+          "name": "variables.c",
+          "type": "INT,FLOAT,BOOLEAN",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            51,
+            52
+          ]
+        },
+        {
+          "name": "BOOLEAN",
+          "type": "BOOLEAN",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "SimpleCalculatorKJ"
+      },
+      "widgets_values": [
+        "min(a, b)"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "SaveImage",
+      "pos": [
+        3325.7818359375,
+        130
+      ],
+      "size": [
+        270,
+        83.75
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 39
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0"
+      },
+      "widgets_values": [
+        "V7-Qwen-Rapid"
+      ]
+    },
+    {
+      "id": 20,
+      "type": "ImageResizeKJv2",
+      "_meta": {
+        "title": "⬜ 横图画布(w>h, max宽×min高 pad)"
+      },
+      "pos": [
+        1100,
+        346
+      ],
+      "size": [
+        270,
+        403.640625
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 40
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "link": 50
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "link": 51
+        },
+        {
+          "name": "mask",
+          "shape": 7,
+          "type": "MASK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            44
+          ]
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "ImageResizeKJv2"
+      },
+      "widgets_values": [
+        1536,
+        864,
+        "lanczos",
+        "pad",
+        "0, 0, 0",
+        "center",
+        8,
+        "cpu"
+      ]
+    },
+    {
+      "id": 21,
+      "type": "ImageResizeKJv2",
+      "_meta": {
+        "title": "⬜ 竖图画布(h>w, min宽×max高 pad)"
+      },
+      "pos": [
+        1100,
+        762
+      ],
+      "size": [
+        270,
+        467.640625
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 41
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "link": 52
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "link": 53
+        },
+        {
+          "name": "mask",
+          "shape": 7,
+          "type": "MASK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            43
+          ]
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "ImageResizeKJv2"
+      },
+      "widgets_values": [
+        864,
+        1536,
+        "lanczos",
+        "pad",
+        "0, 0, 0",
+        "center",
+        8,
+        "cpu"
+      ]
+    },
+    {
+      "id": 22,
+      "type": "LazySwitchKJ",
+      "_meta": {
+        "title": "🔀 画幅二选一 (关=竖图21 开=横图20)"
+      },
+      "pos": [
+        1470,
+        130
+      ],
+      "size": [
+        270,
+        123.75
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "on_false",
+          "type": "*",
+          "link": 43
+        },
+        {
+          "name": "on_true",
+          "type": "*",
+          "link": 44
+        },
+        {
+          "name": "switch",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "switch"
+          },
+          "link": 42
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            25,
+            29
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "a34c5884853b4003ea571995c27bd969e0d4ca13",
+        "Node name for S&R": "LazySwitchKJ"
+      },
+      "widgets_values": [
+        false
+      ]
+    }
+  ],
+  "links": [
+    [
+      23,
+      2,
+      0,
+      3,
+      0,
+      "MODEL"
+    ],
+    [
+      24,
+      3,
+      0,
+      4,
+      0,
+      "MODEL"
+    ],
+    [
+      25,
+      22,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      26,
+      2,
+      2,
+      6,
+      1,
+      "VAE"
+    ],
+    [
+      27,
+      2,
+      1,
+      7,
+      0,
+      "CLIP"
+    ],
+    [
+      28,
+      2,
+      2,
+      7,
+      1,
+      "VAE"
+    ],
+    [
+      29,
+      22,
+      0,
+      7,
+      2,
+      "IMAGE"
+    ],
+    [
+      30,
+      5,
+      0,
+      7,
+      3,
+      "IMAGE"
+    ],
+    [
+      31,
+      7,
+      0,
+      8,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      32,
+      4,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      33,
+      8,
+      0,
+      9,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      34,
+      8,
+      0,
+      9,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      35,
+      6,
+      0,
+      9,
+      3,
+      "LATENT"
+    ],
+    [
+      36,
+      9,
+      0,
+      10,
+      0,
+      "LATENT"
+    ],
+    [
+      37,
+      2,
+      2,
+      10,
+      1,
+      "VAE"
+    ],
+    [
+      39,
+      10,
+      0,
+      18,
+      0,
+      "IMAGE"
+    ],
+    [
+      40,
+      1,
+      0,
+      20,
+      0,
+      "IMAGE"
+    ],
+    [
+      41,
+      1,
+      0,
+      21,
+      0,
+      "IMAGE"
+    ],
+    [
+      42,
+      12,
+      0,
+      22,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      43,
+      21,
+      0,
+      22,
+      0,
+      "IMAGE"
+    ],
+    [
+      44,
+      20,
+      0,
+      22,
+      1,
+      "IMAGE"
+    ],
+    [
+      45,
+      1,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      46,
+      11,
+      1,
+      13,
+      0,
+      "INT"
+    ],
+    [
+      47,
+      11,
+      2,
+      13,
+      1,
+      "INT"
+    ],
+    [
+      48,
+      11,
+      1,
+      14,
+      0,
+      "INT"
+    ],
+    [
+      49,
+      11,
+      2,
+      14,
+      1,
+      "INT"
+    ],
+    [
+      50,
+      13,
+      1,
+      20,
+      1,
+      "INT"
+    ],
+    [
+      51,
+      14,
+      1,
+      20,
+      2,
+      "INT"
+    ],
+    [
+      52,
+      14,
+      1,
+      21,
+      1,
+      "INT"
+    ],
+    [
+      53,
+      13,
+      1,
+      21,
+      2,
+      "INT"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.5644739300537773,
+      "offset": [
+        -1740.0125629760723,
+        316.46448393157016
+      ]
+    },
+    "frontendVersion": "1.45.15"
+  },
+  "version": 0.4
+}
