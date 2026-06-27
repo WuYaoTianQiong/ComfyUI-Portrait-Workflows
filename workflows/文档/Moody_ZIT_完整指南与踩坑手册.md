@@ -497,6 +497,81 @@ Work-Fisher 工作流使用 `OpenposePreprocessor`（非DWPreprocessor）。
 
 ---
 
+## 十四、2026-06-27 Flux.2 Klein 4B 探索记录
+
+> 尝试用 Flux.2 Klein 4B Distilled 替代 MoodyZIT 文生图，追求更高速度与画质。结论：快是真的快，但画质不如 MoodyZIT 双程采样。
+
+### catlover1937 最新状态
+
+作者 HuggingFace (catlover1937) 近期更新（均为 Flux.1 架构）：
+| 模型 | 更新时间 | 基于 |
+|------|---------|------|
+| Moody-Pro-Mix | 1 天前 | Flux.1 |
+| moody-desire-mix | 3 天前 | Flux.1 |
+| Moody-Real-Mix | 20 天前 | Flux.1 |
+
+**结论：catlover 仍活跃，但全部基于 Flux.1，没有迁移到 Flux.2 Klein。**
+
+### Klein 4B 实测结论
+
+**Distilled（蒸馏版）** - 已下载使用
+| 参数 | 值 |
+|------|-----|
+| 模型 | `flux-2-klein-4b-fp8.safetensors` (3.79GB) |
+| CLIP | `qwen_3_4b.safetensors` + type=`flux2` |
+| VAE | `flux2-vae.safetensors` |
+| 采样器 | Euler + Simple |
+| 步数 | **4**（蒸馏版锁定，不可增加） |
+| CFG | 2.5（原生建议 1.0，实测 2.5 细节更好） |
+| 速度 | **3-5 秒/张**（5070） |
+| 画质 | 不如 moodyProMix 双程采样（28步），但速度快 10 倍 |
+| 中文支持 | qwen_3_4b 原生 32K tokens ✅ |
+
+**Base（基础版）** - 已删除，实测翻车
+| 参数 | 值 |
+|------|-----|
+| 模型 | `flux-2-klein-base-4b-fp8.safetensors` (~4GB) |
+| 结论 | ❌ 8 步出图人物残缺、磨皮严重、文字乱码 |
+| 原因 | Base 版是为训练 LoRA 设计的底模，未蒸馏优化直接出图效果差；FP8 量化进一步损失精度 |
+
+### 踩坑记录
+
+1. **CLIPLoader type 错误**：Klein 4B 需要 `flux2` 类型，不是 `lumina2` 或 `flux`。`lumina2` 导致 `mat1 and mat2 shapes cannot be multiplied` 维度错误。
+
+2. **CLIPLoader type `flux` 不存在**：ComfyUI v0.24.0 的 CLIPLoader 23 个类型中没有 `flux`，正确的类型名为 `flux2`。
+
+3. **Distilled 版步数锁死**：蒸馏版文档明确警告不可超过 4 步，否则质量下降。Base 版则相反，需要 8-12 步才收敛。
+
+4. **Base 版不能直接出图**：Base 的定位是"给训练用的底模"，蒸馏版才是"给出图用的成品"。直接拿 Base 版跑 8 步 CFG=3.5 的结果远不如蒸馏版 4 步。
+
+5. **CFG 调整**：Klein 4B 官方推荐 CFG 1.0-1.5，但实测 CFG 2.5 能显著提升细节清晰度，CFG>3 开始出现色彩异常。
+
+### 12GB 显存可选模型全景（2026年6月）
+
+| 模型 | 显存 | 能跑？ | 画质 |
+|------|------|--------|------|
+| **FLUX.2 [klein] 4B Distilled** | 8-13GB | ✅ **最佳选择** | ⭐⭐⭐⭐ |
+| Stable Diffusion 3.5 Large | 8GB | ✅ 但没必要 | ⭐⭐⭐ |
+| SDXL | 8GB | ✅ 太老了 | ⭐⭐ |
+| Z-Image-Turbo 6B | 16GB | ❌ | ⭐⭐⭐⭐ |
+| Qwen-Image 2.0 | 24GB | ❌ | ⭐⭐⭐⭐⭐ |
+| FLUX.2 [dev] 32B | 24GB | ❌ | ⭐⭐⭐⭐⭐ |
+| GLM-Image | 20GB | ❌ | ⭐⭐⭐⭐ |
+| Krea 2 | 16GB | ❌ | ⭐⭐⭐⭐ |
+| FLUX.2 [klein] 9B | 16GB | ❌ | ⭐⭐⭐⭐ |
+
+**结论**：Klein 4B Distilled 是 12GB 档位当前最平衡的选择。画质上限不如 MoodyZIT 双程采样，但速度优势极大。
+
+### 已找到但未下载的亚洲优化 LoRA
+
+| LoRA | 触发词 | 权重 | 平台 |
+|------|--------|------|------|
+| F.2-klein亚洲美女 | `ns80` | 0.8-1.0 | RunningHub（需登录） |
+| Asian Mix Lokr | `asian woman` | 默认 | RunningHub（需登录） |
+| TinFlux 逼真感人像（完整模型替换） | - | - | LiblibAI（需登录） |
+
+---
+
 ## 十三、2026-06-27 两阶段精修失败总结
 
 > 尝试将灵犀控骨（姿势控制）与 MoodyZIT（画质精修）合并为一个工作流，折腾 1 小时放弃。
