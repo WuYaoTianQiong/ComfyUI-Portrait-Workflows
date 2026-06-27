@@ -562,13 +562,27 @@ Work-Fisher 工作流使用 `OpenposePreprocessor`（非DWPreprocessor）。
 
 **结论**：Klein 4B Distilled 是 12GB 档位当前最平衡的选择。画质上限不如 MoodyZIT 双程采样，但速度优势极大。
 
-### 已找到但未下载的亚洲优化 LoRA
+### 已测试的亚洲优化模型
 
-| LoRA | 触发词 | 权重 | 平台 |
-|------|--------|------|------|
-| F.2-klein亚洲美女 | `ns80` | 0.8-1.0 | RunningHub（需登录） |
-| Asian Mix Lokr | `asian woman` | 默认 | RunningHub（需登录） |
-| TinFlux 逼真感人像（完整模型替换） | - | - | LiblibAI（需登录） |
+| 模型 | 架构 | 大小 | 结论 |
+|------|------|------|------|
+| **2127 - Z Image Asian Utopian v2.0 FF FP8** | ZImageTurbo | 5.7GB | ❌ 不如 moodyProMix V13。中文文字扭曲、不加负面词画面模糊（作者 hinablue 微调质量不如 catlover1937） |
+| **F.2-klein亚洲美女 LoRA** | Klein 4B | LoRA | 未下载（RunningHub 需登录） |
+| **Asian Mix Lokr LoRA** | Klein 4B | LoRA | 未下载（RunningHub 需登录） |
+| **TinFlux 逼真感人像**（完整模型替换） | Klein 4B | ~4GB | 未下载（LiblibAI 需会员） |
+
+### 最终结论
+
+**你手上最好的亚洲写实模型就是 catlover1937 的 moodyProMix_zitV13FP8。猫腻圈的所有替代品（Klein 4B Distilled/Base、Asian Utopian、TinFlux）都打不过它。**
+
+| 路线 | 速度 | 画质 | 姿势控制 | 结论 |
+|------|------|------|---------|------|
+| **moodyProMix V13 双程采样** | 慢（28步） | ⭐⭐⭐⭐⭐ 天花板 | ❌ 不能 | 文生图主力 |
+| **灵犀控骨 + Qwen-Rapid** | 中等 | ⭐⭐⭐⭐ | ✅ 最佳 | 姿势控制唯一方案 |
+| **Klein 4B Distilled** | 极快（4步） | ⭐⭐⭐⭐ | ❌ 不能 | 快速出图备选 |
+| **Asian Utopian FP8** | 中等 | ⭐⭐⭐ | ❌ 不能 | ❌ 已删除 |
+
+**12GB 5070 的终极方案就是：灵犀控骨改姿势 + MoodyZIT 双程采样出图。不要折腾了。**
 
 ---
 
