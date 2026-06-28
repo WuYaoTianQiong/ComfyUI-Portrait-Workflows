@@ -287,45 +287,7 @@
           "type": "CONDITIONING",
           "links": [
             22,
-            27
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.24.0",
-        "Node name for S&R": "CLIPTextEncode"
-      },
-      "widgets_values": [
-        ""
-      ]
-    },
-    {
-      "id": 8,
-      "type": "CLIPTextEncode",
-      "pos": [
-        470,
-        672
-      ],
-      "size": [
-        400,
-        200
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "link": 20
-        }
-      ],
-      "outputs": [
-        {
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
+            27,
             23,
             28
           ]
@@ -337,7 +299,7 @@
         "Node name for S&R": "CLIPTextEncode"
       },
       "widgets_values": [
-        "flat clothing texture, painted-on clothing, clothing sticker on skin, smooth fabric on chest, no fabric tension, loose fitting, nipple slip, wardrobe malfunction, exposed nipple"
+        ""
       ]
     },
     {
@@ -692,14 +654,7 @@
       0,
       "CLIP"
     ],
-    [
-      20,
-      2,
-      0,
-      8,
-      0,
-      "CLIP"
-    ],
+
     [
       21,
       5,
@@ -718,7 +673,7 @@
     ],
     [
       23,
-      8,
+      7,
       0,
       9,
       2,
@@ -750,7 +705,7 @@
     ],
     [
       28,
-      8,
+      7,
       0,
       11,
       2,
