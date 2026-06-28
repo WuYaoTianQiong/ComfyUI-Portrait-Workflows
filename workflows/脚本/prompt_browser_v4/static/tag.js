@@ -241,7 +241,7 @@ window.renderTagCheckboxes = async function(containerId, selectedIds) {
         onclick="window.toggleTagOption(this)"
         style="display:inline-block;padding:4px 10px;margin:3px;
         background:${sel ? color.replace(")", "30)") : color + "18"};
-        color:${color};border:1px solid ${color}40;
+        color:${color};border:1px solid ${color}20;
         border-radius:6px;cursor:pointer;font-size:13px;user-select:none">
         ${window.escHtml(t.name)}
       </div>`;

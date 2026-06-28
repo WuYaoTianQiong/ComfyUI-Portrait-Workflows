@@ -4,6 +4,7 @@
   --panel-2: #1c1c22;
   --panel-hover: #22222a;
   --border: #26262e;
+  --border-soft: #1a1a22;
   --text: #e8e8ec;
   --muted: #8e8e99;
   --primary: #6366f1;
@@ -16,6 +17,8 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+*, *:focus { outline: none; }
+*:focus-visible { box-shadow: 0 0 0 2px rgba(99,102,241,0.35); border-radius: 4px; }
 html, body { height: 100%; overflow: hidden; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
@@ -68,13 +71,13 @@ body {
 .btn-warning:hover:not(:disabled) { filter: brightness(1.05); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
-.btn-ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+.btn-ghost { background: transparent; border-color: var(--border-soft); color: var(--muted); }
 .btn-ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 
 .header-select {
   background: var(--panel-2);
-  border-color: var(--border);
+  border-color: var(--border-soft);
   color: var(--text);
   appearance: none;
   -webkit-appearance: none;
@@ -87,13 +90,13 @@ body {
 
 .btn-icon {
   width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
-  justify-content: center; font-size: 14px; background: transparent; border-color: var(--border);
+  justify-content: center; font-size: 14px; background: transparent; border-color: var(--border-soft);
   color: var(--muted); border-radius: var(--radius); cursor: pointer; transition: 0.15s;
 }
 .btn-icon:hover { background: var(--panel-2); color: var(--text); }
 
 .icon-btn {
-  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  background: transparent; border: 1px solid var(--border-soft); color: var(--muted);
   border-radius: 5px; padding: 3px 7px; font-size: 11px; cursor: pointer; transition: 0.15s;
 }
 .icon-btn:hover { background: var(--panel-2); color: var(--text); }
@@ -216,7 +219,7 @@ body {
 /* 通用区块 */
 .toolbar-section {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   padding: 8px;
 }
@@ -262,7 +265,7 @@ body {
   align-items: center;
   gap: 6px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   padding: 6px 10px;
   transition: border-color 0.15s;
@@ -337,7 +340,7 @@ body {
   justify-content: space-between;
   padding: 5px 8px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   border-radius: 5px;
   font-size: 12px;
@@ -459,9 +462,33 @@ body {
 .batch-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 10px 12px;
   font-size: 12px;
+}
+.batch-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.batch-panel-toggle {
+  cursor: pointer;
+  font-size: 9px;
+  color: var(--muted);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+.batch-panel-toggle:hover {
+  color: var(--text);
+}
+
+/* 折叠状态 */
+.batch-panel.collapsed .batch-panel-progress,
+.batch-panel.collapsed .batch-items {
+  display: none;
 }
 .batch-panel-progress {
   padding: 0 12px 10px;
@@ -494,7 +521,7 @@ body {
 .prompt-list { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .prompt-item {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   padding: 10px 12px;
   cursor: pointer;
@@ -525,7 +552,7 @@ body {
 }
 .page-btn {
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 2px 8px;
   border-radius: 4px;
@@ -573,7 +600,7 @@ body {
 .param-item .label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
 .param-item .value { font-size: 13px; font-weight: 500; word-break: break-all; overflow-wrap: anywhere; }
 .note-box { background: rgba(245,158,11,0.08); color: #f0c070; border-left: 3px solid var(--warning); padding: 12px; border-radius: var(--radius); font-size: 13px; }
-.copy-btn { background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 3px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; }
+.copy-btn { background: var(--panel); border: 1px solid var(--border-soft); color: var(--muted); padding: 3px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; }
 .copy-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 
 /* Output area */
@@ -986,7 +1013,7 @@ body {
 }
 .compare-toolbar button {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 6px 12px;
   border-radius: 6px;
@@ -1037,7 +1064,7 @@ body {
 }
 .compare-modal-actions button {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 6px 14px;
   border-radius: 6px;
@@ -1312,7 +1339,7 @@ body {
 .modal-body label { font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
 .modal-body input, .modal-body textarea {
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 8px 12px;
   border-radius: 6px;
@@ -1339,7 +1366,7 @@ body {
 .gallery-total { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .gallery-search {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 5px 10px;
   border-radius: 6px;
@@ -1350,7 +1377,7 @@ body {
 .gallery-search:focus { border-color: var(--primary); }
 .gallery-sort, .gallery-filter {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 5px 8px;
   border-radius: 6px;
@@ -1426,6 +1453,27 @@ body {
   flex-shrink: 0;
 }
 
+.label-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  vertical-align: middle;
+  border-radius: 4px;
+  transition: background 0.12s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  height: 1.2em;
+}
+.label-icon-btn:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
 .toolbar-field select,
 .toolbar-field .dropdown-trigger {
   flex: 1;
@@ -1447,7 +1495,7 @@ body {
 .toolbar-field select {
   /* 与 .dropdown-trigger 保持视觉一致 */
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   border-radius: 5px;
   padding: 5px 8px;
@@ -1529,7 +1577,7 @@ body {
 .tag-manage-form input[type="text"] {
   flex: 1;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 6px 10px;
   border-radius: 6px;
@@ -1544,7 +1592,7 @@ body {
 .tag-manage-form input[type="color"] {
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   cursor: pointer;
   background: transparent;
@@ -1601,7 +1649,7 @@ body {
 .category-manage-form input[type="text"] {
   flex: 1;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 6px 10px;
   border-radius: 6px;
@@ -1617,7 +1665,7 @@ body {
 .category-manage-form input[type="color"] {
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   cursor: pointer;
   background: transparent;
@@ -1625,7 +1673,7 @@ body {
 
 .category-manage-form select {
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text);
   padding: 6px 10px;
   border-radius: 6px;
@@ -1676,7 +1724,7 @@ body {
   gap: 6px;
   padding: 8px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   max-height: 120px;
   overflow-y: auto;
@@ -1732,7 +1780,7 @@ body {
   min-height: 40px;
   padding: 6px 8px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   color: var(--text);
   font-size: 12px;
@@ -1804,7 +1852,7 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1857,7 +1905,7 @@ body {
   position: relative;
   padding: 8px 10px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s;

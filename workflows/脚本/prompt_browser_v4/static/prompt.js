@@ -231,14 +231,14 @@ window.renderDetail = function(p) {
 
   const categories = p.categories || [];
   const categoryHtml = categories.length > 0 ?
-    categories.map(c => `<span class="tag" style="background:${c.color}20;color:${c.color};border:1px solid ${c.color}40">${window.escHtml(c.name)}</span>`).join("") :
+    categories.map(c => `<span class="tag" style="background:${c.color}20;color:${c.color};border:1px solid ${c.color}20">${window.escHtml(c.name)}</span>`).join("") :
     '<span style="color:#666;font-size:13px">未分类</span>';
 
   const tagsDetail = p.tags_detail || [];
   const tags = (p.tags || "").split(",").filter(Boolean);
   let tagHtml = '';
   if (tagsDetail.length > 0) {
-    tagHtml = tagsDetail.map(t => `<span class="tag" style="background:${t.color}20;color:${t.color};border:1px solid ${t.color}40">${window.escHtml(t.name)}</span>`).join("");
+    tagHtml = tagsDetail.map(t => `<span class="tag" style="background:${t.color}20;color:${t.color};border:1px solid ${t.color}18">${window.escHtml(t.name)}</span>`).join("");
   } else {
     tagHtml = tags.map(t => `<span class="tag">${window.escHtml(t.trim())}</span>`).join("");
   }
@@ -287,9 +287,9 @@ window.renderDetail = function(p) {
 // -------------------------------------------------------------------
 // 分段编辑
 // -------------------------------------------------------------------
-const FRAGMENT_KEYS = ["人物外貌", "姿态动作", "服装配饰", "场景背景", "风格技术"];
-const FRAGMENT_ICONS = { "人物外貌": "👤", "姿态动作": "🏃", "服装配饰": "👗", "场景背景": "🌄", "风格技术": "🎨" };
-const FRAGMENT_COLORS = { "人物外貌": "#10b981", "姿态动作": "#f59e0b", "服装配饰": "#a855f7", "场景背景": "#3b82f6", "风格技术": "#ef4444" };
+const FRAGMENT_KEYS = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"];
+const FRAGMENT_ICONS = { "人物面部": "👤", "人物身材": "🧍", "人物服饰": "👗", "姿态动作": "🏃", "拍摄视角": "📷", "场景环境": "🌄", "光影色调": "💡", "画风技术": "🎨" };
+const FRAGMENT_COLORS = { "人物面部": "#10b981", "人物身材": "#059669", "人物服饰": "#a855f7", "姿态动作": "#f59e0b", "拍摄视角": "#f97316", "场景环境": "#3b82f6", "光影色调": "#06b6d4", "画风技术": "#ef4444" };
 
 window._fragmentEditMode = false;
 

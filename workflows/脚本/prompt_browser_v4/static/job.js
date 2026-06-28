@@ -19,8 +19,17 @@ window.trackJob = function(jobId) {
 
 window.loadActiveJobs = async function() {
   try {
-    const data = await window.api("/api/jobs?active=1");
-    (data.jobs || []).forEach(job => {
+    // 先查活跃任务
+    let data = await window.api("/api/jobs?active=1");
+    let jobs = data.jobs || [];
+
+    // 如果没有活跃任务，查最近 5 条完成任务（页面刷新后任务可能已完成）
+    if (jobs.length === 0) {
+      data = await window.api("/api/jobs?limit=5");
+      jobs = (data.jobs || []).filter(j => j.job_type === "batch" || j.items?.length > 1);
+    }
+
+    jobs.forEach(job => {
       if (!window.activeJobs.has(job.id)) window.trackJob(job.id);
     });
   } catch (_) {}
@@ -93,6 +102,12 @@ window.renderSingleJob = function(job) {
 window.renderBatchJob = function(job) {
   const panel = document.getElementById("batchPanel");
   panel.classList.add("show");
+  // 恢复折叠状态
+  if (window.UiState.get("batchPanelCollapsed", false)) {
+    panel.classList.add("collapsed");
+    const t = document.getElementById("batchPanelToggle");
+    if (t) t.textContent = "▶";
+  }
   document.getElementById("batchPanelTitle").textContent = job.title || "批量任务";
   document.getElementById("batchPanelStop").style.display = ["pending", "running"].includes(job.status) ? "" : "none";
   const pct = job.total ? Math.round((job.done_count / job.total) * 100) : 0;
@@ -166,6 +181,27 @@ window.statusText = function(status) {
 // -------------------------------------------------------------------
 // 停止和关闭
 // -------------------------------------------------------------------
+
+// 批量面板折叠/展开
+window.toggleBatchPanel = function() {
+  const panel = document.getElementById("batchPanel");
+  const toggle = document.getElementById("batchPanelToggle");
+  if (!panel || !toggle) return;
+  const collapsed = panel.classList.toggle("collapsed");
+  toggle.textContent = collapsed ? "▶" : "▼";
+  window.UiState.set("batchPanelCollapsed", collapsed);
+};
+
+// 关闭批量结果面板时重置折叠状态
+const _origCloseOutput = window.closeOutput;
+window.closeOutput = function() {
+  const panel = document.getElementById("batchPanel");
+  const toggle = document.getElementById("batchPanelToggle");
+  if (panel) panel.classList.remove("collapsed");
+  if (toggle) toggle.textContent = "▼";
+  window.UiState.set("batchPanelCollapsed", false);
+  _origCloseOutput();
+};
 
 window.batchStop = async function() {
   return window.withLock("batchStop", async () => {

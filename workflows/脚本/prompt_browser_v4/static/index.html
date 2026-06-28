@@ -6,7 +6,7 @@
 <title>提示词管理器</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="/style.css?v=14">
+<link rel="stylesheet" href="/style.css?v=17">
 </head>
 <body>
 
@@ -86,7 +86,7 @@
         <!-- 行2: 分类 + 标签 (并排) -->
         <div class="toolbar-row toolbar-row-2">
           <div class="toolbar-field">
-            <label class="field-label">分类 <button class="btn-sm btn-ghost" style="padding:0 4px;font-size:14px;vertical-align:middle" onclick="manageCategories()" title="管理分类">⚙</button></label>
+            <label class="field-label">分类 <button class="label-icon-btn" onclick="manageCategories()" title="管理分类">⚙</button></label>
             <select id="categorySelect" onchange="onCategoryChange()">
               <option value="">全部分类</option>
             </select>
@@ -132,8 +132,12 @@
 
       <div class="batch-panel" id="batchPanel">
         <div class="batch-panel-header">
+          <span class="batch-panel-toggle" id="batchPanelToggle" onclick="toggleBatchPanel()" title="折叠/展开">▼</span>
           <span id="batchPanelTitle">批量任务</span>
-          <button class="btn btn-sm btn-danger" id="batchPanelStop" onclick="batchStop()" style="display:none">停止</button>
+          <div class="batch-panel-header-actions">
+            <button class="btn btn-sm btn-danger" id="batchPanelStop" onclick="batchStop()" style="display:none">停止</button>
+            <button class="btn btn-sm btn-ghost" onclick="closeOutput()" title="关闭批量面板">✕</button>
+          </div>
         </div>
         <div class="batch-panel-progress">
           <div class="batch-bar-wrap"><div class="batch-bar-fill" id="batchBarFill"></div></div>
@@ -406,15 +410,15 @@
 <script src="/ui.js?v=3"></script>
 <script src="/router.js?v=2"></script>
 <script src="/workflow.js?v=1"></script>
-<script src="/prompt.js?v=4"></script>
+<script src="/prompt.js?v=5"></script>
 <script src="/generator.js?v=1"></script>
-<script src="/job.js?v=1"></script>
+<script src="/job.js?v=3"></script>
 <script src="/history.js?v=1"></script>
 <script src="/gallery.js?v=1"></script>
 <script src="/imageViewer.js?v=1"></script>
 <script src="/app.js?v=3"></script>
 <script src="/category.js?v=2"></script>
 <script src="/tag.js?v=1"></script>
-<script src="/composer.js?v=7"></script>
+<script src="/composer.js?v=8"></script>
 </body>
 </html>
