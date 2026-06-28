@@ -35,10 +35,40 @@ window.loadPrompts = async function(page) {
       window.renderPagination();
       const totalEl = document.getElementById("countBadge");
       if (totalEl) totalEl.textContent = window._promptTotal;
+
+      // 提示词筛选变化后，标记组合创作数据需要刷新
+      window._composerDataStale = true;
     } catch (e) {
       window.showToast("加载提示词失败: " + e.message, "error");
     }
   });
+};
+
+// -------------------------------------------------------------------
+// 加载组合模板（作为列表项展示）
+// -------------------------------------------------------------------
+window.loadTemplatesAsItems = async function () {
+  return window.withLock("loadTemplates", async () => {
+    try {
+      const data = await window.api("/api/templates/as_items");
+      window.allPrompts = data.prompts || [];
+      window._promptTotal = data.total || 0;
+      window.renderList(window.allPrompts);
+      window.renderPagination();
+      const totalEl = document.getElementById("countBadge");
+      if (totalEl) totalEl.textContent = window._promptTotal;
+    } catch (e) {
+      window.showToast("加载模板失败: " + e.message, "error");
+    }
+  });
+};
+
+// 点击模板列表项 → 跳转到组合创作并加载
+window.selectTemplateItem = function (templateId, name) {
+  // 先保存要打开的目标，再切换 tab
+  window._pendingTemplateId = templateId;
+  const btn = document.querySelector('.tab-btn[data-tab="composerTab"]');
+  if (btn) window.switchTab("composerTab", btn);
 };
 
 window.onSortChange = function() {
@@ -55,39 +85,61 @@ window.renderList = function(prompts) {
     return;
   }
   prompts.forEach(p => {
+    const isTemplate = p._is_template === true;
     const div = document.createElement("div");
-    div.className = "prompt-item" + (p.id === window.selectedId ? " active" : "");
+    div.className = "prompt-item" + (p.id === window.selectedId ? " active" : "") + (isTemplate ? " template-item" : "");
     div.dataset.id = p.id;
-    const tags = (p.tags || "").split(",").filter(Boolean);
-    const tagsHtml = tags.map(t => `<span class="tag">${window.escHtml(t.trim())}</span>`).join("");
-    const preview = window.escHtml(p.prompt_preview) + (p.prompt_preview.length >= 60 ? "..." : "");
-    const nameLine = p.name ? `<div class="prompt-name">${window.escHtml(p.name)}</div>` : "";
-    
-    const favIcon = p.is_favorite ? '★' : '☆';
-    const pinIcon = p.is_pinned ? '📌' : '';
-    const ratingStars = p.rating ? '⭐'.repeat(p.rating) : '';
-    const usageCount = p.usage_count > 0 ? `<span class="usage-count" title="使用次数">🔄${p.usage_count}</span>` : '';
-    
-    const indicators = `
-      <div class="prompt-indicators">
-        <span class="indicator-fav ${p.is_favorite ? 'active' : ''}" onclick="event.stopPropagation();window.togglePromptFavorite(${p.id}, this)" title="收藏">${favIcon}</span>
-        <span class="indicator-pin ${p.is_pinned ? 'active' : ''}" onclick="event.stopPropagation();window.togglePromptPin(${p.id}, this)" title="置顶">${pinIcon}</span>
-        ${ratingStars ? `<span class="indicator-rating" title="评级">${ratingStars}</span>` : ''}
-        ${usageCount}
-      </div>
-    `;
-    
-    const bodyHtml = nameLine +
-      `<div class="prompt-preview">${preview}</div>` +
-      `<div class="prompt-meta">${p.steps ? `<span class="badge">${p.steps}步</span>` : ""}${p.sampler ? `<span style="color:#888">${window.escHtml(p.sampler)}</span>` : ""}${tagsHtml}</div>` +
-      indicators;
-    
-    const checked = window.selectedIds.has(p.id) ? " checked" : "";
-    div.innerHTML = `<div class="item-row"><label class="check-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="item-check" data-id="${p.id}"${checked} onchange="window.toggleItemSelect(${p.id},this.checked)"></label><div class="item-body">${bodyHtml}</div></div>`;
-    div.onclick = (e) => {
-      if (e.target.closest(".check-wrap")) return;
-      window.selectPrompt(p.id, true, e.shiftKey, e.ctrlKey || e.metaKey);
-    };
+
+    if (isTemplate) {
+      // 模板列表项
+      const syncIcon = p._has_missing
+        ? '<span class="template-sync-warn" title="部分来源已删除">○</span>'
+        : '<span class="template-sync-ok" title="来源正常">●</span>';
+      const shortPreview = p.prompt_preview && p.prompt_preview.length > 80
+        ? window.escHtml(p.prompt_preview.slice(0, 80)) + "..."
+        : window.escHtml(p.prompt_preview);
+      div.innerHTML = `
+        <div class="item-row">
+          <div class="item-body">
+            <div class="prompt-name">📦 ${syncIcon} ${window.escHtml(p.name)}</div>
+            <div class="prompt-preview" style="color:var(--muted);font-size:11px">${shortPreview}</div>
+            <div class="prompt-meta"><span class="tag">📦 组合模板</span><span style="color:var(--muted);font-size:10px">${p.fragment_count || 0} 个碎片</span></div>
+          </div>
+        </div>`;
+      div.onclick = () => window.selectTemplateItem(p.id, p.name);
+    } else {
+      // 普通提示词列表项
+      const tags = (p.tags || "").split(",").filter(Boolean);
+      const tagsHtml = tags.map(t => `<span class="tag">${window.escHtml(t.trim())}</span>`).join("");
+      const preview = window.escHtml(p.prompt_preview) + (p.prompt_preview.length >= 60 ? "..." : "");
+      const nameLine = p.name ? `<div class="prompt-name">${window.escHtml(p.name)}</div>` : "";
+
+      const favIcon = p.is_favorite ? '★' : '☆';
+      const pinIcon = p.is_pinned ? '📌' : '';
+      const ratingStars = p.rating ? '⭐'.repeat(p.rating) : '';
+      const usageCount = p.usage_count > 0 ? `<span class="usage-count" title="使用次数">🔄${p.usage_count}</span>` : '';
+
+      const indicators = `
+        <div class="prompt-indicators">
+          <span class="indicator-fav ${p.is_favorite ? 'active' : ''}" onclick="event.stopPropagation();window.togglePromptFavorite(${p.id}, this)" title="收藏">${favIcon}</span>
+          <span class="indicator-pin ${p.is_pinned ? 'active' : ''}" onclick="event.stopPropagation();window.togglePromptPin(${p.id}, this)" title="置顶">${pinIcon}</span>
+          ${ratingStars ? `<span class="indicator-rating" title="评级">${ratingStars}</span>` : ''}
+          ${usageCount}
+        </div>
+      `;
+
+      const bodyHtml = nameLine +
+        `<div class="prompt-preview">${preview}</div>` +
+        `<div class="prompt-meta">${p.steps ? `<span class="badge">${p.steps}步</span>` : ""}${p.sampler ? `<span style="color:#888">${window.escHtml(p.sampler)}</span>` : ""}${tagsHtml}</div>` +
+        indicators;
+
+      const checked = window.selectedIds.has(p.id) ? " checked" : "";
+      div.innerHTML = `<div class="item-row"><label class="check-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="item-check" data-id="${p.id}"${checked} onchange="window.toggleItemSelect(${p.id},this.checked)"></label><div class="item-body">${bodyHtml}</div></div>`;
+      div.onclick = (e) => {
+        if (e.target.closest(".check-wrap")) return;
+        window.selectPrompt(p.id, true, e.shiftKey, e.ctrlKey || e.metaKey);
+      };
+    }
     list.appendChild(div);
   });
 };
@@ -233,6 +285,67 @@ window.renderDetail = function(p) {
 };
 
 // -------------------------------------------------------------------
+// 分段编辑
+// -------------------------------------------------------------------
+const FRAGMENT_KEYS = ["人物外貌", "姿态动作", "服装配饰", "场景背景", "风格技术"];
+const FRAGMENT_ICONS = { "人物外貌": "👤", "姿态动作": "🏃", "服装配饰": "👗", "场景背景": "🌄", "风格技术": "🎨" };
+const FRAGMENT_COLORS = { "人物外貌": "#10b981", "姿态动作": "#f59e0b", "服装配饰": "#a855f7", "场景背景": "#3b82f6", "风格技术": "#ef4444" };
+
+window._fragmentEditMode = false;
+
+function parsePromptFragments(text) {
+  if (!text) return {};
+  const result = {};
+  const pattern = /【([^】]+)】\s*(.*?)(?=\n【|$)/g;
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    result[m[1].trim()] = m[2].trim();
+  }
+  return result;
+}
+
+function reassemblePrompt(fragments) {
+  const parts = [];
+  for (const key of FRAGMENT_KEYS) {
+    if (fragments[key]) {
+      parts.push(`【${key}】${fragments[key]}`);
+    }
+  }
+  return parts.join("\n");
+}
+
+window.toggleFragmentEdit = function () {
+  window._fragmentEditMode = !window._fragmentEditMode;
+  const textarea = document.getElementById("f_prompt");
+  const fragContainer = document.getElementById("f_fragments");
+  const btn = document.getElementById("f_toggleFragBtn");
+  if (!textarea || !fragContainer || !btn) return;
+
+  if (window._fragmentEditMode) {
+    // 从 textarea 同步到碎片
+    const fragments = parsePromptFragments(textarea.value);
+    for (const key of FRAGMENT_KEYS) {
+      const ta = document.getElementById(`f_frag_${key}`);
+      if (ta) ta.value = fragments[key] || "";
+    }
+    textarea.style.display = "none";
+    fragContainer.style.display = "flex";
+    btn.textContent = "📝 切换到全文编辑";
+  } else {
+    // 从碎片同步到 textarea
+    const fragments = {};
+    for (const key of FRAGMENT_KEYS) {
+      const ta = document.getElementById(`f_frag_${key}`);
+      if (ta) fragments[key] = ta.value;
+    }
+    textarea.value = reassemblePrompt(fragments);
+    textarea.style.display = "";
+    fragContainer.style.display = "none";
+    btn.textContent = "📝 切换到分段编辑";
+  }
+};
+
+// -------------------------------------------------------------------
 // 提示词 CRUD
 // -------------------------------------------------------------------
 
@@ -247,8 +360,16 @@ window.setRating = function(rating) {
 window.openCreateModal = async function() {
   document.getElementById("modalTitle").textContent = "新建提示词";
   document.getElementById("f_id").value = "";
+  window._fragmentEditMode = false;
   ["f_name","f_prompt","f_neg","f_steps","f_cfg","f_sampler","f_seed","f_model","f_tags","f_note"].forEach(id => document.getElementById(id).value = "");
   window.setRating(0);
+  // 重置碎片编辑器
+  const fc = document.getElementById("f_fragments");
+  const btn = document.getElementById("f_toggleFragBtn");
+  const ta = document.getElementById("f_prompt");
+  if (fc) fc.style.display = "none";
+  if (btn) btn.style.display = "none";
+  if (ta) ta.style.display = "";
   // 异步加载分类和标签选项（无预选）
   await window.loadCategoriesForSelect();
   await window.loadTagsForSelect();
@@ -258,11 +379,44 @@ window.openCreateModal = async function() {
 window.openEditModal = async function(id) {
   document.getElementById("modalTitle").textContent = "编辑提示词 #" + id;
   document.getElementById("f_id").value = id;
+  window._fragmentEditMode = false;
   try {
     const p = await window.api(`/api/prompts/${id}`);
     document.getElementById("f_name").value = p.name || "";
     document.getElementById("f_prompt").value = p.prompt || "";
     document.getElementById("f_neg").value = p.negative_prompt || "";
+
+    // 设置分段编辑器
+    const fragments = parsePromptFragments(p.prompt || "");
+    const hasFrags = Object.keys(fragments).length > 0;
+    const fragContainer = document.getElementById("f_fragments");
+    const btn = document.getElementById("f_toggleFragBtn");
+    const textarea = document.getElementById("f_prompt");
+
+    if (fragContainer && hasFrags) {
+      let html = "";
+      for (const key of FRAGMENT_KEYS) {
+        const color = FRAGMENT_COLORS[key] || "#6366f1";
+        const icon = FRAGMENT_ICONS[key] || "📝";
+        const val = fragments[key] || "";
+        html += `
+          <div class="frag-field">
+            <div class="frag-field-label" style="color:${color}">${icon} ${key}</div>
+            <textarea id="f_frag_${key}" rows="2" data-fragkey="${key}">${window.escHtml(val)}</textarea>
+          </div>`;
+      }
+      fragContainer.innerHTML = html;
+      // 自动切换到分段模式
+      textarea.style.display = "none";
+      fragContainer.style.display = "flex";
+      btn.style.display = "";
+      btn.textContent = "📝 切换到全文编辑";
+      window._fragmentEditMode = true;
+    } else if (fragContainer) {
+      fragContainer.style.display = "none";
+      btn.style.display = "none";
+      textarea.style.display = "";
+    }
     document.getElementById("f_steps").value = p.steps || "";
     document.getElementById("f_cfg").value = p.cfg_scale || "";
     document.getElementById("f_sampler").value = p.sampler || "";
@@ -288,15 +442,38 @@ window.openEditModal = async function(id) {
   }
 };
 
-window.closeModal = function() { document.getElementById("modalOverlay").classList.remove("active"); };
+window.closeModal = function() {
+  document.getElementById("modalOverlay").classList.remove("active");
+  window._fragmentEditMode = false;
+  // 还原 textarea 显示
+  const ta = document.getElementById("f_prompt");
+  const fc = document.getElementById("f_fragments");
+  const btn = document.getElementById("f_toggleFragBtn");
+  if (ta) ta.style.display = "";
+  if (fc) fc.style.display = "none";
+  if (btn) btn.style.display = "none";
+};
 
 window.savePrompt = async function() {
   return window.withLock("savePrompt", async () => {
     const saveBtn = document.getElementById("modalSaveBtn");
     if (saveBtn) saveBtn.disabled = true;
+    // 如果处于分段编辑模式，从碎片重新组装
+    let promptValue;
+    if (window._fragmentEditMode) {
+      const frags = {};
+      for (const key of FRAGMENT_KEYS) {
+        const ta = document.getElementById(`f_frag_${key}`);
+        if (ta) frags[key] = ta.value;
+      }
+      promptValue = reassemblePrompt(frags);
+    } else {
+      promptValue = document.getElementById("f_prompt").value;
+    }
+
     const data = {
       name: document.getElementById("f_name").value,
-      prompt: document.getElementById("f_prompt").value,
+      prompt: promptValue,
       negative_prompt: document.getElementById("f_neg").value,
       steps: parseInt(document.getElementById("f_steps").value) || null,
       cfg_scale: parseFloat(document.getElementById("f_cfg").value) || null,

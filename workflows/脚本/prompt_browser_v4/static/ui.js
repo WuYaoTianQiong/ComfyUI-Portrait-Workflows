@@ -136,6 +136,9 @@ window.applyUiState = function() {
     sortEl.value = savedSort;
   }
 
+  // 恢复上次的分类筛选（含模板特殊值）
+  window._pendingCategoryFilter = window.UiState.get("categoryFilter", "");
+
   window.selectedIds = new Set(window.UiState.get("selectedIds", []));
   window.selectedId = window.UiState.get("selectedId", null) || null;
   window.lastClickedId = window.selectedId;
@@ -144,6 +147,9 @@ window.applyUiState = function() {
   if (activeTab === "galleryTab") {
     const btn = document.querySelector('.tab-btn[data-tab="galleryTab"]');
     if (btn) window.switchTab("galleryTab", btn);
+  } else if (activeTab === "composerTab") {
+    const btn = document.querySelector('.tab-btn[data-tab="composerTab"]');
+    if (btn) window.switchTab("composerTab", btn);
   }
 };
 
@@ -160,14 +166,19 @@ window.switchTab = function(tabId, btn) {
 
   window.UiState.set("activeTab", tabId);
 
-  const isGallery = (tabId === 'galleryTab');
+  const isNotPrompt = (tabId !== 'promptTab');
   ['qualitySelect', 'orientBtn', 'runBtn'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = isGallery ? 'none' : '';
+    if (el) el.style.display = isNotPrompt ? 'none' : '';
   });
 
   if (tabId === 'galleryTab') {
     window.loadHistory(false);
+  }
+
+  if (tabId === 'composerTab') {
+    window.initComposer();
+    window.refreshComposer();
   }
 
   if (tabId !== 'galleryTab') {

@@ -1701,3 +1701,526 @@ body {
   border-color: var(--primary);
 }
 /* ===================================== */
+
+/* ======== Phase 3: 分段编辑 ======== */
+.prompt-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.frag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.frag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.frag-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.frag-field textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.frag-field textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.frag-toggle-wrap {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ======== Phase 3: 组合创作 ======== */
+.composer-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+.composer-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.composer-toolbar-left,
+.composer-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-stats {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.composer-body {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.composer-columns {
+  display: flex;
+  height: 100%;
+  gap: 4px;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.composer-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.composer-col-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-bottom: 2px solid var(--col-color, #6366f1);
+  flex-shrink: 0;
+}
+
+.composer-col-icon {
+  font-size: 16px;
+}
+
+.composer-col-title {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.composer-col-count {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.composer-col-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 20px 0;
+}
+
+.composer-frag-card {
+  position: relative;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.composer-frag-card:hover {
+  background: var(--panel-hover);
+  border-color: var(--col-color, #6366f1);
+}
+
+.composer-frag-card.selected {
+  border-color: var(--col-color, #6366f1);
+  background: color-mix(in srgb, var(--col-color) 12%, var(--panel-2));
+  box-shadow: 0 0 0 1px var(--col-color);
+}
+
+.composer-frag-card .frag-content {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.composer-frag-card .frag-source {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-frag-card .frag-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--col-color, #6366f1);
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+/* 底部区域 */
+.composer-bottom {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  min-height: 0;
+  position: relative;
+  transition: max-height 0.25s ease;
+  max-height: 300px;
+  overflow: hidden;
+}
+.composer-bottom.collapsed {
+  max-height: 28px;
+  border-top-color: var(--border);
+}
+.composer-bottom.collapsed .workbench-area,
+.composer-bottom.collapsed .template-sidebar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 折叠/展开切换条 */
+.composer-bottom-toggle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 6;
+  color: var(--muted);
+  font-size: 9px;
+  transition: color 0.12s;
+  flex-shrink: 0;
+}
+.composer-bottom-toggle:hover {
+  color: var(--primary);
+  background: var(--panel-hover);
+}
+
+/* 工作台 */
+.workbench-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workbench-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px 6px 28px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.workbench-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.workbench-title-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workbench-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workbench-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--muted);
+}
+
+.workbench-empty-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.workbench-empty-hint {
+  font-size: 11px;
+  margin-top: 6px;
+  opacity: 0.6;
+}
+
+.workbench-frag {
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+
+.workbench-frag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.workbench-frag-type {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workbench-frag-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 碎片内操作按钮 — 紧凑型 */
+.wfa-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s;
+  padding: 0;
+  color: var(--muted);
+}
+.wfa-btn:hover {
+  background: var(--panel-hover);
+}
+.wfa-copy:hover {
+  color: var(--primary);
+}
+.wfa-del:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+/* 标题栏复制按钮 — 无框文本按钮，融入标题行 */
+.wfa-title-copy {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.12s;
+  line-height: 1;
+}
+.wfa-title-copy:hover {
+  color: var(--primary);
+  background: var(--panel-hover);
+}
+
+.workbench-frag-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* 模板侧栏 */
+.template-sidebar {
+  width: 200px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  position: relative;
+}
+
+.template-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  transition: background 0.15s;
+}
+.template-handle:hover,
+.template-handle:active {
+  background: var(--primary);
+}
+
+.template-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.template-count {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.template-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.template-empty {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 16px 8px;
+  line-height: 1.6;
+}
+
+.template-empty small {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.template-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.12s;
+  margin-bottom: 2px;
+}
+
+.template-item:hover {
+  background: var(--panel-hover);
+}
+
+.template-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.template-item-name {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.template-item-types {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.template-item-del {
+  opacity: 0;
+  transition: 0.12s;
+  flex-shrink: 0;
+}
+
+.template-item:hover .template-item-del {
+  opacity: 1;
+}
+
+/* 模板同步状态指示 */
+.template-sync-ok {
+  color: var(--success);
+  font-size: 8px;
+  margin-right: 3px;
+  vertical-align: middle;
+}
+.template-sync-warn {
+  color: var(--warning);
+  font-size: 8px;
+  margin-right: 3px;
+  vertical-align: middle;
+}
+
+/* 提示词列表中模板项 */
+.prompt-item.template-item {
+  border-left: 2px solid var(--primary);
+}
+.prompt-item.template-item:hover {
+  background: color-mix(in srgb, var(--primary) 6%, var(--panel));
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .template-sidebar { display: none; }
+}
+/* ===================================== */

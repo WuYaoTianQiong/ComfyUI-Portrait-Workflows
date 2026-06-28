@@ -10,6 +10,8 @@ window._suppressRouteUpdate = false;
 // 路由处理函数
 window.routeGallery = function() { window.switchTabByRoute('galleryTab'); };
 
+window.routeComposer = function() { window.switchTabByRoute('composerTab'); };
+
 window.routePrompt = function(params) {
   window._suppressRouteUpdate = true;
   window.switchTabByRoute('promptTab');
@@ -56,6 +58,8 @@ window.handleRoute = function(path) {
     window.routePrompt(match ? { id: parseInt(match[1]) } : {});
   } else if (path === '/prompt') {
     window.routePrompt({});
+  } else if (path === '/composer') {
+    window.routeComposer();
   } else {
     window.routeGallery();
   }
@@ -87,6 +91,8 @@ window.updateRoute = function() {
     url = `/prompt/${window.selectedId}`;
   } else if (window.UiState.get('activeTab', 'galleryTab') === 'promptTab') {
     url = '/prompt';
+  } else if (window.UiState.get('activeTab', 'galleryTab') === 'composerTab') {
+    url = '/composer';
   }
   
   if (window.location.pathname !== url && !window._suppressRouteUpdate) {

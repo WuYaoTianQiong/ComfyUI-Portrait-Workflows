@@ -32,6 +32,19 @@ window.renderCategorySelect = async function(selectId, selectedId, showCount) {
       });
     }
     addOpts(categories, 0);
+
+    // 添加组合模板特殊选项（仅侧边栏分类筛选）
+    if (selectId === "categorySelect") {
+      const sep = document.createElement("option");
+      sep.disabled = true;
+      sep.textContent = "──────────";
+      select.appendChild(sep);
+      const tplOpt = document.createElement("option");
+      tplOpt.value = "__templates__";
+      tplOpt.textContent = "📦 组合模板";
+      select.appendChild(tplOpt);
+    }
+
     select.style.color = "";
   } catch (e) {
     console.error("renderCategorySelect 失败:", e);
@@ -49,9 +62,16 @@ function onCategoryChange() {
   if (!select) return;
 
   const value = select.value;
-  window._currentCategoryId = value ? parseInt(value) : null;
-  window._promptPage = 1;
-  window.loadPrompts();
+  window.UiState.set("categoryFilter", value);
+  if (value === "__templates__") {
+    window._currentCategoryId = "__templates__";
+    window._promptPage = 1;
+    window.loadTemplatesAsItems();
+  } else {
+    window._currentCategoryId = value ? parseInt(value) : null;
+    window._promptPage = 1;
+    window.loadPrompts();
+  }
 }
 
 // 管理分类（打开模态框）

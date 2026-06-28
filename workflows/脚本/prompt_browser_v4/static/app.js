@@ -47,7 +47,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.loadWorkflows();
   window.loadPrompts().then(() => {
-    if (window.selectedId) {
+    // 应用保留的分类筛选（如 📦 组合模板）
+    if (window._pendingCategoryFilter === "__templates__") {
+      setTimeout(() => {
+        const sel = document.getElementById("categorySelect");
+        if (sel) { sel.value = "__templates__"; onCategoryChange(); }
+      }, 100);
+    }
+    // 选中待选提示词（如从"另存为提示词"跳转回来）
+    if (window._pendingSelectPromptId) {
+      const pid = window._pendingSelectPromptId;
+      window._pendingSelectPromptId = null;
+      const exists = window.allPrompts.some(p => p.id === pid);
+      if (exists) {
+        window.selectPrompt(pid, true, false, false, true);
+      }
+    } else if (window.selectedId) {
       const exists = window.allPrompts.some(p => p.id === window.selectedId);
       if (exists) window.selectPrompt(window.selectedId, true, false, false, true);
       else window.selectedId = null;
