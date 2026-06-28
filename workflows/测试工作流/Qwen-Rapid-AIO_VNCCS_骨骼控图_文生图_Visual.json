@@ -1,0 +1,943 @@
+{
+  "id": "2261f288-5725-4ada-9546-7bd18b9822d9",
+  "revision": 0,
+  "last_node_id": 16,
+  "last_link_id": 52,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "EmptyLatentImage",
+      "pos": [
+        100,
+        130
+      ],
+      "size": [
+        270,
+        150
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "潜空间(宽/高/批次数)"
+      },
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            30
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        640,
+        960,
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        414.43862376818856,
+        -100
+      ],
+      "size": [
+        520.9375,
+        127.75
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "模型加载(Qwen-Rapid)"
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            22,
+            26
+          ]
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            23,
+            37,
+            42
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "QWEN\\Qwen-Rapid-AIO-NSFW-v18.safetensors"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "ModelSamplingAuraFlow",
+      "pos": [
+        1050,
+        -100
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "AuraFlow 偏移"
+      },
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "ModelSamplingAuraFlow"
+      },
+      "widgets_values": [
+        3
+      ]
+    },
+    {
+      "id": 4,
+      "type": "CFGNorm",
+      "pos": [
+        1450,
+        -100
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "CFG 归一化"
+      },
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "patched_model",
+          "type": "MODEL",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CFGNorm"
+      },
+      "widgets_values": [
+        1,
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "type": "VNCCS_PoseStudio",
+      "pos": [
+        100,
+        594
+      ],
+      "size": [
+        900,
+        1350
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "3D 人偶摆姿"
+      },
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pose_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "shape": 6,
+          "type": "IMAGE",
+          "links": [
+            24,
+            41
+          ]
+        },
+        {
+          "name": "lighting_prompt",
+          "shape": 6,
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "ComfyUI_VNCCS_Utils",
+        "ver": "1908ddfa8a5084a360783ca596f27678743c5496",
+        "Node name for S&R": "VNCCS_PoseStudio"
+      },
+      "widgets_values": [
+        "{\"mesh\":{\"age\":25,\"gender\":0,\"weight\":0.5,\"muscle\":0.5,\"height\":0.5,\"breast_size\":0.5,\"firmness\":0.5,\"penis_len\":0.5,\"penis_circ\":0.5,\"penis_test\":0.5,\"head_size\":1,\"arm_size\":1,\"hand_size\":1,\"foot_size\":1,\"upper_arm_l_length\":0.5,\"upper_arm_r_length\":0.5,\"forearm_l_length\":0.5,\"forearm_r_length\":0.5,\"thigh_l_length\":0.5,\"thigh_r_length\":0.5,\"shin_l_length\":0.5,\"shin_r_length\":0.5,\"spine_length\":0.5},\"export\":{\"view_width\":1024,\"view_height\":1024,\"cam_zoom\":1,\"cam_offset_x\":0,\"cam_offset_y\":0,\"cam_yaw_deg\":0,\"cam_pitch_deg\":0,\"output_mode\":\"LIST\",\"grid_columns\":2,\"bg_color\":[255,255,255],\"debugMode\":false,\"debugPortraitMode\":false,\"debugKeepLighting\":false,\"debugShowSAMHelper\":false,\"debugShowSAMMeshOverlay\":false,\"samApplyCamera\":false,\"keepOriginalLighting\":false,\"user_prompt\":\"\",\"prompt_template\":\"Draw character from image2\\n<lighting>\\n<user_prompt>\",\"skin_type\":\"naked\",\"interface_mode\":\"studio\",\"hand_controls_v2\":true},\"poses\":[{\"bones\":{\"spine_03\":[1.6682477030471685,-0.0017677747396654482,0.02896998538827804],\"neck_01\":[-13.963868946029448,-0.39513533752679936,1.2917363622368818],\"upperarm_l\":[-19.29484860486925,-12.116939807516484,-36.17705815379351],\"upperarm_r\":[-18.086459409408036,11.329796538297478,35.75339566568588],\"lowerarm_l\":[43.484303580424054,18.07194393656505,-10.438667611258863],\"lowerarm_r\":[44.76059946796976,-17.963505752579266,8.776684966754512]},\"modelRotation\":[0,0,0],\"camera\":{\"posX\":0,\"posY\":-1.2786405086517307,\"posZ\":46.003026843070984,\"targetX\":0,\"targetY\":-1.2786405086517334,\"targetZ\":1.0030268430709839},\"cameraParams\":{\"offset_x\":0,\"offset_y\":0,\"zoom\":1,\"yaw_deg\":0,\"pitch_deg\":0},\"prompt\":\"\"}],\"lights\":[{\"type\":\"directional\",\"color\":\"#ffffff\",\"intensity\":2,\"x\":10,\"y\":20,\"z\":30},{\"type\":\"ambient\",\"color\":\"#505050\",\"intensity\":1,\"x\":0,\"y\":0,\"z\":0}],\"activeTab\":0,\"capture_id\":\"vnccs_capture_5\",\"lighting_prompts\":[\"Draw character from image2\\nstrong Pale White lighting coming from the eye-level front\"],\"background_url\":null}",
+        ""
+      ]
+    },
+    {
+      "id": 6,
+      "type": "TextEncodeQwenImageEditPlus",
+      "pos": [
+        1100,
+        648
+      ],
+      "size": [
+        400,
+        211.71875
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "正面编码(骨骼图+提示词)"
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 22
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 23
+        },
+        {
+          "name": "image1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 24
+        },
+        {
+          "name": "image3",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "TextEncodeQwenImageEditPlus"
+      },
+      "widgets_values": [
+        "超写实古风少女，20岁，黑长直发散落于地面铺开，头顶发带系结，两侧立体粉色玫瑰花发饰。渐变蓝紫抹胸汉服缀满银色流苏与雕花银饰，粉白渐变底色下摆绣红花蓝叶刺绣，外披薄纱广袖铺展于地面。室内粉色少女房，浅木地板，梳妆台有Hello Kitty玩偶，白色窗帘透入柔光。85mm f/1.4 shallow depth of field, cinematic lighting, high detail, film grain, back view from ground level, masterwork photography"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "FluxKontextMultiReferenceLatentMethod",
+      "pos": [
+        1600,
+        342
+      ],
+      "size": [
+        275.78125,
+        103.75
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "Kontext 多参考融合"
+      },
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 25
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            51
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "FluxKontextMultiReferenceLatentMethod"
+      },
+      "widgets_values": [
+        "index_timestep_zero"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "CLIPTextEncode",
+      "pos": [
+        1100,
+        318
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "负面编码(防衣物破损)"
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            52
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "flat clothing texture, painted-on clothing, loose fitting, nipple slip, wardrobe malfunction, exposed nipple"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "KSampler",
+      "pos": [
+        800,
+        130
+      ],
+      "size": [
+        270,
+        300
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "第一程(denoise=0.85 锚定姿势)"
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 27
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 45
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 47
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            31
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "KSampler"
+      },
+      "widgets_values": [
+        42,
+        "randomize",
+        20,
+        2,
+        "euler",
+        "simple",
+        1
+      ]
+    },
+    {
+      "id": 10,
+      "type": "MiDaS-DepthMapPreprocessor",
+      "pos": [
+        1200,
+        750
+      ],
+      "size": [
+        315,
+        111.75
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "MiDaS 深度图提取"
+      },
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 41
+        },
+        {
+          "name": "a",
+          "widget": {"name": "a"}
+        },
+        {
+          "name": "bg_threshold",
+          "widget": {"name": "bg_threshold"}
+        },
+        {
+          "name": "resolution",
+          "widget": {"name": "resolution"}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            48
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "comfyui_controlnet_aux",
+        "Node name for S&R": "MiDaS-DepthMapPreprocessor"
+      },
+      "widgets_values": [
+        6.2832,
+        0.1,
+        512
+      ]
+    },
+    {
+      "id": 14,
+      "type": "ControlNetLoader",
+      "pos": [
+        1700,
+        400
+      ],
+      "size": [
+        315,
+        79.765625
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "ControlNet 加载(Qwen)"
+      },
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CONTROL_NET",
+          "type": "CONTROL_NET",
+          "links": [
+            49
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "ControlNetLoader"
+      },
+      "widgets_values": [
+        "Qwen-Image-ControlNet-Union\\diffusion_pytorch_model.safetensors"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "SetUnionControlNetType",
+      "pos": [
+        1800,
+        600
+      ],
+      "size": [
+        315,
+        67.765625
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "ControlNet 类型(depth)"
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": 49
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONTROL_NET",
+          "type": "CONTROL_NET",
+          "links": [
+            50
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "SetUnionControlNetType"
+      },
+      "widgets_values": [
+        "depth"
+      ]
+    },
+    {
+      "id": 16,
+      "type": "ControlNetApplyAdvanced",
+      "pos": [
+        2200,
+        500
+      ],
+      "size": [
+        315,
+        239.703125
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "ControlNet 应用(深度强制)"
+      },
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 51
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 52
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": 50
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 48
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 42
+        },
+        {
+          "name": "strength",
+          "widget": {"name": "strength"}
+        },
+        {
+          "name": "start_percent",
+          "widget": {"name": "start_percent"}
+        },
+        {
+          "name": "end_percent",
+          "widget": {"name": "end_percent"}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            45,
+            46
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            47,
+            48
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "ControlNetApplyAdvanced"
+      },
+      "widgets_values": [
+        0.75,
+        0,
+        1
+      ]
+    },
+    {
+      "id": 12,
+      "type": "VAEDecodeTiled",
+      "pos": [
+        3085.7818359375,
+        130
+      ],
+      "size": [
+        270,
+        150
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "VAE 分块解码"
+      },
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 31
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 37
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "VAEDecodeTiled"
+      },
+      "widgets_values": [
+        512,
+        128,
+        64,
+        8
+      ]
+    },
+    {
+      "id": 13,
+      "type": "SaveImage",
+      "pos": [
+        3455.7818359375,
+        130
+      ],
+      "size": [
+        270,
+        339.703125
+      ],
+      "flags": {},
+      "_meta": {
+        "title": "保存图像"
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 38
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0"
+      },
+      "widgets_values": [
+        "V7-txt2img-Bone"
+      ]
+    }
+  ],
+  "links": [
+    [
+      20,
+      2,
+      0,
+      3,
+      0,
+      "MODEL"
+    ],
+    [
+      21,
+      3,
+      0,
+      4,
+      0,
+      "MODEL"
+    ],
+    [
+      22,
+      2,
+      1,
+      6,
+      0,
+      "CLIP"
+    ],
+    [
+      23,
+      2,
+      2,
+      6,
+      1,
+      "VAE"
+    ],
+    [
+      24,
+      5,
+      0,
+      6,
+      3,
+      "IMAGE"
+    ],
+    [
+      25,
+      6,
+      0,
+      7,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      26,
+      2,
+      1,
+      8,
+      0,
+      "CLIP"
+    ],
+    [
+      27,
+      4,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      28,
+      7,
+      0,
+      9,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      29,
+      8,
+      0,
+      9,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      30,
+      1,
+      0,
+      9,
+      3,
+      "LATENT"
+    ],
+    [
+      31,
+      9,
+      0,
+      12,
+      0,
+      "LATENT"
+    ],
+
+    [
+      37,
+      2,
+      2,
+      12,
+      1,
+      "VAE"
+    ],
+    [
+      38,
+      12,
+      0,
+      13,
+      0,
+      "IMAGE"
+    ],
+
+    [
+      41,
+      5,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      42,
+      2,
+      2,
+      16,
+      4,
+      "VAE"
+    ],
+    [
+      45,
+      16,
+      0,
+      9,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      47,
+      16,
+      1,
+      9,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      48,
+      10,
+      0,
+      16,
+      3,
+      "IMAGE"
+    ],
+    [
+      49,
+      14,
+      0,
+      15,
+      0,
+      "CONTROL_NET"
+    ],
+    [
+      50,
+      15,
+      0,
+      16,
+      2,
+      "CONTROL_NET"
+    ],
+    [
+      51,
+      7,
+      0,
+      16,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      52,
+      8,
+      0,
+      16,
+      1,
+      "CONDITIONING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6209213230591554,
+      "offset": [
+        496.9378982262637,
+        -10.444891457371966
+      ]
+    },
+    "frontendVersion": "1.45.15"
+  },
+  "version": 0.4
+}
