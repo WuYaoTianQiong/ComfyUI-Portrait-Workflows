@@ -8,10 +8,11 @@
     python batch_insert_prompts.py --file prompts.txt --dry-run
     python batch_insert_prompts.py --file prompts.txt --strict
 
-输入格式（以空行分隔）：
+输入格式（以两个以上空行分隔）：
     方式1: 【人物外貌】...【姿态动作】... + 元数据行
     方式2: 三段式(人+衣 / 姿态 / 场景) + 元数据行 → 自动拆分
     方式3: 纯文本 + 元数据行
+    方式4: 仅提示词，无元数据 → 元数据字段自动置空
 """
 
 import argparse, re, sqlite3, sys
@@ -171,7 +172,8 @@ def generate_tags(frags, prompt_text, model, width, height):
         if kw in full: tags.append(kw)
     tags.extend(ENGLISH_TAG_PATTERNS.findall(full))
     if model: tags.append(model.split('\\')[-1].split('/')[-1])
-    tags.append(f'{width}x{height}')
+    if width and height:
+        tags.append(f'{width}x{height}')
     seen = set()
     return ','.join(t for t in tags if not (t.lower() in seen or seen.add(t.lower())))[:100]
 
@@ -226,9 +228,15 @@ def main():
     records = []
     for idx, block in enumerate(split_blocks(text)):
         meta, body = parse_metadata(block)
-        if not meta:
-            print(f'[SKIP] 第 {idx+1} 块：无元数据')
-            continue
+        body = block if meta is None else body  # 无元数据时整块当作 body
+
+        # 无元数据时使用空值，不跳过
+        if meta is None:
+            meta = {
+                'steps': None, 'cfg_scale': None, 'sampler': None,
+                'seed': None, 'model': None, 'width': None, 'height': None,
+            }
+
         body, neg = parse_negative_prompt(body)
         for pat, repl in STYLE_REPLACEMENTS:
             body = re.sub(pat, repl, body, flags=re.IGNORECASE)
