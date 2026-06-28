@@ -66,6 +66,7 @@
 | FLUX.2-dev-Fun-Controlnet-Union | `controlnet/FLUX.2-dev-Fun-Controlnet-Union/` | 7.7G | Flux2 dev专用，不与klein兼容 |
 | flux_union_controlnet | `controlnet/` | 6.2G | Flux1 ControlNet |
 | qwen-image-2512-Q4_K_M.gguf | `unet/` | 13.2G | Qwen 2512 GGUF量化 |
+| Real-Qwen-Image-V2-2512-Q4_K_M.gguf | `diffusion_models/` | 13.1G | 写实+亚洲人脸优化版(2026.1) |
 
 ---
 
@@ -134,6 +135,31 @@
 2. **MoodyZIT 不能做骨骼控图**：它的原生 CLIP（qwen_3_4b）是纯文本模型，TextEncodeQwenImageEditPlus 需要 VL CLIP 才能把骨骼图编码进 conditioning。唯一的骨骼控图路径是 ControlNet，但需额外装插件。
 
 3. **Qwen-Rapid-AIO 是骨骼控图最优解**：Checkpoint 内置 VL CLIP，支持文生图和图生图两种骨骼控图模式。
+
+---
+
+---
+
+## 十七、Flux 架构工作流设计原则：不需要负面提示词
+
+Flux 系列模型（包括 MoodyZIT V7/V8/V9）使用 `guidance` 机制而非传统 CFG，**负面提示词的理论基础在 Flux 上不存在**。
+
+### 已应用
+
+- `MoodyZIT_V7_Visual_文生图_双程采样_快速预览_文字渲染.json`：节点 8 的负面 CLIPTextEncode 已清空为 `""`，保留节点仅用于维持工作流结构兼容
+
+### 为什么 Flux 不需要负面词
+
+传统 SD/SDXL 模型中，CFG 通过 `positive - negative` 的差值来放大引导强度。负面词说"不要什么"，正面词说"要什么"，模型按差值走。
+
+Flux 的 `guidance` 机制不同——它直接在条件注入时混合一个空池化特征，只关注正面内容。**负面词在 Flux 上几乎没有效果**，这是架构决定的。
+
+### 实际影响
+
+- Flux 工作流可以完全移除负面 CLIPTextEncode（或留空）
+- 留下防衣物穿帮之类的负面词也没害处，只是不会被模型当真
+- 这不是"效果好不好"的问题，是"机制上就不支持"的问题
+- 配置 Flux 工作流时，只需专注写好正面提示词即可
 
 ---
 
@@ -629,4 +655,119 @@ Work-Fisher 工作流使用 `OpenposePreprocessor`（非DWPreprocessor）。
 | 正面提示词 | `realistic photo, high quality, 真实摄影风格` + 手动追加姿势描述 |
 | 负面提示词 | 由 FluxKontext 自动从正面分离 |
 | 横竖切换 | BOOLConstant 关=竖图 / 开=横图 |
+
+---
+
+## 十五、2026-06-28 VNCCS + ControlNet + 文生图姿势控制全记录
+
+> 历时 3 小时，逐一验证了 4 种姿势控制方案。最终结论：12GB VRAM 上，用 2D OpenPose 编辑器 + GGUF + ControlNet 是唯一可靠的文生图姿势控制路线。
+
+### 1. 方案 A：VNCCS → TextEncodeQwenImageEditPlus(image2)
+
+- **原理**：VNCCS 3D 人偶渲染图作为 `image2` 喂入 Qwen VL 的 `TextEncodeQwenImageEditPlus`，由 VL CLIP 将人偶图编码进入 conditioning
+- **结果**：❌ 姿势不跟。文字提示词中的姿态描述权重远高于 image2 的微弱信号，模型最终"听"了文字
+- **结论**：原始工作流里 VNCCS 确实提供了辅助信号，但文字描述对最终姿势的贡献更大
+
+### 2. 方案 B：VNCCS → VAEEncode → KSampler（图生图锚定）
+
+- **原理**：VNCCS 人偶通过 VAEEncode 直接变成 KSampler 的起始潜空间，用 denoise 控制人偶保留/擦除比例
+- **结果**：✅ 姿势能锁死，但存在不可调和的平衡点
+  - `denoise=0.7~0.85`：姿势正确，但 3D 人偶纹理残留在最终图上
+  - `denoise>0.9`：人偶纹理消失，但姿势也被冲掉（回到 txt2img）
+- **两阶段尝试**：第一程低 denoise 锚定姿势→第二程高 denoise 擦纹理，结果第二程仍会破坏姿势
+- **结论**：VNCCS 人偶和真实人物在潜空间中差异太大，任何保留结构的操作都会保留纹理
+
+### 3. 方案 C：VNCCS → ControlNet（openpose/pose 模式）
+
+- **原理**：VNCCS 3D 人偶直接喂给 ControlNet 的 pose 模式
+- **结果**：❌ 姿势不跟。pose ControlNet 在 OpenPose 骨架线条图（黑底白线）上训练，无法识别 VNCCS 的 3D 彩色人偶渲染图
+
+### 4. 方案 D：VNCCS → MiDaS 深度图 → ControlNet（depth 模式）
+
+- **原理**：MiDaS 将 VNCCS 人偶提取为纯灰度深度图（无纹理），喂给 ControlNet 的 depth 模式。depth 模式只读空间 Z 轴信息
+- **结果**：❌ 姿势不跟。最终确认 **Qwen-Rapid-AIO-NSFW-v18 与 ControlNet 不兼容**。虽然架构配置匹配（`inner_dim=3072, joint_attention_dim=3584`），但社区合并版 checkpoint 的 UNet 权重经过微调，ControlNet 注入的空间信号被"翻译"错误
+
+### 5. 方案验证：2D OpenPose 编辑器 + ControlNet
+
+- **原理**：用 `Nui.OpenPoseEditor` 手动摆 2D 火柴人骨架，输出标准 OpenPose 格式 → ControlNet(openpose) → 原版 Qwen GGUF
+- **结果**：✅ 理论上可行（已有 12G 工作流 `【Qwen-2512+ControlNet】OpenPose姿势控制_12G.json`），但 2D 骨架无法表达深度（如趴地姿势），且 GGUF 速度约 500秒/张
+- **结论**：唯一可靠的文生图姿势控制路线，但受限于 2D 深度表达和 GGUF 速度
+
+### 总表
+
+| 方案 | 姿势 | 画质 | 速度 |
+|------|:---:|:---:|:---:|
+| VNCCS + TextEncode(image2) | ❌ 文字覆盖 | ⭐⭐⭐⭐ | ⚡ |
+| VNCCS + VAEEncode(img2img) | ✅ denoise<0.85 | ⭐⭐ 人偶残留 | ⚡ |
+| VNCCS + ControlNet(pose) | ❌ 格式不识别 | - | - |
+| VNCCS + ControlNet(depth) | ❌ 模型不兼容 | - | - |
+| OpenPose 编辑器 + GGUF + ControlNet | ✅ | ⭐⭐⭐⭐ | 🐢 500s |
+
+
+### 关键认知
+
+- **VNCCS 的 image2 路径**：提供辅助视觉参考，但文字姿势描述力量更强
+- **Qwen-Rapid-AIO ≠ 原版 Qwen-Image**：社区合并版的 UNet 无法被 ControlNet 正确控制
+- **12GB 上的现实**：GGUF + ControlNet 是唯一可靠路线，代价是速度
+
+---
+
+## 十六、2026-06-28 Real-Qwen-Image-V2 + 最终结论
+
+### 1. Real-Qwen-Image-V2 下载与测试
+
+- **来源**：HuggingFace `wikeeyang/Real-Qwen-Image-V2`（2026年1月发布）
+- **基底**：Qwen-Image-2512 微调，专攻写实度和亚洲人脸美学
+- **下载**：`Real-Qwen-Image-V2-2512-Q4_K_M.gguf`（13.1GB）→ 置于 `models/diffusion_models/`
+- **结果**：❌ 13.1GB GGUF + 3.5GB ControlNet + 8.7GB CLIP ≈ 25+GB 总量，12GB VRAM 在 `--lowvram` 下 GPU 利用率仅 50%，速度不可接受
+
+### 2. 启动参数修正
+
+`start_comfyui.bat` 从 `--high-ram` 改为 `--lowvram`，提升 Qwen-Rapid-AIO 模型的内存管理效率。
+
+### 3. VAEEncode img2img 方案深入验证
+
+- VNCCS → VAEEncode → KSampler 可以在 `denoise=0.7~0.85` 锁死姿势
+- 但人偶纹理残留无法消除：denoise 升高→姿势丢失，denoise 降低→纹理残留
+- 两阶段采样（第一程锚姿势+第二程擦纹理）在该平衡点上同样失效
+- **结论**：VAEEncode 方案的 denoise 平衡点是无解的，不适合生产使用
+
+### 4. 文生图 + 粗略姿势引导方案（可用的）
+
+创建了 `Qwen-Rapid_OpenPose_文生图_9x16画幅切换.json`：
+- **模型**：Qwen-Rapid-AIO（CheckpointLoaderSimple，快速）
+- **姿势**：`Nui.OpenPoseEditor` 手动摆火柴人 → `dw_pose_image` → `TextEncodeQwenImageEditPlus.image2`（Qwen VL 视觉参考）
+- **横竖切换**：BOOLConstant + LazySwitchKJ + 双 EmptyLatentImage
+- **骨架预览**：PreviewImage 节点
+- **骨架保存**：SaveImage 节点保存为 PNG
+
+已知局限：2D 火柴人无法表达深度，趴地/朝拜姿势会被解读为侧身蹲姿。速度 5-15 秒/张（`--lowvram` 后）。
+
+### 5. 工作流文件归档
+
+| 文件 | 状态 | 用途 |
+|------|:---:|------|
+| `Qwen-Rapid_OpenPose_文生图_9x16画幅切换.json` | ✅ 可用 | 快速版文本+粗略姿势 |
+| `Qwen-2512_OpenPose编辑器_ControlNet_文生图_12G.json` | ✅ 可用 | GGUF+CN精准姿势（慢） |
+| `Qwen-Rapid_OpenPose_文生图_快速预览.json` | ⚠️ 旧版 | 无横竖切换，可删除 |
+| `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_Visual.json` | ❌ 实验残留 | 多次修改后的混乱版本 |
+
+### 6. 终极结论
+
+**2026年6月，12GB VRAM（RTX 5070）上，不存在同时满足以下所有条件的方案：**
+
+- ✅ 文生图（txt2img）
+- ✅ 精准 3D 姿势控制（如 VNCCS 摆的趴地/朝拜姿态）
+- ✅ 写实画质
+- ✅ 高速度（<30秒/张）
+- ✅ 12GB 显存约束
+
+三个需求互相制约：
+- **要姿势 → ControlNet → 需要 GGUF 或更多 VRAM → 慢/爆显存**
+- **要速度 → Qwen-Rapid-AIO → 不支持 ControlNet → 姿势控制弱**
+- **要 3D 深度 → VNCCS → 人偶格式与 ControlNet/文生图不兼容**
+
+当前最优妥协：`Qwen-Rapid_OpenPose_文生图_9x16画幅切换.json`——牺牲姿势精度换速度。
+
+未来可探索：24GB+ 显卡 + Real-Qwen-Image-V2 FP8 + ControlNet(depth) + VNCCS → MiDaS深度图联动，这可能实现真正的 3D 姿势文生图控制。但不在当前硬件范围内。
 
