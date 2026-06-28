@@ -1,7 +1,7 @@
 {
   "id": "00000000-0000-0000-0000-000000000000",
   "revision": 0,
-  "last_node_id": 16,
+  "last_node_id": 15,
   "last_link_id": 39,
   "nodes": [
     {
@@ -24,7 +24,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            17
+            18
           ]
         }
       ],
@@ -105,46 +105,6 @@
       },
       "widgets_values": [
         "ae.safetensors"
-      ]
-    },
-    {
-      "id": 4,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        470,
-        130
-      ],
-      "size": [
-        270,
-        111.75
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 17
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            18
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.24.0",
-        "Node name for S&R": "LoraLoaderModelOnly"
-      },
-      "widgets_values": [
-        "momoka-zib-v2_clean.safetensors",
-        0.5
       ]
     },
     {
@@ -287,7 +247,45 @@
           "type": "CONDITIONING",
           "links": [
             22,
-            27,
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 8,
+      "type": "CLIPTextEncode",
+      "pos": [
+        470,
+        672
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
             23,
             28
           ]
@@ -357,7 +355,7 @@
         813972274184088,
         "randomize",
         17,
-        3,
+        3.5,
         "euler",
         "simple",
         0,
@@ -470,7 +468,7 @@
     },
     {
       "id": 12,
-      "type": "VAEDecodeTiled",
+      "type": "VAEDecode",
       "pos": [
         2450,
         130
@@ -508,12 +506,7 @@
         "ver": "0.24.0",
         "Node name for S&R": "VAEDecodeTiled"
       },
-      "widgets_values": [
-        512,
-        128,
-        64,
-        8
-      ]
+      "widgets_values": []
     },
     {
       "id": 13,
@@ -631,16 +624,8 @@
   ],
   "links": [
     [
-      17,
-      1,
-      0,
-      4,
-      0,
-      "MODEL"
-    ],
-    [
       18,
-      4,
+      1,
       0,
       5,
       0,
@@ -654,7 +639,14 @@
       0,
       "CLIP"
     ],
-
+    [
+      20,
+      2,
+      0,
+      8,
+      0,
+      "CLIP"
+    ],
     [
       21,
       5,
@@ -673,7 +665,7 @@
     ],
     [
       23,
-      7,
+      8,
       0,
       9,
       2,
@@ -705,7 +697,7 @@
     ],
     [
       28,
-      7,
+      8,
       0,
       11,
       2,
