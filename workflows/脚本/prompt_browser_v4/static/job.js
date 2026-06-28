@@ -15,6 +15,8 @@ window.trackJob = function(jobId) {
   if (window.jobPollTimer) clearInterval(window.jobPollTimer);
   window.jobPollTimer = setInterval(() => window.pollJob(jobId), 1000);
   window.pollJob(jobId);
+  // 新任务开始时重置面板关闭状态，确保新任务能正常展示
+  window.UiState.set("batchPanelDismissed", false);
 };
 
 window.loadActiveJobs = async function() {
@@ -27,6 +29,11 @@ window.loadActiveJobs = async function() {
     if (jobs.length === 0) {
       data = await window.api("/api/jobs?limit=5");
       jobs = (data.jobs || []).filter(j => j.job_type === "batch" || j.items?.length > 1);
+    }
+
+    // 如果用户之前关闭了批量面板，不再重新展示已完成的任务
+    if (window.UiState.get("batchPanelDismissed", false)) {
+      jobs = jobs.filter(j => !["done", "error", "stopped"].includes(j.status));
     }
 
     jobs.forEach(job => {
@@ -192,15 +199,12 @@ window.toggleBatchPanel = function() {
   window.UiState.set("batchPanelCollapsed", collapsed);
 };
 
-// 关闭批量结果面板时重置折叠状态
-const _origCloseOutput = window.closeOutput;
 window.closeOutput = function() {
-  const panel = document.getElementById("batchPanel");
-  const toggle = document.getElementById("batchPanelToggle");
-  if (panel) panel.classList.remove("collapsed");
-  if (toggle) toggle.textContent = "▼";
-  window.UiState.set("batchPanelCollapsed", false);
-  _origCloseOutput();
+  document.getElementById("outputArea").classList.remove("show");
+  document.getElementById("batchPanel").classList.remove("show");
+  if (window.jobPollTimer) { clearInterval(window.jobPollTimer); window.jobPollTimer = null; }
+  window.activeJobId = null;
+  window.UiState.set("batchPanelDismissed", true);
 };
 
 window.batchStop = async function() {
@@ -214,11 +218,4 @@ window.batchStop = async function() {
       window.showToast("停止失败: " + e.message, "error");
     }
   });
-};
-
-window.closeOutput = function() {
-  document.getElementById("outputArea").classList.remove("show");
-  document.getElementById("batchPanel").classList.remove("show");
-  if (window.jobPollTimer) { clearInterval(window.jobPollTimer); window.jobPollTimer = null; }
-  window.activeJobId = null;
 };

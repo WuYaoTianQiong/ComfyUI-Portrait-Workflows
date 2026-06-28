@@ -136,21 +136,22 @@ def list_prompts(
     total = query.count()
 
     # ======== Phase 1: 更新排序逻辑 ========
-    # 默认排序：置顶 → 收藏 → 最新
+    # 仅默认排序(newest)：置顶 → 收藏 → 最新
+    # 其他排序：置顶 → 用户选择的排序字段（收藏不自动置顶）
     if sort == "newest":
         order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
     elif sort == "oldest":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.asc()]
+        order = [Prompt.is_pinned.desc(), Prompt.id.asc()]
     elif sort == "name_asc":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.name.asc()]
+        order = [Prompt.is_pinned.desc(), Prompt.name.asc()]
     elif sort == "name_desc":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.name.desc()]
+        order = [Prompt.is_pinned.desc(), Prompt.name.desc()]
     elif sort == "updated":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.updated_at.desc()]
+        order = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
     elif sort == "most_used":  # 新增：按使用次数排序
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.usage_count.desc()]
+        order = [Prompt.is_pinned.desc(), Prompt.usage_count.desc()]
     else:
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+        order = [Prompt.is_pinned.desc(), Prompt.id.desc()]
     # ==========================================
     
     offset = (page - 1) * page_size
