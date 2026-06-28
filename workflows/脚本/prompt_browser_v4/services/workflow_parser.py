@@ -106,8 +106,10 @@ def ensure_api_format(workflow: dict) -> dict:
                 if val is not None:
                     api[nid]["inputs"][name] = val
 
-        # 补充仅有 widgets_values 没有 inputs 的节点
-        if wv and (not isinstance(raw_inputs, list) or len(raw_inputs) == 0):
+        # 补充 widget values 中未被 inputs 数组覆盖的参数
+        # 解释：部分节点（如 CLIPTextEncode、KSamplerAdvanced、LoraLoaderModelOnly）
+        # 的 widget 值仅存在于 widgets_values 中，不在 inputs 数组里
+        if wv:
             for wname, _ in w_entries:
                 if wname not in api[nid]["inputs"] and wname in wv_by_name:
                     api[nid]["inputs"][wname] = wv_by_name[wname]

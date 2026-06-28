@@ -110,6 +110,7 @@ class GenHistory(BaseModel):
     favorite = BooleanField(default=False)
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
     source = TextField(default="local")
+    is_deleted = BooleanField(default=False)  # 软删除标记
 
     class Meta:
         table_name = "gen_history"
@@ -208,6 +209,10 @@ def init_db():
     # ======== Phase 2: 创建新表 ========
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
     # ==========================================
+
+    # 迁移：软删除字段
+    _migrate_column(db, "gen_history", "is_deleted",
+                    "is_deleted BOOLEAN NOT NULL DEFAULT 0")
 
     # ======== Phase 3: 模板表 ========
     db.create_tables([Template, TemplateFragment], safe=True)

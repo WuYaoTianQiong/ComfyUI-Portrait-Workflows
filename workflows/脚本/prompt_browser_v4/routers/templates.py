@@ -11,7 +11,7 @@ router = APIRouter(tags=["模板"])
 
 # ---------- helpers ----------
 
-FRAGMENT_TYPES = ["人物外貌", "姿态动作", "服装配饰", "场景背景", "风格技术"]
+FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
 
 
 def _extract_fragment(prompt_text: str, fragment_type: str) -> str:
@@ -95,6 +95,47 @@ def list_templates(category_id: Optional[int] = Query(None)):
         query = query.where(Template.category == category_id)
     rows = query.order_by(Template.updated_at.desc())
     return {"templates": [_template_to_dict(t) for t in rows]}
+
+
+@router.get("/templates/as_items", response_model=dict)
+def list_templates_as_prompt_items():
+    """返回模板列表，格式兼容 prompt 列表前端渲染"""
+    rows = Template.select().order_by(Template.updated_at.desc())
+    items = []
+    for t in rows:
+        fragments = list(TemplateFragment.select().where(TemplateFragment.template == t.id).order_by(TemplateFragment.sort_order))
+        # 组装预览文本
+        preview_parts = []
+        has_missing = False
+        for tf in fragments:
+            resolved = _resolve_fragment(tf.prompt_id, tf.fragment_type, tf.cached_content)
+            preview_parts.append(f"【{tf.fragment_type}】{resolved['content'][:40]}")
+            if not resolved["source_exists"]:
+                has_missing = True
+
+        prompt_preview = " · ".join(preview_parts) if preview_parts else "(空模板)"
+        if len(prompt_preview) > 120:
+            prompt_preview = prompt_preview[:120] + "..."
+
+        items.append({
+            "id": t.id,
+            "name": t.name or "",
+            "prompt_preview": prompt_preview,
+            "tags": "📦 组合模板",
+            "_is_template": True,
+            "_has_missing": has_missing,
+            "fragment_count": len(fragments),
+            "created_at": str(t.created_at) if t.created_at else "",
+            "steps": None,
+            "sampler": "",
+            "model": "",
+            "is_favorite": False,
+            "is_pinned": False,
+            "rating": None,
+            "usage_count": 0,
+        })
+
+    return {"prompts": items, "total": len(items), "page": 1, "page_size": 999}
 
 
 @router.get("/templates/{template_id}", response_model=dict)

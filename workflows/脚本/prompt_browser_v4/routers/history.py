@@ -135,7 +135,7 @@ def list_history(
     sort: str = Query("newest"),
     search: str = Query(""),
 ):
-    q = Gh.select()
+    q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
         q = q.where(Gh.favorite == favorite)
 
@@ -210,7 +210,17 @@ def delete_history_item(item_id: int):
     r = Gh.get_or_none(Gh.id == item_id)
     if r is None:
         raise HTTPException(404, "历史记录不存在")
-    r.delete_instance()
+    # 软删除：标记而非真删，防止 sync 重新导入
+    Gh.update(is_deleted=True).where(Gh.id == item_id).execute()
+    # 清理缩略图（按文件名前缀匹配）
+    try:
+        thumb_dir = settings.thumbnail_dir
+        if r.filename:
+            prefix = r.filename.replace("/", "_").replace("\\", "_").replace(":", "_")
+            for f in thumb_dir.glob(f"{prefix}*"):
+                f.unlink()
+    except Exception:
+        pass
     return {"success": True}
 
 
@@ -223,7 +233,17 @@ def batch_delete_history(body: BatchDeleteRequest):
     ids = body.ids
     if not ids:
         return {"success": True, "deleted": 0}
-    cnt = Gh.delete().where(Gh.id.in_(ids)).execute()
+    cnt = Gh.update(is_deleted=True).where(Gh.id.in_(ids)).execute()
+    # 批量清理缩略图
+    try:
+        thumb_dir = settings.thumbnail_dir
+        for r in Gh.select().where(Gh.id.in_(ids)):
+            if r.filename:
+                prefix = r.filename.replace("/", "_").replace("\\", "_").replace(":", "_")
+                for f in thumb_dir.glob(f"{prefix}*"):
+                    f.unlink()
+    except Exception:
+        pass
     return {"success": True, "deleted": cnt}
 
 
@@ -274,5 +294,14 @@ def download_history_item(item_id: int):
 
 @router.delete("/history")
 def clear_history():
-    Gh.delete().execute()
+    Gh.update(is_deleted=True).execute()
+    # 清理全部缩略图
+    try:
+        import shutil
+        td = settings.thumbnail_dir
+        if td.exists():
+            shutil.rmtree(td)
+            td.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     return {"success": True}

@@ -33,6 +33,11 @@ def post_comfyui(path: str, data: dict | None = None, timeout: int = 5) -> httpx
 def push_prompt(api_workflow: dict) -> dict:
     """将工作流推送到 ComfyUI，返回 {prompt_id, ...}"""
     payload = json.dumps({"prompt": api_workflow}).encode("utf-8")
+    
+    # 调试：输出发送的数据（前500字符）
+    print(f"[DEBUG] 发送到 ComfyUI 的数据: {payload[:500]}...")
+    print(f"[DEBUG] API workflow keys: {list(api_workflow.keys())[:5]}")
+    
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
@@ -40,8 +45,18 @@ def push_prompt(api_workflow: dict) -> dict:
                 content=payload,
                 headers={"Content-Type": "application/json"},
             )
+            
+            # 调试：输出响应
+            print(f"[DEBUG] ComfyUI 响应状态码: {resp.status_code}")
+            if resp.status_code != 200:
+                print(f"[DEBUG] ComfyUI 响应内容: {resp.text}")
+            
             resp.raise_for_status()
             return resp.json()
+    except httpx.HTTPStatusError as e:
+        print(f"[ERROR] ComfyUI 返回错误: {e.response.status_code}")
+        print(f"[ERROR] 响应内容: {e.response.text}")
+        raise RuntimeError(f"ComfyUI 连接失败: {e}")
     except httpx.HTTPError as e:
         raise RuntimeError(f"ComfyUI 连接失败: {e}")
 
@@ -52,9 +67,9 @@ def get_queue() -> dict:
     return result or {}
 
 
-def get_history() -> dict:
-    """获取 ComfyUI 全局历史"""
-    result = fetch_json(f"{COMFYUI_API}/history", timeout=5)
+def get_history(max_items: int = 100) -> dict:
+    """获取 ComfyUI 最近历史（限制条数以加速）"""
+    result = fetch_json(f"{COMFYUI_API}/history?max_items={max_items}", timeout=5)
     return result or {}
 
 

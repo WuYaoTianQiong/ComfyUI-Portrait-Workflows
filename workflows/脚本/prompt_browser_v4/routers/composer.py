@@ -14,7 +14,7 @@ from config import settings
 
 router = APIRouter(tags=["组合创作"])
 
-FRAGMENT_TYPES = ["人物外貌", "姿态动作", "服装配饰", "场景背景", "风格技术"]
+FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
 
 
 def parse_prompt_fragments(prompt_text: str) -> list[dict]:
