@@ -143,6 +143,32 @@ class PromptTag(BaseModel):
         )
 
 
+# ======== Phase 3: 模板系统 ========
+class Template(BaseModel):
+    """组合模板表"""
+    id = AutoField()
+    name = TextField()
+    category = ForeignKeyField(Category, backref="templates", null=True)
+    created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+    updated_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+
+    class Meta:
+        table_name = "templates"
+
+
+class TemplateFragment(BaseModel):
+    """模板碎片（引用式）"""
+    id = AutoField()
+    template = ForeignKeyField(Template, backref="fragments")
+    prompt = ForeignKeyField(Prompt, backref="template_fragments", null=True)
+    fragment_type = TextField()  # 人物外貌/姿态动作/...
+    cached_content = TextField(default="")  # 快照，来源删除时兜底
+    sort_order = IntegerField(default=0)
+
+    class Meta:
+        table_name = "template_fragments"
+
+
 def _migrate_column(db, table, col, col_def):
     """如果列不存在则 ALTER TABLE 添加（兼容旧库）。"""
     try:
@@ -181,6 +207,10 @@ def init_db():
 
     # ======== Phase 2: 创建新表 ========
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
+    # ==========================================
+
+    # ======== Phase 3: 模板表 ========
+    db.create_tables([Template, TemplateFragment], safe=True)
     # ==========================================
 
     db.close()

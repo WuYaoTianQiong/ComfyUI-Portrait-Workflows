@@ -116,6 +116,8 @@ from routers.comfyui import router as comfyui_router
 from routers.thumbnail import router as thumbnail_router
 from routers.categories import router as categories_router
 from routers.tags import router as tags_router
+from routers.composer import router as composer_router
+from routers.templates import router as templates_router
 
 app.include_router(prompts_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
@@ -125,6 +127,8 @@ app.include_router(comfyui_router, prefix="/api")
 app.include_router(thumbnail_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(tags_router, prefix="/api")
+app.include_router(composer_router, prefix="/api")
+app.include_router(templates_router, prefix="/api")
 
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):
