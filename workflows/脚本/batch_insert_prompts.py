@@ -21,7 +21,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 DB_PATH = r'd:\Entertainment\ComfyUI-aki-v2\ComfyUI-aki-v3\workflows\文档\提示词收藏.db'
 STYLE_PREFIXES = ["Moody Photography", "Moody Distillation photography style",
                   "Moody Distillation", "Huihui(辉辉)", "Dori"]
-FRAGMENT_TYPES = ["人物外貌", "姿态动作", "服装配饰", "场景背景", "风格技术"]
+FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
 STYLE_REPLACEMENTS = [
     (r'Keep the presentation in a romantic intimate adult direction\.', '保持浪漫亲密的成人风格。'),
     (r'Keep the presentation in a suggestive adult direction\.', '保持暗示性成人风格。'),
