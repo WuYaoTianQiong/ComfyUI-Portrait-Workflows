@@ -92,3 +92,8 @@ workflows/.reasonix/
 # Database backup files
 *_backup_*.db
 *.db.bak
+
+# Git export/history files (temporary analysis artifacts)
+git_history_export.txt
+git_log_simple.txt
+git_recent_diffs.txt
