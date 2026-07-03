@@ -1,6 +1,6 @@
 # ComfyUI 12G 显存姿势控制踩坑手册
 
-> 2026年6月26日更新（Nunchaku/GGUF/AnyPose 折腾全记录），基于 ComfyUI 2026-06-16 版本
+> 2026年7月1日更新（新增景别控制实战公式、英文构图指令精度对比、全透视薄纱服饰描述指南），基于 ComfyUI 2026-06-16 版本
 
 ## 硬件配置
 
@@ -17,18 +17,21 @@
 
 ## 一、可用工作流速查
 
-| 工作流 | 用途 | 模型 | 骨骼控图 |
-|---|---|---|---|
-| `Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json` | DWPose拍照提取骨骼→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 |
-| `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` | VNCCS 3D手动摆姿→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_API.json` | VNCCS 3D手动摆姿→文生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_Visual.json` | ⭐ **VNCCS图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `千面绘形_DWPose姿态编辑_16x9画幅一键横竖切换_图生图.json` | ⭐ **DWPose图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 |
-| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_API.json` | VNCCS横竖切换(API版) | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D |
-| `MoodyZIT_V7_API_文生图_双程采样_快速预览_文字渲染.json` | 高质量双程文生图 | moodyProMix_zitV13FP8 | ❌ |
-| `MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json` | 图生图/局部重绘+超分 | moodyProMix_zitV13FP8 | ❌ |
-| `MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json` | 文生图+双程+4K超分 | moodyProMix_zitV13FP8 | ❌ |
-| `FLUX2_Klein9B_双程采样_快速预览.json` | Flux2 Klein 双程文生图 | flux-2-klein 系列 | ❌ |
+| 工作流 | 用途 | 模型 | 骨骼控图 | 提示词语言 |
+|---|---|---|---|---|
+| `Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json` | DWPose拍照提取骨骼→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 | 中/英 |
+| `Qwen-Rapid-AIO_VNCCS_骨骼控图_图生图_API.json` | VNCCS 3D手动摆姿→图生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D | 中/英 |
+| `Qwen-Rapid-AIO_VNCCS_骨骼控图_文生图_API.json` | VNCCS 3D手动摆姿→文生图 | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D | 中/英 |
+| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_Visual.json` | ⭐ **VNCCS图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D | 中/英 |
+| `千面绘形_DWPose姿态编辑_16x9画幅一键横竖切换_图生图.json` | ⭐ **DWPose图生图+自动横竖切换** | Qwen-Rapid-AIO-NSFW-v18 | ✅ DWPose自动 | 中/英 |
+| `灵犀控骨_VNCCS骨骼控图_16x9画幅一键横竖切换_图生图_API.json` | VNCCS横竖切换(API版) | Qwen-Rapid-AIO-NSFW-v18 | ✅ VNCCS 3D | 中/英 |
+| `MoodyZIT_V7_API_文生图_双程采样_快速预览_文字渲染.json` | ⭐ **高质量双程写实文生图** | moodyProMix_zitV13FP8 | ❌ | 中/英 |
+| `MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json` | 图生图/局部重绘+超分 | moodyProMix_zitV13FP8 | ❌ | 中/英 |
+| `MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json` | 文生图+双程+4K超分 | moodyProMix_zitV13FP8 | ❌ | 中/英 |
+| `FLUX2_Klein9B_双程采样_快速预览.json` | Flux2 Klein 双程文生图 | flux-2-klein 系列 | ❌ | 英 |
+| `NoobAI-XL_Vpred_动漫文生图.json` | ⭐ **纯日式动漫文生图（2026最佳动漫底模）** | NoobAI-XL-Vpred-v1.0 | ❌ | 英（Danbooru标签） |
+| `Qwen-Rapid_中文文生图.json` | 2.5D美式动漫/插画文生图（支持中文） | Qwen-Rapid-AIO-NSFW-v18 | ❌ | 中/英 |
+| `MoodyProMix_中文漫画_文生图.json` | **写实底模+漫画/动漫LoRA（支持中文）** | moodyProMix_zitV13FP8 + LoRA | ❌ | 中/英 |
 
 ---
 
@@ -121,7 +124,7 @@
 
 ### 关键发现
 
-1. **Qwen-Rapid-AIO 文生图骨骼控图偏动画风格**：实测 Qwen-Rapid 在文生图模式下出图偏二次元/动画质感，写实度不如 MoodyZIT。如需写实画风，建议用 Qwen-Rapid 图生图（输入写实照片做参考），或走 Work-Fisher→MoodyZIT 两级串联方案。
+1. **Qwen-Rapid-AIO 文生图偏2.5D美式动漫风格**：实测 Qwen-Rapid 在文生图模式下出图偏向2.5D美式动漫质感（而非日式赛璐璐风格），写实度不如 MoodyZIT。如需写实画风，建议用 Qwen-Rapid 图生图（输入写实照片做参考），或走 Work-Fisher→MoodyZIT 两级串联方案。如需纯日式漫画风格，建议用 NoobAI-XL Vpred 模型（需英文 Danbooru 标签，详见新工作流 `NoobAI-XL_Vpred_动漫文生图.json`）。
 
 2. **CheckpointLoaderSimple vs UNETLoader**：Checkpoint 打包了模型+CLIP+VAE，CLIP 和模型绑定正确不会维度报错。UNETLoader 分离加载，手动配错 CLIP 会炸（如 qwen_2.5_vl_7b(3584维) ≠ qwen_3_4b(2560维) → LayerNorm 报错）
 
@@ -249,7 +252,7 @@ API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR
 
 ## 十八、catlover1937 Moody Gals 系列角色 LoRA 全览
 
-> 2026-06-28 新增。作者 catlover1937 发布了 5 个原创角色 LoRA，全部基于 ZImageTurbo 架构（ZIB/ZIT 双格式），对写实人像生成有重要参考价值。
+> 2026-06-30 全面更新。作者 catlover1937 共发布了 **11 个**原创角色 LoRA，全部基于 ZImageTurbo 架构（ZIB/ZIT 双格式），数据通过 CivitAI API 采集。
 
 ### 1. 系列概述
 
@@ -257,23 +260,48 @@ API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR
 |------|------|
 | 作者 | catlover1937（同时也是 moodyProMix 模型作者） |
 | 类型 | 角色 LoRA（固定特定角色的面容、身材、风格） |
+| 首发平台 | [CivitAI](https://civitai.com/user/catlover1937/models)（免费下载） |
 | 格式 | ZIB（影响构图和动作）+ ZIT（影响细节） |
 | 基础模型 | ZImageTurbo |
 | 命名规则 | `{角色名}-zib-v{版本}_clean.safetensors` |
-| 文件大小 | 各约 133~170 MB |
+| 文件大小 | 各约 162 MB（个别 133~202 MB） |
 | 许可证 | Apache 2.0 |
 
-### 2. 角色列表
+### 2. 完整角色列表（11 个）
 
-| # | 角色 | 文件名 | 触发词 | 人设 | 来源状态 |
-|---|------|--------|--------|------|---------|
-| 1 | **Momoka** | `momoka-zib-v2_clean.safetensors` | `Momoka` | 23岁日本Cosplayer，甜美可爱，热爱动漫漫画同人文化 | ✅ 已下载至 `models/loras/` |
-| 2 | **Rina** | `Rina-zib-v1_clean.safetensors` | `Rina`（推测） | 21岁韩国偶像练习生，会钢琴/小提琴/爵士鼓 | ✅ 已下载至 `models/loras/` |
-| 3 | **Weiwei** | `weiwei-zib-v1_clean.safetensors` | `Weiwei` | 27岁上海华裔女编辑，细腻感性 | ✅ 已下载至 `models/loras/` |
-| 4 | **Dori** | `Dori-zib-v2_clean.safetensors` | `Dori` | 未公开详细设定 | [需手动下载](https://www.runninghub.cn/model/public/2056201854354247681)（RunningHub 需登录） |
-| 5 | **Yoki** | `Yoki-zib-xxx.safetensors`（文件名待确认） | `Yoki` | 21岁中国古典美女，爱汉服古风 | [需手动下载](https://www.runninghub.cn/model/public/2059036311079710722)（RunningHub 需登录） |
+| # | 角色 | 年龄 | 人设 | 文件名 | 触发词 | 下载状态 | CivitAI 页面 |
+|:---:|:----|:---:|------|--------|:------:|:--------:|:-----------:|
+| 1 | **Momoka** | 23岁 | 日本 Cosplayer，甜美可爱，热爱动漫同人文化 | `momoka-zib-v2_clean.safetensors` | `Momoka` | ✅ 已下载 | [查看](https://civitai.com/models/2657057) |
+| 2 | **Rina** | 21岁 | 韩国偶像练习生，学表演与舞台艺术，会乐器 | `Rina-zib-v1_clean.safetensors` | `Rina` | ✅ 已下载 | [查看](https://civitai.com/models/2656506) |
+| 3 | **Weiwei** | 27岁 | 上海华裔女编辑，细腻感性 | `weiwei-zib-v1_clean.safetensors` | `Weiwei` | ✅ 已下载 | [查看](https://civitai.com/models/2669955) |
+| 4 | **Yoki** | 21岁 | 中国古典美女，爱汉服古风，大学表演专业 | `yoki-zib-v1_clean.safetensors` | `Yoki` | ✅ 已下载 | [查看](https://civitai.com/models/2651415) |
+| 5 | **Dori** | 19岁 | （未公开详细设定） | `Dori-zib-v2_clean.safetensors` | `Dori` | ✅ 已下载 | [查看](https://civitai.com/models/2629822) |
+| 6 | **Huihui** | ? | （未公开详细设定） | `huihui-zib-kage.safetensors` | （无触发词） | ✅ 已下载 | [查看](https://civitai.com/models/2681932) |
+| 7 | **Hana** | 20岁 | 韩国大学生，在首尔 Starbucks 兼职店员 | `hana-zib-v7.safetensors` | `Hana` | ✅ 已下载 | [查看](https://civitai.com/models/2707619) |
+| 8 | **Nari** | 25岁 | 韩国女 DJ，常年活跃于夜店和音乐节 | `Nari-zib-v1_clean.safetensors` | `Nari` | ✅ 已下载 | [查看](https://civitai.com/models/2662271) |
+| 9 | **Lili** | 27岁 | 中国女演员，冷艳高级气质，演配角+广告拍摄 | `lili-v5_clean.safetensors` | `Lili` | ✅ 已下载 | [查看](https://civitai.com/models/2713788) |
+| 10 | **Vivian** | 21岁 | 菲律宾大学毕业生，富家女，时尚性感风格 | `Vivian-zib-v1_clean.safetensors` | `Vivian` | ✅ 已下载 | [查看](https://civitai.com/models/2676413) |
+| 11 | **Veronica** | 22岁 | 俄罗斯女孩，职业是「生活体验师」 | `Veronica-zib-v1_000006000.safetensors` | `Veronica` | ✅ 已下载 | [查看](https://civitai.com/models/2699169) |
 
-### 3. 关键认知（防踩坑）
+### 3. 各角色预览图
+
+所有预览图均来自 CivitAI 页面，可直接在浏览器中打开查看：
+
+| 角色 | 预览图链接（点击查看） |
+|:----|:---------------------|
+| Momoka | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/fb639fc7-eb00-406c-ad1b-30037c6ce7aa/original=true/132249590.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/93dd837c-aafc-41f2-9247-7ddca43c7ef4/original=true/132249138.jpeg) · [图片2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/65f7d271-31f2-4c48-9495-65545c5fdee8/original=true/132249243.jpeg) |
+| Rina | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/bbbd510e-f6c1-4d73-a734-31dbac6cfad0/original=true/132044910.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/df85d59e-4611-41be-8a0b-3f42c699044c/original=true/132045110.jpeg) |
+| Weiwei | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/b12c02c4-4b8b-4bbd-acc6-c84e40bc6fc4/original=true/132629749.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/38dcceae-e2fe-48cd-8956-03a23fe4c9ba/original=true/132585363.jpeg) · [图片2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/fa907c5a-3e14-4f88-a3ec-595ba30b40d1/original=true/132585942.jpeg) |
+| Yoki | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/e6dbe67d-2631-4f8c-b044-a5042927f39b/original=true/131832290.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/78ed1a53-7a0e-44b4-8845-9c301145ba46/original=true/131832262.jpeg) |
+| Dori | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/7f5ee8c4-0de6-45aa-af46-1e854e53d4aa/original=true/130974298.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/ab0277e7-a694-4b54-be5f-041bd35f57b5/original=true/130974380.jpeg) · [图片2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/28733ae7-74cd-4bc7-890c-1baa24ae076b/original=true/130974403.jpeg) |
+| Huihui | [视频1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/6ff9894c-f14e-4961-a3fd-2358b600a440/original=true/133076285.mp4) · [视频2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/2ef8d2b5-8640-4438-9191-1079f54dea14/original=true/133076286.mp4) |
+| Hana | [视频1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/80eac422-a747-4bb2-ba32-06d9e9852000/original=true/133999721.mp4) · [视频2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/e3de9277-6c4f-464a-9927-d94926dfb2b8/original=true/133999724.mp4) |
+| Nari | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/2643ee86-352e-4aa4-9f6a-a21cf8821160/original=true/132295171.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/01b07b5b-c6ea-4834-8776-17876bc22829/original=true/132291060.jpeg) |
+| Lili | [视频1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/930b5c2f-98ed-4f76-b7e4-4a96c4124525/original=true/134219973.mp4) · [视频2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/1b8fe6c3-b1f7-4d8e-bda1-05e0a4afd952/original=true/134219948.mp4) |
+| Vivian | [视频预览](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/fdca19c6-1951-4f35-92f3-e20bf6d7b48a/original=true/132829568.mp4) · [图片1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/91b04c18-ff62-4ce5-b451-e3522d931e0c/original=true/132827893.jpeg) |
+| Veronica | [视频1](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/0f29a40d-01c1-45d9-bcad-29ea6108a2c2/original=true/133706997.mp4) · [视频2](https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/dde16588-9b53-492a-84e7-2a036b44ed5e/original=true/133706996.mp4) |
+
+### 4. 关键认知（防踩坑）
 
 | 认知 | 说明 |
 |------|------|
@@ -282,7 +310,7 @@ API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR
 | **与 prompt 的正面描述冲突** | 一旦 prompt 中出现大量需要"展示正面才能看到"的服饰细节（领口、面部、眼睛等），角色 LoRA 会加剧"转回正面"的倾向 |
 | **moodyProMix 是 all-in-one** | 作者明确指出 Moody 系列模型是 all-in-one，**不需要额外叠加角色 LoRA 也能出高质量亚洲写实人像** |
 
-### 4. 推荐用法
+### 5. 推荐用法
 
 | 场景 | 推荐操作 | 理由 |
 |------|---------|------|
@@ -291,19 +319,23 @@ API 格式按参数名匹配，不依赖位置。在 API 格式中添加 `SeedVR
 | 出非常规视角（正后方/俯视等） | **权重设为 0 或移除节点** | 消除面部锁定与视角的冲突 |
 | 纯写实高质量人像（无特定角色需求） | **不挂任何角色 LoRA** | moodyProMix 本身已足够 |
 
-### 5. 下载指引
+### 6. 下载指引
 
-以下 LoRA 已在 `models/loras/` 目录中可用，可直接在工作流中使用：
-- `momoka-zib-v2_clean.safetensors` ✅
-- `Rina-zib-v1_clean.safetensors` ✅
-- `weiwei-zib-v1_clean.safetensors` ✅
+所有 11 个角色 LoRA 已全部下载至 `models/loras/`，可直接在工作流中使用：
 
-以下 LoRA 需要手动下载：
-
-| 角色 | 下载链接 |
-|------|---------|
-| Dori | [RunningHub](https://www.runninghub.cn/model/public/2056201854354247681)（需登录） |
-| Yoki | [RunningHub](https://www.runninghub.cn/model/public/2059036311079710722)（需登录） |
+```text
+models/loras/momoka-zib-v2_clean.safetensors        (162.2 MB)  ✅
+models/loras/Rina-zib-v1_clean.safetensors           (162.2 MB)  ✅
+models/loras/weiwei-zib-v1_clean.safetensors         (162.2 MB)  ✅
+models/loras/yoki-zib-v1_clean.safetensors           (162.2 MB)  ✅
+models/loras/Dori-zib-v2_clean.safetensors           (162.2 MB)  ✅
+models/loras/huihui-zib-kage.safetensors             (162.2 MB)  ✅
+models/loras/hana-zib-v7.safetensors                 (162.2 MB)  ✅
+models/loras/Nari-zib-v1_clean.safetensors           (162.2 MB)  ✅
+models/loras/lili-v5_clean.safetensors               (202.0 MB)  ✅
+models/loras/Vivian-zib-v1_clean.safetensors         (162.2 MB)  ✅
+models/loras/Veronica-zib-v1_000006000.safetensors   (162.2 MB)  ✅
+```
 
 
 
@@ -498,7 +530,69 @@ UNETLoader(N1) → ModelSampling(N5) → 第一程KSampler(N9) → LatentUpscale
 
 ---
 
-## 八、后续可探索方向
+## 二十三、2026-06-30 日式漫画风格工作流全记录
+
+> 历时约 2 小时，最终结论：Anima 混合底模 + 专用 LoRA = 12GB 上最佳日式漫画方案。
+
+### 1. 探索路线
+
+| 路线 | 结果 | 原因 |
+|------|:----:|------|
+| Anima (原版) + Qwen3_06b CLIP | ❌ 0.6B CLIP 太弱 | 复杂长 prompt 理解差 |
+| NoobAI-XL Vpred (v-prediction) | ⚠️ 可用但需英文标签 | 需 ModelSamplingDiscrete + CLIPSetLastLayer |
+| moodyProMix (写实) + 动漫 LoRA | ❌ 底模写实偏向太强 | LoRA 权重拧不过 |
+| **PearlyAnimaMix_v10 + perfect_toon LoRA** | **✅ 最佳方案** | Anima 混合底模 + 专为卡通风格训练的 LoRA |
+| Qwen-Rapid-AIO (文生图) | ⚠️ 偏2.5D美式动漫 | 不是日式漫画风格 |
+
+### 2. 最终推荐方案
+
+**底模**: `pearlyAnimaMix_v10.safetensors`（4.13 GB，作者 Serephian）
+**LoRA**: `perfect_toon.safetensors`（87.6 MB，触发词 `pearlyperf`，权重 1.0）
+**可选 LoRA**: `Bushes_in_Foreground_epoch_10.safetensors`（217.9 MB，作者 parlayjp840）
+
+### 3. 关键参数
+
+| 参数 | 值 |
+|------|-----|
+| 采样器 | Euler |
+| 步数 | 25 |
+| CFG | 5 |
+| VAE | qwen_image_vae（Anima 专用） |
+| CLIP | qwen_3_06b_base（type=qwen_image） |
+| 分辨率 | 1080×1920（竖版1080P） |
+| Clip skip | 1（默认，不需要 CLIPSetLastLayer） |
+
+**注意**：所有漫画工作流均只支持 **英文提示词（Danbooru 标签格式）**，不支持中文。Qwen3_06b 虽能解析中文，但模型微调数据为英文标签，中英混用效果差。
+
+### 4. ⭐ 最终工作流
+
+| 工作流 | 用途 | 模型 | LoRA |
+|--------|------|------|------|
+| `Anime_PearlyToon_EN.json` | 日式卡通风格文生图（图1复刻） | pearlyAnimaMix_v10 | perfect_toon w1.0 |
+| `Anime_Bushes_EN.json` | 前景灌木场景文生图（图2复刻） | pearlyAnimaMix_v10 | Bushes_in_Foreground w0.8 |
+
+### 5. 踩坑记录
+
+| 坑 | 教训 |
+|----|------|
+| **v_prediction 模型** | NoobAI-XL 需 ModelSamplingDiscrete + CLIPSetLastLayer，Anima 不需要 |
+| **LoRA 基座不匹配** | perfect_toon 是 Anima 基座，Bushes 是 Illustrious 基座，不能混用 |
+| **中文 prompt 无效** | Qwen3 能读中文，但模型权重是英文标签训练的，需用英文 Danbooru 标签 |
+| **漂白标签过度** | 颜色风格由底模本身决定，硬加 overexposed/pale 标签会崩 |
+| **CLIP 0.6B vs 4B** | Anima 锁定 1024 维输入，不能换 qwen_3_4b（2560维）|
+
+### 6. 已下载的关键模型/文件清单
+
+| 文件 | 大小 | 用途 |
+|------|:----:|------|
+| `pearlyAnimaMix_v10.safetensors` | 4.13 GB | Anima 混合底模（Serephian） |
+| `perfect_toon.safetensors` | 87.6 MB | Pearly perfect toon 风格 LoRA |
+| `Bushes_in_Foreground_epoch_10.safetensors` | 217.9 MB | 前景灌木 LoRA |
+| `sk_anime_style_v1.0.safetensors` | 81.2 MB | ZIT 原生动漫风格 LoRA |
+| `NoobAI-XL-Vpred-v1.0.safetensors` | 6.62 GB | 动漫底模（需英文标签+v_prediction） |
+| `Comic_Book_V4T3_E10.safetensors` | 162 MB | 漫画书风格 LoRA（支持 ZIT/Flux） |
+
+---
 
 1. **VNCCS Pose Studio + Qwen Rapid-AIO 串联**：3D人偶摆姿 → 输出骨骼图 → 喂给Work-Fisher工作流的骨骼参考
 2. **Work-Fisher出图 + MoodyZIT Inpaint精修**：姿势图→MoodyZIT图生图去噪0.5~0.7，利用Flux画质优势
@@ -1158,6 +1252,164 @@ Work-Fisher 工作流使用 `OpenposePreprocessor`（非DWPreprocessor）。
    - 或放弃一次性三视图，改单张生成后拼接
 
 3. **Flux 不需要负面提示词**（架构不支持），把精力集中在正面词的精准度上。
+
+---
+
+## 二十四、人物景别控制：近景 / 中景 / 远景实战经验
+
+> 2026-07-01 新增。基于 moodyProMix_zitV13FP8 + Momoka LoRA 实测总结。
+
+### 1. 问题背景
+
+MoodyZIT / ZImageTurbo 系列的训练数据以**人像特写和半身照为主**，模型有很强的「放大人物看脸」的内禀偏置。即使 prompt 写了 `full body` 或 `全身入镜`，模型仍倾向于出近景特写。
+
+### 2. 根因分析
+
+| 因素 | 说明 |
+|------|------|
+| **训练数据偏置** | ZIT 训练集以 portrait / half-body 为主，模型认为「离远拍」不是常规操作 |
+| **人物细节量** | subject 描述越详细（发型/五官/妆造），模型越想 zoom in 看清细节 |
+| **构图指令位置** | `full body` / `远景` 写在 prompt 末尾会被 CLIP 注意力稀释 |
+| **镜头语言** | 85mm 暗示特写，35mm 暗示中景，24mm 暗示远景——模型理解镜头焦距含义 |
+
+### 3. 三景别控制公式
+
+#### 3.1 近景 / 特写（Close-up）
+
+适合：面部表情、半身姿势
+
+```
+【构图】特写，半身，人物占据画面大部分，背景虚化
+一位身穿...的少女，【面部细节省略不影响构图】
+【画风】85mm镜头，浅景深
+```
+
+**实测效果**：⭐⭐⭐⭐⭐ 模型天然倾向，几乎不需要额外控制。
+
+#### 3.2 中景（Medium Shot）—— 已验证
+
+适合：全身坐姿、跪姿、站姿，人物在画面中大小适中
+
+```
+【构图】中远景，全身完整在画面内，人物高度约占画面一半，
+头顶上方留约四分之一空白，人物大小适中
+一位身穿...的少女
+【画风】35mm镜头
+约束：全身中远景，人物大小适中
+```
+
+**实测效果**：⭐⭐⭐⭐⭐ 稳定有效。关键技巧：
+
+1. **「人物高度约占画面一半」** 这个定量描述比 `full body` 更精准
+2. **「头顶上方留约四分之一空白」** 锚定画面顶部边界
+3. **中文有效**：模型支持中文，用中文写构图指令完全可行
+4. **人物细节要精简**：`一位身穿淡蓝薄纱长裙的少女` 就够了，避免五官/妆造细节导致模型 zoom in
+
+#### 3.3 远景（Wide Shot）—— 已验证
+
+适合：躺姿、一字马、大场景，人物在画面中很小
+
+```
+【构图】远景，人物在画面中占很小比例，人物四周大量空白，
+人物头顶和脚下留有大量空间，以大场景为主人物只是点缀
+一位身穿...的少女
+【画风】24mm广角镜头，深景深
+约束：远景，人物极小
+```
+
+**实测效果**：⭐⭐⭐⭐⭐ 第一次用 `人物极小` 时效果「人物太小了」，说明控制力足够强，只需调整比例。
+
+### 4. 关键经验总结
+
+| 景别 | 人物占画面比例 | 关键词 | 注意 |
+|:----|:-------------:|:-------|:----|
+| 近景 | 70%~100% | 特写，半身，85mm | 模型天然倾向，不加也出 |
+| 中景 | **40%~50%**（约一半） | 中远景，人物高度约占画面一半，头顶上方留四分之一空白 | **最常用，需要主动控制** |
+| 远景 | 10%~20%（极小） | 远景，人物极小，人物占很小比例 | 需配合广角镜头描述，否则模型抗拒 |
+
+### 5. 踩坑记录
+
+#### 5.1 人物细节越多，画面越近
+
+```
+❌ 错误：一位身穿淡蓝薄纱长裙的少女，面容精致冷白肌肤，两侧留长垂耳碎发其余束发，
+   眼眸圆大睫毛纤长，鼻梁小巧嘴唇粉嫩...
+   → 模型: 「细节这么多？让我放大看看」→ 特写
+
+✅ 正确：一位身穿淡蓝薄纱长裙的少女
+   → 模型: 「描述很简略，那按构图指令办」→ 中远景
+```
+
+**原则**：构图和人物描述是矛盾的——细节挤占构图指令的注意力权重。构图不稳时，优先删人物细节。
+
+#### 5.2 英文构图术语 vs 中文
+
+> **2026-07-01 更新**：实测发现 **英文构图指令的精准度远超中文**。
+
+中文的「脚下留约三分之一空白」模型只能执行到「二十分之一」的精度，而英文 `feet fully visible with clear space below` 能精准实现。
+
+**推荐公式**（已验证12次以上）：
+```
+# 英文部分：精确控制构图
+full body shot, subject centered, feet fully visible with space below,
+no cropping, medium shot, subject height about 50 percent of frame
+
+# 中文部分：描述人物、动作、场景
+一位身穿半透明淡蓝薄纱长裙的少女，...
+坐床边腿垂落可见完整脚部...
+古风床榻...
+```
+
+**原因**：Z-Image Turbo 训练数据以英文为主，模型对 `full body shot`、`feet fully visible` 等英文术语有精确理解。中文需要翻译+映射两层，精度丢失。
+
+#### 5.3 底部色块问题
+
+如果使用 `empty space at bottom` 等描述，模型会**填充色块**而非地面场景。**修正**：改为描述底部实际物体——`showing wooden floor` / `木地板延伸`。
+
+#### 5.4 颜色对比度
+
+人物服饰颜色需与背景色有足够对比，避免融为一体：
+- 淡蓝薄纱 → ✅ 暖色床榻/木地板/白墙（有对比）
+- 淡蓝薄纱 → ❌ 浅蓝天/淡蓝墙（融在一起）
+
+#### 5.5 横图 vs 竖图选择
+
+| 姿势类型 | 推荐画幅 | 分辨率 | 理由 |
+|:--------|:-------:|:------|:----|
+| 站姿/坐姿/跪姿 | 竖图 | 640×960（2:3锁定比例） | 身体纵向伸展 |
+| 躺姿/趴姿/一字马 | 横图 | 960×640（3:2锁定比例） | 身体横向伸展 |
+
+> **注意**：MoodyZIT V13 训练锁定的标准分辨率为 **640×960（2:3）** 和 **1248×832（3:2）**。但 1248×832 + 1.7x upscale ≈ 2122×1414 latent 过大，横图实测用 **960×640** 更稳定。
+
+#### 5.4 遇到模型不放远景怎么办
+
+```text
+渐进式降噪法：
+第1次: 写「人物高度约占画面一半」→ 若还特写
+第2次: 改「人物占很小比例，四周大量空白」→ 若还特写  
+第3次: 改「人物极小，人物只是点缀」→ 肯定远景，但可能太小
+第4次: 回调到「人物高度约占画面一半」→ 成功
+```
+
+**原理**：先拉远景极限（压过模型偏置），再回调到理想比例。
+
+#### 5.5 负面提示词无效
+
+Flux/ZIT 架构不使用 CFG，**负面提示词完全无效**。所有约束必须写在正面 prompt 中。
+
+---
+
+## 二十五、Moody Gals 角色 LoRA 景别兼容性速查
+
+> 2026-07-01 新增
+
+| LoRA | 近景效果 | 中景效果 | 远景效果 | 说明 |
+|:----|:-------:|:-------:|:-------:|:----|
+| Momoka | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 全能型，各种距离表现稳定 |
+| Rina | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 近景最佳 |
+| Yoki | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | 远景略弱 |
+
+> 所有角色 LoRA 在近景（特写）表现最佳，远景需要更简练的 subject 描述。
 
 ---
 
