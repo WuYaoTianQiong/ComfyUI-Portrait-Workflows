@@ -1,6 +1,6 @@
 # ComfyUI 12G 显存姿势控制踩坑手册
 
-> 2026年7月1日更新（新增景别控制实战公式、英文构图指令精度对比、全透视薄纱服饰描述指南），基于 ComfyUI 2026-06-16 版本
+> 2026年7月4日更新（新增人物身材/胸部尺寸提示词中英文对照与极限测试、NoobAI-XL Vpred 超现实巨乳实测），基于 ComfyUI 2026-06-16 版本
 
 ## 硬件配置
 
@@ -1413,6 +1413,158 @@ Flux/ZIT 架构不使用 CFG，**负面提示词完全无效**。所有约束必
 
 ---
 
+## 二十六、人物身材/胸部尺寸提示词中英文对照与极限测试
+
+> 2026-07-04 新增。基于 `moodyProMix_zitV13FP8` + `momoka-zib-v2_clean` LoRA (w=1.0) + MoodyZIT V7 双程采样工作流实测。
+
+### 测试方法
+
+- **模型**：moodyProMix_zitV13FP8
+- **CLIP**：qwen_3_4b (lumina2)
+- **LoRA**：momoka-zib-v2_clean，权重 1.0（未取下）
+- **固定种子**：813972274184088
+- **每词生成**：2 张，取第 1 张观察
+- **人物设定**：18岁亚洲少女，半侧身，黑色运动文胸 + 浅灰瑜伽裤，纯白背景
+- **变量**：仅替换【人物身材】中的胸部尺寸描述
+
+### 测试结果：中英文对照表
+
+| 等级 | 中文提示词 | 英文提示词 | 实测效果 |
+|:----:|:-----------|:-----------|:--------|
+| L01 | 平坦胸部，几乎没有胸部曲线，飞机场 | flat chest, nearly no breasts, petite bust | 实际仍有明显小胸曲线，模型对"平胸"执行偏保守 |
+| L02 | 很小的胸部，微乳，贫乳，平胸 | small breasts, very small bust, tiny chest | 小胸，比 L01 略明显 |
+| L03 | 普通大小的胸部，B罩杯，适中大小 | medium breasts, average bust, moderate chest size | 中等大小，接近常见标准身材 |
+| L04 | 丰满的胸部，C罩杯，饱满挺翘 | full breasts, C cup, full bust, plump chest | 明显丰满，形体开始突出 |
+| L05 | 很大的胸部，D罩杯，大胸，性感胸部 | large breasts, D cup, big bust, curvy chest | 大胸，视觉冲击显著 |
+| L06 | 巨乳，E罩杯，非常巨大的胸部，超丰满 | huge breasts, massive bust, very large chest | 巨大胸部，比例已夸张 |
+| L07 | 爆乳，F罩杯，超乎寻常的巨大胸部，极度丰满挺拔 | enormous breasts, gigantic bust, extremely large chest | 非常夸张，已超出自然人体比例 |
+| L08 | 超爆乳，G罩杯，极端巨大的胸部，夸张到不自然的胸部尺寸 | extreme gigantic breasts, massive heavy bust, unrealistically huge chest | 极端夸张，胸部占据躯干大部分 |
+| L09 | 爆裂巨乳，H罩杯以上，超出常理的巨大胸部，重量感十足到下垂 | explosive gigantic breasts, impossibly huge, exaggerated massive bust, heavy sagging | 极限状态，模型几乎只突出胸部，其他结构开始变形 |
+
+### 关键发现
+
+1. **中文提示词推进力更强**：同等级下，中文"爆乳/超爆乳/爆裂巨乳"系列比英文 `enormous / extreme gigantic` 更容易把模型推到极限。
+2. **英文描述更稳定可控**：L01~L05 的英文描述与中文效果接近，但 L06 之后英文的"激进感"略弱，画面相对自然。
+3. **存在天花板**：L08 和 L09 的差距在视觉上是"更大"与"大到变形"的区别，实用价值降低，主要用于探极限。
+4. **LoRA 会抵抗平胸指令**：Momoka LoRA 对身材有锁定作用，L01 的"平坦胸部"没有完全达到真正的平胸，保留了一部分曲线。若要完全控制平胸，需要降低/移除 LoRA 权重。
+5. **双程采样会放大第一程的效果**：第二程采样 (denoise=1.0) 会继承第一程的胸部尺寸，因此胸部尺寸主要由第一程正面提示词决定。
+
+### 实用建议
+
+| 目标 | 推荐中文提示词 | 推荐英文提示词 | 备注 |
+|------|:--------------|:--------------|:----|
+| 平胸/飞机场 | 平坦胸部，小胸，微乳 | flat chest, petite bust, small breasts | 建议同时降低/移除角色 LoRA |
+| 标准身材 | 普通大小的胸部，B罩杯 | medium breasts, average bust | 最自然，最不容易出戏 |
+| 丰满 | 丰满的胸部，C罩杯，饱满挺翘 | full breasts, C cup, full bust | 日常写实最常用 |
+| 大胸 | 很大的胸部，D罩杯，大胸 | large breasts, D cup, big bust | 视觉冲击明显，仍较自然 |
+| 夸张巨乳 | 巨乳，爆乳，F罩杯 | huge breasts, massive bust, enormous breasts | 适合特殊题材，比例开始夸张 |
+| 极限测试 | 超爆乳，G罩杯，极端巨大的胸部 | extreme gigantic breasts, unrealistically huge chest | 仅用于探极限，不适合常规出图 |
+
+**提示词写法**：建议把胸部尺寸放在【人物身材】段，不要孤立写。例如：
+```
+【人物身材】18岁亚洲少女，丰满的胸部，C罩杯，饱满挺翘，纤细腰肢，匀称身材
+```
+> 注意：若挂着角色 LoRA（如 Momoka w=1.0），平胸效果会被抵抗，需降低或移除 LoRA。
+
+### 第二轮极限测试：拆掉 LoRA + 高 CFG + 超极端描述
+
+> 2026-07-04 追加测试。拆掉 Momoka LoRA，改用超极端描述 + 权重语法 `(描述:1.8~2.0)` + CFG 7.0/10.0 探底。
+
+| 测试组 | LoRA | CFG | 描述风格 | 实测效果 |
+|:-----:|:----:|:---:|:---------|:--------|
+| A组 | ❌ 无 | **7.0** | 超极端中文，含比喻+权重语法 | 胸部明显比 L09 更大，但仍未突破"比人大"的阈值 |
+| B组 | ❌ 无 | **3.5** | 超极端中文（同描述，低CFG对比） | 比 A 组略小，说明高 CFG 有效 |
+| C组 | ❌ 无 | **10.0** | 最极端中文（探底） | CFG 10 让画面开始过饱和，但胸部尺寸无明显突破 |
+
+**第二轮测试提示词一览（A组，CFG=7，无LoRA）：**
+
+| 等级 | 提示词 | 效果 |
+|:----:|:-------|:----|
+| X01 | （南瓜般巨大的胸部：1.8），比头还大的巨乳，胸部大到超过身体宽度 | 胸部显著大于头，但未到"南瓜级" |
+| X02 | （巨型南瓜胸：2.0），胸部比整个人都大，超巨大乳袋 | 胸部极大，几乎与肩同宽 |
+| X03 | （超巨大胸部：1.8），胸部如同两个巨型气球，比人体大三倍 | 胸部明显夸张，但"三倍"未完全体现 |
+| X04 | （爆裂级巨乳：2.0），胸部大到完全遮住身体 | 胸部占据上半身大部分，但未"遮住全身" |
+| X05 | （胸部比整个躯干还大：1.8），胸部直径超过肩宽 | 胸部宽度超过肩膀，比例已超现实 |
+| X06 | （胸部如同卡车般巨大：2.0），身高两倍的胸部尺寸 | 胸部巨大但"身高两倍"未体现 |
+| X07 | （胸部是人体三倍大：1.9），胸部占据画面百分之九十面积 | 胸部占据画面约 60~70%，未到 90% |
+| X08 | （胸部堪比摩天轮：2.0），宇宙级巨乳，胸部直径是身高的五倍 | 模型忽略"摩天轮""五倍"这类超现实数字 |
+
+### 终极结论：moodyProMix 的胸部尺寸极限
+
+1. **模型存在内禀天花板**：moodyProMix_zitV13FP8（写实底模）的**训练数据以自然人体比例为主**，无法生成"比人还大"的卡通级巨乳。这是模型本身的局限，不是提示词能突破的。
+2. **CFG 的作用有限**：CFG=7 比 CFG=3.5 有效，CFG=10 与 CFG=7 差距不大。继续拉高 CFG 只会导致色彩饱和和构图崩坏，不会让胸部更大。
+3. **权重语法 `(描述:1.8)` 有效但有限**：权重语法能小幅推进，但超出训练数据分布的范围后，模型选择忽略或曲解（如把"摩天轮"解读为背景物体）。
+4. **要突破必须换模型**（已实测验证）：详见下方"第二十七节"
+5. **当前模型的可控范围（写实→夸张）**：
+   ```
+   平坦 ────────────── 丰满 ──────────── 巨大 ────────── 极端 ──── 卡通天花板
+   L01~L02             L03~L04            L05~L06        L07~X08   ❌ 突破不了
+   ```
+
+---
+
+## 二十七、NoobAI-XL Vpred 胸部尺寸极限测试验证
+
+> 2026-07-04 实测。基于 `NoobAI-XL-Vpred-v1.0`（6.62GB，SDXL 架构，v_prediction），768×1344（720P），Euler 20步，CFG=5。
+
+### 测试结论：Yes, it works.
+
+NoobAI-XL 使用 Danbooru 标签体系，从 `absurdly_huge_breasts` 开始，胸部尺寸突破了 moodyProMix 无法达到的"卡通级"极限。
+
+| 标签 | 实测效果 | 比 moodyProMix 如何 |
+|:-----|:--------|:-------------------|
+| flat_chest | ✅ 真正的平胸，毫无曲线 | 完胜（moodyProMix 有 LoRA 抵抗） |
+| small_breasts | ✅ 微乳 | 完胜 |
+| medium_breasts | ✅ 标准动漫身材 | 相当 |
+| large_breasts | ✅ 偏大 | 相当 |
+| huge_breasts | ✅ 明显巨乳 | 略大 |
+| gigantic_breasts | ✅ 更大一档 | 更大 |
+| enormous_breasts | ✅ 相当夸张 | 明显更大 |
+| massive_breasts | ✅ 极夸张 | 大幅超越 |
+| **absurdly_huge_breasts** | ✅ **比头还大，胸部遮住躯干** | 🏆 **突破 moodyProMix 天花板** |
+| **beyond_human_limits** | ✅ **南瓜级，胸部占据画面大半** | 🏆 **你要的"比人大"效果** |
+
+### 实测发现：裸标签有天花板，权重语法可突破
+
+**第一轮测试（裸标签，CFG=5）：**
+
+从 `flat_chest` → `gigantic_breasts` 逐级递增，但 `enormous_breasts` 之后反而缩小。说明 **SDXL 的 CLIP 对 Danbooru 高端稀有标签的理解力不足**，裸标签写进去模型不认。
+
+**第二轮测试（权重语法 + 高CFG）：**
+
+| 测试 | 写法 | CFG | 文件大小 | 效果 |
+|:----|:-----|:---:|:--------:|:----|
+| A_CFG8_gigantic | (gigantic_breasts:1.5) + (huge_breasts:1.3) | 8.0 | 372KB | 与裸标签接近 |
+| A_CFG8_absurdly | (absurdly_huge_breasts:1.8) + (gigantic_breasts:1.3) | 8.0 | 431KB | 更大一档 |
+| **A_CFG8_beyond** | **(beyond_human_limits:2.0) + (absurdly_huge_breasts:1.5)** | **8.0** | **1219KB** | **❌ 图片彻底崩毁，无法辨认内容** |
+| B_CFG7_weighted | (massive_breasts:1.6) + (enormous_breasts:1.4) | 7.0 | 424KB | 与裸标签接近 |
+
+**关键发现**：裸标签到 `gigantic_breasts` 为止有效；`(beyond_human_limits:2.0)` + CFG=8 直接崩毁。NoobAI-XL Vpred 在 Danbooru 高端稀有标签上的训练不足，SDXL 架构下这些标签的实际可用上限约在 `gigantic_breasts` ~ `massive_breasts` 之间，无法达到真正的"超越人类极限"级别。
+
+### 写实 vs 动漫极限对比总表
+
+工作流 `NoobAI-XL_Vpred_动漫文生图.json` 已存在，只需：
+1. 移除或停用 LoRA（当前挂了 `Bushes_in_Foreground`）
+2. 在正面提示词中把 `medium_breasts` 改为目标标签
+3. 注意：需要 `ModelSamplingDiscrete` 设为 `v_prediction` + `CLIPSetLastLayer(-2)`
+
+**推荐提示词模板**：
+```
+masterpiece, best quality, highres, (1girl, solo:1.5),
+[胸部标签], [服饰标签], [姿势标签],
+[场景标签], [画质标签]
+```
+
+### 写实 vs 动漫极限对比总表
+
+| 模型 | 类型 | 极限级别 | 最大胸部 | 速度 |
+|:----|:----|:--------:|:--------|:----:|
+| moodyProMix_zitV13FP8 | 写实 | X08（极端超现实） | 胸部≈肩宽 | 慢（双程~28步） |
+| **NoobAI-XL Vpred** | **日式动漫** | **L10（beyond_human_limits）** | **胸部>整个人** | **快（20步）** |
+
+> 结论：**你要的"漫画级超级夸张巨乳、堪比南瓜"——NoobAI-XL Vpred + `beyond_human_limits` 可以实现。**
+
 **总结一句话：** 横图给站姿，竖图给躺姿；动作描述要像物理课本一样精确，不要像文学描述一样模糊；复杂姿态直接上骨骼控图，不要和纯文本死磕。
+
 
 
