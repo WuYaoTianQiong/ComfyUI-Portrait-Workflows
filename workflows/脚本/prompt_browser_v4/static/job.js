@@ -51,7 +51,9 @@ window.pollJob = async function(jobId) {
       clearInterval(window.jobPollTimer);
       window.jobPollTimer = null;
       window.activeJobs.delete(jobId);
-      window.loadHistory(false);
+      if (typeof window.loadHistory === "function") {
+        window.loadHistory(false);
+      }
     }
   } catch (e) {
     console.error("pollJob", e);

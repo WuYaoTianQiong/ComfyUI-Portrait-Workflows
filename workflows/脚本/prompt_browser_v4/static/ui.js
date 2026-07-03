@@ -5,14 +5,38 @@ const LS_UI = "promptBrowserUiState_v3";
 
 window.UiState = {
   data: {},
+  _storageAvailable: true,
+  
   load() {
-    try { this.data = JSON.parse(localStorage.getItem(LS_UI) || "{}"); } catch (_) { this.data = {}; }
+    try {
+      const stored = localStorage.getItem(LS_UI);
+      if (stored) {
+        this.data = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn("[UiState] localStorage 不可用，状态将不会持久化:", e.message);
+      this._storageAvailable = false;
+    }
   },
+  
   save() {
-    try { localStorage.setItem(LS_UI, JSON.stringify(this.data)); } catch (_) {}
+    if (!this._storageAvailable) return;
+    try {
+      localStorage.setItem(LS_UI, JSON.stringify(this.data));
+    } catch (e) {
+      console.warn("[UiState] 保存状态失败:", e.message);
+      this._storageAvailable = false;
+    }
   },
-  set(k, v) { this.data[k] = v; this.save(); },
-  get(k, def) { return this.data[k] !== undefined ? this.data[k] : def; }
+  
+  set(k, v) { 
+    this.data[k] = v; 
+    this.save(); 
+  },
+  
+  get(k, def) { 
+    return this.data[k] !== undefined ? this.data[k] : def; 
+  }
 };
 
 // -------------------------------------------------------------------
@@ -50,6 +74,26 @@ window.setupWorkflowPopover = function() {
 window.closeWorkflowPopover = function() {
   document.getElementById("wfPopover").classList.remove("show");
   window._wfPopoverOpen = false;
+};
+
+// 通用函数：点击弹窗背景关闭
+window.closeModalOnBackdrop = function(event, closeFunc) {
+  if (event.target === event.currentTarget) {
+    closeFunc();
+  }
+};
+
+// 通用函数：为按钮添加操作反馈效果
+window.showButtonFeedback = function(btn, successText, duration) {
+  if (!btn) return;
+  const originalText = btn.innerHTML;
+  const originalDisabled = btn.disabled;
+  btn.innerHTML = successText;
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.innerHTML = originalText;
+    btn.disabled = originalDisabled;
+  }, duration || 1500);
 };
 
 window.setupKeyboard = function() {
@@ -135,7 +179,9 @@ window.switchTab = function(tabId, btn) {
   });
 
   if (tabId === 'galleryTab') {
-    window.loadHistory(false);
+    if (typeof window.loadHistory === "function") {
+      window.loadHistory(false);
+    }
   }
 
   if (tabId === 'composerTab') {

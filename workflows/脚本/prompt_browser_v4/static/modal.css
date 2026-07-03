@@ -1,0 +1,182 @@
+/* ======== Phase 2: 标签管理模态框样式 ======== */
+.tag-manage-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tag-manage-form input[type="text"] {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-manage-form input[type="text"]:focus {
+  border-color: var(--primary);
+}
+
+.tag-manage-form input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.tag-manage-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.tag-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.tag-manage-item:last-child {
+  border-bottom: none;
+}
+
+.tag-manage-item .tag-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tag-manage-item .tag-name {
+  flex: 1;
+}
+
+.tag-manage-item .tag-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tag-manage-item .tag-actions {
+  display: flex;
+  gap: 4px;
+}
+/* ===================================== */
+
+/* ======== Phase 2: 分类管理模态框样式 ======== */
+.category-manage-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.category-manage-form input[type="text"] {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  min-width: 120px;
+}
+
+.category-manage-form input[type="text"]:focus {
+  border-color: var(--primary);
+}
+
+.category-manage-form input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.category-manage-form select {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  min-width: 100px;
+}
+
+.category-manage-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.category-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.category-manage-item:last-child {
+  border-bottom: none;
+}
+
+.category-manage-item .category-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.category-manage-item .category-name {
+  flex: 1;
+}
+
+.category-manage-item .category-actions {
+  display: flex;
+  gap: 4px;
+}
+/* ===================================== */
+
+/* ======== Phase 2: 模态框标签选择样式 ======== */
+.modal-tags-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.modal-tags-select .tag-option {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: 0.15s;
+  border: 1px solid transparent;
+}
+
+.modal-tags-select .tag-option:hover {
+  background: var(--panel-hover);
+}
+
+.modal-tags-select .tag-option.selected {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+/* ===================================== */

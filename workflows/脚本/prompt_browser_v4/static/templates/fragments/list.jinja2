@@ -1,0 +1,43 @@
+<div id="fragmentListContainer">
+  {% set types_map = {'人物面部':{'icon':'👤','color':'#10b981'},'人物身材':{'icon':'🧍','color':'#059669'},'人物服饰':{'icon':'👗','color':'#a855f7'},'姿态动作':{'icon':'🏃','color':'#f59e0b'},'拍摄视角':{'icon':'📷','color':'#f97316'},'场景环境':{'icon':'🌄','color':'#3b82f6'},'光影色调':{'icon':'💡','color':'#06b6d4'},'画风技术':{'icon':'🎨','color':'#ef4444'}} %}
+  <div class="frag-toolbar">
+    <input type="text" id="fragSearchInput" placeholder="搜索碎片..." value="{{ search }}"
+           hx-get="/api/fragments/html" hx-trigger="keyup changed delay:300ms" hx-target="#fragmentListContainer"
+           hx-swap="outerHTML" hx-include="[name='fragment_type']" name="search">
+    <select id="fragTypeFilter" name="fragment_type"
+            hx-get="/api/fragments/html" hx-trigger="change" hx-target="#fragmentListContainer"
+            hx-swap="outerHTML" hx-include="[name='search']">
+      <option value="">全部类型</option>
+      {% for key, info in types_map.items() %}
+      <option value="{{ key }}" {{ 'selected' if fragment_type == key }}>{{ info.icon }} {{ key }}</option>
+      {% endfor %}
+    </select>
+    <span class="frag-stats">{{ total }} 条</span>
+    <button class="btn btn-sm btn-success" onclick="window.openCreateFragmentModal()">＋ 新建</button>
+  </div>
+  <div class="fragment-list" id="fragmentList">
+    {% if items and items|length > 0 %}
+    {% for f in items %}
+    {% set ft = types_map.get(f.fragment_type, {}) %}
+    {% set color = ft.color or '#888' %}
+    {% set icon = ft.icon or '📄' %}
+    {% set content_short = f.content[:55] + '…' if f.content|length > 55 else (f.content or '') %}
+    <div class="frag-item" data-id="{{ f.id }}">
+      <div class="frag-item-header">
+        <span class="frag-item-type" style="color:{{ color }}">{{ icon }} {{ f.fragment_type }}</span>
+        <span class="frag-item-name">{{ f.name or '(未命名)' }}</span>
+        <span class="frag-item-usage" title="被引用次数">🔄{{ f.usage_count or 0 }}</span>
+      </div>
+      <div class="frag-item-body">{{ content_short }}</div>
+      <div class="frag-item-actions">
+        <button class="btn btn-xxs btn-ghost" onclick="window.editFragment({{ f.id }})" title="编辑">✏️</button>
+        <button class="btn btn-xxs btn-ghost" onclick="window.copyFragmentText({{ f.id }})" title="复制">📋</button>
+        <button class="btn btn-xxs btn-danger-ghost" onclick="window.deleteFragment({{ f.id }})" title="删除">🗑️</button>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="frag-empty">暂无碎片<br><small>点击上方"新建碎片"创建</small></div>
+    {% endif %}
+  </div>
+</div>

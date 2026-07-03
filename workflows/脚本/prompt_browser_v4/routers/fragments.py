@@ -1,15 +1,15 @@
 """碎片库 API —— 独立碎片 CRUD + 按类型分组（供 Composer 使用）"""
 import traceback
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from models import Fragment, db
+from shared import FRAGMENT_TYPES, templates
 
 router = APIRouter(tags=["碎片库"])
-
-FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
 
 
 def _ensure_table():
@@ -141,3 +141,42 @@ def delete_fragment(fragment_id: int):
         raise HTTPException(404, "碎片不存在")
     Fragment.delete_by_id(fragment_id)
     return {"success": True}
+
+
+# ====================================================================
+# Phase 2: HTMX 端点 —— 返回碎片库列表的 HTML 片段
+# ====================================================================
+
+@router.get("/fragments/html", response_class=HTMLResponse)
+def fragments_list_html(
+    request: Request,
+    search: str = Query(""),
+    fragment_type: str = Query(""),
+    page: int = Query(1),
+    page_size: int = Query(500),
+):
+    _ensure_table()
+    query = Fragment.select()
+    if search:
+        query = query.where(
+            Fragment.content.contains(search)
+            | Fragment.name.contains(search)
+            | Fragment.tags.contains(search)
+        )
+    if fragment_type:
+        query = query.where(Fragment.fragment_type == fragment_type)
+    total = query.count()
+    rows = query.order_by(Fragment.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id, "name": r.name or "", "fragment_type": r.fragment_type,
+            "content": r.content, "tags": r.tags or "", "usage_count": r.usage_count,
+            "created_at": str(r.created_at) if r.created_at else "",
+            "updated_at": str(r.updated_at) if r.updated_at else "",
+        })
+    return templates.TemplateResponse("fragments/list.jinja2", {
+        "request": request, "items": items, "total": total,
+        "page": page, "page_size": page_size,
+        "search": search, "fragment_type": fragment_type,
+    })

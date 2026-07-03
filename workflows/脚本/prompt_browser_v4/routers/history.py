@@ -4,13 +4,14 @@ import traceback
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from config import settings
 from models import GenHistory as Gh, Prompt
 from services.helpers import build_view_url, get_image_metadata
+from shared import templates
 
 router = APIRouter(tags=["历史"])
 
@@ -321,3 +322,141 @@ def clear_history():
     except Exception:
         pass
     return {"success": True}
+
+
+# ====================================================================
+# Phase 2: HTMX 端点 —— 返回历史画廊的 HTML 片段
+# ====================================================================
+
+@router.get("/history/html", response_class=HTMLResponse)
+def history_list_html(
+    request: Request,
+    page: int = Query(1),
+    page_size: int = Query(50),
+    favorite: str = Query(""),
+    sort: str = Query("newest"),
+    search: str = Query(""),
+):
+    q = Gh.select().where(Gh.is_deleted == False)
+    if favorite:
+        q = q.where(Gh.favorite == (favorite == "1"))
+    if search:
+        like = f"%{search}%"
+        condition = ((Gh.filename ** like) | (Gh.subfolder ** like) | (Gh.comfyui_prompt_id ** like))
+        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
+        if prompt_matches:
+            condition = condition | (Gh.prompt_id << prompt_matches)
+        q = q.where(condition)
+    total = q.count()
+    rows = q.order_by(Gh.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    items = []
+    for r in rows:
+        meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+        prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
+        prompt_name = ""
+        if r.prompt_id:
+            p = Prompt.get_or_none(Prompt.id == r.prompt_id)
+            if p:
+                prompt_name = p.name or ""
+        items.append({
+            "id": r.id, "job_id": r.job_id, "prompt_id": r.prompt_id,
+            "comfyui_prompt_id": r.comfyui_prompt_id,
+            "filename": r.filename, "subfolder": r.subfolder or "", "img_type": r.img_type or "output",
+            "view_url": r.view_url, "favorite": bool(r.favorite),
+            "prompt_params": prompt_params,
+            "created_at": str(r.created_at) if r.created_at else "",
+            "prompt_name": prompt_name,
+            **meta,
+        })
+    return templates.TemplateResponse("history/list.jinja2", {
+        "request": request, "items": items, "total": total,
+        "page": page, "page_size": page_size, "sort": sort,
+        "favorite": favorite, "search": search,
+    })
+
+
+# ====================================================================
+# 新增：以历史图片为输入，使用指定工作流处理（超分/重绘等）
+# ====================================================================
+
+class ProcessImageRequest(BaseModel):
+    workflow_path: str
+    workflow_content: str | None = None
+    orientation: str = "portrait"
+    quality: str = "4K"
+
+
+@router.post("/history/{item_id}/process")
+def process_history_image(item_id: int, data: ProcessImageRequest):
+    """将历史图片作为输入，用指定工作流处理（如超分、重绘等）"""
+    r = Gh.get_or_none(Gh.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+
+    # 1. 定位源图片
+    from pathlib import Path
+    from config import settings
+    from services.workflow_parser import load_workflow, inject_prompt, inject_input_image
+    from services.comfyui_client import push_prompt
+    from routers.jobs import create_job, update_job_items
+
+    if r.img_type == "input":
+        src_dir = settings.comfyui_root / "input"
+    else:
+        src_dir = settings.comfyui_root / "output"
+    src_path = src_dir / (r.subfolder or "") / r.filename if r.subfolder else src_dir / r.filename
+
+    if not src_path.exists():
+        raise HTTPException(404, f"图片文件不存在: {src_path}")
+
+    # 2. 加载工作流
+    workflow_path = data.workflow_path or ""
+    if not workflow_path:
+        raise HTTPException(400, "缺少工作流路径")
+    try:
+        api_wf = load_workflow(workflow_path, data.workflow_content)
+    except Exception as e:
+        raise HTTPException(400, f"工作流加载失败: {e}")
+
+    # 3. 注入图片到 LoadImage 节点
+    input_dir = settings.comfyui_root / "input"
+    try:
+        img_name = inject_input_image(api_wf, str(src_path), str(input_dir))
+    except Exception as e:
+        raise HTTPException(500, f"图片注入失败: {e}")
+
+    # 4. 注入基础参数
+    prompt_data = {
+        "prompt": "", "negative_prompt": "",
+        "seed": 0, "seed_override": 0,
+        "orientation": data.orientation, "quality": data.quality,
+    }
+    inject_prompt(api_wf, prompt_data)
+
+    # 5. 创建任务
+    items = [{
+        "prompt_id": r.prompt_id or 0, "seed": 0,
+        "prompt_preview": f"处理图片: {r.filename}",
+        "prompt_params": json.dumps({
+            "source": "history_process",
+            "history_id": item_id,
+            "input_image": img_name,
+            "original_filename": r.filename,
+        }, ensure_ascii=False),
+    }]
+    job_id = create_job(
+        "single", f"图片处理: {r.filename[:30]}", items,
+        workflow_path, data.orientation, data.quality,
+    )
+
+    # 6. 推送 ComfyUI
+    try:
+        result = push_prompt(api_wf)
+        comfy_pid = result.get("prompt_id", "")
+        items[0]["comfyui_prompt_id"] = comfy_pid
+        items[0]["status"] = "pending"
+        update_job_items(job_id, items, status="running")
+        return {"success": True, "job_id": job_id, "result": result}
+    except Exception as e:
+        update_job_items(job_id, items, status="error")
+        raise HTTPException(500, f"推送 ComfyUI 失败: {e}")

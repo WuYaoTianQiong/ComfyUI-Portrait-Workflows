@@ -12,6 +12,14 @@ window._galleryLoading = false;
 // -------------------------------------------------------------------
 
 window.loadHistory = async function(sync = false) {
+  // Phase 2: HTMX 模式 —— 画廊由 HTMX 自动加载
+  if (document.body.dataset.htmxActive === "1") {
+    if (!sync) {
+      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+    }
+    return;
+  }
+
   try {
     let url;
     if (sync) {
@@ -160,6 +168,7 @@ window.deleteHistoryItem = async function(id) {
     try {
       await window.api(`/api/history/${id}`, { method: "DELETE" });
       window.loadHistory(false);
+      window.showToast("已删除", "success");
     } catch (e) {
       window.showToast("删除失败: " + e.message, "error");
     }
@@ -172,6 +181,7 @@ window.clearHistory = async function() {
     try {
       await window.api("/api/history", { method: "DELETE" });
       window.loadHistory(false);
+      window.showToast("已清空历史", "success");
     } catch (e) {
       window.showToast("清空失败: " + e.message, "error");
     }
@@ -193,6 +203,11 @@ window.toggleFavorite = async function(id, btn) {
       if (btn) {
         btn.classList.toggle('active', r.favorite);
         btn.textContent = r.favorite ? '★' : '☆';
+        // 添加视觉反馈
+        btn.style.transform = "scale(1.3)";
+        setTimeout(() => {
+          btn.style.transform = "";
+        }, 300);
       }
       if (window._compareMode === 'single') {
         const favBtn = document.getElementById('lightboxFavBtn');
@@ -218,6 +233,8 @@ window.batchDeleteHistory = async function() {
   const ids = Array.from(window._gallerySelectedIds);
   if (!ids.length) return;
   if (!confirm(`确定删除选中的 ${ids.length} 张图片吗？`)) return;
+  const btn = document.getElementById('galleryBatchDel');
+  if (btn) window.showButtonFeedback(btn, '🗑️ 删除中...', 2000);
   try {
     const r = await window.api('/api/history/batch_delete', {
       method: 'POST',
@@ -240,11 +257,14 @@ window.downloadHistoryItem = function(id) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  window.showToast('已开始下载', 'info');
 };
 
 window.batchDownloadHistory = async function() {
   const ids = Array.from(window._gallerySelectedIds);
   if (!ids.length) return;
+  const btn = document.getElementById('galleryBatchDl');
+  if (btn) window.showButtonFeedback(btn, '⬇️ 下载中...', 3000);
   window.showToast(`正在下载 ${ids.length} 张图片...`, 'info');
   for (const id of ids) {
     await window.downloadHistoryItem(id);
@@ -296,18 +316,30 @@ window.onGallerySearch = function() {
   clearTimeout(window._gallerySearchTimer);
   window._gallerySearchTimer = setTimeout(() => {
     window._gallerySearch = document.getElementById('gallerySearch').value;
-    window.loadHistory(false);
+    if (document.body.dataset.htmxActive === "1") {
+      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+    } else {
+      window.loadHistory(false);
+    }
   }, 300);
 };
 
 window.onGallerySortChange = function() {
   window._gallerySort = document.getElementById('gallerySort').value;
-  window.loadHistory(false);
+  if (document.body.dataset.htmxActive === "1") {
+    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+  } else {
+    window.loadHistory(false);
+  }
 };
 
 window.onGalleryFilterChange = function() {
   window._galleryFilter = document.getElementById('galleryFilter').value;
-  window.loadHistory(false);
+  if (document.body.dataset.htmxActive === "1") {
+    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+  } else {
+    window.loadHistory(false);
+  }
 };
 
 window.updateGalleryActionButtons = function() {

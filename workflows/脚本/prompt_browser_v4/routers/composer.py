@@ -12,10 +12,9 @@ from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt
 from routers.jobs import create_job, update_job_items
 from config import settings
+from shared import FRAGMENT_TYPES, parse_prompt_fragments
 
 router = APIRouter(tags=["组合创作"])
-
-FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
 
 
 def _get_fragment_data(search="", category_id=None, tag_ids=None):
@@ -103,21 +102,6 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
         print(f"[composer] 碎片库查询失败: {type(e).__name__}: {e}")
 
     return grouped
-
-
-def parse_prompt_fragments(prompt_text: str) -> list[dict]:
-    """解析 【xx】... 格式的提示词为碎片列表"""
-    if not prompt_text:
-        return []
-    fragments = []
-    # 匹配 【xxx】后面的内容，直到遇到下一个 【 或字符串结尾
-    pattern = r'【([^】]+)】\s*(.*?)(?=\n【|$)'
-    for m in re.finditer(pattern, prompt_text, re.DOTALL):
-        name = m.group(1).strip()
-        content = m.group(2).strip()
-        if content:
-            fragments.append({"type": name, "content": content})
-    return fragments
 
 
 @router.get("/composer/fragments")

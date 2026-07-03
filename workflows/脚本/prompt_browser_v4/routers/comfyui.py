@@ -1,4 +1,4 @@
-"""ComfyUI 代理 —— 状态 / 图片 / 缩略图 / 跑图 / 批量生成"""
+"""ComfyUI 代理 —— 状态 / 图片 / 缩略图 / 工作流列表 / 跑图 / 批量生成"""
 import json
 import mimetypes
 import os
@@ -21,6 +21,36 @@ from state import batch_stop_flag
 
 router = APIRouter(tags=["ComfyUI"])
 
+DEPRECATED_DIR = settings.project_root / "废弃工作流"
+
+
+def _is_valid_workflow(filepath: Path) -> bool:
+    try:
+        content = json.loads(filepath.read_text(encoding="utf-8"))
+        return any(
+            isinstance(v, dict) and "class_type" in v
+            for v in content.values()
+        )
+    except Exception:
+        return False
+
+
+def _find_default_workflow() -> str:
+    candidates = []
+    for d in [settings.project_root, DEPRECATED_DIR]:
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*.json")):
+            try:
+                if _is_valid_workflow(f):
+                    candidates.append(str(f))
+            except Exception:
+                continue
+    for c in candidates:
+        if "文生图" in c:
+            return c
+    return candidates[0] if candidates else ""
+
 COMFYUI_API = settings.comfyui_api
 
 
@@ -33,6 +63,16 @@ class RunRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     seed_override: int = 0
+
+
+class RunTextRequest(BaseModel):
+    prompt: str = ""
+    negative_prompt: str = ""
+    workflow_path: str = ""
+    workflow_content: str | None = None
+    orientation: str = "portrait"
+    quality: str = "4K"
+    seed: int = 0
 
 
 class BatchItem(BaseModel):
@@ -133,18 +173,65 @@ def serve_thumbnail(
 
 @router.get("/validate_workflow")
 def validate_workflow(path: str = Query("")):
+    """验证工作流文件是否合法（仅检查格式，不要求特定节点类型）"""
     if not path or not os.path.exists(path):
         return {"valid": False, "error": "文件不存在"}
     try:
         with open(path, "r", encoding="utf-8") as f:
             wf = json.load(f)
-        has_clip = any(
-            isinstance(v, dict) and v.get("class_type") == "CLIPTextEncode"
-            for v in wf.values()
-        )
-        return {"valid": has_clip, "name": os.path.basename(path)}
+        # 仅检查是否为合法的 ComfyUI 工作流格式（API 格式或 UI 格式）
+        if isinstance(wf, dict):
+            # API 格式：至少包含一个节点（key 为数字字符串，value 含 class_type）
+            if any("class_type" in v for v in wf.values() if isinstance(v, dict)):
+                return {"valid": True, "name": os.path.basename(path)}
+            # UI 格式：包含 nodes 数组
+            if "nodes" in wf and isinstance(wf["nodes"], list):
+                return {"valid": True, "name": os.path.basename(path)}
+        return {"valid": False, "error": "不支持的工作流格式"}
     except Exception as e:
         return {"valid": False, "error": str(e)}
+
+
+# ---------- 工作流列表与配置 ----------
+
+@router.get("/workflows")
+def list_workflows(sort: str = Query("mtime")):
+    """列出所有可用工作流"""
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for d in [settings.project_root, DEPRECATED_DIR]:
+        if not d.exists():
+            continue
+        for f in d.glob("*.json"):
+            if not _is_valid_workflow(f):
+                continue
+            fp = str(f)
+            if fp not in seen:
+                seen.add(fp)
+                results.append({
+                    "path": fp,
+                    "name": f.name,
+                    "mtime": f.stat().st_mtime,
+                })
+
+    if sort == "mtime":
+        results.sort(key=lambda x: x["mtime"], reverse=True)
+    else:
+        results.sort(key=lambda x: x["name"])
+
+    return {"workflows": results, "default": _find_default_workflow()}
+
+
+@router.get("/config")
+def get_config():
+    """返回默认工作流和数据库路径等配置"""
+    default = _find_default_workflow()
+    return {
+        "workflow_path": default,
+        "workflow_name": Path(default).name if default else "未设置",
+        "db_path": str(settings.db_path),
+    }
 
 
 # ---------- 单图跑图 ----------
@@ -176,10 +263,20 @@ def run_prompt(req: RunRequest):
         inject_prompt(api_wf, prompt_data)
 
         # 创建任务记录
+        prompt_params = {
+            "prompt": p.prompt or "",
+            "negative_prompt": p.negative_prompt or "",
+            "seed": req.seed_override or (p.seed or 0),
+            "steps": p.steps, "cfg_scale": p.cfg_scale,
+            "sampler": p.sampler or "", "model": p.model or "",
+            "width": p.width, "height": p.height,
+            "source": "prompt_run",
+        }
         items = [{
             "prompt_id": req.id,
             "seed": req.seed_override or (p.seed or 0),
             "prompt_preview": (p.name or p.prompt or "")[:40],
+            "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
         job_id = create_job("single", "单图生成", items, workflow_path, req.orientation, req.quality)
 
@@ -195,6 +292,58 @@ def run_prompt(req: RunRequest):
             dims = f"{p.width}×{p.height}"
 
         return {"success": True, "job_id": job_id, "result": result, "dimensions": dims}
+
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+
+
+# ---------- 裸 prompt 跑图（无需 prompt_id） ----------
+
+@router.post("/run_text")
+def run_text_prompt(req: RunTextRequest):
+    """直接提交 prompt 文本生成，无需数据库中已有记录"""
+    workflow_path = req.workflow_path or ""
+    if not workflow_path:
+        raise HTTPException(400, "缺少工作流路径")
+
+    try:
+        api_wf = load_workflow(workflow_path, req.workflow_content)
+
+        prompt_data = {
+            "prompt": req.prompt or "",
+            "negative_prompt": req.negative_prompt or "",
+            "seed": req.seed or 0,
+            "orientation": req.orientation,
+            "quality": req.quality,
+        }
+        inject_prompt(api_wf, prompt_data)
+
+        prompt_params = {
+            "prompt": req.prompt or "",
+            "negative_prompt": req.negative_prompt or "",
+            "seed": req.seed or 0,
+            "source": "text_run",
+        }
+        items = [{
+            "prompt_id": 0,
+            "seed": req.seed or 0,
+            "prompt_preview": (req.prompt or "")[:40],
+            "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
+        }]
+        job_id = create_job("single", "文本跑图", items, workflow_path, req.orientation, req.quality)
+
+        result = push_prompt(api_wf)
+        comfy_pid = result.get("prompt_id", "")
+        items[0]["comfyui_prompt_id"] = comfy_pid
+        items[0]["status"] = "pending"
+        update_job_items(job_id, items, status="running")
+
+        return {"success": True, "job_id": job_id, "result": result}
 
     except FileNotFoundError as e:
         raise HTTPException(400, str(e))

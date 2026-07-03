@@ -1,0 +1,419 @@
+/* Header */
+.app-header {
+  height: 54px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.brand { display: flex; align-items: baseline; gap: 8px; min-width: 140px; }
+.brand h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
+.version { font-size: 10px; color: var(--muted); background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
+.header-center { flex: 2; display: flex; justify-content: center; min-width: 0; }
+.header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-right: 8px; min-width: 220px; white-space: nowrap; justify-content: flex-end; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.status-dot.offline { background: var(--danger); }
+.status-dot.loading { background: #fbbf24; animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+.header-select, .btn {
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.btn { font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-warning { background: var(--warning); color: #111; }
+.btn-warning:hover:not(:disabled) { filter: brightness(1.05); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-ghost { background: transparent; border-color: var(--border-soft); color: var(--muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+
+.header-select {
+  background: var(--panel-2);
+  border-color: var(--border-soft);
+  color: var(--text);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3l3 4 3-4' fill='none' stroke='%238e8e99' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
+
+.btn-icon {
+  width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 14px; background: transparent; border-color: var(--border-soft);
+  color: var(--muted); border-radius: var(--radius); cursor: pointer; transition: 0.15s;
+}
+.btn-icon:hover { background: var(--panel-2); color: var(--text); }
+
+.icon-btn {
+  background: transparent; border: 1px solid var(--border-soft); color: var(--muted);
+  border-radius: 5px; padding: 3px 7px; font-size: 11px; cursor: pointer; transition: 0.15s;
+}
+.icon-btn:hover { background: var(--panel-2); color: var(--text); }
+
+/* Selection bar */
+.selection-bar {
+  display: none; align-items: center; gap: 10px; padding: 10px 12px;
+  border-top: 1px solid var(--border); background: var(--panel-2);
+}
+.selection-bar.show { display: flex; }
+.sel-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.sel-check input { accent-color: var(--primary); cursor: pointer; }
+.sel-info { flex: 1; font-size: 12px; color: var(--primary); }
+
+/* Workflow selector */
+.wf-selector {
+  position: relative;
+  flex: 1 1 380px;
+  min-width: 180px;
+  max-width: 500px;
+}
+/* 继承 .dropdown-trigger，只补充布局需要 */
+.wf-trigger {
+  width: 100%;
+  min-width: 0;
+}
+.wf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.wf-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  max-width: 600px;
+  max-height: 420px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  flex-direction: column;
+  overflow-y: auto;
+  transform: translateZ(0); /* 触发硬件加速，避免渲染问题 */
+}
+.wf-popover.show { display: flex; }
+.wf-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+.wf-actions { display: flex; gap: 6px; }
+.wf-popover-list { overflow-y: auto; padding: 6px; }
+.wf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  gap: 8px;
+  transition: 0.15s;
+  font-size: 12px;
+}
+.wf-item:hover { background: var(--panel-hover); }
+.wf-item.active { background: rgba(99,102,241,0.12); color: var(--primary); }
+.wf-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.wf-item-hide {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.wf-item:hover .wf-item-hide { opacity: 1; }
+.wf-item-hide:hover { color: var(--danger); }
+
+/* Layout */
+.container { flex: 1; display: flex; overflow: hidden; }
+.sidebar {
+  width: 380px;
+  min-width: 280px;
+  max-width: 600px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.resize-handle {
+  width: 5px;
+  background: var(--border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.resize-handle:hover, .resize-handle:active { background: var(--primary); }
+
+/* ===== 工具栏分区布局 ===== */
+.toolbar {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* 通用区块 */
+.toolbar-section {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+/* 行内区块（排序/统计） */
+.toolbar-section-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-section-row select {
+  flex: 1;
+}
+
+/* 区块标题 */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.section-icon {
+  font-size: 14px;
+}
+
+.section-title {
+  flex: 1;
+}
+
+.section-action {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* 搜索框 */
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 10px;
+  transition: border-color 0.15s;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-box .clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  display: none;
+}
+
+.search-box .clear-btn.show {
+  display: inline-block;
+}
+
+.search-box .clear-btn:hover {
+  color: var(--text);
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+}
+
+.search-icon {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search-box input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* 按钮全宽 */
+.btn-full {
+  width: 100%;
+  justify-content: center;
+}
+
+/* 计数标签 */
+.count-badge {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tag-count {
+  font-size: 10px;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.15);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+
+
+/* ======== 通用下拉组件（可复用）======== */
+/* 触发按钮 - 与 .toolbar-field select 保持完全一致 */
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  border-radius: 5px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  min-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+
+.dropdown-trigger:hover {
+  border-color: var(--primary);
+}
+
+.dropdown-arrow {
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+/* 下拉菜单 */
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  max-height: 360px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.dropdown-menu.show {
+  display: block;
+}
+
+/* 下拉列表 */
+.dropdown-list {
+  padding: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* 下拉项 */
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: 0.15s;
+  font-size: 12px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 不让 checkbox 直接接收点击，统一由父级 div 的 onclick 处理 */
+.dropdown-item input[type="checkbox"] {
+  pointer-events: none;
+}
+
+.dropdown-item:hover {
+  background: var(--panel-hover);
+}
+
+.dropdown-item input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* 下拉项选中态 */
+.dropdown-item.selected {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+/* 标签下拉项内的颜色点与名称（扩展自通用 dropdown-item） */
+.dropdown-item .tag-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dropdown-item .tag-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 下拉底部操作区 */
+.dropdown-actions {
+  padding: 6px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}

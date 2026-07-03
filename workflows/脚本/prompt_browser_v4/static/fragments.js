@@ -6,11 +6,11 @@
 // 碎片类型定义（与 Composer 保持一致）
 // -------------------------------------------------------------------
 const FRAG_TYPES = [
-  { key: "人物面部", label: "人物面部", color: "#10b981", icon: "👤" },
+  { key: "拍摄视角", label: "拍摄视角", color: "#f97316", icon: "📷" },
+  { key: "姿态动作", label: "姿态动作", color: "#f59e0b", icon: "🏃" },
   { key: "人物身材", label: "人物身材", color: "#059669", icon: "🧍" },
   { key: "人物服饰", label: "人物服饰", color: "#a855f7", icon: "👗" },
-  { key: "姿态动作", label: "姿态动作", color: "#f59e0b", icon: "🏃" },
-  { key: "拍摄视角", label: "拍摄视角", color: "#f97316", icon: "📷" },
+  { key: "人物面部", label: "人物面部", color: "#10b981", icon: "👤" },
   { key: "场景环境", label: "场景环境", color: "#3b82f6", icon: "🌄" },
   { key: "光影色调", label: "光影色调", color: "#06b6d4", icon: "💡" },
   { key: "画风技术", label: "画风技术", color: "#ef4444", icon: "🎨" },
@@ -42,6 +42,12 @@ window._restoreFragmentState = function () {
 // 加载碎片列表
 // -------------------------------------------------------------------
 window.refreshFragmentLibrary = async function () {
+  // Phase 2: HTMX 模式
+  if (document.body.dataset.htmxActive === "1") {
+    document.body.dispatchEvent(new CustomEvent("fragmentListRefresh"));
+    return;
+  }
+
   const search = (document.getElementById("fragSearchInput") || {}).value || "";
   const params = { search, page_size: 500 };
   if (window._fragmentTypeFilter) params.fragment_type = window._fragmentTypeFilter;
@@ -120,7 +126,7 @@ window.showCreateFragment = function () {
   document.getElementById("fragFormTitle").textContent = "新建碎片";
   document.getElementById("fragName").value = "";
   document.getElementById("fragContent").value = "";
-  document.getElementById("fragType").value = "人物面部";
+  document.getElementById("fragType").value = "拍摄视角";
   document.getElementById("fragTags").value = "";
   document.getElementById("fragModalOverlay").classList.add("active");
 };
@@ -133,7 +139,7 @@ window.editFragment = async function (fragmentId) {
   document.getElementById("fragFormTitle").textContent = "编辑碎片";
   document.getElementById("fragName").value = f.name || "";
   document.getElementById("fragContent").value = f.content || "";
-  document.getElementById("fragType").value = f.fragment_type || "人物面部";
+  document.getElementById("fragType").value = f.fragment_type || "拍摄视角";
   document.getElementById("fragTags").value = f.tags || "";
   document.getElementById("fragModalOverlay").classList.add("active");
 };

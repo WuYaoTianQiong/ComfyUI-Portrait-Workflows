@@ -33,12 +33,20 @@ window.renderCategorySelect = async function(selectId, selectedId, showCount) {
     }
     addOpts(categories, 0);
 
-    // 添加组合模板特殊选项（仅侧边栏分类筛选）
+    // 添加特殊选项（仅侧边栏分类筛选）
     if (selectId === "categorySelect") {
       const sep = document.createElement("option");
       sep.disabled = true;
       sep.textContent = "──────────";
       select.appendChild(sep);
+      
+      // 组合创作分类（通过标签筛选）
+      const composeOpt = document.createElement("option");
+      composeOpt.value = "__composed__";
+      composeOpt.textContent = "🔧 组合创作";
+      select.appendChild(composeOpt);
+      
+      // 组合模板
       const tplOpt = document.createElement("option");
       tplOpt.value = "__templates__";
       tplOpt.textContent = "📦 组合模板";
@@ -63,11 +71,22 @@ function onCategoryChange() {
 
   const value = select.value;
   window.UiState.set("categoryFilter", value);
+  
   if (value === "__templates__") {
+    // 组合模板
     window._currentCategoryId = "__templates__";
     window._promptPage = 1;
     window.loadTemplatesAsItems();
+  } else if (value === "__composed__") {
+    // 组合创作（通过标签筛选，不设置 category_id）
+    window._currentCategoryId = null;  // 重要：不设置 category_id
+    window._promptPage = 1;
+    // 设置搜索框为"组合创作"标签
+    const searchInput = document.getElementById("searchInput");
+    if (searchInput) searchInput.value = "组合创作";
+    window.loadPrompts();
   } else {
+    // 普通分类
     window._currentCategoryId = value ? parseInt(value) : null;
     window._promptPage = 1;
     window.loadPrompts();

@@ -107,6 +107,10 @@ window.selectWorkflowByPath = function(path) {
   // 更新组合创作页面的批量随机跑图按钮状态
   const batchBtn = document.getElementById("composerBatchRunBtn");
   if (batchBtn) batchBtn.disabled = !window.currentWorkflowPath();
+  // 更新灯箱中的工作流显示
+  if (window.updateLightboxWorkflowDisplay) {
+    window.updateLightboxWorkflowDisplay();
+  }
 };
 
 // -------------------------------------------------------------------
@@ -167,7 +171,7 @@ window.pickWorkflowFile = function(event) {
       const hasClip = wf.nodes && Array.isArray(wf.nodes)
         ? wf.nodes.some(n => n && n.type === "CLIPTextEncode")
         : Object.values(wf).some(v => v && v.class_type === "CLIPTextEncode");
-      if (!hasClip) { window.showToast("所选文件没有 CLIPTextEncode 节点", "error"); return; }
+      if (!hasClip) { window.showToast("所选工作流不含文本提示词节点（CLIPTextEncode），将跳过提示词注入", "info"); }
     } catch (_) {
       window.showToast("无效的 JSON 文件", "error"); return;
     }

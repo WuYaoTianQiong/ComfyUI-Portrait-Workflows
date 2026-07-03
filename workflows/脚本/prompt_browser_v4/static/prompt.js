@@ -11,6 +11,37 @@ window.loadPrompts = async function(page) {
     const search = document.getElementById("searchInput").value;
     const sort = document.getElementById("sortFilter").value;
 
+    // Phase 2: HTMX mode —— 构建 URL 参数后触发服务端渲染
+    if (document.body.dataset.htmxActive === "1") {
+      const p = { search, sort, page: window._promptPage || 1 };
+      // 修复：只有 category_id 是有效整数时才传递
+      if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
+        p.category_id = window._currentCategoryId;
+      }
+      if (window._selectedTags && window._selectedTags.size > 0)
+        p.tag_ids = Array.from(window._selectedTags).join(",");
+      const qs = new URLSearchParams(p).toString();
+      const container = document.getElementById("promptListContainer");
+      if (container) container.setAttribute("hx-get", "/api/prompts/html?" + qs);
+      
+      // 返回一个 Promise，等待 HTMX 加载完成
+      return new Promise((resolve) => {
+        const onLoad = () => {
+          document.body.removeEventListener("promptListLoaded", onLoad);
+          window._composerDataStale = true;
+          resolve();
+        };
+        document.body.addEventListener("promptListLoaded", onLoad);
+        document.body.dispatchEvent(new CustomEvent("promptListRefresh"));
+        
+        // 超时保护（5秒）
+        setTimeout(() => {
+          document.body.removeEventListener("promptListLoaded", onLoad);
+          resolve();
+        }, 5000);
+      });
+    }
+
     const params = {
       search: search,
       sort: sort,
@@ -18,7 +49,8 @@ window.loadPrompts = async function(page) {
       page_size: window._promptPageSize,
     };
 
-    if (window._currentCategoryId !== null) {
+    // 修复：只有 category_id 是有效整数时才传递
+    if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
       params.category_id = window._currentCategoryId;
     }
 
@@ -50,7 +82,8 @@ window.loadPrompts = async function(page) {
 window.loadTemplatesAsItems = async function () {
   return window.withLock("loadTemplates", async () => {
     try {
-      const data = await window.api("/api/templates/as_items");
+      const sort = document.getElementById("sortFilter").value;
+      const data = await window.api(`/api/templates/as_items?sort=${sort}`);
       window.allPrompts = data.prompts || [];
       window._promptTotal = data.total || 0;
       window.renderList(window.allPrompts);
@@ -73,7 +106,12 @@ window.selectTemplateItem = function (templateId, name) {
 
 window.onSortChange = function() {
   window._promptPage = 1;
-  window.loadPrompts();
+  // 修复：如果是"📦 组合模板"分类，调用 loadTemplatesAsItems() 而不是 loadPrompts()
+  if (window._currentCategoryId === "__templates__") {
+    window.loadTemplatesAsItems();
+  } else {
+    window.loadPrompts();
+  }
   window.UiState.set("sortFilter", document.getElementById("sortFilter").value);
 };
 
@@ -287,9 +325,9 @@ window.renderDetail = function(p) {
 // -------------------------------------------------------------------
 // 分段编辑
 // -------------------------------------------------------------------
-const FRAGMENT_KEYS = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"];
-const FRAGMENT_ICONS = { "人物面部": "👤", "人物身材": "🧍", "人物服饰": "👗", "姿态动作": "🏃", "拍摄视角": "📷", "场景环境": "🌄", "光影色调": "💡", "画风技术": "🎨" };
-const FRAGMENT_COLORS = { "人物面部": "#10b981", "人物身材": "#059669", "人物服饰": "#a855f7", "姿态动作": "#f59e0b", "拍摄视角": "#f97316", "场景环境": "#3b82f6", "光影色调": "#06b6d4", "画风技术": "#ef4444" };
+const FRAGMENT_KEYS = ["拍摄视角", "姿态动作", "人物身材", "人物服饰", "人物面部", "场景环境", "光影色调", "画风技术"];
+const FRAGMENT_ICONS = { "拍摄视角": "📷", "姿态动作": "🏃", "人物身材": "🧍", "人物服饰": "👗", "人物面部": "👤", "场景环境": "🌄", "光影色调": "💡", "画风技术": "🎨" };
+const FRAGMENT_COLORS = { "拍摄视角": "#f97316", "姿态动作": "#f59e0b", "人物身材": "#059669", "人物服饰": "#a855f7", "人物面部": "#10b981", "场景环境": "#3b82f6", "光影色调": "#06b6d4", "画风技术": "#ef4444" };
 
 window._fragmentEditMode = false;
 
@@ -442,7 +480,7 @@ window.openEditModal = async function(id) {
   }
 };
 
-window.closeModal = function() {
+window.closePromptModal = function() {
   document.getElementById("modalOverlay").classList.remove("active");
   window._fragmentEditMode = false;
   // 还原 textarea 显示
@@ -452,6 +490,22 @@ window.closeModal = function() {
   if (ta) ta.style.display = "";
   if (fc) fc.style.display = "none";
   if (btn) btn.style.display = "none";
+};
+
+// 兼容旧代码：closeModal 现在关闭所有弹窗
+window.closeModal = function() {
+  // 先尝试关闭提示词编辑弹窗
+  const modalOverlay = document.getElementById("modalOverlay");
+  if (modalOverlay && modalOverlay.classList.contains("active")) {
+    window.closePromptModal();
+    return;
+  }
+  // 再尝试关闭动态弹窗
+  const dynamicModalOverlay = document.getElementById("dynamicModalOverlay");
+  if (dynamicModalOverlay && dynamicModalOverlay.classList.contains("active")) {
+    dynamicModalOverlay.classList.remove("active");
+    return;
+  }
 };
 
 window.savePrompt = async function() {
@@ -712,4 +766,88 @@ window.loadCategoriesForSelect = async function(selectedCatId) {
 // 复用 tag.js 中的共享函数 window.renderTagCheckboxes
 window.loadTagsForSelect = async function(selectedTagIds) {
   await window.renderTagCheckboxes("f_tags_select", selectedTagIds || []);
+};
+
+// ====================================================================
+// 新增：导入/导出 + 批量操作
+// ====================================================================
+
+/** 导出提示词为 JSON 文件 */
+window.exportPrompts = async function() {
+  try {
+    const blob = await window.apiBlob("/api/prompts/export");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `prompts_export_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    window.showToast("导出成功", "info");
+  } catch (e) {
+    window.showToast("导出失败: " + e.message, "error");
+  }
+};
+
+/** 导入提示词 JSON 文件 */
+window.importPrompts = async function(fileInput) {
+  const file = fileInput.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const prompts = data.prompts;
+    if (!Array.isArray(prompts)) {
+      window.showToast("无效的导入格式", "error");
+      return;
+    }
+    const resp = await window.api("/api/prompts/import", {
+      method: "POST",
+      body: JSON.stringify({ prompts }),
+      headers: { "Content-Type": "application/json" },
+    });
+    window.showToast(resp.message || `导入 ${resp.imported} 条`, "info");
+    window.loadPrompts();
+  } catch (e) {
+    window.showToast("导入失败: " + e.message, "error");
+  } finally {
+    fileInput.value = "";
+  }
+};
+
+/** 批量删除选中的提示词 */
+window.batchDeleteSelected = async function() {
+  const ids = Array.from(window.selectedIds);
+  if (!ids.length) { window.showToast("请先选择提示词", "warn"); return; }
+  if (!confirm(`确定删除 ${ids.length} 条提示词？删除后不可恢复。`)) return;
+  try {
+    const resp = await window.api("/api/prompts/batch_delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+      headers: { "Content-Type": "application/json" },
+    });
+    window.showToast(`已删除 ${resp.deleted} 条`, "info");
+    window.selectedIds.clear();
+    window.UiState.set("selectedIds", []);
+    window.loadPrompts();
+    window.updateSelectionBar();
+  } catch (e) {
+    window.showToast("批量删除失败: " + e.message, "error");
+  }
+};
+
+/** 批量收藏选中的提示词 */
+window.batchFavoriteSelected = async function() {
+  const ids = Array.from(window.selectedIds);
+  if (!ids.length) { window.showToast("请先选择提示词", "warn"); return; }
+  try {
+    const resp = await window.api("/api/prompts/batch_favorite?favorite=true", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+      headers: { "Content-Type": "application/json" },
+    });
+    window.showToast(`已收藏 ${resp.updated} 条`, "info");
+    window.loadPrompts();
+  } catch (e) {
+    window.showToast("批量收藏失败: " + e.message, "error");
+  }
 };

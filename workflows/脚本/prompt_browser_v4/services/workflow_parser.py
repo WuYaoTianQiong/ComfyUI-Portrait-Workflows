@@ -14,7 +14,23 @@ _widget_name_cache: dict[str, list[tuple[str, int]]] = {}
 
 SKIP_NODE_TYPES = {"Note", "MarkdownNote", "Label (rgthree)", "Comment", "StickyNote"}
 
-WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
+WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
+# 不论有没有 widget 字段，这些类型的输入在 widgets_values 中都占一个位置
+_WIDGET_INPUT_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "IMAGEUPLOAD"}
+
+
+def _pytype_matches_comfy(py_val: object, comfy_type: str) -> bool:
+    """检查 Python 值类型是否与 ComfyUI 输入类型兼容。"""
+    if comfy_type in ("INT",):
+        return isinstance(py_val, int) and not isinstance(py_val, bool)
+    if comfy_type in ("FLOAT",):
+        return isinstance(py_val, (int, float)) and not isinstance(py_val, bool)
+    if comfy_type in ("BOOLEAN",):
+        return isinstance(py_val, (bool, int))
+    if comfy_type in ("STRING", "COMBO"):
+        return isinstance(py_val, str)
+    # IMAGEUPLOAD, HIDDEN 等类型不做限制
+    return True
 
 
 def _get_widget_order(node_type: str) -> list[tuple[str, int]]:
@@ -36,12 +52,16 @@ def _get_widget_order(node_type: str) -> list[tuple[str, int]]:
                 if not isinstance(v, list) or len(v) == 0:
                     continue
                 first = v[0]
+                # 连接槽（list 类型，如 MODEL、VAE、LATENT 等）→ 占 1 个 slot
                 if isinstance(first, list):
                     entries.append((k, 1))
+                # COMBO 类型（下拉选择）→ v[1] 是选项列表，占 1 个 slot
+                elif first == "COMBO":
+                    entries.append((k, 1))
+                # 普通 widget（INT/FLOAT/STRING/BOOLEAN）→ v[1] 是配置 dict
                 elif isinstance(first, str) and len(v) >= 2 and isinstance(v[1], dict):
-                    if first in WIDGET_TYPES:
-                        slots = 2 if v[1].get("control_after_generate") else 1
-                        entries.append((k, slots))
+                    slots = 2 if v[1].get("control_after_generate") else 1
+                    entries.append((k, slots))
 
         # 成功才缓存
         _widget_name_cache[node_type] = entries
@@ -79,40 +99,59 @@ def ensure_api_format(workflow: dict) -> dict:
                 api[nid]["inputs"] = dict(raw_inputs)
             continue
 
-        # 根据 widget 顺序映射 widgets_values 到名称
-        wv_by_name: dict[str, object] = {}
-        if wv:
-            w_entries = _get_widget_order(node_type)
-            if w_entries:
-                pos = 0
-                for name, slots in w_entries:
-                    if pos + slots <= len(wv):
-                        wv_by_name[name] = wv[pos]
-                    pos += slots
-
+        # 按 inputs 数组顺序映射 widgets_values，配合类型检测跳过隐藏值
+        # 关键：INT/FLOAT/STRING/BOOLEAN/COMBO 类型的输入无论有没有 widget 字段或 link，
+        #       都在 widgets_values 中占一个位置（如 resolution 接 Range 节点）
+        wv_idx = 0
         for inp in raw_inputs:
             name = inp.get("name", "")
             if not name:
                 continue
+            inp_type = inp.get("type", "")
             link_id = inp.get("link")
+            has_widget_field = "widget" in inp
+            is_value_type = inp_type in _WIDGET_INPUT_TYPES
+            consumes_wv = has_widget_field or is_value_type  # 是否消耗 widgets_values 位置
+
+            if not consumes_wv:
+                # 纯连接输入（IMAGE, MODEL, VAE 等）
+                if link_id is not None:
+                    src = link_map.get(link_id)
+                    if src:
+                        api[nid]["inputs"][name] = [src[0], src[1]]
+                continue
+
+            # 跳过 widgets_values 中类型不匹配的隐藏值
+            while wv_idx < len(wv) and not _pytype_matches_comfy(wv[wv_idx], inp_type):
+                wv_idx += 1
+
             if link_id is not None:
+                # 有连线的 widget 类型输入：使用 link 值，但仍消耗位置
                 src = link_map.get(link_id)
                 if src:
                     api[nid]["inputs"][name] = [src[0], src[1]]
-            elif "widget" in inp:
-                val = inp.get("widget", {}).get("value")
-                if val is None and name in wv_by_name:
-                    val = wv_by_name[name]
-                if val is not None:
-                    api[nid]["inputs"][name] = val
+                wv_idx += 1
+            elif has_widget_field or is_value_type:
+                # 纯 widget 输入：从 widgets_values 取值
+                if wv_idx < len(wv):
+                    api[nid]["inputs"][name] = wv[wv_idx]
+                    wv_idx += 1
+                elif has_widget_field:
+                    val = inp.get("widget", {}).get("value")
+                    if val is not None:
+                        api[nid]["inputs"][name] = val
 
-        # 补充 widget values 中未被 inputs 数组覆盖的参数
-        # 解释：部分节点（如 CLIPTextEncode、KSamplerAdvanced、LoraLoaderModelOnly）
-        # 的 widget 值仅存在于 widgets_values 中，不在 inputs 数组里
-        if wv:
-            for wname, _ in w_entries:
-                if wname not in api[nid]["inputs"] and wname in wv_by_name:
-                    api[nid]["inputs"][wname] = wv_by_name[wname]
+        # 补充：widgets_values 中剩余的值，按 object_info 顺序映射到未覆盖的输入
+        # （适用于 CLIPTextEncode 等 inputs 数组不含 widget 的节点）
+        if wv_idx < len(wv):
+            w_entries = _get_widget_order(node_type)
+            if w_entries:
+                covered = set(api[nid]["inputs"].keys())
+                remaining = [wname for wname, _ in w_entries if wname not in covered]
+                for i, wname in enumerate(remaining):
+                    idx = wv_idx + i
+                    if idx < len(wv):
+                        api[nid]["inputs"][wname] = wv[idx]
 
     return api
 
@@ -136,6 +175,7 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     修改传入的 dict（就地修改）。
     """
     # 1. 注入提示词到 CLIPTextEncode 节点
+    #    若无 CLIPTextEncode 节点（如纯图片超分工作流），则跳过提示词注入
     clip_nodes = []
     for node_id, node in api_workflow.items():
         if isinstance(node, dict) and node.get("class_type") == "CLIPTextEncode":
@@ -143,11 +183,12 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
                 clip_nodes.append((node_id, node))
 
     if len(clip_nodes) == 0:
-        raise RuntimeError("工作流中没有可用的 CLIPTextEncode 节点（全部悬空）")
-
-    clip_nodes[0][1]["inputs"]["text"] = prompt_data["prompt"]
-    if len(clip_nodes) >= 2:
-        clip_nodes[1][1]["inputs"]["text"] = prompt_data["negative_prompt"]
+        # 纯图像工作流（如 SeedVR2 超分）不含文本编码节点，跳过提示词注入
+        print("[workflow_parser] 警告：未找到 CLIPTextEncode 节点，跳过提示词注入")
+    else:
+        clip_nodes[0][1]["inputs"]["text"] = prompt_data["prompt"]
+        if len(clip_nodes) >= 2:
+            clip_nodes[1][1]["inputs"]["text"] = prompt_data["negative_prompt"]
 
     # 2. 注入种子
     # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0
@@ -225,3 +266,49 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
                 inputs["filename_prefix"] = f"{orig}_{_unique_prefix}" if orig else _unique_prefix
 
     return api_workflow
+
+
+def inject_input_image(api_workflow: dict, source_path: str, dest_dir: str) -> str:
+    """将源图片复制到 ComfyUI input 目录，并注入 LoadImage 节点。
+
+    Args:
+        api_workflow: API 格式的工作流
+        source_path: 源图片绝对路径（如 ComfyUI output 下的图片）
+        dest_dir: ComfyUI input 目录绝对路径
+
+    Returns:
+        复制后的图片文件名（可用于后续记录的 prompt_params）
+    """
+    import os
+    import shutil
+    import time
+    from pathlib import Path
+
+    src = Path(source_path)
+    if not src.exists():
+        raise FileNotFoundError(f"源图片不存在: {source_path}")
+
+    # 生成唯一文件名，避免覆盖
+    ts = int(time.time() * 1000)
+    dst_name = f"pb_process_{ts}_{src.name}"
+    dst_path = Path(dest_dir) / dst_name
+    shutil.copy2(str(src), str(dst_path))
+
+    # 找到第一个 LoadImage 节点，注入图片
+    injected = False
+    for node_id, node in api_workflow.items():
+        if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+            node["inputs"]["image"] = dst_name
+            injected = True
+            break
+
+    if not injected:
+        # 没有 LoadImage 节点时尝试在第一个节点新增 image 参数
+        first_id = next(iter(api_workflow))
+        first = api_workflow[first_id]
+        if "image" not in first.get("inputs", {}):
+            first.setdefault("inputs", {})["image"] = dst_name
+            # 也设置 class_type 为 LoadImage
+            first["class_type"] = "LoadImage"
+
+    return dst_name

@@ -1,12 +1,16 @@
 """提示词 CRUD + 标签"""
+import io
+import json
 import traceback
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag
 from services.helpers import get_image_metadata
+from shared import templates
 
 router = APIRouter(tags=["提示词"])
 
@@ -30,6 +34,8 @@ class PromptCreate(BaseModel):
     is_favorite: bool = False
     is_pinned: bool = False
     rating: Optional[int] = None
+    # ======== 新增：自动分类 ========
+    auto_categorize: bool = False
     # ================================
 
 
@@ -178,6 +184,101 @@ def list_prompts(
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
 
 
+# ====================================================================
+# Phase 2: HTMX 端点 —— 返回提示词列表的 HTML 片段
+# ====================================================================
+
+@router.get("/prompts/html")
+def prompts_list_html(
+    request: Request,
+    search: str = Query(""),
+    tag: str = Query(""),
+    category_id: Optional[str] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+    sort: str = Query("newest"),
+    page: int = Query(1),
+    page_size: int = Query(50),
+):
+    """返回提示词列表 HTML 片段（供 HTMX 加载）"""
+    query = Prompt.select()
+    if search:
+        query = query.where(
+            (Prompt.prompt.contains(search))
+            | (Prompt.tags.contains(search))
+            | (Prompt.note.contains(search))
+        )
+    if tag:
+        query = query.where(Prompt.tags.contains(tag))
+    # HTMX 可能传 "null" 字符串，转为 None
+    cat_id: Optional[int] = None
+    if category_id and category_id not in ("null", "", "None"):
+        try:
+            cat_id = int(category_id)
+        except (ValueError, TypeError):
+            pass
+    if cat_id is not None:
+        query = query.join(PromptCategory).where(PromptCategory.category == cat_id)
+    if tag_ids and tag_ids not in ("null", "", "None"):
+        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
+        if tid_list:
+            query = query.join(PromptTag).where(PromptTag.tag.in_(tid_list))
+
+    total = query.count()
+
+    # 排序逻辑与 JSON 接口保持一致
+    if sort == "default":
+        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+    elif sort == "oldest":
+        order = [Prompt.is_pinned.desc(), Prompt.id.asc()]
+    elif sort == "name_asc":
+        order = [Prompt.is_pinned.desc(), Prompt.name.asc()]
+    elif sort == "name_desc":
+        order = [Prompt.is_pinned.desc(), Prompt.name.desc()]
+    elif sort == "updated":
+        order = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
+    elif sort == "most_used":
+        order = [Prompt.is_pinned.desc(), Prompt.usage_count.desc()]
+    else:
+        order = [Prompt.is_pinned.desc(), Prompt.id.desc()]
+
+    offset = (page - 1) * page_size
+    rows = query.order_by(*order).offset(offset).limit(page_size)
+
+    prompts = []
+    for r in rows:
+        prompts.append({
+            "id": r.id,
+            "prompt_preview": (r.prompt or "")[:60],
+            "tags": r.tags or "",
+            "steps": r.steps,
+            "sampler": r.sampler or "",
+            "model": r.model or "",
+            "name": r.name or "",
+            "created_at": str(r.created_at) if r.created_at else "",
+            "is_favorite": r.is_favorite,
+            "is_pinned": r.is_pinned,
+            "rating": r.rating,
+            "usage_count": r.usage_count,
+        })
+
+    return templates.TemplateResponse(
+        "prompts/list.jinja2",
+        {
+            "request": request,
+            "prompts": prompts,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "search": search,
+            "sort": sort,
+            "category_id": category_id or "",
+            "tag_ids": tag_ids or "",
+            "selected_id": 0,       # 前端 JS 维护选中状态
+            "selected_ids": [],
+        },
+    )
+
+
 @router.get("/prompts/{prompt_id}", response_model=dict)
 def get_prompt(prompt_id: int):
     """获取单条提示词详情"""
@@ -290,6 +391,7 @@ def create_prompt(data: PromptCreate):
     """新建提示词"""
     # ======== Phase 1: 处理新字段 ========
     data_dict = data.model_dump()
+    auto_categorize = data_dict.pop("auto_categorize", False)  # 提取并移除该字段
     # 确保布尔字段有默认值
     if "is_favorite" not in data_dict:
         data_dict["is_favorite"] = False
@@ -299,6 +401,16 @@ def create_prompt(data: PromptCreate):
         data_dict["usage_count"] = 0
     # ==========================================
     r = Prompt.create(**data_dict)
+    
+    # 自动分类到"组合创作"
+    if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
+        # 查找或创建"组合创作"分类
+        cat = Category.get_or_none(Category.name == "组合创作")
+        if not cat:
+            cat = Category.create(name="组合创作", color="#6366f1", parent_id=None)
+        # 关联提示词到分类
+        PromptCategory.get_or_create(prompt=r.id, category=cat.id)
+    
     return {"success": True, "id": r.id}
 
 
@@ -365,3 +477,80 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
             **meta,
         })
     return {"items": items}
+
+
+# ====================================================================
+# 新增：提示词导入/导出 + 批量操作
+# ====================================================================
+
+@router.get("/prompts/export")
+def export_prompts():
+    """导出所有提示词为 JSON 文件"""
+    rows = Prompt.select().order_by(Prompt.id)
+    data = []
+    for r in rows:
+        data.append({
+            "name": r.name or "",
+            "prompt": r.prompt or "",
+            "negative_prompt": r.negative_prompt or "",
+            "steps": r.steps, "cfg_scale": r.cfg_scale,
+            "sampler": r.sampler or "", "seed": r.seed,
+            "model": r.model or "", "width": r.width, "height": r.height,
+            "tags": r.tags or "", "note": r.note or "",
+            "is_favorite": r.is_favorite, "is_pinned": r.is_pinned,
+            "rating": r.rating,
+        })
+    json_str = json.dumps({"prompts": data}, ensure_ascii=False, indent=2)
+    return StreamingResponse(
+        io.BytesIO(json_str.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=prompts_export.json"},
+    )
+
+
+class BatchImportRequest(BaseModel):
+    prompts: list[PromptCreate]
+
+
+@router.post("/prompts/import")
+def import_prompts(data: BatchImportRequest):
+    """批量导入提示词（JSON 格式）"""
+    imported = 0
+    errors = []
+    for i, item in enumerate(data.prompts):
+        try:
+            Prompt.create(**item.model_dump())
+            imported += 1
+        except Exception as e:
+            errors.append({"index": i, "error": str(e)})
+    msg = f"成功导入 {imported} 条"
+    if errors:
+        msg += f"，{len(errors)} 条失败"
+    return {"success": True, "imported": imported, "errors": errors, "message": msg}
+
+
+class BatchIdsRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/prompts/batch_delete")
+def batch_delete_prompts(data: BatchIdsRequest):
+    """批量删除提示词（连带清理关联关系）"""
+    ids = data.ids
+    if not ids:
+        raise HTTPException(400, "ids 不能为空")
+    PromptCategory.delete().where(PromptCategory.prompt.in_(ids)).execute()
+    PromptTag.delete().where(PromptTag.prompt.in_(ids)).execute()
+    GenHistory.delete().where(GenHistory.prompt_id.in_(ids)).execute()
+    deleted = Prompt.delete().where(Prompt.id.in_(ids)).execute()
+    return {"success": True, "deleted": deleted}
+
+
+@router.post("/prompts/batch_favorite")
+def batch_favorite_prompts(data: BatchIdsRequest, favorite: bool = Query(True)):
+    """批量设置/取消收藏"""
+    ids = data.ids
+    if not ids:
+        raise HTTPException(400, "ids 不能为空")
+    Prompt.update(is_favorite=favorite).where(Prompt.id.in_(ids)).execute()
+    return {"success": True, "updated": len(ids), "is_favorite": favorite}

@@ -26,11 +26,16 @@ window.openUnifiedImageModal = function() {
           <span id="lightboxHeaderPrompt" class="lightbox-header-prompt"></span>
         </div>
         <div class="compare-modal-actions" id="compareModalActions">
+          <div class="lightbox-wf-selector" id="lightboxWfSelector" style="display:none">
+            <span class="lightbox-wf-label">工作流:</span>
+            <button class="lightbox-wf-name" id="lightboxWfName">选择工作流</button>
+          </div>
           <button id="compareSyncBtn2" class="active" onclick="window.setCompareMode('sync')">同步</button>
           <button id="compareSplitBtn2" onclick="window.setCompareMode('split')">分屏</button>
           <button id="lightboxFavBtn" class="lightbox-action-btn" style="display:none" onclick="window.toggleFavoriteFromLightbox()">☆</button>
           <button id="lightboxDlBtn" class="lightbox-action-btn" style="display:none" onclick="window.downloadFromLightbox()">⬇️</button>
           <button id="lightboxRegenBtn" class="lightbox-action-btn" style="display:none" onclick="window.regenFromLightbox()">🔄</button>
+          <button id="lightboxProcessBtn" class="lightbox-action-btn" style="display:none" onclick="window.processFromLightbox()" title="投喂给工作流处理（超分/重绘等）">⚡</button>
           <button id="lightboxPrevBtn" class="lightbox-action-btn" style="display:none" onclick="window.prevLightboxImage()" title="上一张 (←)">←</button>
           <button id="lightboxNextBtn" class="lightbox-action-btn" style="display:none" onclick="window.nextLightboxImage()" title="下一张 (→)">→</button>
           <button id="imageFlipBtn" class="lightbox-action-btn" onclick="window.flipImage()" title="水平翻转">⇋</button>
@@ -57,11 +62,29 @@ window.openUnifiedImageModal = function() {
   const favBtn = document.getElementById('lightboxFavBtn');
   const dlBtn = document.getElementById('lightboxDlBtn');
   const regenBtn = document.getElementById('lightboxRegenBtn');
+  const processBtn = document.getElementById('lightboxProcessBtn');
   const prevBtn = document.getElementById('lightboxPrevBtn');
   const nextBtn = document.getElementById('lightboxNextBtn');
   const flipBtn = document.getElementById('imageFlipBtn');
   const rotateBtn = document.getElementById('imageRotateBtn');
   const fitBtn = document.getElementById('imageFitBtn');
+  const wfSelector = document.getElementById('lightboxWfSelector');
+  const wfNameBtn = document.getElementById('lightboxWfName');
+
+  // 绑定工作流按钮点击事件
+  if (wfNameBtn && !wfNameBtn._clickBound) {
+    wfNameBtn._clickBound = true;
+    wfNameBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Workflow button clicked');
+      if (window.openWfModal) {
+        window.openWfModal();
+      } else {
+        console.error('openWfModal function not found');
+      }
+    });
+  }
 
   if (window._compareMode === 'single') {
     syncBtn.style.display = 'none';
@@ -69,12 +92,14 @@ window.openUnifiedImageModal = function() {
     favBtn.style.display = '';
     dlBtn.style.display = '';
     regenBtn.style.display = '';
+    processBtn.style.display = '';
     resetBtn.style.display = '';
     prevBtn.style.display = '';
     nextBtn.style.display = '';
     flipBtn.style.display = '';
     rotateBtn.style.display = '';
     fitBtn.style.display = '';
+    wfSelector.style.display = '';
     titleText.textContent = `图片查看（${window._lightboxIndex + 1} / ${window._lightboxItems.length}）`;
   } else {
     syncBtn.style.display = '';
@@ -82,14 +107,19 @@ window.openUnifiedImageModal = function() {
     favBtn.style.display = 'none';
     dlBtn.style.display = 'none';
     regenBtn.style.display = 'none';
+    processBtn.style.display = 'none';
     resetBtn.style.display = '';
     prevBtn.style.display = 'none';
     nextBtn.style.display = 'none';
     flipBtn.style.display = '';
     rotateBtn.style.display = '';
     fitBtn.style.display = '';
+    wfSelector.style.display = 'none';
     titleText.innerHTML = `对比模式（<span id="compareModalCount">0</span> 张）`;
   }
+
+  // 更新灯箱中的工作流显示
+  window.updateLightboxWorkflowDisplay();
 
   if (zoomDisplay) zoomDisplay.textContent = '100%';
 
@@ -318,12 +348,36 @@ window.updateLightboxActions = function() {
   if (!item) return;
   const favBtn = document.getElementById('lightboxFavBtn');
   const regenBtn = document.getElementById('lightboxRegenBtn');
+  const processBtn = document.getElementById('lightboxProcessBtn');
   if (favBtn) {
     favBtn.textContent = item.favorite ? '★' : '☆';
     favBtn.title = item.favorite ? '取消收藏' : '收藏';
   }
   if (regenBtn) {
     regenBtn.style.display = item.prompt_id ? '' : 'none';
+  }
+  if (processBtn) {
+    processBtn.title = '投喂给工作流处理（超分/重绘等）';
+  }
+};
+
+// -------------------------------------------------------------------
+// 更新灯箱中的工作流显示
+// -------------------------------------------------------------------
+
+window.updateLightboxWorkflowDisplay = function() {
+  const wfNameBtn = document.getElementById('lightboxWfName');
+  if (!wfNameBtn) return;
+
+  const workflowPath = window.currentWorkflowPath();
+  if (workflowPath) {
+    // 查找工作流名称
+    const wf = window.workflowList.find(w => w.path === workflowPath);
+    wfNameBtn.textContent = wf ? wf.name : '选择工作流';
+    wfNameBtn.title = workflowPath;
+  } else {
+    wfNameBtn.textContent = '选择工作流';
+    wfNameBtn.title = '点击选择工作流';
   }
 };
 
@@ -340,6 +394,104 @@ window.regenFromLightbox = function() {
     return;
   }
   window.regenerateFromHistory(item.prompt_id);
+};
+
+// -------------------------------------------------------------------
+// 图片处理（超分/重绘等）
+// -------------------------------------------------------------------
+
+window._processBtnLoading = false; // 防抖标志
+window._processLoadingToast = null; // 保存loading toast 元素
+
+window.processFromLightbox = async function() {
+  // 防抖：如果正在处理中，忽略点击
+  if (window._processBtnLoading) {
+    window.showToast('正在处理中，请稍候...', 'info');
+    return;
+  }
+
+  const item = window._lightboxItems[window._lightboxIndex];
+  if (!item) return;
+
+  const workflowPath = window.currentWorkflowPath();
+  if (!workflowPath) {
+    window.showToast('请先选择工作流', 'error');
+    return;
+  }
+
+  // 设置loading状态
+  window._processBtnLoading = true;
+  const processBtn = document.getElementById('lightboxProcessBtn');
+  if (processBtn) {
+    processBtn.disabled = true;
+    processBtn.style.opacity = '0.6';
+    processBtn.innerHTML = '⏳'; // 改为loading图标
+    processBtn.title = '正在提交处理任务...';
+  }
+
+  // 显示loading toast（使用自定义元素，因为showToast不支持持久化）
+  if (!window._processLoadingToast) {
+    const toast = document.createElement('div');
+    toast.id = 'processLoadingToast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel);
+      color: var(--text);
+      padding: 12px 24px;
+      border-radius: 8px;
+      border: 1px solid var(--primary);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 100002;
+      font-size: 14px;
+    `;
+    toast.textContent = '⏳ 正在提交处理任务...';
+    document.body.appendChild(toast);
+    window._processLoadingToast = toast;
+  }
+
+  try {
+    const body = {
+      workflow_path: workflowPath,
+      ...window.workflowExtraBody(),
+      orientation: window.currentOrientation,
+      quality: window.getQuality(),
+    };
+
+    const data = await window.api(`/api/history/${item.id}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    // 移除loading toast
+    if (window._processLoadingToast) {
+      window._processLoadingToast.remove();
+      window._processLoadingToast = null;
+    }
+
+    window.showToast(`已提交处理任务 (job ${data.job_id})`, 'success');
+    if (data.job_id) window.trackJob(data.job_id);
+  } catch (e) {
+    // 移除loading toast
+    if (window._processLoadingToast) {
+      window._processLoadingToast.remove();
+      window._processLoadingToast = null;
+    }
+
+    window.showToast('处理失败: ' + e.message, 'error');
+  } finally {
+    // 恢复按钮状态
+    window._processBtnLoading = false;
+    if (processBtn) {
+      processBtn.disabled = false;
+      processBtn.style.opacity = '1';
+      processBtn.innerHTML = '⚡'; // 恢复 original 图标
+      processBtn.title = '投喂给工作流处理（超分/重绘等）';
+    }
+  }
 };
 
 // -------------------------------------------------------------------
@@ -854,18 +1006,74 @@ window.restoreLightboxState = function() {
 // -------------------------------------------------------------------
 
 window.openLightbox = function(src, meta, event, clickedIndex) {
+  // Phase 5: Viewer.js 作为备选（保留原有弹窗主流程不变）
+  // 只有在 Viewer.js 可用、且是单图且 ctrl 键按下时使用
+  if (typeof Viewer !== "undefined" && clickedIndex < 0 && event && (event.ctrlKey || event.metaKey)) {
+    const img = new Image();
+    img.onload = () => { window.viewImageWithViewer(img); };
+    img.onerror = () => { window._openLightboxLegacy(src, meta, event, clickedIndex); };
+    img.src = src;
+    return;
+  }
+  window._openLightboxLegacy(src, meta, event, clickedIndex);
+};
+
+/** 旧版灯箱 */
+window._openLightboxLegacy = function(src, meta, event, clickedIndex) {
   const allItems = window._historyItems.map((item) => {
     return {
       ...item,
       view_url: item.view_url || `/api/image?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}`
     };
   });
-  
+
   window._lightboxItems = allItems;
   window._lightboxIndex = clickedIndex >= 0 ? clickedIndex : 0;
   window._compareMode = 'single';
-  
+
   window.openUnifiedImageModal();
 };
 
 window.pswpLightbox = null;
+
+// ====================================================================
+// Phase 5: Viewer.js 增强 —— 单图查看使用 Viewer.js
+// ====================================================================
+
+/** 初始化 Viewer.js 查看单张图片（替代旧的 zoom/pan 手写逻辑） */
+window.viewImageWithViewer = function(imgElement) {
+  if (typeof Viewer === "undefined") {
+    // Viewer.js 未加载，回退到旧方式
+    return false;
+  }
+  // 如果已有 viewer 实例，先销毁
+  if (window._viewerInstance) {
+    window._viewerInstance.destroy();
+    window._viewerInstance = null;
+  }
+  const viewer = new Viewer(imgElement, {
+    inline: false,
+    viewed() {
+      window._viewerInstance = viewer;
+    },
+    hidden() {
+      if (window._viewerInstance === viewer) {
+        window._viewerInstance = null;
+      }
+    },
+    toolbar: {
+      zoomIn: 1,
+      zoomOut: 1,
+      oneToOne: 1,
+      reset: 1,
+      rotateLeft: 1,
+      rotateRight: 1,
+      flipHorizontal: 1,
+      flipVertical: 1,
+    },
+    title: false,  // 由我们自己的 header 提供标题
+    navbar: false,
+  });
+  viewer.show();
+  return true;
+};
