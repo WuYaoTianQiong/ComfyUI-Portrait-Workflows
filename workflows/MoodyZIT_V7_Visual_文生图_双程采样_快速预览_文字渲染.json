@@ -1,8 +1,8 @@
 {
   "id": "00000000-0000-0000-0000-000000000000",
   "revision": 0,
-  "last_node_id": 15,
-  "last_link_id": 39,
+  "last_node_id": 16,
+  "last_link_id": 40,
   "nodes": [
     {
       "id": 1,
@@ -108,6 +108,46 @@
       ]
     },
     {
+      "id": 4,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        100,
+        730
+      ],
+      "size": [
+        270,
+        111.75
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            40
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.24.0",
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "momoka-zib-v2_clean.safetensors",
+        1.0
+      ]
+    },
+    {
       "id": 5,
       "type": "ModelSamplingAuraFlow",
       "pos": [
@@ -125,7 +165,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 18
+          "link": 40
         }
       ],
       "outputs": [
@@ -626,6 +666,14 @@
     [
       18,
       1,
+      0,
+      4,
+      0,
+      "MODEL"
+    ],
+    [
+      40,
+      4,
       0,
       5,
       0,

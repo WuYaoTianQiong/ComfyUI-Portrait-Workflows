@@ -1,0 +1,142 @@
+{
+  "last_node_id": 7,
+  "last_link_id": 9,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CheckpointLoaderSimple",
+      "pos": [300, 300],
+      "size": [315, 106],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "MODEL", "type": "MODEL", "links": [1], "shape": 3, "slot_index": 0 },
+        { "name": "CLIP", "type": "CLIP", "links": [2, 4], "shape": 3, "slot_index": 1 },
+        { "name": "VAE", "type": "VAE", "links": [5], "shape": 3, "slot_index": 2 }
+      ],
+      "properties": { "Node name for S&R": "CheckpointLoaderSimple" },
+      "widgets_values": ["animagine-xl-3.1.safetensors"]
+    },
+    {
+      "id": 2,
+      "type": "CLIPTextEncode",
+      "pos": [700, 260],
+      "size": [422.78, 180],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        { "name": "clip", "type": "CLIP", "link": 2 },
+        { "name": "text", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "CONDITIONING", "type": "CONDITIONING", "links": [3], "shape": 3, "slot_index": 0 }
+      ],
+      "properties": { "Node name for S&R": "CLIPTextEncode" },
+      "widgets_values": ["masterpiece, best quality, amazing quality, very aesthetic, absurdres, 1girl, comic style, manga style, (looking at viewer:1.2), solo, (smile:1.1), long hair, black hair, bangs, (hands on desk:1.1), (office chair:0.8), (white table:0.8), (painting:1.2), (comic illustration:1.3), (clean lineart:1.2), cell shading, depth of field, blurry background, indoors, room, window, daylight, from side, skirt, bare shoulders"]
+    },
+    {
+      "id": 6,
+      "type": "CLIPTextEncode",
+      "pos": [700, 480],
+      "size": [422.78, 164],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        { "name": "clip", "type": "CLIP", "link": 4 },
+        { "name": "text", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "CONDITIONING", "type": "CONDITIONING", "links": [6], "shape": 3, "slot_index": 0 }
+      ],
+      "properties": { "Node name for S&R": "CLIPTextEncode" },
+      "widgets_values": ["nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, ugly, deformed"]
+    },
+    {
+      "id": 3,
+      "type": "EmptyLatentImage",
+      "pos": [700, 650],
+      "size": [315, 106],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "LATENT", "type": "LATENT", "links": [7], "shape": 3, "slot_index": 0 }
+      ],
+      "properties": { "Node name for S&R": "EmptyLatentImage" },
+      "widgets_values": [832, 1216, 1]
+    },
+    {
+      "id": 4,
+      "type": "KSampler",
+      "pos": [1200, 260],
+      "size": [315, 260],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        { "name": "model", "type": "MODEL", "link": 1 },
+        { "name": "positive", "type": "CONDITIONING", "link": 3 },
+        { "name": "negative", "type": "CONDITIONING", "link": 6 },
+        { "name": "latent_image", "type": "LATENT", "link": 7 }
+      ],
+      "outputs": [
+        { "name": "LATENT", "type": "LATENT", "links": [8], "shape": 3, "slot_index": 0 }
+      ],
+      "properties": { "Node name for S&R": "KSampler" },
+      "widgets_values": [121577309084160, "randomize", 28, 7, "euler", "simple", 1]
+    },
+    {
+      "id": 5,
+      "type": "VAEDecode",
+      "pos": [1550, 260],
+      "size": [210, 46],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        { "name": "samples", "type": "LATENT", "link": 8 },
+        { "name": "vae", "type": "VAE", "link": 5 }
+      ],
+      "outputs": [
+        { "name": "IMAGE", "type": "IMAGE", "links": [9], "shape": 3, "slot_index": 0 }
+      ],
+      "properties": { "Node name for S&R": "VAEDecode" },
+      "widgets_values": []
+    },
+    {
+      "id": 7,
+      "type": "SaveImage",
+      "pos": [1550, 360],
+      "size": [210, 586],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        { "name": "images", "type": "IMAGE", "link": 9 }
+      ],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SaveImage" },
+      "widgets_values": ["AnimagineXL"]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 4, 0, "MODEL"],
+    [2, 1, 1, 2, 0, "CLIP"],
+    [3, 2, 0, 4, 1, "CONDITIONING"],
+    [4, 1, 1, 6, 0, "CLIP"],
+    [5, 1, 2, 5, 1, "VAE"],
+    [6, 6, 0, 4, 2, "CONDITIONING"],
+    [7, 3, 0, 4, 3, "LATENT"],
+    [8, 4, 0, 5, 0, "LATENT"],
+    [9, 5, 0, 7, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
