@@ -1,32 +1,32 @@
 # ComfyUI Portrait Workflows
 
-ComfyUI 写实人像工作流合集，专注于高质量人像生成。
+ComfyUI 写实人像工作流合集，专注于高质量人像生成与提示词管理。
 
 ## 工作流列表
 
-### 1. MoodyZIT V7 - 写实人像（主力）
-- **文件**: `MoodyZIT_V7_写实人像_小图放大超分_4K级竖屏.json`
-- **特点**: 两阶段采样 + 潜空间放大 + UltimateSDUpscale + FaceDetailer
-- **输出**: 2720×4080（4K级竖屏）
-- **显存**: 约 9GB
-- **文档**: [完整指南](workflows/文档/Moody_ZIT_完整指南与踩坑手册.md)
+### API 远程生成类
+- **`MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json`** — API 模式，Inpaint + 超分
+- **`MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json`** — API 模式，双程采样 + 4K 文字渲染
+- **`Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json`** — API 模式，DWPose 骨骼控图
+- **`Qwen3VL_API_图生中文提示词.json`** — API 模式，VLM 图生提示词
 
-### 2. Hunyuan 2.1 - 混元文生图
-- **文件**: `混元2.1_Q3_竖屏两阶段超分精修_4K级人像.json`
-- **特点**: 腾讯混元模型，中文理解强
-- **输出**: 768×1344 → 1728×3024
-- **显存**: 约 12GB
-- **注意**: 写实人像效果不如 MoodyZIT，更适合中文场景
+### Visual 编辑器类
+- **`MoodyZIT_V7_Visual_文生图_双程采样_快速预览_文字渲染.json`** — Visual 模式，双程采样 + 文字渲染
+- **`Qwen-2512_OpenPose编辑器_ControlNet_文生图_12G.json`** — OpenPose 编辑器控图
+- **`Qwen-Rapid_OpenPose_文生图_9x16画幅切换.json`** — OpenPose 编辑器 + 画幅切换
+- **`灵犀控骨_VNCCS骨骼控图_一键横竖切换_图生图_Visual.json`** — VNCCS 骨骼控图
 
-### 3. QwenImage - 文字生成
-- **文件**: `QwenImage_文字生成_1024x1024.json`
-- **特点**: 专门用于生成带文字的图像
-- **输出**: 1024×1024
+### 风格化 & 动漫类
+- **`AnimagineXL_3.1_漫画文生图.json`** — AnimagineXL 漫画风格
+- **`Flux1_Dev_漫画文生图.json`** — Flux 漫画风格
+- **`MoodyProMix_中文漫画_文生图.json`** — MoodyProMix 中文漫画
+- **`NoobAI-XL_Vpred_动漫文生图.json`** — NoobAI 动漫风格
+- **`Qwen-Rapid_中文文生图.json`** — Qwen-Rapid 通用文生图
+- **`Anima_2.5D_文生图_基础版.json`** — Anima 2.5D 风格
+- **`Anime_Bushes_EN.json`**  / **`Anime_PearlyToon_EN.json`** — Anime 风格英文版
 
-### 4. Anima v10 - 图生图批量
-- **文件**: `Anima_v10_图生图_批量处理.json`
-- **特点**: Anime 风格批量转换
-- **输出**: 1536×2048
+### 超分 & 辅助类
+- **`图片超分_SeedVR2_多分辨率版.json`** — SeedVR2 通用超分
 
 ## 快速开始
 
@@ -79,11 +79,11 @@ huggingface-cli download <repo_name>
 # https://hf-mirror.com/<repo_name>
 ```
 
-## 文档
+## 文档与工具
 
-- [工作流说明](workflows/文档/README_工作流说明.md) - 各工作流详细说明
 - [MoodyZIT 完整指南](workflows/文档/Moody_ZIT_完整指南与踩坑手册.md) - 从安装到出图的完整教程
 - [LoRA 训练规划](workflows/文档/LoRA训练_定制人脸_完整规划.md) - 自定义人脸训练
+- [提示词浏览器](workflows/脚本/prompt_browser_v4/) - 提示词管理、组合创作、历史追踪的 Web 工具
 
 ## 常见问题
 
