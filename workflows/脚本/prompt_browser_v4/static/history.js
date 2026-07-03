@@ -3,6 +3,9 @@
 
 window._historyItems = [];
 window._promptHistoryItems = [];
+window._galleryPage = 1;
+window._galleryTotal = 0;
+window._galleryLoading = false;
 
 // -------------------------------------------------------------------
 // 历史加载
@@ -13,21 +16,74 @@ window.loadHistory = async function(sync = false) {
     let url;
     if (sync) {
       url = "/api/history_sync";
-    } else {
-      url = "/api/history?";
-      const params = [];
-      if (window._galleryFilter === "favorite") params.push("favorite=1");
-      if (window._gallerySort) params.push(`sort=${window._gallerySort}`);
-      if (window._gallerySearch) params.push(`search=${encodeURIComponent(window._gallerySearch)}`);
-      url += params.join("&");
+      const data = await window.api(url);
+      window._historyItems = data.items || [];
+      window._galleryTotal = data.total || window._historyItems.length;
+      window._galleryPage = 1;
+      window.renderGallery(window._historyItems);
+      window.updateGalleryBadge();
+      window.updateGalleryLoadMore();
+      return;
     }
-    const data = await window.api(url);
-    window._historyItems = data.items || [];
-    window.renderGallery(window._historyItems);
-    window.updateGalleryBadge();
+
+    // 普通加载：重置为第一页
+    window._galleryPage = 1;
+    window._historyItems = [];
+    await window._loadHistoryPage();
   } catch (e) {
     console.error("loadHistory", e);
   }
+};
+
+window._loadHistoryPage = async function() {
+  if (window._galleryLoading) return;
+  window._galleryLoading = true;
+  try {
+    const params = [`page=${window._galleryPage}`, `page_size=50`];
+    if (window._galleryFilter === "favorite") params.push("favorite=1");
+    if (window._gallerySort) params.push(`sort=${window._gallerySort}`);
+    if (window._gallerySearch) params.push(`search=${encodeURIComponent(window._gallerySearch)}`);
+    const url = "/api/history?" + params.join("&");
+    const data = await window.api(url);
+    const items = data.items || [];
+    window._galleryTotal = data.total || 0;
+    if (window._galleryPage === 1) {
+      window._historyItems = items;
+      window.renderGallery(items);
+      window._setupGalleryScroll();
+    } else {
+      window._historyItems = window._historyItems.concat(items);
+      window.appendGalleryItems(items);
+    }
+    window.updateGalleryBadge();
+    window.updateGalleryLoadMore();
+  } catch (e) {
+    console.error("_loadHistoryPage", e);
+  } finally {
+    window._galleryLoading = false;
+  }
+};
+
+window.loadMoreHistory = async function() {
+  if (window._galleryLoading) return;
+  const loaded = window._historyItems.length;
+  if (loaded >= window._galleryTotal) return;
+  window._galleryPage += 1;
+  await window._loadHistoryPage();
+};
+
+// 无限滚动：监听画廊容器滚动
+window._setupGalleryScroll = function() {
+  const container = document.querySelector('.gallery-container');
+  if (!container || window._galleryScrollReady) return;
+  window._galleryScrollReady = true;
+  container.addEventListener('scroll', () => {
+    if (window._galleryLoading) return;
+    const threshold = 200;
+    if (container.scrollTop + container.clientHeight >= container.scrollHeight - threshold) {
+      window.loadMoreHistory();
+    }
+  });
 };
 
 window.renderHistory = function(items) {
