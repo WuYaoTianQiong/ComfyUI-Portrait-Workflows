@@ -22,7 +22,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 DB_PATH = r'd:\Entertainment\ComfyUI-aki-v2\ComfyUI-aki-v3\workflows\文档\提示词收藏.db'
 STYLE_PREFIXES = ["Moody Photography", "Moody Distillation photography style",
                   "Moody Distillation", "Huihui(辉辉)", "Dori"]
-FRAGMENT_TYPES = ["人物面部", "人物身材", "人物服饰", "姿态动作", "拍摄视角", "场景环境", "光影色调", "画风技术"]
+FRAGMENT_TYPES = ["姿态动作", "拍摄视角", "人物面部", "人物身材", "人物服饰", "场景环境", "光影色调", "画风技术"]
 STYLE_REPLACEMENTS = [
     (r'Keep the presentation in a romantic intimate adult direction\.', '保持浪漫亲密的成人风格。'),
     (r'Keep the presentation in a suggestive adult direction\.', '保持暗示性成人风格。'),
@@ -145,10 +145,37 @@ def parse_metadata(block):
     p = (r'Steps:\s*(\d+),\s*CFG scale:\s*([\d.]+),\s*Sampler:\s*([^,]+?),\s*'
          r'Seed:\s*(\d+),\s*Model:\s*([^,]+?),\s*width:\s*(\d+),\s*height:\s*(\d+)')
     m = re.search(p, block, re.IGNORECASE)
-    return ({
+    if not m:
+        return (None, block)
+    meta = {
         'steps': int(m.group(1)), 'cfg_scale': float(m.group(2)), 'sampler': m.group(3).strip(),
         'seed': int(m.group(4)), 'model': m.group(5).strip(), 'width': int(m.group(6)), 'height': int(m.group(7)),
-    }, block[:m.start()].strip()) if m else (None, block)
+        # 双程采样 + LoRA 可选字段
+        'scheduler': None, 'steps_2': None, 'cfg_scale_2': None,
+        'sampler_2': None, 'scheduler_2': None, 'lora_name': None, 'lora_weight': None,
+    }
+    rest = block[m.end():]
+    # 解析可选字段
+    opt = {
+        'Scheduler': 'scheduler', 'Steps 2': 'steps_2', 'CFG scale 2': 'cfg_scale_2',
+        'Sampler 2': 'sampler_2', 'Scheduler 2': 'scheduler_2',
+    }
+    for key, field in opt.items():
+        em = re.search(key + r':\s*([^,\n]+)', rest)
+        if em:
+            val = em.group(1).strip()
+            if field in ('steps_2',):
+                meta[field] = int(val)
+            elif field in ('cfg_scale_2',):
+                meta[field] = float(val)
+            else:
+                meta[field] = val
+    # LoRA: LoRA: filename@weight
+    lm = re.search(r'LoRA:\s*([^@\n]+?)(?:@([\d.]+))?', rest)
+    if lm:
+        meta['lora_name'] = lm.group(1).strip()
+        meta['lora_weight'] = float(lm.group(2)) if lm.group(2) else None
+    return (meta, block[:m.start()].strip())
 
 
 def parse_negative_prompt(body):
@@ -197,22 +224,46 @@ def insert_records(records, dry_run=False):
     if dry_run:
         print('=== 预览模式 ===')
         for i, r in enumerate(records, 1):
-            print(f'\n--- 第 {i} 条 ---\nname: {r["name"]}\nprompt: {r["prompt"][:120]}...\ntags: {r["tags"]}')
+            print(f'\n--- 第 {i} 条 ---\nname: {r["name"]}\n碎片:')
+            for ft, content in r.get('fragments', {}).items():
+                print(f'  【{ft}】{content[:60]}...')
+            print(f'model: {r["model"]} lora: {r.get("lora_name","")} cfg: {r["cfg_scale"]} w: {r["width"]} h: {r["height"]}')
+            print(f'tags: {r["tags"]}')
         return
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         for r in records:
+            # 1. 插入 prompts
             cur.execute(
-                'INSERT INTO prompts (name, prompt, negative_prompt, steps, cfg_scale, sampler, seed, model, width, height, tags, note, updated_at) '
-                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                'INSERT INTO prompts (name, prompt, negative_prompt, steps, cfg_scale, sampler, seed, model, width, height, tags, note, updated_at, scheduler, steps_2, cfg_scale_2, sampler_2, scheduler_2, lora_name, lora_weight) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (r['name'], r['prompt'], r['negative_prompt'], r['steps'], r['cfg_scale'],
                  r['sampler'], r['seed'], r['model'], r['width'], r['height'],
-                 r['tags'], '手动收藏', now))
+                 r['tags'], '手动收藏', now,
+                 r.get('scheduler'), r.get('steps_2'), r.get('cfg_scale_2'),
+                 r.get('sampler_2'), r.get('scheduler_2'), r.get('lora_name'), r.get('lora_weight')))
+            prompt_id = cur.lastrowid
+
+            # 2. 插入 templates
+            cur.execute(
+                'INSERT INTO templates (name, category_id, created_at, updated_at) VALUES (?,?,?,?)',
+                (r['name'], None, now, now))
+            template_id = cur.lastrowid
+
+            # 3. 插入 template_fragments
+            frags = r.get('fragments', {})
+            for sort_order, ft in enumerate(FRAGMENT_TYPES):
+                content = frags.get(ft, '')
+                if not content:
+                    continue
+                cur.execute(
+                    'INSERT INTO template_fragments (template_id, prompt_id, fragment_type, cached_content, sort_order) VALUES (?,?,?,?,?)',
+                    (template_id, prompt_id, ft, content, sort_order))
+
         conn.commit()
-        print(f'已插入 {len(records)} 条记录')
-        cur.execute('SELECT id, name FROM prompts ORDER BY id DESC LIMIT ?', (len(records),))
-        for row in cur.fetchall():
-            print(f'  #{row[0]} {row[1]}')
+        print(f'已插入 {len(records)} 组碎片')
+        for r in records:
+            print(f'  {r["name"]} ({len([v for v in r.get("fragments",{}).values() if v])}个碎片)')
 
 
 def main():
@@ -235,6 +286,8 @@ def main():
             meta = {
                 'steps': None, 'cfg_scale': None, 'sampler': None,
                 'seed': None, 'model': None, 'width': None, 'height': None,
+                'scheduler': None, 'steps_2': None, 'cfg_scale_2': None,
+                'sampler_2': None, 'scheduler_2': None, 'lora_name': None, 'lora_weight': None,
             }
 
         body, neg = parse_negative_prompt(body)
@@ -262,6 +315,11 @@ def main():
             'sampler': meta['sampler'], 'seed': meta['seed'],
             'model': meta['model'], 'width': meta['width'], 'height': meta['height'],
             'tags': generate_tags(frags if has_frags else {}, prompt_text, meta['model'], meta['width'], meta['height']),
+            'scheduler': meta.get('scheduler'), 'steps_2': meta.get('steps_2'),
+            'cfg_scale_2': meta.get('cfg_scale_2'), 'sampler_2': meta.get('sampler_2'),
+            'scheduler_2': meta.get('scheduler_2'), 'lora_name': meta.get('lora_name'),
+            'lora_weight': meta.get('lora_weight'),
+            'fragments': frags if has_frags else {},
         })
 
     if not records:
