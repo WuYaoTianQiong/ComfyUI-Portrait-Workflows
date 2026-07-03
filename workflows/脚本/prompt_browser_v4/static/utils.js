@@ -95,3 +95,21 @@ window.formatFileSize = function(bytes) {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 };
+
+window.copyFilename = async function(name) {
+  if (!name) return;
+  try {
+    await navigator.clipboard.writeText(name);
+    window.showToast("已复制: " + name, "success");
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = name;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    window.showToast("已复制: " + name, "success");
+  }
+};

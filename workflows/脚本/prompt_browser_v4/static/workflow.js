@@ -34,34 +34,56 @@ window.loadWorkflows = async function() {
 
 window.renderWorkflows = function() {
   const list = document.getElementById("wfPopoverList");
-  list.innerHTML = "";
-  const filtered = window.workflowList.filter(w => !window.hiddenWorkflows.includes(w.path));
-  document.getElementById("wfRestoreBtn").style.display = window.hiddenWorkflows.length ? "" : "none";
-  const selPath = document.getElementById("wfTrigger").dataset.path || "";
-  if (!filtered.length) {
-    list.innerHTML = '<div class="empty-tip" style="padding:20px">无可用工作流</div>';
-    return;
+  if (list) {
+    list.innerHTML = "";
+    const filtered = window.workflowList.filter(w => !window.hiddenWorkflows.includes(w.path));
+    document.getElementById("wfRestoreBtn").style.display = window.hiddenWorkflows.length ? "" : "none";
+    const selPath = document.getElementById("wfTrigger").dataset.path || "";
+    if (!filtered.length) {
+      list.innerHTML = '<div class="empty-tip" style="padding:20px">无可用工作流</div>';
+    } else {
+      filtered.forEach(w => { window._appendWfItem(list, w, selPath); });
+    }
   }
-  filtered.forEach(w => {
-    const div = document.createElement("div");
-    div.className = "wf-item" + (w.path === selPath ? " active" : "");
-    
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "wf-item-name";
-    nameSpan.title = w.path;
-    nameSpan.textContent = w.name;
-    
-    const hideBtn = document.createElement("button");
-    hideBtn.className = "wf-item-hide";
-    hideBtn.title = "隐藏";
-    hideBtn.textContent = "✕";
-    hideBtn.onclick = (e) => { e.stopPropagation(); window.hideWorkflow(w.path); };
-    
-    div.appendChild(nameSpan);
-    div.appendChild(hideBtn);
-    div.onclick = () => { window.selectWorkflowByPath(w.path); window.closeWorkflowPopover(); };
-    list.appendChild(div);
-  });
+  // 同时渲染到弹窗列表
+  const modalList = document.getElementById("wfModalList");
+  if (modalList) {
+    modalList.innerHTML = "";
+    if (window.workflowList.length === 0) {
+      modalList.innerHTML = '<div class="empty-tip" style="padding:20px">无可用工作流</div>';
+    } else {
+      const selPath = document.getElementById("wfTrigger").dataset.path || "";
+      const filtered = window.workflowList.filter(w => !window.hiddenWorkflows.includes(w.path));
+      document.getElementById("wfRestoreBtnModal").style.display = window.hiddenWorkflows.length ? "" : "none";
+      filtered.forEach(w => { window._appendWfItem(modalList, w, selPath); });
+    }
+  }
+};
+
+window._appendWfItem = function(container, w, selPath) {
+  const div = document.createElement("div");
+  div.className = "wf-item" + (w.path === selPath ? " active" : "");
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "wf-item-name";
+  nameSpan.title = w.path;
+  nameSpan.textContent = w.name;
+  const hideBtn = document.createElement("button");
+  hideBtn.className = "wf-item-hide";
+  hideBtn.title = "隐藏";
+  hideBtn.textContent = "✕";
+  hideBtn.onclick = (e) => { e.stopPropagation(); window.hideWorkflow(w.path); window.renderWorkflows(); };
+  div.appendChild(nameSpan);
+  div.appendChild(hideBtn);
+  div.onclick = () => { window.selectWorkflowByPath(w.path); window.closeWfModal(); };
+  container.appendChild(div);
+};
+
+window.openWfModal = function() {
+  document.getElementById("wfModalOverlay").classList.add("active");
+  window.renderWorkflows();
+};
+window.closeWfModal = function() {
+  document.getElementById("wfModalOverlay").classList.remove("active");
 };
 
 window.selectWorkflowByPath = function(path) {
@@ -82,6 +104,9 @@ window.selectWorkflowByPath = function(path) {
   window.renderWorkflows();
   window.UiState.set("workflowPath", trigger.dataset.path || "");
   window.updateRunBtn();
+  // 更新组合创作页面的批量随机跑图按钮状态
+  const batchBtn = document.getElementById("composerBatchRunBtn");
+  if (batchBtn) batchBtn.disabled = !window.currentWorkflowPath();
 };
 
 // -------------------------------------------------------------------
@@ -118,7 +143,11 @@ window.restoreHiddenWorkflows = function() {
 
 window.toggleWorkflowSort = function() {
   window.workflowSort = window.workflowSort === "mtime" ? "name" : "mtime";
-  document.getElementById("wfSortBtn").textContent = window.workflowSort === "mtime" ? "最近" : "名称";
+  const label = window.workflowSort === "mtime" ? "最近" : "名称";
+  const btn1 = document.getElementById("wfSortBtn");
+  const btn2 = document.getElementById("wfSortBtnModal");
+  if (btn1) btn1.textContent = label;
+  if (btn2) btn2.textContent = label;
   window.UiState.set("workflowSort", window.workflowSort);
   window.loadWorkflows();
 };

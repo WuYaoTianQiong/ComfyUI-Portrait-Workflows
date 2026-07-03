@@ -777,16 +777,18 @@ body {
   display: none;
   flex: 1;
   overflow: hidden;
+  flex-direction: column;
 }
 .tab-content.active {
   display: flex;
+  flex-direction: column;
 }
 
 /* 历史画廊 */
 .gallery-container {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 0 16px 16px;
 }
 .gallery-grid {
   display: grid;
@@ -811,6 +813,8 @@ body {
   height: 100%;
   object-fit: contain;
   background: var(--panel-2);
+  position: relative;
+  z-index: 1;
 }
 /* 画廊卡片 overlay 布局说明：
  * 顶部左侧：[fav] [prompt-name]
@@ -855,7 +859,7 @@ body {
   padding: 0 10px;
   border-radius: 6px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
   transition: 0.15s;
   max-width: calc(100% - 80px);
   overflow: hidden;
@@ -867,8 +871,19 @@ body {
   display: flex;
   align-items: center;
 }
-.gallery-item:hover .gallery-item-prompt { opacity: 1; }
+.gallery-item:hover .gallery-item-prompt { opacity: 1; background: var(--primary); }
 .gallery-item-prompt:hover { background: var(--primary); }
+.gallery-item-prompt-composer {
+  background: rgba(99,102,241,0.3) !important;
+  color: #a5b4fc !important;
+  cursor: default !important;
+}
+.gallery-item-prompt-random {
+  background: rgba(245,158,11,0.3) !important;
+  color: #fbbf24 !important;
+  cursor: pointer !important;
+}
+.gallery-item-prompt-random:hover { background: rgba(245,158,11,0.5) !important; }
 
 /* 勾选框：顶部右侧（统一高度 28px） */
 .gallery-item-check {
@@ -958,6 +973,35 @@ body {
   display: flex;
   align-items: center;
 }
+
+/* 文件名：底部左侧，在 meta 上方 */
+.gallery-item-filename {
+  position: absolute;
+  bottom: 40px;
+  left: 8px;
+  right: auto;
+  height: 24px;
+  line-height: 24px;
+  background: rgba(0,0,0,0.55);
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #ddd;
+  opacity: 0;
+  transition: 0.15s;
+  pointer-events: auto;
+  cursor: pointer;
+  max-width: calc(100% - 16px);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+}
+.gallery-item:hover .gallery-item-filename { opacity: 1; }
+.gallery-item-filename:hover { background: rgba(99,102,241,0.7); color: #fff; }
 .lightbox-prompt-link {
   color: #6ea8fe;
   cursor: pointer;
@@ -1226,11 +1270,229 @@ body {
   gap: 0;
   align-items: stretch;
   justify-items: center;
+  position: relative;
+}
+
+/* 图片导航箭头 */
+.lightbox-nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 60px;
+  height: 120px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  opacity: 0.3;
+  transition: opacity 0.2s, background 0.2s;
+  user-select: none;
+  border-radius: 4px;
+}
+
+.lightbox-nav-arrow:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.lightbox-nav-prev {
+  left: 10px;
+}
+
+.lightbox-nav-next {
+  right: 10px;
 }
 .compare-grid-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
 .compare-grid-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
 .compare-grid-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .compare-grid-3 .compare-item-wrap:first-child { grid-column: 1 / -1; }
+
+/* ======== Phase 4: 碎片库样式 ======== */
+
+/* 碎片库面板（侧边抽屉） */
+.frag-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 380px;
+  height: 100vh;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: 100;
+  flex-direction: column;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+  animation: fragSlideIn 0.2s ease;
+}
+@keyframes fragSlideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.frag-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 15px;
+}
+.frag-panel-stats {
+  flex: 1;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: normal;
+}
+.frag-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.frag-panel-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.frag-search-box {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.frag-search-box .search-icon {
+  position: absolute;
+  left: 8px;
+  font-size: 13px;
+  pointer-events: none;
+}
+.frag-search-box input {
+  width: 100%;
+  padding: 6px 8px 6px 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.frag-search-box input:focus {
+  border-color: var(--primary);
+}
+.frag-panel-toolbar select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.frag-panel-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+}
+
+/* 碎片卡片 */
+.frag-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.frag-empty small {
+  color: var(--muted-dark, #666);
+  font-size: 12px;
+}
+
+.frag-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.frag-item:hover {
+  border-color: var(--primary);
+}
+.frag-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.frag-item-type {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(128,128,128,0.1);
+  white-space: nowrap;
+}
+.frag-item-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.frag-item-usage {
+  font-size: 11px;
+  color: var(--muted);
+}
+.frag-item-body {
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+  line-height: 1.4;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.frag-item-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* 碎片来源标记 */
+.frag-source-library {
+  color: #f59e0b !important;
+}
+.frag-source-library::before {
+  content: "📦 ";
+}
+
+/* 小按钮变体 */
+.btn-xxs {
+  font-size: 11px;
+  padding: 2px 6px !important;
+  min-height: auto !important;
+  line-height: 1.4;
+}
+.btn-danger-ghost {
+  color: #ef4444;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.btn-danger-ghost:hover {
+  background: rgba(239,68,68,0.1);
+}
+
+/* 碎片库面板在移动端缩小 */
+@media (max-width: 768px) {
+  .frag-panel {
+    width: calc(100vw - 40px);
+  }
+}
+/* ================================ */
 .compare-grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
 /* 图片容器 */
@@ -1292,6 +1554,15 @@ body {
   color: #fff;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.compare-item-label .label-filename-clickable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.compare-item-label .label-filename-clickable:hover {
+  color: #6ea8fe;
 }
 
 /* Toast */
@@ -1362,6 +1633,11 @@ body {
   gap: 10px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+  padding: 8px 0 0 0;
 }
 .gallery-total { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .gallery-search {
@@ -1803,7 +2079,8 @@ body {
 .composer-layout {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   gap: 0;
 }
 
@@ -1836,25 +2113,124 @@ body {
   flex: 1;
   overflow: hidden;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .composer-columns {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   gap: 4px;
   padding: 6px;
   overflow: hidden;
+}
+.composer-columns.composer-list {
+  display: block;
+  overflow-y: auto;
+  gap: 0;
+  flex: 1;
+}
+
+/* 行视图 */
+.composer-list-section {
+  margin-bottom: 12px;
+  min-height: 40px;
+}
+.composer-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+.composer-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+.composer-list-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.composer-list-card:hover {
+  border-color: var(--primary);
+  background: rgba(99,102,241,0.05);
+}
+.composer-list-card.selected {
+  border-color: var(--primary);
+  background: rgba(99,102,241,0.1);
+}
+.clc-content {
+  flex: 1;
+  min-width: 0;
+}
+.clc-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px dotted transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.clc-text:hover {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+.clc-source {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .composer-col {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
+  /* 不允许溢出，让 .composer-col-list 内部滚动 */
   overflow: hidden;
+  /* 为底部渐变遮罩提供定位上下文 */
+  position: relative;
+}
+
+/* 底部渐变遮罩：提示用户下面还有内容 */
+.composer-col::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: linear-gradient(to top, var(--panel) 0%, var(--panel) 20%, transparent 100%);
+  pointer-events: none;
+  z-index: 2;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  transition: opacity 0.2s;
+}
+/* 滚动到底部时隐藏渐变遮罩 */
+.composer-col.at-bottom::after {
+  opacity: 0;
 }
 
 .composer-col-header {
@@ -1887,11 +2263,22 @@ body {
 
 .composer-col-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 6px;
+  padding: 6px 6px 6px 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  scroll-behavior: smooth;
+  /* 隐藏滚动条但保留滚动功能 */
+  scrollbar-width: none;          /* Firefox */
+}
+.composer-col-list::-webkit-scrollbar {
+  display: none;                  /* Chrome/Safari/Edge */
+}
+/* 底部空间：让最后一项可以滚到容器中间 */
+.composer-col-list {
+  padding-bottom: 250px;
 }
 
 .composer-empty {
@@ -1927,6 +2314,27 @@ body {
   line-height: 1.4;
   color: var(--text);
   word-break: break-all;
+}
+.frag-text-click {
+  cursor: pointer;
+  border-bottom: 1px dotted transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.frag-text-click:hover {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.frag-dup-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: #f59e0b;
+  background: rgba(245,158,11,0.12);
+  padding: 0 5px;
+  border-radius: 3px;
+  margin-left: 3px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 .composer-frag-card .frag-source {
@@ -2034,7 +2442,6 @@ body {
 
 .workbench-body {
   flex: 1;
-  overflow-y: auto;
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -2128,10 +2535,37 @@ body {
 }
 
 .workbench-frag-body {
+  width: 100%;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px dashed rgba(128,128,128,0.25);
+  border-radius: 4px;
+  background: rgba(128,128,128,0.03);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text);
-  word-break: break-all;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  cursor: text;
+}
+.workbench-frag-body:hover {
+  border-color: rgba(128,128,128,0.4);
+  background: rgba(128,128,128,0.06);
+}
+.workbench-frag-body:focus {
+  border-color: var(--primary);
+  border-style: solid;
+  background: var(--input-bg, #16213e);
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+}
+.workbench-editable-hint {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: normal;
+  opacity: 0.7;
 }
 
 /* 模板侧栏 */
@@ -2272,3 +2706,76 @@ body {
   .template-sidebar { display: none; }
 }
 /* ===================================== */
+
+/* 画廊加载更多 */
+.gallery-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+}
+.gallery-load-more .btn {
+  min-width: 200px;
+}
+
+/* 组合创作 - 批量随机 */
+.composer-batch-label {
+  font-size: 13px;
+  color: var(--muted);
+  margin-left: 8px;
+}
+.composer-batch-select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-1);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-accent {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+.btn-accent:hover {
+  opacity: 0.9;
+}
+.btn-accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 固定碎片类型按钮 */
+.col-fix-btn:hover {
+  color: var(--warning) !important;
+}
+
+/* 已固定类型的列头高亮 */
+.composer-col-header:has(.col-fix-btn[style*="var(--warning)"]) {
+  background: color-mix(in srgb, var(--warning) 8%, var(--panel-2));
+  border-bottom-color: var(--warning) !important;
+}
+
+/* 工作台已固定碎片标记 */
+.wb-fix-badge {
+  display: inline-block;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--warning) 18%, var(--panel-2));
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+  font-weight: 500;
+}
+
+/* 固定按钮样式（工作台操作区） */
+.wfa-fix {
+  color: var(--warning) !important;
+  background: color-mix(in srgb, var(--warning) 12%, transparent) !important;
+}
+.wfa-fix-off:hover {
+  color: var(--warning) !important;
+}

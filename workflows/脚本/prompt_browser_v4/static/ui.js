@@ -44,41 +44,7 @@ window.setupResize = function() {
 };
 
 window.setupWorkflowPopover = function() {
-  const trigger = document.getElementById("wfTrigger");
-  const popover = document.getElementById("wfPopover");
-  
-  trigger.addEventListener("click", (e) => {
-    e.stopPropagation();
-    // 互斥：统一由 openDropdown 管理
-    window.openDropdown("wfPopover");
-    window._wfPopoverOpen = popover.classList.contains("show");
-  });
-  
-  document.addEventListener("click", (e) => {
-    if (!popover.contains(e.target) && !trigger.contains(e.target)) {
-      popover.classList.remove("show");
-      window._wfPopoverOpen = false;
-    }
-  });
-  
-  // 捕获阶段拦截 wheel 事件，阻止下拉框滚动穿透到外部
-  document.addEventListener("wheel", (e) => {
-    if (!popover.classList.contains("show")) return;
-    if (!popover.contains(e.target)) return;
-    
-    // 找到实际滚动的元素（popover 或 popover-list）
-    const scrollable = e.target.closest(".wf-popover, .wf-popover-list");
-    if (!scrollable) return;
-    
-    const atTop = scrollable.scrollTop <= 0;
-    const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1;
-    
-    // 滚动到边界时允许传递，否则拦截
-    if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) return;
-    
-    e.preventDefault();
-    scrollable.scrollTop += e.deltaY;
-  }, { passive: false, capture: true });
+  // 工作流已改为弹窗
 };
 
 window.closeWorkflowPopover = function() {
@@ -108,12 +74,7 @@ window.setupKeyboard = function() {
 };
 
 window.setupUnloadGuard = function() {
-  window.addEventListener("beforeunload", (e) => {
-    if (window.activeJobs && window.activeJobs.size) {
-      e.preventDefault();
-      e.returnValue = "有生成任务正在运行，刷新页面将丢失实时进度（但会尝试续跑）。";
-    }
-  });
+  // 不再注册 beforeunload 监听，避免 Chrome 无差别弹窗
 };
 
 // -------------------------------------------------------------------
@@ -126,11 +87,12 @@ window.applyUiState = function() {
   window.currentOrientation = window.UiState.get("orientation", "portrait");
   document.getElementById("orientBtn").textContent = window.currentOrientation === "portrait" ? "📱" : "🖥️";
   window.workflowSort = window.UiState.get("workflowSort", "mtime");
-  document.getElementById("wfSortBtn").textContent = window.workflowSort === "mtime" ? "最近" : "名称";
+  const wfSortBtn = document.getElementById("wfSortBtn");
+  if (wfSortBtn) wfSortBtn.textContent = window.workflowSort === "mtime" ? "最近" : "名称";
   const sw = window.UiState.get("sidebarWidth", "");
   if (sw) document.getElementById("sidebar").style.width = sw;
 
-  const savedSort = window.UiState.get("sortFilter", "newest");
+  const savedSort = window.UiState.get("sortFilter", "default");
   const sortEl = document.getElementById("sortFilter");
   if (sortEl && [...sortEl.options].some(o => o.value === savedSort)) {
     sortEl.value = savedSort;

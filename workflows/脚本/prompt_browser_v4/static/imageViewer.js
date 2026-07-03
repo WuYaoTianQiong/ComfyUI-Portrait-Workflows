@@ -31,6 +31,11 @@ window.openUnifiedImageModal = function() {
           <button id="lightboxFavBtn" class="lightbox-action-btn" style="display:none" onclick="window.toggleFavoriteFromLightbox()">☆</button>
           <button id="lightboxDlBtn" class="lightbox-action-btn" style="display:none" onclick="window.downloadFromLightbox()">⬇️</button>
           <button id="lightboxRegenBtn" class="lightbox-action-btn" style="display:none" onclick="window.regenFromLightbox()">🔄</button>
+          <button id="lightboxPrevBtn" class="lightbox-action-btn" style="display:none" onclick="window.prevLightboxImage()" title="上一张 (←)">←</button>
+          <button id="lightboxNextBtn" class="lightbox-action-btn" style="display:none" onclick="window.nextLightboxImage()" title="下一张 (→)">→</button>
+          <button id="imageFlipBtn" class="lightbox-action-btn" onclick="window.flipImage()" title="水平翻转">⇋</button>
+          <button id="imageRotateBtn" class="lightbox-action-btn" onclick="window.rotateImage()" title="旋转 90°">⟳</button>
+          <button id="imageFitBtn" class="lightbox-action-btn" onclick="window.toggleFitMode()" title="适应/原始尺寸">1:1</button>
           <button id="compareResetBtn" onclick="window.resetImageZoom()">重置</button>
           <button onclick="window.closeCompareModal(true)">✕ 退出</button>
         </div>
@@ -52,6 +57,11 @@ window.openUnifiedImageModal = function() {
   const favBtn = document.getElementById('lightboxFavBtn');
   const dlBtn = document.getElementById('lightboxDlBtn');
   const regenBtn = document.getElementById('lightboxRegenBtn');
+  const prevBtn = document.getElementById('lightboxPrevBtn');
+  const nextBtn = document.getElementById('lightboxNextBtn');
+  const flipBtn = document.getElementById('imageFlipBtn');
+  const rotateBtn = document.getElementById('imageRotateBtn');
+  const fitBtn = document.getElementById('imageFitBtn');
 
   if (window._compareMode === 'single') {
     syncBtn.style.display = 'none';
@@ -60,6 +70,11 @@ window.openUnifiedImageModal = function() {
     dlBtn.style.display = '';
     regenBtn.style.display = '';
     resetBtn.style.display = '';
+    prevBtn.style.display = '';
+    nextBtn.style.display = '';
+    flipBtn.style.display = '';
+    rotateBtn.style.display = '';
+    fitBtn.style.display = '';
     titleText.textContent = `图片查看（${window._lightboxIndex + 1} / ${window._lightboxItems.length}）`;
   } else {
     syncBtn.style.display = '';
@@ -68,6 +83,11 @@ window.openUnifiedImageModal = function() {
     dlBtn.style.display = 'none';
     regenBtn.style.display = 'none';
     resetBtn.style.display = '';
+    prevBtn.style.display = 'none';
+    nextBtn.style.display = 'none';
+    flipBtn.style.display = '';
+    rotateBtn.style.display = '';
+    fitBtn.style.display = '';
     titleText.innerHTML = `对比模式（<span id="compareModalCount">0</span> 张）`;
   }
 
@@ -87,6 +107,13 @@ window.closeCompareModal = function(navigateBack = false) {
   document.body.style.overflow = '';
 
   window._destroyAllViewers();
+
+  // 对比模式退出时清除选中状态
+  if (window._compareMode !== 'single') {
+    window._gallerySelectedIds.clear();
+    window.updateCompareButton();
+    window.renderGallery();
+  }
 
   if (window._compareMode === 'single') {
     window._lightboxItems = [];
@@ -116,12 +143,28 @@ window.renderUnifiedImageGrid = function() {
   if (!body) return;
 
   window._destroyAllViewers();
+  window._activeImageIdx = 0;
   body.innerHTML = '';
 
   let items = [];
   if (window._compareMode === 'single') {
     items = [window._lightboxItems[window._lightboxIndex]];
     body.className = 'compare-modal-body compare-grid-1';
+
+    // 添加左右切换箭头（仅单图模式）
+    if (window._lightboxItems.length > 1) {
+      const prevArrow = document.createElement('div');
+      prevArrow.className = 'lightbox-nav-arrow lightbox-nav-prev';
+      prevArrow.innerHTML = '‹';
+      prevArrow.onclick = (e) => { e.stopPropagation(); window.prevLightboxImage(); };
+      body.appendChild(prevArrow);
+
+      const nextArrow = document.createElement('div');
+      nextArrow.className = 'lightbox-nav-arrow lightbox-nav-next';
+      nextArrow.innerHTML = '›';
+      nextArrow.onclick = (e) => { e.stopPropagation(); window.nextLightboxImage(); };
+      body.appendChild(nextArrow);
+    }
   } else {
     items = window._compareItems;
     if (countEl) countEl.textContent = items.length;
@@ -138,6 +181,7 @@ window.renderUnifiedImageGrid = function() {
     img.src = item.view_url;
     img.alt = item.filename;
     img.draggable = false;
+    img.dataset.idx = idx;
     wrap.appendChild(img);
 
     const label = document.createElement('div');
@@ -146,8 +190,14 @@ window.renderUnifiedImageGrid = function() {
 
     if (window._compareMode === 'single') {
       const rows = [];
+      if (item.filename) rows.push(`<div class="label-param-row"><span class="label-param-key">文件名：</span><span class="label-param-val label-filename-clickable" title="点击复制文件名" data-filename="${window.escAttr(item.filename)}">${window.escHtml(item.filename)}</span></div>`);
       if (item.created_at) rows.push(`<div class="label-param-row"><span class="label-param-key">时间：</span><span class="label-param-val">${item.created_at}</span></div>`);
       const p = item.prompt_params || {};
+      // 组合创作：展示完整提示词
+      if (p.source === "composer" && p.prompt) {
+        rows.push(`<div class="label-param-row"><span class="label-param-key">组合提示词：</span></div>`);
+        rows.push(`<div class="label-param-row" style="max-width:400px;word-break:break-all;white-space:pre-wrap;line-height:1.6">${window.escHtml(p.prompt)}</div>`);
+      }
       if (p.steps) rows.push(`<div class="label-param-row"><span class="label-param-key">步数：</span><span class="label-param-val">${p.steps}</span></div>`);
       if (p.cfg_scale) rows.push(`<div class="label-param-row"><span class="label-param-key">CFG：</span><span class="label-param-val">${p.cfg_scale}</span></div>`);
       if (p.sampler) rows.push(`<div class="label-param-row"><span class="label-param-key">采样器：</span><span class="label-param-val">${window.escHtml(p.sampler)}</span></div>`);
@@ -158,6 +208,7 @@ window.renderUnifiedImageGrid = function() {
       labelHTML = rows.length ? rows.join('') : window.buildImageMeta(item);
     } else {
       let parts = [];
+      if (item.filename) parts.push(`<span title="${window.escHtml(item.filename)}">${window.escHtml(item.filename)}</span>`);
       if (item.prompt_name && item.prompt_id) {
         parts.push(`<span class="lightbox-prompt-link" onclick="window.jumpToPrompt(${item.prompt_id})">📝 ${window.escHtml(item.prompt_name)}</span>`);
       }
@@ -167,6 +218,13 @@ window.renderUnifiedImageGrid = function() {
 
     label.innerHTML = labelHTML;
     label.addEventListener('mousedown', (e) => e.stopPropagation());
+    label.querySelectorAll('.label-filename-clickable').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.onclick = (e) => {
+        e.stopPropagation();
+        window.copyFilename(el.dataset.filename);
+      };
+    });
     wrap.appendChild(label);
     body.appendChild(wrap);
   });
@@ -203,7 +261,49 @@ window.renderUnifiedImageGrid = function() {
   if (window._compareMode === 'single') {
     window.setupImageModalKeyboardNav();
     window.updateLightboxActions();
-    window.updateRoute();
+    window.updateRoute(window._lightboxRouteReplace);
+    window._lightboxRouteReplace = false;
+
+    // 添加空白区域滑动切换图片功能
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let isSwiping = false;
+
+    body.addEventListener('mousedown', (e) => {
+      // 只在空白区域或箭头按钮上启动滑动
+      const target = e.target;
+      const isBlankArea = target === body ||
+                          target.classList.contains('lightbox-nav-arrow') ||
+                          target.classList.contains('lightbox-nav-prev') ||
+                          target.classList.contains('lightbox-nav-next');
+
+      if (isBlankArea && e.button === 0) {
+        swipeStartX = e.clientX;
+        swipeStartY = e.clientY;
+        isSwiping = true;
+      }
+    });
+
+    body.addEventListener('mouseup', (e) => {
+      if (!isSwiping) return;
+      isSwiping = false;
+
+      const deltaX = e.clientX - swipeStartX;
+      const deltaY = e.clientY - swipeStartY;
+      const absDeltaX = Math.abs(deltaX);
+      const absDeltaY = Math.abs(deltaY);
+
+      // 水平滑动 > 50px 且垂直滑动 < 30px 时触发切换
+      if (absDeltaX > 50 && absDeltaY < 30) {
+        if (deltaX > 0) {
+          // 向右滑动，显示上一张
+          window.prevLightboxImage();
+        } else {
+          // 向左滑动，显示下一张
+          window.nextLightboxImage();
+        }
+      }
+    });
   }
 
   window._bindCompareInteractions(body);
@@ -247,6 +347,7 @@ window.regenFromLightbox = function() {
 // -------------------------------------------------------------------
 
 window._imageStates = [];
+window._activeImageIdx = 0;
 
 window._initImageState = function(img, wrap) {
   const nW = img.naturalWidth, nH = img.naturalHeight;
@@ -260,13 +361,23 @@ window._initImageState = function(img, wrap) {
   return {
     scale: fitScale, x, y,
     targetScale: fitScale, targetX: x, targetY: y,
-    anchorX: 0, anchorY: 0, rafId: null
+    anchorX: 0, anchorY: 0, rafId: null,
+    flipX: false,
+    rotation: 0,
+    fitScale: fitScale
   };
 };
 
 window._applyTransform = function(img, state) {
-  img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+  const flip = state.flipX ? -1 : 1;
+  img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale * flip}, ${state.scale})`;
   img.style.transformOrigin = '0 0';
+};
+
+window._applyRotation = function(wrap, state) {
+  const rot = state.rotation || 0;
+  wrap.style.transform = `rotate(${rot}deg)`;
+  wrap.style.transformOrigin = 'center center';
 };
 
 window._constrain = function(state, wrap, img) {
@@ -307,6 +418,9 @@ window._destroyAllViewers = function() {
   document.querySelectorAll('#compareModalBody .compare-img').forEach(img => {
     img.style.transform = '';
     img.style.transformOrigin = '';
+  });
+  document.querySelectorAll('#compareModalBody .compare-item-wrap').forEach(wrap => {
+    wrap.style.transform = '';
   });
 };
 
@@ -373,6 +487,7 @@ window._bindCompareInteractions = function(body) {
       while (window._imageStates.length <= idx) window._imageStates.push(null);
       window._imageStates[idx] = s;
       window._applyTransform(img, s);
+      window._applyRotation(wrap, s);
       window._updateZoomDisplay();
     };
     if (img.complete && img.naturalWidth > 0) {
@@ -416,8 +531,25 @@ window._bindCompareInteractions = function(body) {
       if (!isDragging) return;
       const state = window._imageStates[idx];
       if (!state) return;
-      const deltaX = (e.clientX - dragStartX);
-      const deltaY = (e.clientY - dragStartY);
+      let deltaX = (e.clientX - dragStartX);
+      let deltaY = (e.clientY - dragStartY);
+
+      // 根据翻转和旋转状态调整拖拽方向
+      const rot = state.rotation % 360;
+      if (state.flipX) deltaX = -deltaX;
+      if (rot === 90) {
+        const tmp = deltaX;
+        deltaX = deltaY;
+        deltaY = -tmp;
+      } else if (rot === 180) {
+        deltaX = -deltaX;
+        deltaY = -deltaY;
+      } else if (rot === 270) {
+        const tmp = deltaX;
+        deltaX = -deltaY;
+        deltaY = tmp;
+      }
+
       state.x = dragStateX + deltaX;
       state.y = dragStateY + deltaY;
       state.targetX = state.x;
@@ -453,6 +585,7 @@ window._bindCompareInteractions = function(body) {
       if (e.button !== 0) return;
       const state = window._imageStates[idx];
       if (!state) return;
+      window._activeImageIdx = idx;
       isDragging = true;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
@@ -579,6 +712,100 @@ window.updateImageModalTitle = function() {
   const titleText = document.getElementById('imageModalTitleText');
   if (titleText && window._compareMode === 'single') {
     titleText.textContent = `图片查看（${window._lightboxIndex + 1} / ${window._lightboxItems.length}）`;
+  }
+};
+
+// -------------------------------------------------------------------
+// 图片编辑功能
+// -------------------------------------------------------------------
+
+window.flipImage = function() {
+  const idx = window._activeImageIdx || 0;
+  const state = window._imageStates[idx];
+  if (!state) return;
+  state.flipX = !state.flipX;
+  const img = document.querySelectorAll('#compareModalBody .compare-img')[idx];
+  if (img) window._applyTransform(img, state);
+};
+
+window.rotateImage = function() {
+  const idx = window._activeImageIdx || 0;
+  const state = window._imageStates[idx];
+  if (!state) return;
+  state.rotation = (state.rotation + 90) % 360;
+
+  const img = document.querySelectorAll('#compareModalBody .compare-img')[idx];
+  const wrap = document.querySelectorAll('#compareModalBody .compare-item-wrap')[idx];
+  if (!img || !wrap) return;
+
+  const nW = img.naturalWidth, nH = img.naturalHeight;
+  const cW = wrap.clientWidth, cH = wrap.clientHeight;
+
+  const isRotated = (state.rotation % 360 === 90 || state.rotation % 360 === 270);
+  const effectiveW = isRotated ? nH : nW;
+  const effectiveH = isRotated ? nW : nH;
+
+  state.fitScale = Math.min(cW / effectiveW, cH / effectiveH);
+  state.scale = state.fitScale;
+  state.x = (cW - effectiveW * state.fitScale) / 2;
+  state.y = (cH - effectiveH * state.fitScale) / 2;
+  state.targetScale = state.scale;
+  state.targetX = state.x;
+  state.targetY = state.y;
+
+  window._applyTransform(img, state);
+  window._applyRotation(wrap, state);
+  window._updateZoomDisplay();
+};
+
+window.toggleFitMode = function() {
+  const idx = window._activeImageIdx || 0;
+  const state = window._imageStates[idx];
+  if (!state) return;
+  const img = document.querySelectorAll('#compareModalBody .compare-img')[idx];
+  const wrap = document.querySelectorAll('#compareModalBody .compare-item-wrap')[idx];
+  if (!img || !wrap) return;
+
+  const btn = document.getElementById('imageFitBtn');
+  const isFit = Math.abs(state.scale - state.fitScale) < 0.01;
+
+  if (isFit) {
+    state.scale = 1;
+    state.x = (wrap.clientWidth - img.naturalWidth) / 2;
+    state.y = (wrap.clientHeight - img.naturalHeight) / 2;
+    if (btn) btn.textContent = '适应';
+  } else {
+    state.scale = state.fitScale;
+    state.x = (wrap.clientWidth - img.naturalWidth * state.fitScale) / 2;
+    state.y = (wrap.clientHeight - img.naturalHeight * state.fitScale) / 2;
+    if (btn) btn.textContent = '1:1';
+  }
+  state.targetScale = state.scale;
+  state.targetX = state.x;
+  state.targetY = state.y;
+  window._applyTransform(img, state);
+  window._updateZoomDisplay();
+};
+
+// -------------------------------------------------------------------
+// 灯箱图片切换
+// -------------------------------------------------------------------
+
+window.prevLightboxImage = function() {
+  if (window._lightboxIndex > 0) {
+    window._lightboxIndex--;
+    window._lightboxRouteReplace = true;
+    window.renderUnifiedImageGrid();
+    window.updateImageModalTitle();
+  }
+};
+
+window.nextLightboxImage = function() {
+  if (window._lightboxIndex < window._lightboxItems.length - 1) {
+    window._lightboxIndex++;
+    window._lightboxRouteReplace = true;
+    window.renderUnifiedImageGrid();
+    window.updateImageModalTitle();
   }
 };
 

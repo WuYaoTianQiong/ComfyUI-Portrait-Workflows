@@ -79,7 +79,7 @@ window.switchTabByRoute = function(tabId) {
   }
 };
 
-window.updateRoute = function() {
+window.updateRoute = function(useReplace = false) {
   let url = '/gallery';
   
   if (window._compareMode === 'single') {
@@ -96,7 +96,11 @@ window.updateRoute = function() {
   }
   
   if (window.location.pathname !== url && !window._suppressRouteUpdate) {
-    console.log(`[路由] pushState: ${url}  ←  ${window.location.pathname}`);
-    history.pushState(null, '', url);
+    console.log(`[路由] ${useReplace ? 'replaceState' : 'pushState'}: ${url}  ←  ${window.location.pathname}`);
+    if (useReplace) {
+      history.replaceState(null, '', url);
+    } else {
+      history.pushState(null, '', url);
+    }
   }
 };

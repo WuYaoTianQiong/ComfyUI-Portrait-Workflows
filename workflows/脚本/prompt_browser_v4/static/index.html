@@ -6,7 +6,7 @@
 <title>提示词管理器</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="/style.css?v=17">
+<link rel="stylesheet" href="/style.css?v=18">
 </head>
 <body>
 
@@ -18,21 +18,10 @@
 
   <div class="header-center">
       <div class="wf-selector" id="wfSelector">
-        <button class="wf-trigger dropdown-trigger" id="wfTrigger" title="点击选择工作流">
+        <button class="wf-trigger dropdown-trigger" id="wfTrigger" title="点击选择工作流" onclick="window.openWfModal()">
           <span class="wf-name" id="wfLabel">选择工作流</span>
-          <span class="wf-caret dropdown-arrow">▼</span>
+          <span class="wf-caret dropdown-arrow">&#x25BC;</span>
         </button>
-      <div class="wf-popover" id="wfPopover">
-        <div class="wf-popover-header">
-          <span>工作流</span>
-          <div class="wf-actions">
-            <button class="icon-btn" id="wfSortBtn" onclick="toggleWorkflowSort()" title="切换排序">最近</button>
-            <button class="icon-btn" onclick="document.getElementById('wfPicker').click()" title="从文件加载">📁</button>
-            <button class="icon-btn" id="wfRestoreBtn" onclick="restoreHiddenWorkflows()" style="display:none" title="恢复隐藏">↩</button>
-          </div>
-        </div>
-        <div class="wf-popover-list" id="wfPopoverList"></div>
-      </div>
     </div>
   </div>
 
@@ -72,7 +61,6 @@
   <div class="container" style="flex:1">
     <aside class="sidebar" id="sidebar">
       <div class="toolbar">
-        <!-- 行1: 新建按钮 + 搜索框 -->
         <div class="toolbar-row">
           <button class="btn btn-success btn-new" onclick="openCreateModal()">
             ＋ 新建
@@ -83,7 +71,6 @@
           </div>
         </div>
 
-        <!-- 行2: 分类 + 标签 (并排) -->
         <div class="toolbar-row toolbar-row-2">
           <div class="toolbar-field">
             <label class="field-label">分类 <button class="label-icon-btn" onclick="manageCategories()" title="管理分类">⚙</button></label>
@@ -96,7 +83,7 @@
             <div class="dropdown-wrap">
               <div class="dropdown-trigger" id="tagSelectorTrigger" onclick="toggleTagSelector()">
                 <span id="tagSelectorLabel">全部</span>
-                <span class="dropdown-arrow">▼</span>
+                <span class="dropdown-arrow">&#x25BC;</span>
               </div>
               <div class="dropdown-menu" id="tagSelectorDropdown">
                 <div class="dropdown-list" id="tagSelectorList"></div>
@@ -108,17 +95,17 @@
           </div>
         </div>
 
-        <!-- 行3: 排序 + 统计 -->
         <div class="toolbar-row toolbar-row-3">
           <div class="toolbar-field">
             <label class="field-label">排序</label>
             <select id="sortFilter" onchange="onSortChange()">
-              <option value="newest">最新创建</option>
+              <option value="default">默认</option>
               <option value="oldest">最早创建</option>
               <option value="name_asc">名称 A→Z</option>
               <option value="name_desc">名称 Z→A</option>
               <option value="updated">最近更新</option>
               <option value="most_used">使用最多</option>
+              <option value="newest">最新创建</option>
             </select>
           </div>
           <div class="toolbar-stats">
@@ -126,13 +113,12 @@
           </div>
         </div>
 
-        <!-- 分类管理按钮 (隐藏) -->
         <button id="manageCategoriesBtn" class="btn btn-sm btn-ghost" onclick="manageCategories()" style="display:none">管理分类</button>
       </div>
 
       <div class="batch-panel" id="batchPanel">
         <div class="batch-panel-header">
-          <span class="batch-panel-toggle" id="batchPanelToggle" onclick="toggleBatchPanel()" title="折叠/展开">▼</span>
+          <span class="batch-panel-toggle" id="batchPanelToggle" onclick="toggleBatchPanel()" title="折叠/展开">&#x25BC;</span>
           <span id="batchPanelTitle">批量任务</span>
           <div class="batch-panel-header-actions">
             <button class="btn btn-sm btn-danger" id="batchPanelStop" onclick="batchStop()" style="display:none">停止</button>
@@ -163,13 +149,13 @@
 
     <main class="main">
       <div class="detail" id="detailPanel">
-        <div class="placeholder">← 从左侧选择一个提示词</div>
+        <div class="placeholder">&#x2190; 从左侧选择一个提示词</div>
       </div>
 
       <div class="output-area" id="outputArea">
         <div class="output-header">
           <span id="outputTitle">生成结果</span>
-          <button class="close-output" onclick="closeOutput()">×</button>
+          <button class="close-output" onclick="closeOutput()">&#x00d7;</button>
         </div>
         <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progressFill"></div></div>
         <div class="progress-info" id="progressInfo"></div>
@@ -188,18 +174,18 @@
       <select class="gallery-sort" id="gallerySort" onchange="onGallerySortChange()">
         <option value="newest">最新</option>
         <option value="oldest">最早</option>
-        <option value="size_desc">体积 ↓</option>
-        <option value="size_asc">体积 ↑</option>
-        <option value="res_desc">分辨率 ↓</option>
-        <option value="res_asc">分辨率 ↑</option>
+        <option value="size_desc">体积 &#x2193;</option>
+        <option value="size_asc">体积 &#x2191;</option>
+        <option value="res_desc">分辨率 &#x2193;</option>
+        <option value="res_asc">分辨率 &#x2191;</option>
       </select>
       <select class="gallery-filter" id="galleryFilter" onchange="onGalleryFilterChange()">
         <option value="all">全部</option>
         <option value="favorite">仅收藏</option>
       </select>
       <span style="flex:1"></span>
-      <button class="btn btn-sm btn-ghost" id="galleryBatchDel" style="display:none" onclick="batchDeleteHistory()">🗑️ 删除选中</button>
-      <button class="btn btn-sm btn-ghost" id="galleryBatchDl" style="display:none" onclick="batchDownloadHistory()">⬇️ 下载选中</button>
+      <button class="btn btn-sm btn-ghost" id="galleryBatchDel" style="display:none" onclick="batchDeleteHistory()">&#x1F5D1; 删除选中</button>
+      <button class="btn btn-sm btn-ghost" id="galleryBatchDl" style="display:none" onclick="batchDownloadHistory()">&#x2B07; 下载选中</button>
       <button class="btn btn-sm btn-ghost" onclick="clearHistory()" title="清空历史">清空</button>
       <button class="btn btn-sm btn-primary" id="compareBtn" onclick="enterCompareMode()" style="display:none">
         对比 (<span id="compareCount">0</span>)
@@ -213,68 +199,44 @@
 <div class="tab-content" id="composerTab">
   <div class="composer-layout">
 
-    <!-- 工具栏 -->
     <div class="composer-toolbar">
       <div class="composer-toolbar-left">
-        <button class="btn btn-ghost" onclick="window.randomComposer()" title="随机从各个碎片列中选一个组合">🎲 随机组合</button>
-        <button class="btn btn-ghost" onclick="window.clearComposerSelection()" title="清空当前组合">🗑 清空</button>
+        <button class="btn btn-ghost" onclick="window.randomComposer()" title="随机从各个碎片列中选一个组合">&#x1F3B2; 随机组合</button>
+        <button class="btn btn-ghost" onclick="window.clearComposerSelection()" title="清空当前组合">&#x1F5D1; 清空</button>
+        <button class="btn btn-ghost" id="viewToggleBtn" onclick="window.toggleComposerView()" title="切换列/行视图">&#x1F4D0; 行视图</button>
         <span class="composer-stats" id="composerStats">加载中...</span>
       </div>
       <div class="composer-toolbar-right">
-        <button class="btn btn-success" onclick="window.composerSaveAsPrompt()" title="将当前组合保存为普通提示词（快照，可编辑）">💾 另存为提示词</button>
-        <button class="btn btn-ghost" onclick="window.saveComposerTemplate()" title="将当前组合保存为引用模板（跟随源提示词更新）">📁 保存模板</button>
-        <button class="btn btn-primary" id="composerRunBtn" onclick="window.composerRun()" disabled>🚀 跑图</button>
+        <button class="btn btn-ghost" onclick="window.toggleFragmentLibrary()" title="管理独立碎片库，可跨提示词复用">&#x1F4E6; 碎片库</button>
+        <button class="btn btn-ghost" onclick="window.openWorkbenchModal()" id="wbModalBtn" disabled title="查看和编辑已选碎片">&#x1F9E9; 工作台</button>
+        <button class="btn btn-ghost" onclick="window.openTemplateModal()" title="查看和管理模板">&#x1F4C1; 模板收藏</button>
+        <button class="btn btn-success" onclick="window.composerSaveAsPrompt()" title="将当前组合保存为普通提示词（快照，可编辑）">&#x1F4BE; 另存为提示词</button>
+        <button class="btn btn-ghost" onclick="window.saveComposerTemplate()" title="将当前组合保存为引用模板（跟随源提示词更新）">&#x1F4C1; 保存模板</button>
+        <button class="btn btn-primary" id="composerRunBtn" onclick="window.composerRun()" disabled>&#x1F680; 跑图</button>
+        <span class="composer-batch-label">批量随机</span>
+        <select id="composerBatchCount" class="composer-batch-select">
+          <option value="1">1组</option>
+          <option value="2">2组</option>
+          <option value="3">3组</option>
+          <option value="4">4组</option>
+          <option value="5" selected>5组</option>
+          <option value="6">6组</option>
+          <option value="7">7组</option>
+          <option value="8">8组</option>
+          <option value="9">9组</option>
+          <option value="10">10组</option>
+        </select>
+        <button class="btn btn-accent" id="composerBatchRunBtn" onclick="window.composerBatchRandomRun()" disabled title="按选定组数批量随机组合并跑图">&#x1F3B2; 批量随机跑图</button>
       </div>
     </div>
 
-    <!-- 主体：五列碎片 -->
     <div class="composer-body">
       <div class="composer-columns" id="composerColumns"></div>
-    </div>
-
-    <!-- 底部：工作台 + 模板面板 -->
-    <div class="composer-bottom" id="composerBottom">
-
-      <div class="composer-bottom-toggle" id="composerBottomToggle" onclick="window.toggleComposerBottom()" title="展开/收起工作台">
-        <span id="composerBottomArrow">▲</span>
-      </div>
-
-      <!-- 工作台 -->
-      <div class="workbench-area" id="workbenchArea">
-        <div class="workbench-title">
-          <span>🧩 组装工作台</span>
-          <div class="workbench-title-right">
-            <span class="workbench-hint">点击左侧碎片列中的卡片选择，再次点击取消</span>
-            <button class="wfa-title-copy" onclick="window.copyComposedPrompt()" title="复制完整拼接提示词">📋 复制完整</button>
-          </div>
-        </div>
-        <div class="workbench-body" id="composerWorkbench">
-          <div class="workbench-empty">
-            <div class="workbench-empty-icon">🧩</div>
-            <div>从上方各列点击碎片，自由组合提示词</div>
-            <div class="workbench-empty-hint">每列最多选一个碎片，选中的碎片会在这里拼接</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 模板面板 -->
-      <div class="template-sidebar" id="templateSidePanel">
-        <div class="template-handle" id="templateResizeHandle"></div>
-        <div class="template-header">
-          <span>📁 模板收藏</span>
-          <span class="template-count" id="templateCount">0</span>
-        </div>
-        <div class="template-list" id="templateList">
-          <div class="template-empty">暂无保存的模板<br><small>组合好碎片后点击"保存模板"</small></div>
-        </div>
-      </div>
-
     </div>
 
   </div>
 </div>
 
-<!-- 对比模式工具栏 -->
 <div class="compare-toolbar" id="compareToolbar">
   <button id="compareSyncBtn" class="active" onclick="setCompareMode('sync')">同步切换</button>
   <button id="compareSplitBtn" onclick="setCompareMode('split')">分屏对比</button>
@@ -282,7 +244,6 @@
   <button onclick="exitCompareMode()">退出对比</button>
 </div>
 
-<!-- Toast -->
 <div id="toast"></div>
 
 <!-- Modal: Create / Edit -->
@@ -290,7 +251,7 @@
   <div class="modal">
     <div class="modal-header">
       <h2 id="modalTitle">新建提示词</h2>
-      <button class="close-btn" onclick="closeModal()">×</button>
+      <button class="close-btn" onclick="closeModal()">&#x00d7;</button>
     </div>
     <div class="modal-body" id="modalBody">
       <label>名称<input id="f_name" placeholder="方便识别的名称，如：冰品店打卡"></label>
@@ -299,7 +260,7 @@
           <textarea id="f_prompt" rows="4" placeholder="提示词内容..."></textarea>
           <div id="f_fragments" class="frag-editor" style="display:none"></div>
           <div class="frag-toggle-wrap">
-            <button class="btn btn-sm btn-ghost" id="f_toggleFragBtn" onclick="window.toggleFragmentEdit()" style="display:none">📝 切换分段/全文编辑</button>
+            <button class="btn btn-sm btn-ghost" id="f_toggleFragBtn" onclick="window.toggleFragmentEdit()" style="display:none">&#x1F4DD; 切换分段/全文编辑</button>
           </div>
         </div>
       </label>
@@ -310,25 +271,23 @@
       </div>
       <div class="form-row">
         <label>采样器<input id="f_sampler" placeholder="euler"></label>
-        <label>种子<span class="input-with-btn"><input type="number" id="f_seed" placeholder="0"><button class="btn btn-sm btn-ghost" onclick="document.getElementById('f_seed').value=Math.floor(Math.random()*999999999999999)" title="随机种子">🎲</button></span></label>
+        <label>种子<span class="input-with-btn"><input type="number" id="f_seed" placeholder="0"><button class="btn btn-sm btn-ghost" onclick="document.getElementById('f_seed').value=Math.floor(Math.random()*999999999999999)" title="随机种子">&#x1F3B2;</button></span></label>
       </div>
       <div class="form-row">
         <label>模型<input id="f_model" placeholder="模型名称"></label>
         <label>标签<input id="f_tags" placeholder="逗号分隔，如：人像,室外"></label>
       </div>
       <label>备注<input id="f_note" placeholder="可选备注"></label>
-      <!-- ======== Phase 1: 添加评级字段 ======== -->
       <label>评级
         <div class="rating-input" id="f_rating">
-          <span class="rating-star-input" data-rating="1" onclick="setRating(1)">★</span>
-          <span class="rating-star-input" data-rating="2" onclick="setRating(2)">★</span>
-          <span class="rating-star-input" data-rating="3" onclick="setRating(3)">★</span>
-          <span class="rating-star-input" data-rating="4" onclick="setRating(4)">★</span>
-          <span class="rating-star-input" data-rating="5" onclick="setRating(5)">★</span>
+          <span class="rating-star-input" data-rating="1" onclick="setRating(1)">&#x2605;</span>
+          <span class="rating-star-input" data-rating="2" onclick="setRating(2)">&#x2605;</span>
+          <span class="rating-star-input" data-rating="3" onclick="setRating(3)">&#x2605;</span>
+          <span class="rating-star-input" data-rating="4" onclick="setRating(4)">&#x2605;</span>
+          <span class="rating-star-input" data-rating="5" onclick="setRating(5)">&#x2605;</span>
           <input type="hidden" id="f_rating_value" value="">
         </div>
       </label>
-      <!-- ======== Phase 2: 添加分类和标签选择 ======== -->
       <label>分类
         <select id="f_category">
           <option value="">未分类</option>
@@ -337,7 +296,6 @@
       <label>标签（多选）
         <div class="modal-tags-select" id="f_tags_select"></div>
       </label>
-      <!-- ============================================= -->
       <input type="hidden" id="f_id" value="">
     </div>
     <div class="modal-footer">
@@ -352,7 +310,7 @@
   <div class="modal" style="width:420px">
     <div class="modal-header">
       <h2>多种子变体生成</h2>
-      <button class="close-btn" onclick="closeVarModal()">×</button>
+      <button class="close-btn" onclick="closeVarModal()">&#x00d7;</button>
     </div>
     <div class="modal-body">
       <label>生成数量<input type="number" id="varCount" value="4" min="1" max="50" style="width:120px"></label>
@@ -373,7 +331,7 @@
   <div class="modal" style="width:500px">
     <div class="modal-header">
       <h2>管理标签</h2>
-      <button class="close-btn" onclick="closeTagManageModal()">×</button>
+      <button class="close-btn" onclick="closeTagManageModal()">&#x00d7;</button>
     </div>
     <div class="modal-body">
       <div class="tag-manage-form">
@@ -391,7 +349,7 @@
   <div class="modal" style="width:500px">
     <div class="modal-header">
       <h2>管理分类</h2>
-      <button class="close-btn" onclick="closeCategoryManageModal()">×</button>
+      <button class="close-btn" onclick="closeCategoryManageModal()">&#x00d7;</button>
     </div>
     <div class="modal-body">
       <div class="category-manage-form">
@@ -405,20 +363,166 @@
   </div>
 </div>
 
+<!-- Modal: 碎片库面板 -->
+<div class="frag-panel" id="fragmentLibraryPanel" style="display:none">
+  <div class="frag-panel-header">
+    <span>&#x1F4E6; 碎片库</span>
+    <span class="frag-panel-stats" id="fragmentStats">0 个独立碎片</span>
+    <div class="frag-panel-actions">
+      <button class="btn btn-sm btn-success" onclick="window.showCreateFragment()">＋ 新建</button>
+      <button class="btn btn-sm btn-ghost" onclick="window.hideFragmentLibrary()">✕</button>
+    </div>
+  </div>
+  <div class="frag-panel-toolbar">
+    <div class="frag-search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="fragSearchInput" placeholder="搜索碎片内容..." oninput="window.refreshFragmentLibrary()">
+    </div>
+    <select id="fragTypeFilter" onchange="window.onFragmentTypeFilter()">
+      <option value="">全部类型</option>
+      <option value="人物面部">人物面部</option>
+      <option value="人物身材">人物身材</option>
+      <option value="人物服饰">人物服饰</option>
+      <option value="姿态动作">姿态动作</option>
+      <option value="拍摄视角">拍摄视角</option>
+      <option value="场景环境">场景环境</option>
+      <option value="光影色调">光影色调</option>
+      <option value="画风技术">画风技术</option>
+    </select>
+  </div>
+  <div class="frag-panel-list" id="fragmentList">
+    <div class="frag-empty">暂无碎片</div>
+  </div>
+</div>
+
+<!-- Modal: 新建/编辑碎片 -->
+<div class="modal-overlay" id="fragModalOverlay">
+  <div class="modal" style="width:550px">
+    <div class="modal-header">
+      <h2 id="fragFormTitle">新建碎片</h2>
+      <button class="close-btn" onclick="window.closeFragmentModal()">&#x00d7;</button>
+    </div>
+    <div class="modal-body">
+      <label>碎片名称<input id="fragName" placeholder="方便识别的名称，如：明代桃心髻"></label>
+      <label>碎片类型
+        <select id="fragType">
+          <option value="人物面部">人物面部</option>
+          <option value="人物身材">人物身材</option>
+          <option value="人物服饰">人物服饰</option>
+          <option value="姿态动作">姿态动作</option>
+          <option value="拍摄视角">拍摄视角</option>
+          <option value="场景环境">场景环境</option>
+          <option value="光影色调">光影色调</option>
+          <option value="画风技术">画风技术</option>
+        </select>
+      </label>
+      <label>碎片内容<textarea id="fragContent" rows="5" placeholder="碎片文本内容..."></textarea></label>
+      <label>标签<input id="fragTags" placeholder="逗号分隔，如：古风,薄纱"></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="window.closeFragmentModal()">取消</button>
+      <button class="btn btn-success" onclick="window.saveFragment()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 工作流选择 -->
+<div class="modal-overlay" id="wfModalOverlay">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <h2>选择工作流</h2>
+      <button class="close-btn" onclick="window.closeWfModal()">&#x00d7;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <button class="icon-btn" id="wfSortBtnModal" onclick="window.toggleWorkflowSort()" title="切换排序">最近</button>
+        <button class="icon-btn" onclick="document.getElementById('wfPicker').click()" title="从文件加载">📁 加载文件</button>
+        <button class="icon-btn" id="wfRestoreBtnModal" onclick="window.restoreHiddenWorkflows()" style="display:none" title="恢复隐藏">↩ 恢复隐藏</button>
+      </div>
+      <div class="wf-popover-list" id="wfModalList"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="window.closeWfModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 模板收藏 -->
+<div class="modal-overlay" id="templateModalOverlay">
+  <div class="modal" style="width:450px">
+    <div class="modal-header">
+      <h2>&#x1F4C1; 模板收藏</h2>
+      <button class="close-btn" onclick="window.closeTemplateModal()">&#x00d7;</button>
+    </div>
+    <div class="modal-body" style="padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--muted)">共 <span id="templateModalCount">0</span> 个模板</span>
+      </div>
+      <div class="template-list" id="templateModalList">
+        <div class="template-empty">暂无保存的模板</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="window.closeTemplateModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 工作台 -->
+<div class="modal-overlay" id="wbModalOverlay">
+  <div class="modal" style="width:910px">
+    <div class="modal-header">
+      <h2>&#x1F9E9; 组装工作台 <span class="workbench-editable-hint">&#x270F; 碎片可编辑</span></h2>
+      <button class="close-btn" onclick="window.closeWorkbenchModal()">&#x00d7;</button>
+    </div>
+    <div class="modal-body">
+      <div class="workbench-body" id="composerWorkbench">
+        <div class="workbench-empty">
+          <div class="workbench-empty-icon">&#x1F9E9;</div>
+          <div>请先选择碎片</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div style="flex:1">
+        <button class="btn btn-ghost btn-sm" onclick="window.copyComposedPrompt()" title="复制完整文本">&#x1F4CB; 复制完整</button>
+      </div>
+      <button class="btn btn-ghost" onclick="window.closeWorkbenchModal()">关闭</button>
+      <button class="btn btn-success" onclick="window.composerSaveAsPrompt();window.closeWorkbenchModal()">&#x1F4BE; 另存</button>
+      <button class="btn btn-primary" onclick="window.composerRun();window.closeWorkbenchModal()">&#x1F680; 跑图</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 碎片完整内容查看 -->
+<div class="modal-overlay" id="fragFullModal" onclick="if(event.target===this)window._closeFullFrag()">
+  <div class="modal" style="width:550px">
+    <div class="modal-header">
+      <h2><span id="fragFullType"></span></h2>
+      <button class="close-btn" onclick="window._closeFullFrag()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre id="fragFullContent" style="width:100%;min-height:80px;padding:12px;border:none;background:transparent;color:var(--text);font-size:13px;font-family:monospace;line-height:1.6;white-space:pre-wrap;word-break:break-all;margin:0;box-sizing:border-box"></pre>
+      <div id="fragFullSource" style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.6"></div>
+    </div>
+  </div>
+</div>
+
 <!-- 按依赖顺序加载模块 -->
 <script src="/utils.js?v=2"></script>
-<script src="/ui.js?v=3"></script>
+<script src="/ui.js?v=4"></script>
 <script src="/router.js?v=2"></script>
 <script src="/workflow.js?v=1"></script>
 <script src="/prompt.js?v=5"></script>
 <script src="/generator.js?v=1"></script>
-<script src="/job.js?v=3"></script>
+<script src="/job.js?v=4"></script>
 <script src="/history.js?v=1"></script>
 <script src="/gallery.js?v=1"></script>
 <script src="/imageViewer.js?v=1"></script>
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 <script src="/category.js?v=2"></script>
 <script src="/tag.js?v=1"></script>
-<script src="/composer.js?v=8"></script>
+<script src="/composer.js?v=9"></script>
+<script src="/fragments.js?v=1"></script>
 </body>
 </html>
