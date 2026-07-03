@@ -150,14 +150,22 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
         clip_nodes[1][1]["inputs"]["text"] = prompt_data["negative_prompt"]
 
     # 2. 注入种子
-    seed_val = prompt_data.get("seed_override") or prompt_data.get("seed", 0)
-    if seed_val and seed_val != 0:
-        for node_id, node in api_workflow.items():
-            if isinstance(node, dict) and node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
-                if "noise_seed" in node["inputs"]:
-                    node["inputs"]["noise_seed"] = seed_val
-                elif "seed" in node["inputs"]:
-                    node["inputs"]["seed"] = seed_val
+    # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0
+    seed_override = prompt_data.get("seed_override")
+    if seed_override is not None:
+        seed_val = seed_override
+    else:
+        seed_val = prompt_data.get("seed", 0)
+    # 如果 seed_val 仍为 0 且没有显式 override，则生成随机种子
+    if seed_val == 0 and seed_override is None:
+        import random as _rnd
+        seed_val = _rnd.randint(1, 2**32 - 1)
+    for node_id, node in api_workflow.items():
+        if isinstance(node, dict) and node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
+            if "noise_seed" in node["inputs"]:
+                node["inputs"]["noise_seed"] = seed_val
+            elif "seed" in node["inputs"]:
+                node["inputs"]["seed"] = seed_val
 
     # 3. 注入方向（横竖屏）
     orientation = prompt_data.get("orientation", "portrait")
@@ -186,5 +194,34 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
                 node["inputs"]["resolution"] = res
                 node["inputs"]["max_resolution"] = max_res
                 break
+
+    # 5. 为输出节点注入唯一文件名前缀，避免批量跑图时文件互相覆盖
+    import time
+    import random as _random
+    _ts = int(time.time() * 1000)
+    _rand = _random.randint(1000, 9999)
+    _unique_prefix = f"prompt_browser_{_ts}_{_rand}"
+    # 常见输出节点类型
+    _SAVE_NODE_TYPES = {
+        "SaveImage", "SaveImageWebedition", "SaveImageExtended",
+        "VHS_SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG",
+        "ImageSave", "SaveLatent", "ETN_SaveImage",
+    }
+    for node_id, node in api_workflow.items():
+        if not isinstance(node, dict):
+            continue
+        cls = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+        # 精确匹配已知保存节点
+        if cls in _SAVE_NODE_TYPES:
+            if "filename_prefix" in inputs:
+                # 在原前缀后追加唯一标识，保留用户原有的前缀习惯
+                orig = inputs["filename_prefix"] or ""
+                inputs["filename_prefix"] = f"{orig}_{_unique_prefix}" if orig else _unique_prefix
+        # 模糊匹配：类名包含 Save/Export/Output 且无连线输出（是终端保存节点）
+        elif "Save" in cls or "Export" in cls or "Output" in cls:
+            if "filename_prefix" in inputs:
+                orig = inputs["filename_prefix"] or ""
+                inputs["filename_prefix"] = f"{orig}_{_unique_prefix}" if orig else _unique_prefix
 
     return api_workflow

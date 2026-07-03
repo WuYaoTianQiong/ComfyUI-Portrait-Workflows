@@ -84,7 +84,22 @@ def get_job_status_snapshot(job: dict) -> dict:
             if isinstance(item, list) and len(item) > 1:
                 pending.add(str(item[1]))
 
-    hist = get_history()
+    # 先拉最近历史（用于快速判断），未命中的 pid 单独精确查询
+    hist = get_history(max_items=200)
+    # 收集所有 comfyui_prompt_id
+    all_pids = {item.get("comfyui_prompt_id") for item in items if item.get("comfyui_prompt_id")}
+    # 未命中最近历史的 pid，批量精确查询
+    miss_pids = {pid for pid in all_pids if pid and pid not in hist}
+    if miss_pids:
+        try:
+            from services.comfyui_client import get_history_for_prompt
+            for pid in miss_pids:
+                single = get_history_for_prompt(pid)
+                if single and pid in single:
+                    hist[pid] = single[pid]
+        except Exception:
+            pass
+
     progress_data: dict | None = None
     current_pid: str | None = None
     if qdata and qdata.get("queue_running"):
@@ -108,7 +123,20 @@ def get_job_status_snapshot(job: dict) -> dict:
         status = item.get("status", "pending")
         iprogress = None
 
-        if pid and pid in hist:
+        # 优先用 hist 快速判断，miss 时单独精确查询
+        found_in_hist = pid and pid in hist
+        if pid and not found_in_hist:
+            # 精确查询该 pid 是否已完成
+            try:
+                from services.comfyui_client import get_history_for_prompt
+                single_hist = get_history_for_prompt(pid)
+                if single_hist and pid in single_hist:
+                    found_in_hist = True
+                    hist[pid] = single_hist[pid]
+            except Exception:
+                pass
+
+        if pid and found_in_hist:
             status = "done"
             images = []
             for node_out in hist[pid].get("outputs", {}).values():
@@ -117,8 +145,12 @@ def get_job_status_snapshot(job: dict) -> dict:
             item["images"] = images
             done_count += 1
 
-            # 写入历史表
-            _insert_history_for_item(job["id"], item.get("prompt_id"), pid, images, item.get("prompt_preview", ""))
+            # 写入历史表，携带 prompt_params（含随机组合的 selection 等信息）
+            _insert_history_for_item(
+                job["id"], item.get("prompt_id"), pid, images,
+                item.get("prompt_preview", ""),
+                item.get("prompt_params"),
+            )
 
         elif pid and pid in running:
             status = "running"
@@ -175,7 +207,7 @@ def get_job_status_snapshot(job: dict) -> dict:
     }
 
 
-def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview=""):
+def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", prompt_params=None):
     """将生成结果写入历史表"""
     for img in images:
         try:
@@ -191,6 +223,7 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview=""):
                     img.get("type", "output"),
                 ),
                 preview=preview,
+                prompt_params=prompt_params,
                 source="local",
             ).on_conflict_ignore().execute()
         except Exception:

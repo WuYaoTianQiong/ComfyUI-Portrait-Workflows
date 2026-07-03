@@ -37,6 +37,24 @@ def _image_exists(filename: str, subfolder: str, img_type: str) -> bool:
 
 def _enrich_item(r, prompt_cache=None) -> dict:
     meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+    prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
+
+    # 补写逻辑：如果 prompt_params 为空且有 job_id，尝试从 job items 里找回
+    if prompt_params is None and r.job_id:
+        try:
+            from models import GenJob
+            job = GenJob.get_or_none(GenJob.id == r.job_id)
+            if job and job.items:
+                items = json.loads(job.items) if isinstance(job.items, str) else job.items
+                for it in items:
+                    if it.get("comfyui_prompt_id") == r.comfyui_prompt_id and it.get("prompt_params"):
+                        # 补写到数据库，下次就不需要再查了
+                        Gh.update(prompt_params=it["prompt_params"]).where(Gh.id == r.id).execute()
+                        prompt_params = json.loads(it["prompt_params"]) if isinstance(it["prompt_params"], str) else it["prompt_params"]
+                        break
+        except Exception:
+            pass
+
     item = {
         "id": r.id,
         "job_id": r.job_id,
@@ -48,7 +66,7 @@ def _enrich_item(r, prompt_cache=None) -> dict:
         "view_url": r.view_url,
         "preview": r.preview,
         "favorite": bool(r.favorite),
-        "prompt_params": json.loads(r.prompt_params) if r.prompt_params else None,
+        "prompt_params": prompt_params,
         "created_at": str(r.created_at) if r.created_at else "",
         "source": r.source,
         "prompt_name": "",  # 默认空字符串
@@ -130,7 +148,8 @@ def _build_prompt_cache(rows) -> dict:
 
 @router.get("/history")
 def list_history(
-    limit: int = Query(200),
+    page: int = Query(1),
+    page_size: int = Query(50),
     favorite: bool = Query(None),
     sort: str = Query("newest"),
     search: str = Query(""),
@@ -141,23 +160,22 @@ def list_history(
 
     if search:
         like = f"%{search}%"
-        # 搜索文件名、子目录、ComfyUI prompt_id
         condition = (
             (Gh.filename ** like)
             | (Gh.subfolder ** like)
             | (Gh.comfyui_prompt_id ** like)
         )
-        # 同时搜索关联的 prompt 名称
         prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
         if prompt_matches:
             condition = condition | (Gh.prompt_id << prompt_matches)
         q = q.where(condition)
 
-    # 先按 ID 粗排，Python 层再做精细排序
-    q = q.order_by(Gh.id.desc()).limit(limit)
+    total = q.count()
+
+    offset = (page - 1) * page_size
+    q = q.order_by(Gh.id.desc()).offset(offset).limit(page_size)
     rows = list(q)
 
-    # 过滤已不存在的文件
     deleted_ids = []
     alive = []
     for r in rows:
@@ -169,7 +187,6 @@ def list_history(
     if deleted_ids:
         Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
 
-    # Python 层二次排序
     def _get_meta(item):
         return get_image_metadata(item.filename, item.subfolder or "", item.img_type or "output")
 
@@ -183,11 +200,10 @@ def list_history(
         alive.sort(key=lambda r: (_get_meta(r).get("width", 0) or 0))
     elif sort == "res_desc":
         alive.sort(key=lambda r: (_get_meta(r).get("width", 0) or 0), reverse=True)
-    # "newest" 已是默认（id desc）
 
     cache = _build_prompt_cache(alive)
     result = [_enrich_item(r, cache) for r in alive]
-    return {"items": result}
+    return {"items": result, "total": total, "page": page, "page_size": page_size}
 
 
 # ---------------------------------------------------------------------------
@@ -195,10 +211,10 @@ def list_history(
 # ---------------------------------------------------------------------------
 
 @router.api_route("/history_sync", methods=["GET", "POST"])
-def sync_history(limit: int = Query(200)):
+def sync_history(page_size: int = Query(500)):
     added = _sync_comfyui_history()
-    items = list_history(limit=limit, favorite=None, sort="newest", search="")["items"]
-    return {"added": added, "items": items}
+    data = list_history(page=1, page_size=page_size, favorite=None, sort="newest", search="")
+    return {"added": added, "items": data["items"], "total": data["total"]}
 
 
 # ---------------------------------------------------------------------------

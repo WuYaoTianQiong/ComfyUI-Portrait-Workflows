@@ -136,9 +136,9 @@ def list_prompts(
     total = query.count()
 
     # ======== Phase 1: 更新排序逻辑 ========
-    # 仅默认排序(newest)：置顶 → 收藏 → 最新
+    # "默认"排序：置顶 → 收藏 → 最新
     # 其他排序：置顶 → 用户选择的排序字段（收藏不自动置顶）
-    if sort == "newest":
+    if sort == "default":
         order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
     elif sort == "oldest":
         order = [Prompt.is_pinned.desc(), Prompt.id.asc()]

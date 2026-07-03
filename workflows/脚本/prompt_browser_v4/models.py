@@ -170,6 +170,23 @@ class TemplateFragment(BaseModel):
         table_name = "template_fragments"
 
 
+# ======== Phase 4: 碎片库 ========
+class Fragment(BaseModel):
+    """独立碎片（碎片库）"""
+    id = AutoField()
+    name = TextField(default="")              # 碎片名（用户可自定义）
+    fragment_type = TextField()                # 人物面部/姿态动作/...
+    content = TextField()                      # 碎片文本内容
+    tags = TextField(default="")
+    usage_count = IntegerField(default=0)      # 被引用次数
+    created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+    updated_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+
+    class Meta:
+        table_name = "fragments"
+# ================================
+
+
 def _migrate_column(db, table, col, col_def):
     """如果列不存在则 ALTER TABLE 添加（兼容旧库）。"""
     try:
@@ -216,6 +233,15 @@ def init_db():
 
     # ======== Phase 3: 模板表 ========
     db.create_tables([Template, TemplateFragment], safe=True)
+    # ==========================================
+
+    # ======== Phase 4: 碎片库 ========
+    db.create_tables([Fragment], safe=True)
+    # 迁移碎片库新列（兼容旧表）
+    _migrate_column(db, "fragments", "name", "name TEXT NOT NULL DEFAULT ''")
+    _migrate_column(db, "fragments", "tags", "tags TEXT NOT NULL DEFAULT ''")
+    _migrate_column(db, "fragments", "updated_at",
+                     "updated_at DATETIME")
     # ==========================================
 
     db.close()

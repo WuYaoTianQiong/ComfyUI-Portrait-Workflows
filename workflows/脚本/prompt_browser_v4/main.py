@@ -118,6 +118,7 @@ from routers.categories import router as categories_router
 from routers.tags import router as tags_router
 from routers.composer import router as composer_router
 from routers.templates import router as templates_router
+from routers.fragments import router as fragments_router
 
 app.include_router(prompts_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
@@ -129,6 +130,9 @@ app.include_router(categories_router, prefix="/api")
 app.include_router(tags_router, prefix="/api")
 app.include_router(composer_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
+# ======== Phase 4: 碎片库 ========
+app.include_router(fragments_router, prefix="/api")
+# ================================
 
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):

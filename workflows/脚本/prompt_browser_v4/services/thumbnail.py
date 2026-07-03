@@ -42,7 +42,13 @@ def generate_thumbnail(
     thumb_path = THUMBNAIL_DIR / f"{safe_key}.webp"
 
     if thumb_path.exists():
-        return thumb_path
+        # 检查原图是否有变化（修改时间比缩略图新 → 重新生成）
+        try:
+            if img_path.stat().st_mtime <= thumb_path.stat().st_mtime:
+                return thumb_path
+        except Exception:
+            return thumb_path
+        # 原图已变化，删除旧缩略图重新生成
 
     try:
         with Image.open(img_path) as img:
