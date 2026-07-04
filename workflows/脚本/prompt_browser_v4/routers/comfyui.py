@@ -2,6 +2,7 @@
 import json
 import mimetypes
 import os
+import re
 import traceback
 from pathlib import Path
 from urllib.parse import quote
@@ -251,9 +252,10 @@ def run_prompt(req: RunRequest):
         # 加载并解析工作流
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
-        # 注入提示词
+        # 注入提示词：传 ComfyUI 时去掉【】碎片标题
+        clean_prompt = re.sub(r'【[^】]+】\s*', '', p.prompt or "")
         prompt_data = {
-            "prompt": p.prompt or "",
+            "prompt": clean_prompt,
             "negative_prompt": p.negative_prompt or "",
             "seed": p.seed or 0,
             "seed_override": req.seed_override,
@@ -264,7 +266,7 @@ def run_prompt(req: RunRequest):
 
         # 创建任务记录
         prompt_params = {
-            "prompt": p.prompt or "",
+            "prompt": clean_prompt,
             "negative_prompt": p.negative_prompt or "",
             "seed": req.seed_override or (p.seed or 0),
             "steps": p.steps, "cfg_scale": p.cfg_scale,
@@ -400,7 +402,7 @@ def batch_generate(req: BatchRequest):
         try:
             api_wf = load_workflow(workflow_path, req.workflow_content)
             prompt_data = {
-                "prompt": p.prompt or "",
+                "prompt": re.sub(r'【[^】]+】\s*', '', p.prompt or ""),
                 "negative_prompt": p.negative_prompt or "",
                 "seed": p.seed or 0,
                 "seed_override": item.seed,

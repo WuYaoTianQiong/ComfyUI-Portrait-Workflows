@@ -255,4 +255,3 @@
 .hist-clear { flex-shrink: 0; font-size: 11px; color: var(--muted); cursor: pointer; }
 .hist-clear:hover { color: var(--danger); }
 
-/* PhotoSwipe 元数据面板 - 右下角，不遮挡图片 */

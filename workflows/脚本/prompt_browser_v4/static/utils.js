@@ -89,6 +89,13 @@ window.escHtml = function(s) {
   return d.innerHTML;
 };
 
+// 将【标题】内容\n\n 格式的提示词转为带样式的 HTML，标题用高亮色
+window.formatFragmentDisplay = function(text) {
+  if (!text) return "";
+  const safe = window.escHtml(text);
+  return safe.replace(/【([^】]+)】/g, '<span class="frag-tag">【$1】</span>');
+};
+
 window.escAttr = function(s) {
   if (!s) return "";
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "&#10;").replace(/\r/g, "&#13;");

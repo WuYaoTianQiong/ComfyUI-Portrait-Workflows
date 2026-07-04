@@ -313,9 +313,13 @@
 
 /* 提示词详情面板：生成历史 */
 .prompt-history-section {
+  display: none;
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+.prompt-history-section.visible {
+  display: block;
 }
 .prompt-history-grid {
   display: grid;

@@ -143,6 +143,21 @@ def _build_prompt_cache(rows) -> dict:
     return {r.id: r.name for r in Prompt.select(Prompt.id, Prompt.name).where(Prompt.id << prompt_ids)}
 
 
+def _cleanup_thumbnails(filename: str, subfolder: str, img_type: str):
+    """清理缩略图：按 (filename, subfolder, img_type) 精确清理，避免误删其他记录的缩略图"""
+    try:
+        thumb_dir = settings.thumbnail_dir
+        safe_filename = filename.replace("/", "_").replace("\\", "_").replace(":", "_")
+        safe_subfolder = (subfolder or "").replace("/", "_").replace("\\", "_").replace(":", "_")
+        safe_type = (img_type or "output").replace("/", "_").replace("\\", "_").replace(":", "_")
+        # 匹配模式：{filename}_{subfolder}_{img_type}_*
+        prefix = f"{safe_filename}_{safe_subfolder}_{safe_type}_"
+        for f in thumb_dir.glob(f"{prefix}*"):
+            f.unlink()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # 查询（支持筛选 / 排序 / 搜索）
 # ---------------------------------------------------------------------------
@@ -178,15 +193,20 @@ def list_history(
     rows = list(q)
 
     deleted_ids = []
+    deleted_records = []  # 记录完整信息用于缩略图清理
     alive = []
     for r in rows:
         if not _image_exists(r.filename, r.subfolder or "", r.img_type or "output"):
             deleted_ids.append(r.id)
+            deleted_records.append(r)
             continue
         alive.append(r)
 
     if deleted_ids:
         Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
+        # 清理已删除图片的缩略图
+        for r in deleted_records:
+            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
 
     def _get_meta(item):
         return get_image_metadata(item.filename, item.subfolder or "", item.img_type or "output")
@@ -229,15 +249,8 @@ def delete_history_item(item_id: int):
         raise HTTPException(404, "历史记录不存在")
     # 软删除：标记而非真删，防止 sync 重新导入
     Gh.update(is_deleted=True).where(Gh.id == item_id).execute()
-    # 清理缩略图（按文件名前缀匹配）
-    try:
-        thumb_dir = settings.thumbnail_dir
-        if r.filename:
-            prefix = r.filename.replace("/", "_").replace("\\", "_").replace(":", "_")
-            for f in thumb_dir.glob(f"{prefix}*"):
-                f.unlink()
-    except Exception:
-        pass
+    # 清理缩略图
+    _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
     return {"success": True}
 
 
@@ -252,15 +265,8 @@ def batch_delete_history(body: BatchDeleteRequest):
         return {"success": True, "deleted": 0}
     cnt = Gh.update(is_deleted=True).where(Gh.id.in_(ids)).execute()
     # 批量清理缩略图
-    try:
-        thumb_dir = settings.thumbnail_dir
-        for r in Gh.select().where(Gh.id.in_(ids)):
-            if r.filename:
-                prefix = r.filename.replace("/", "_").replace("\\", "_").replace(":", "_")
-                for f in thumb_dir.glob(f"{prefix}*"):
-                    f.unlink()
-    except Exception:
-        pass
+    for r in Gh.select().where(Gh.id.in_(ids)):
+        _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
     return {"success": True, "deleted": cnt}
 
 
@@ -348,9 +354,26 @@ def history_list_html(
             condition = condition | (Gh.prompt_id << prompt_matches)
         q = q.where(condition)
     total = q.count()
-    rows = q.order_by(Gh.id.desc()).offset((page - 1) * page_size).limit(page_size)
-    items = []
+    rows = list(q.order_by(Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
+
+    # 自动清理本地已不存在的图片记录，与 /history 端点保持一致
+    deleted_ids = []
+    deleted_records = []
+    alive = []
     for r in rows:
+        if not _image_exists(r.filename, r.subfolder or "", r.img_type or "output"):
+            deleted_ids.append(r.id)
+            deleted_records.append(r)
+            continue
+        alive.append(r)
+
+    if deleted_ids:
+        Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
+        for r in deleted_records:
+            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
+
+    items = []
+    for r in alive:
         meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
         prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
         prompt_name = ""

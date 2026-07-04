@@ -13,6 +13,13 @@
     方式2: 三段式(人+衣 / 姿态 / 场景) + 元数据行 → 自动拆分
     方式3: 纯文本 + 元数据行
     方式4: 仅提示词，无元数据 → 元数据字段自动置空
+
+整理提示词时的坑点（2026-07-05 实测）：
+  - 外语提示词不要混入，全部翻译成中文再入库。
+  - 某碎片无内容时，直接移除整行【】，不要留空行标题。
+    因为 parse_fragments 使用 re.DOTALL 的正则，空碎片会导致
+    后续碎片内容被错误吞并（如【姿态动作】空 → 会吃掉【场景环境】）。
+  - 优先使用【】碎片格式（方式1），手动拆分为精准的碎片类型。
 """
 
 import argparse, re, sqlite3, sys
@@ -232,7 +239,13 @@ def insert_records(records, dry_run=False):
         return
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
+        inserted, skipped = 0, 0
         for r in records:
+            # 去重：以 prompt 文本为唯一标识
+            cur.execute('SELECT id FROM prompts WHERE prompt = ?', (r['prompt'],))
+            if cur.fetchone():
+                skipped += 1
+                continue
             # 1. 插入 prompts
             cur.execute(
                 'INSERT INTO prompts (name, prompt, negative_prompt, steps, cfg_scale, sampler, seed, model, width, height, tags, note, updated_at, scheduler, steps_2, cfg_scale_2, sampler_2, scheduler_2, lora_name, lora_weight) '
@@ -243,6 +256,7 @@ def insert_records(records, dry_run=False):
                  r.get('scheduler'), r.get('steps_2'), r.get('cfg_scale_2'),
                  r.get('sampler_2'), r.get('scheduler_2'), r.get('lora_name'), r.get('lora_weight')))
             prompt_id = cur.lastrowid
+            inserted += 1
 
             # 2. 插入 templates
             cur.execute(
@@ -261,7 +275,9 @@ def insert_records(records, dry_run=False):
                     (template_id, prompt_id, ft, content, sort_order))
 
         conn.commit()
-        print(f'已插入 {len(records)} 组碎片')
+        print(f'已插入 {inserted} 组碎片，跳过 {skipped} 条重复')
+        for r in records:
+            print(f'  {r["name"]} ({len([v for v in r.get("fragments",{}).values() if v])}个碎片)')
         for r in records:
             print(f'  {r["name"]} ({len([v for v in r.get("fragments",{}).values() if v])}个碎片)')
 
@@ -304,7 +320,9 @@ def main():
             if validate_purity(frags) and args.strict:
                 print(f'  [SKIP] 跳过')
                 continue
-            prompt_text = reassemble(frags)
+            # prompt存带标题的展示格式，前端复制用 JS 去标记：copyText.replace(/【[^】]+】\s*/g, '')
+            display_lines = [f'【{k}】{frags[k]}' for k in FRAGMENT_TYPES if frags.get(k)]
+            prompt_text = '\n\n'.join(display_lines)
         else:
             prompt_text = body
 

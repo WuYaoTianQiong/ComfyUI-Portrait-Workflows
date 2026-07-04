@@ -122,18 +122,20 @@ window.jumpToPrompt = function(promptId) {
 // -------------------------------------------------------------------
 
 window.loadPromptHistory = async function(promptId) {
-  const grid = document.getElementById("promptHistoryGrid");
-  if (!grid) return;
-  grid.innerHTML = '<div class="empty-tip" style="font-size:12px">加载中...</div>';
+  const section = document.getElementById("promptHistorySection");
+  if (!section) return;
+  // 先隐藏，请求完成后再决定是否显示
+  section.classList.remove("visible");
+  section.innerHTML = "";
   try {
     const data = await window.api(`/api/prompts/${promptId}/history`);
     const items = data.items || [];
     window._promptHistoryItems = items;
-    if (!items.length) {
-      grid.innerHTML = '<div class="empty-tip" style="font-size:12px">暂无生成历史</div>';
-      return;
-    }
-    grid.innerHTML = "";
+    if (!items.length) return;  // 无数据，保持隐藏
+    section.classList.add("visible");
+    section.innerHTML = '<h3>🖼️ 生成历史</h3><div class="prompt-history-grid" id="promptHistoryGrid"></div>';
+    const grid = document.getElementById("promptHistoryGrid");
+    if (!grid) return;
     items.forEach((item, idx) => {
       const img = document.createElement("img");
       img.className = "prompt-history-thumb";
@@ -144,7 +146,8 @@ window.loadPromptHistory = async function(promptId) {
       grid.appendChild(img);
     });
   } catch (e) {
-    grid.innerHTML = '<div class="empty-tip" style="font-size:12px;color:var(--danger)">加载失败</div>';
+    section.classList.add("visible");
+    section.innerHTML = '<h3>🖼️ 生成历史</h3><div class="prompt-history-grid" id="promptHistoryGrid"><div class="empty-tip" style="font-size:12px;color:var(--danger)">加载失败</div></div>';
   }
 };
 

@@ -1,0 +1,12 @@
+.frag-tag {
+    color: #e8915a;
+    font-weight: 600;
+    font-size: 13px;
+}
+.frag-tag::before {
+    content: "\A";
+    white-space: pre;
+}
+.frag-tag:first-of-type::before {
+    content: "";
+}

@@ -305,7 +305,7 @@ window.renderDetail = function(p) {
       `<button class="btn btn-sm btn-warning" onclick="window.openEditModal(${p.id})">✏️ 编辑</button>` +
       `<button class="btn btn-sm btn-danger" onclick="window.deletePrompt(${p.id})">🗑️ 删除</button>` +
     `</div></div>${ratingHtml}${usageHtml}` : "") +
-    `<div class="section"><h3>📝 正面提示词 <button class="copy-btn" onclick="window.copyPromptText(this,0)">复制</button></h3><div class="content pos">${window.escHtml(p.prompt)}</div></div>` +
+    `<div class="section"><h3>📝 正面提示词 <button class="copy-btn" onclick="window.copyPromptText(this,0)">复制</button></h3><div class="content pos">${window.formatFragmentDisplay(p.prompt)}</div></div>` +
     `<div class="section"><h3>🚫 负面提示词 <button class="copy-btn" onclick="window.copyPromptText(this,1)">复制</button></h3><div class="content neg">${window.escHtml(p.negative_prompt || "(空)")}</div></div>` +
     `<div class="section"><h3>⚙️ 参数</h3><div class="params">` +
       `<div class="param-item"><div class="label">步数</div><div class="value">${p.steps || "-"}</div></div>` +
@@ -318,7 +318,7 @@ window.renderDetail = function(p) {
     (p.note ? `<div class="section"><h3>📌 备注</h3><div class="note-box">${window.escHtml(p.note)}</div></div>` : "") +
     `<div class="section"><h3>📂 分类</h3><div>${categoryHtml}</div></div>` +
     `<div class="section"><h3>🏷️ 标签</h3><div>${tagHtml || '<span style="color:#666;font-size:13px">无标签</span>'}</div></div>` +
-    `<div class="section prompt-history-section"><h3>🖼️ 生成历史</h3><div class="prompt-history-grid" id="promptHistoryGrid"><div class="empty-tip" style="font-size:12px">加载中...</div></div></div>` +
+    `<div class="section prompt-history-section" id="promptHistorySection"></div>` +
     `<div style="color:#555;font-size:11px;margin-top:16px">创建: ${p.created_at || "未知"}${p.updated_at && p.updated_at !== p.created_at ? " · 更新: " + p.updated_at : ""}</div>`;
 };
 
@@ -741,7 +741,9 @@ window.debounceSearch = function() {
 
 window.copyPromptText = function(btn, type) {
   if (!window._currentPromptData) return;
-  const text = type === 0 ? (window._currentPromptData.prompt || "") : (window._currentPromptData.negative_prompt || "");
+  let text = type === 0 ? (window._currentPromptData.prompt || "") : (window._currentPromptData.negative_prompt || "");
+  // 正面提示词复制时去掉【】碎片标题
+  if (type === 0) text = text.replace(/【[^】]+】\s*/g, '');
   navigator.clipboard.writeText(text).then(() => {
     btn.textContent = "已复制";
     setTimeout(() => btn.textContent = "复制", 1500);

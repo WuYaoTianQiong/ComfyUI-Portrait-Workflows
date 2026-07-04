@@ -37,7 +37,7 @@ def generate_thumbnail(
         return None
 
     file_stat = img_path.stat()
-    cache_key = f"{filename}_{subfolder}_{file_stat.st_size}_{size}"
+    cache_key = f"{filename}_{subfolder}_{img_type}_{file_stat.st_size}_{size}"
     safe_key = cache_key.replace("/", "_").replace("\\", "_").replace(":", "_")
     thumb_path = THUMBNAIL_DIR / f"{safe_key}.webp"
 
