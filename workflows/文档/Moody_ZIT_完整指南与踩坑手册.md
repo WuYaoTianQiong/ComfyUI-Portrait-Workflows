@@ -1397,7 +1397,252 @@ no cropping, medium shot, subject height about 50 percent of frame
 
 Flux/ZIT 架构不使用 CFG，**负面提示词完全无效**。所有约束必须写在正面 prompt 中。
 
+#### 5.6 中文 vs 英文空间控制精度极限测试（2026-07-04）
+
+> 基于 moodyProMix_zitV13FP8 + momoka-zib-v2(w=1.0) + 640×1136 + CFG=3.5，固定 seed 813972274184088。目标：人物居中、上下对称留白。
+
+##### 6 轮纯中文提示词策略与结果
+
+| 轮 | 策略 | 顶部 | 底部 | 问题 |
+|:--:|:---|:---:|:---:|:---|
+| 1 | `【构图】中远景，头顶留白1/4，脚下留白1/4` | ✅ ~1/4 | ❌ ~0 | "脚下"语义精度丢失 |
+| 2 | `(画面下方留白:1.5)` 权重语法 | ✅ | ❌ ~1/8 | 底部权重弱，无法对抗偏置 |
+| 3 | 自然场景叙述"大片留白空间" | ❌ ~1/2 | ❌ ~1/10 | "留白"触发顶部堆叠，头被遮住 |
+| 4 | 边框锚定"距离画面上/下边缘1/4" | ❌ | ❌ | 头被空白块盖住，底部出棕黑色块 |
+| 5 | 否定式"无任何裁切"+"广角" | ✅ ~1/8 | ⚠️ ~1/10 | 最接近但不对称 |
+| 6 | "严格居中"+"留白面积相等" | ❌ | ❌ | 头消失，底部出现异常色块 |
+
+##### 根因
+
+- **CLIP（qwen_3_4b）中文编码没有问题**——它是 Qwen3-4B 原生中文模型
+- **瓶颈在 UNET（moodyProMix_zitV13FP8）训练数据分布**——Z-Image Turbo 训练数据以英文标注为主，UNET 对英文摄影术语（`full body shot`、`feet fully visible`）的嵌入模式更熟悉
+- 中文擅长**语义强度**（如"爆乳"推进力 > "enormous breasts"），但在**空间定位精度**上远不如英文
+- **"脚下"是中文空间控制的死穴**：ZIT 训练数据中极少出现"脚下留白"这类精确空间描述，模型无法建立可靠映射
+
+##### 结论与推荐
+
+```
+✅ 空间构图用英文（精确），人物描述用中文（自然）
+
+推荐公式（已验证稳定）：
+full body shot, subject centered, feet fully visible with clear space below,
+no cropping, subject height about [30~50] percent of frame,
+equal empty space above head and below feet, [35mm/24mm] lens
+
+[中文人物描述]
+
+[中文画质描述]
+```
+
+关键参数速查：
+
+| 想要的比例 | `subject height about` | 镜头 |
+|:---|:---|:---|
+| 人物占 ~1/2（中景） | `50 percent` | `35mm lens` |
+| 人物占 ~1/3（远景） | `33 percent` | `24mm lens` |
+| 人物占 ~1/4（极远景） | `25 percent` | `24mm lens` |
+
+#### 5.7 上下对称留白的关键突破：`midpoint aligned`（2026-07-04）
+
+##### 问题
+
+即使用了 `equal empty space above head and below feet`，模型输出的上下留白依然不对称——顶部 > 底部。原因是：**`subject centered` 让模型对齐的是人物的「视觉重心」（腰部/胯部），而非几何中心**，导致头顶空间大、脚底空间小。
+
+##### 解决方案
+
+在英文构图段加入几何中心锚定：
+
+```
+full body shot, person vertically centered in frame,
+the midpoint between head top and feet bottom aligned with frame vertical center,
+feet fully visible with clear space below, no cropping,
+35mm lens, subject occupies approximately half the frame height,
+equal empty space above and below, pure white background
+```
+
+**关键句**：`the midpoint between head top and feet bottom aligned with frame vertical center`
+
+这句直接定义"居中的基准是头顶到脚底的几何中点"，绕过模型自己猜的"视觉重心"。实测效果：上下留白从 1/6 vs 1/10 改善到 1/4 vs 1/4，基本对称。
+
+##### 完整已验证公式（中景，上下各 1/4 对称留白）
+
+```
+# 英文部分：精确控制构图（必须放最前面）
+full body shot, person vertically centered in frame,
+the midpoint between head top and feet bottom aligned with frame vertical center,
+feet fully visible with clear space below, no cropping,
+35mm lens, subject occupies approximately half the frame height,
+equal empty space above and below, pure white background
+
+# 中文部分：人物、动作、画质
+一位身着华丽粉色汉服的年轻东方女性，约20岁，乌黑长发，精致面容。
+粉色汉服，点缀金色刺绣，飘逸薄纱长裙，轻薄披肩。
+全身站立，面对镜头，左手轻触嘴唇。
+
+电影级质感画质，8K超高分辨率，超写实真人摄影风格，极简纯白色背景，
+梦幻飘渺意境
+```
+
+##### 比例调节速查（基于已验证公式）
+
+> **重要**：扩散模型对精确数值（如 `60 percent`）理解模糊，误差约 ±10~15%。**调节留白最敏感的手段是镜头焦距**，而非数字描述。
+
+| 镜头焦距 | 每边留白（实测） | 人物占比 | 景别 | 实测效果 |
+|:--------|:----------|:--------|:----|:-------|
+| `24mm lens` | ~1/3 | ~1/3 | 远景 | 待测 |
+| `30mm lens` ✅ | ~1/7 | ~5/7 | 中近景 | ✅ 已验证 |
+| `35mm lens` ✅ | ~1/4 | ~1/2 | 中景 | ✅ 已验证对称 |
+
+**使用方法**：固定公式不变，只改 `[LENS]mm lens` 一个数字即可精确控制人物大小。
+
+##### 封存公式（直接套用）
+
+```
+# ===== 英文构图段（必须放最前面）=====
+full body shot, person vertically centered in frame,
+the midpoint between head top and feet bottom aligned with frame vertical center,
+feet fully visible with clear space below, no cropping,
+[LENS]mm lens, pure white background
+
+# ===== 中文人物段 =====
+[人物描述：精简，避免细节导致 zoom in]
+
+# ===== 中文画质段 =====
+[画质描述]
+```
+
+**`[LENS]` 速选**：
+- 要远景（人物小）→ `24`
+- 要中近景（人物稍大）→ `30`
+- 要中景（人物适中）→ `35`
+
+**注意**：`subject occupies about X percent` 这类数字描述效果有限，优先用镜头焦距控制。
+
+##### LoRA 权重对构图的影响
+
+> 基于 momoka-zib-v2 测试
+
+| LoRA 权重 | 顶部间距 | 底部间距 | 说明 |
+|:---------|:--------|:--------|:----|
+| w=1.0 | ~1/5 | ~1/10 | 底部空间被压缩，对称失效 |
+| w=0.3 | ~1/5 | ~1/5 | ✅ 对称恢复 |
+
+**结论**：角色 LoRA 权重越高，模型越倾向拉近人物（看脸），构图指令被抵抗。需要精确构图时，建议 LoRA 权重 ≤ 0.5，或通过 `midpoint aligned` 强制修正。
+
+#### 5.8 细节与构图的终极矛盾（2026-07-04 最终结论）
+
+> 基于 moodyProMix_zitV13FP8 + 完整细节 prompt（350+字） 的系统性测试。
+
+##### 问题
+
+精简 prompt（~80 字）在各种工作流/分辨率/采样参数下都能稳定出中景构图。但加入完整细节（服饰刺绣、脚链、开叉、层次薄纱等 350+字）后，画面必然 zoom in。
+
+##### 系统性测试矩阵
+
+| 工作流 | 分辨率 | 镜头 | LoRA | 采样参数 | 精简 prompt | 完整细节 |
+|:---|:---|:---|:---|:---|:---:|:---:|
+| V7_Visual | 640×1136 | 30mm | w=0.3 | steps 17/CFG 3.5 | ✅ ~1/7 | ❌ ~1/10 |
+| V7_Visual | 640×1136 | 35mm | w=1.0 | steps 17/CFG 3.5 | ✅ ~1/5 | ❌ ~1/8 |
+| V7.5 Simple | 640×960 | 24mm | 无 | steps 9/CFG 1 | ✅ ~1/7 | ❌ ~1/16 |
+| V7.5 Simple | 640×960 | 30mm | 无 | steps 9/CFG 1 | ✅ ~1/7 | ❌ ~1/16 |
+| V7.5 Simple | 640×1136 | 30mm | 无 | steps 9/CFG 1 | ✅ ~1/7 | ❌ ~1/16 |
+
+**所有组合下，完整细节 prompt 都会导致画面顶满。**
+
+##### 根因
+
+不是 CLIP token 限制（qwen_3_4b 是 32K 上下文），也不是 prompt 措辞问题——是 **UNET 的去噪策略**：当模型需要渲染大量细节信息时，会主动增加像素分配密度，表现为放大画面。
+
+##### 解决方案：两段式流程（已验证）
+
+**主生成（Node 627）**：精简 prompt，控制构图
+```
+full body shot, person vertically centered in frame,
+the midpoint between head top and feet bottom aligned with frame vertical center,
+feet with generous space below, more space below feet than above head,
+no cropping, 30mm lens, pure white background
+
+很大的胸部，一位身着粉色汉服的年轻东方女性，全身站立，面对镜头，左手轻触嘴唇
+
+电影级质感画质，8K超高分辨率，超写实真人摄影风格，极简纯白色背景
+```
+
+**SD Upscale（可选，denoise 0.23）**：短风格词补充纹理
+```
+电影级质感，8K画质，细腻纹理，梦幻光照
+```
+
+**FaceDetailer（自动）**：加载角色 LoRA 换脸（w=0.5）
+
+注意：**不要把完整服饰细节放入任何 prompt 中**——它们通过模型自身的理解能力在生成时自然呈现，不需要逐字描述。
+
+#### 5.9 工作流 V7_Visual vs V7.5 Simple 对比（2026-07-04）
+
+| 维度 | V7_Visual | V7.5 Simple |
+|:---|:---|:---|
+| **来源** | 社区衍生版 | 作者原版（catlover1937） |
+| **节点数** | 16 | 62 |
+| **速度** | ~30秒 | ~90秒 |
+| **分辨率** | 640×1136（可切换横竖） | 640×960（原生 2:3） |
+| **LoRA 策略** | 主生成阶段全流程加载 | **仅 FaceDetailer 阶段加载**（作者推荐） |
+| **FaceDetailer** | ❌ 无 | ✅ YOLOv8 自动人脸检测 + 换脸 |
+| **SD Upscale** | ❌ 无 | ✅ 2× 放大 + denoise 0.23 |
+| **SkinContrast** | ❌ 无 | ✅ 皮肤质感增强 |
+| **SeedVR 4K** | ❌ 无 | ✅ 可选（小显存不推荐） |
+| **采样参数** | steps 17/CFG 3.5/euler simple | steps 9/CFG 1/dpmpp_2m_sde beta |
+| **构图控制** | CFG 3.5 给 prompt 更强控制力 | CFG 1 依赖 prompt 措辞 |
+| **适用场景** | 快速测试 prompt、构图验证 | 高质量正式出图 |
+
+##### 推荐
+
+- **日常调试、测试 prompt** → **V7_Visual**（快，反馈即时）
+- **正式出图、面部一致性** → **V7.5 Simple**（完整 pipeline，自动换脸）
+- V7_Visual 不需要大幅优化——它已经是极简调试版，加 FaceDetailer 反而失去速度优势
+- 两个工作流**互补使用**，不需要互相替代
+
+#### 5.10 完整工作流清单与选型建议（2026-07-04）
+
+##### 工作流目录（`workflows/测试工作流/`）
+
+| 工作流 | 类型 | 用途 | 推荐场景 |
+|:---|:---|:---|:---|
+| **MoodyZIT V7_Visual** | ZIT 文生图 | 双程采样，极简 16 节点 | ⭐ 日常调试 |
+| **Moody Simple V7.5** | ZIT 文生图 | 作者原版，62 节点，自动换脸 | ⭐ 正式出图 |
+| **Moody i2i V3.1** | ZIT 图生图 | 洗图流，Florence2 自动反推 prompt | 批量喂图 |
+| **SeedVR2 多分辨率版** | 纯超分 | DiT 4K 超分，输入任意图片 | ⭐ 后期放大 |
+| **FLUX2 Klein4B** | Flux2 文生图 | 快速预览 | 替代 ZIT 测试 |
+| **FLUX2 Klein9B** | Flux2 文生图 | 双程采样 | 高质量备选 |
+| **Qwen-Rapid 系列** | Qwen 文生图 | OpenPose 骨骼控图 | 姿势精确控制 |
+
+##### 推荐组合（2026-07-04 最终方案）
+
+```
+日常调试：
+  V7_Visual（30秒出图，快速验证 prompt）
+      ↓
+正式出图：
+  V7.5 Simple（自动换脸 + SD Upscale + SkinContrast）
+      ↓
+4K 超分：
+  SeedVR2（比 V7.5 自带的 SD Upscale 更细腻）
+```
+
+##### 放大技术选型
+
+| 方案 | 技术 | 细腻度 | 速度 | 推荐 |
+|:---|:---|:---:|:---:|:---:|
+| V7.5 内置 SD Upscale | 4xNomosWebPhoto 切块放大 | ⭐⭐⭐ | 快 | 日常够用 |
+| SeedVR2 | DiT 模型 AI 超分 | ⭐⭐⭐⭐⭐ | 慢 | **最佳** |
+
+**结论**：V7_Visual → V7.5 Simple → SeedVR2 三级递进是最佳出图流程。不需要给 SeedVR2 加 SkinContrast（DiT 输出已足够细腻，加了反而容易油腻）。
+
+##### 关于换脸
+
+如果暂时不需要角色一致性和换脸，可以跳过 V7.5，直接用 **V7_Visual + SeedVR2** 组合。功能覆盖无异，流程更简单。
+
 ---
+
+## 二十七、Moody_ZIT 开发最终结论
 
 ## 二十五、Moody Gals 角色 LoRA 景别兼容性速查
 
@@ -1565,6 +1810,49 @@ masterpiece, best quality, highres, (1girl, solo:1.5),
 > 结论：**你要的"漫画级超级夸张巨乳、堪比南瓜"——NoobAI-XL Vpred + `beyond_human_limits` 可以实现。**
 
 **总结一句话：** 横图给站姿，竖图给躺姿；动作描述要像物理课本一样精确，不要像文学描述一样模糊；复杂姿态直接上骨骼控图，不要和纯文本死磕。
+
+---
+
+## 二十七、Moody_ZIT 开发最终结论（2026-07-04）
+
+> 历时 6 小时系统性测试的最终总结。
+
+### 构图控制铁律
+
+| 规律 | 说明 |
+|:---|:---|
+| **细节与构图不可兼得** | prompt 超过 ~100 字必定 zoom in，与分辨率/采样/LoRA 无关 |
+| **镜头焦距是唯一可靠控制手段** | 20mm/24mm/30mm/35mm 比任何文字描述都精准 |
+| **`midpoint aligned` 解决对称问题** | `person vertically centered` + `midpoint between head top and feet bottom aligned with frame vertical center` |
+| **底部总是少于顶部** | ZIT 模型天然偏袒头顶空间，需 `more space below feet than above head` 反向补偿 |
+| **中文空间控制无效** | 6 轮纯中文测试全部失败，必须英文+中文混合 |
+| **CFG 跨阶段不能混用** | KSampler 1st 用 CFG 3.5 会导致 KSampler 2nd（CFG 1）产生彩色伪影 |
+
+### LoRA 使用策略
+
+| 做法 | 结果 |
+|:---|:---|
+| 主生成阶段加载 LoRA | 构图被对抗，w=1.0 时底部空间压缩 |
+| **仅在 Detailer 阶段加载 LoRA**（作者方案） | 构图不受影响，FaceDetailer 自动检测人脸换脸 |
+
+### 推荐出图流程
+
+```
+V7_Visual（30s）→ 快速验证 prompt 构图
+      ↓
+V7.5 Simple（90s）→ 正式出图，自动换脸
+      ↓
+SeedVR2（慢）→ DiT 4K 超分，比 SD Upscale 细腻
+```
+
+**不需要换脸时直接用 V7_Visual + SeedVR2 即可。**
+
+### 当前模型配置
+
+- UNET：`moodyProMix_zitV13FP8`
+- CLIP：`qwen_3_4b`（lumina2）
+- 常用 LoRA：`momoka-zib-v2_clean`（w=0.3~0.5）
+- 备用模型：`moodyRealMix_zitV7GlobalFP8`
 
 
 

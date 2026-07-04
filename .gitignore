@@ -89,6 +89,9 @@ temp_*/
 # Reasonix cache
 workflows/.reasonix/
 
+# External downloaded reference workflows (one-time analysis)
+workflows/catlover1937_downloads/
+
 # Database backup files
 *_backup_*.db
 *.db.bak
