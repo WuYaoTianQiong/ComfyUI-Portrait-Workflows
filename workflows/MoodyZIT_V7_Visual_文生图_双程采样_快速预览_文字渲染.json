@@ -144,7 +144,7 @@
       },
       "widgets_values": [
         "momoka-zib-v2_clean.safetensors",
-        1.0
+        0.3
       ]
     },
     {
@@ -297,7 +297,7 @@
         "Node name for S&R": "CLIPTextEncode"
       },
       "widgets_values": [
-        ""
+        "full body shot, person vertically centered in frame, the midpoint between head top and feet bottom aligned with frame vertical center, feet fully visible with clear space below, no cropping, 30mm lens, pure white background\n\n一位身着华丽粉色汉服的年轻东方女性，约20岁，乌黑长发，精致面容。粉色汉服，点缀金色刺绣，飘逸薄纱长裙，轻薄披肩。全身站立，面对镜头，左手轻触嘴唇。\n\n电影级质感画质，8K超高分辨率，超写实真人摄影风格，极简纯白色背景，梦幻飘渺意境"
       ]
     },
     {
