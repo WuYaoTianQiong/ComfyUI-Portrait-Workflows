@@ -36,7 +36,7 @@ def push_prompt(api_workflow: dict) -> dict:
     
     # 调试：输出发送的数据（前500字符）
     print(f"[DEBUG] 发送到 ComfyUI 的数据: {payload[:500]}...")
-    print(f"[DEBUG] API workflow keys: {list(api_workflow.keys())[:5]}")
+    print(f"[DEBUG] API workflow keys count: {len(api_workflow)}, first 10: {list(api_workflow.keys())[:10]}")
     
     try:
         with httpx.Client(timeout=30) as client:

@@ -141,6 +141,20 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
                 return FileResponse(index_file)
         return response
 
+# 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
+_output_dir = settings.comfyui_root / "output"
+if _output_dir.exists():
+    app.mount("/output", StaticFiles(directory=str(_output_dir)), name="output")
+    print(f"  [mount] /output -> {_output_dir}")
+_input_dir = settings.comfyui_root / "input"
+if _input_dir.exists():
+    app.mount("/input", StaticFiles(directory=str(_input_dir)), name="input")
+    print(f"  [mount] /input -> {_input_dir}")
+_temp_dir = settings.comfyui_root / "temp"
+if _temp_dir.exists():
+    app.mount("/temp", StaticFiles(directory=str(_temp_dir)), name="temp")
+    print(f"  [mount] /temp -> {_temp_dir}")
+
 # 静态文件挂载 + SPA Fallback 中间件
 if settings.static_dir.exists():
     app.mount("/", StaticFiles(directory=str(settings.static_dir), html=True), name="static")

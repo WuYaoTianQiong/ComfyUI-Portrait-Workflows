@@ -458,7 +458,10 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
     rows = (
         GenHistory
         .select()
-        .where(GenHistory.prompt_id == prompt_id)
+        .where(
+            (GenHistory.prompt_id == prompt_id) &
+            (GenHistory.is_deleted == False)
+        )
         .order_by(GenHistory.id.desc())
         .limit(limit)
     )

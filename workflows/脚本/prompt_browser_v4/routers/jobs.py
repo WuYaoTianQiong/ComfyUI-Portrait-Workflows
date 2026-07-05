@@ -2,9 +2,11 @@
 import json
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
+from config import settings
 from models import GenJob, GenHistory
 from services.comfyui_client import (
     get_queue, get_history, get_progress, interrupt, clear_queue,
@@ -142,8 +144,23 @@ def get_job_status_snapshot(job: dict) -> dict:
             for node_out in hist[pid].get("outputs", {}).values():
                 for img in node_out.get("images", []):
                     images.append(img)
+
+            # 过滤掉磁盘上已不存在的图片
+            valid = []
+            for img in images:
+                base = settings.comfyui_root / (img.get("type", "output"))
+                path = base / (img.get("subfolder", "") or "") / img["filename"]
+                if path.exists():
+                    valid.append(img)
+                else:
+                    print(f"[JOB] skip deleted image: {img['filename']}")
+            images = valid
+
             item["images"] = images
             done_count += 1
+            print(f"[JOB] item done, prompt_id={pid}, found {len(images)} valid images")
+            if not images:
+                print(f"[JOB] WARNING: pid={pid} marked done but no valid images remain (all deleted?)")
 
             # 写入历史表，携带 prompt_params（含随机组合的 selection 等信息）
             _insert_history_for_item(
@@ -164,7 +181,11 @@ def get_job_status_snapshot(job: dict) -> dict:
             elif status in ("error", "cancelled"):
                 error_count += 1
         else:
-            status = "unknown"
+            # 没有 comfyui_prompt_id 或找不到匹配状态 → 标记为错误
+            status = "error"
+            item["error"] = item.get("error") or "任务提交到 ComfyUI 失败（无 prompt_id），请检查 ComfyUI 连接"
+            error_count += 1
+            print(f"[JOB] ERROR: item missing comfyui_prompt_id or unmatched: pid={pid!r}, preview={item.get('prompt_preview', '')[:60]}")
 
         item["status"] = status
         item["progress"] = iprogress

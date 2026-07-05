@@ -203,10 +203,13 @@ def list_history(
         alive.append(r)
 
     if deleted_ids:
-        Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
-        # 清理已删除图片的缩略图
-        for r in deleted_records:
-            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
+        try:
+            Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
+            # 清理已删除图片的缩略图
+            for r in deleted_records:
+                _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
+        except Exception as e:
+            print(f"[history] 清理已删除图片记录失败: {e}")
 
     def _get_meta(item):
         return get_image_metadata(item.filename, item.subfolder or "", item.img_type or "output")

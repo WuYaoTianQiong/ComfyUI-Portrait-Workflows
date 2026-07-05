@@ -7,7 +7,10 @@ from config import settings
 
 
 def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
-    """构建图片代理 URL（供 history/jobs 共用）"""
+    """构建图片访问 URL（优先直读静态文件）"""
+    if not subfolder and img_type in ("output", "input", "temp"):
+        # 直接返回静态文件 URL，绕过 Python FileResponse
+        return f"/{img_type}/{quote(filename)}"
     return (
         f"/api/image"
         f"?filename={quote(filename)}"

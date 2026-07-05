@@ -169,6 +169,50 @@ def load_workflow(workflow_path: str, workflow_content: str | None = None) -> di
     return ensure_api_format(workflow)
 
 
+def _inject_sampler_params(node: dict, prompt_data: dict):
+    """为采样器节点（KSampler/KSamplerAdvanced）显式覆盖关键参数，避免 workflow 解析器值错位"""
+    inputs = node.get("inputs", {})
+    is_advanced = node.get("class_type") == "KSamplerAdvanced"
+
+    # 步数：prompt 有则用，无则用默认值（解析器值已错位，必须覆盖）
+    steps_val = prompt_data.get("steps")
+    if steps_val is None:
+        steps_val = 30
+    if "steps" in inputs:
+        inputs["steps"] = int(steps_val)
+
+    # CFG
+    cfg_val = prompt_data.get("cfg_scale")
+    if cfg_val is not None and "cfg" in inputs:
+        inputs["cfg"] = float(cfg_val)
+
+    # sampler_name：prompt 数据或默认值
+    sampler_name = prompt_data.get("sampler")
+    if not sampler_name:
+        sampler_name = "euler"
+    if "sampler_name" in inputs:
+        inputs["sampler_name"] = str(sampler_name)
+
+    # scheduler：KSamplerAdvanced 只能用 ['simple','sgm_uniform','karras','exponential','ddim_uniform','beta','normal','linear_quadratic','kl_optimal']
+    if is_advanced and "scheduler" in inputs:
+        scheduler = prompt_data.get("scheduler")
+        if scheduler:
+            inputs["scheduler"] = str(scheduler)
+        else:
+            inputs["scheduler"] = "simple"
+
+    # KSamplerAdvanced 特定字段
+    if is_advanced:
+        if "start_at_step" in inputs:
+            inputs["start_at_step"] = 0
+        if "end_at_step" in inputs:
+            inputs["end_at_step"] = int(steps_val)
+        if "return_with_leftover_noise" in inputs:
+            inputs["return_with_leftover_noise"] = "disable"
+        if "add_noise" in inputs:
+            inputs["add_noise"] = "enable"
+
+
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     """
     向工作流注入提示词 / 种子 / 方向 / 画质。
@@ -201,12 +245,18 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     if seed_val == 0 and seed_override is None:
         import random as _rnd
         seed_val = _rnd.randint(1, 2**32 - 1)
+
+    # 遍历所有采样器节点：先注种子，再注参数
     for node_id, node in api_workflow.items():
         if isinstance(node, dict) and node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
-            if "noise_seed" in node["inputs"]:
-                node["inputs"]["noise_seed"] = seed_val
-            elif "seed" in node["inputs"]:
-                node["inputs"]["seed"] = seed_val
+            inputs = node["inputs"]
+            # 种子
+            if "noise_seed" in inputs:
+                inputs["noise_seed"] = seed_val
+            elif "seed" in inputs:
+                inputs["seed"] = seed_val
+            # 显式覆盖采样参数（修复 workflow 解析器值错位问题）
+            _inject_sampler_params(node, prompt_data)
 
     # 3. 注入方向（横竖屏）
     orientation = prompt_data.get("orientation", "portrait")

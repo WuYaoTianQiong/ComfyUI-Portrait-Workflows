@@ -143,6 +143,8 @@ def proxy_image(
     try:
         with httpx.Client(timeout=30, follow_redirects=True) as client:
             resp = client.get(url)
+            if resp.status_code == 404:
+                raise HTTPException(404, "图片文件不存在（可能已被删除）")
             resp.raise_for_status()
         return StreamingResponse(
             iter([resp.content]),
@@ -150,7 +152,9 @@ def proxy_image(
             headers={"Cache-Control": "public, max-age=86400"},
         )
     except httpx.ConnectError:
-        raise HTTPException(503, "ComfyUI 未运行，本地也无此文件")
+        raise HTTPException(404, "图片文件不存在（已在磁盘上被删除）")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"获取图片失败: {e}")
 
@@ -406,6 +410,9 @@ def batch_generate(req: BatchRequest):
                 "negative_prompt": p.negative_prompt or "",
                 "seed": p.seed or 0,
                 "seed_override": item.seed,
+                "steps": p.steps,
+                "cfg_scale": p.cfg_scale,
+                "sampler": p.sampler,
                 "orientation": req.orientation,
                 "quality": req.quality,
             }
