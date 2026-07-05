@@ -31,6 +31,9 @@ window.loadActiveJobs = async function() {
       jobs = (data.jobs || []).filter(j => j.job_type === "batch" || j.items?.length > 1);
     }
 
+    // 过滤掉状态异常的 unknown 任务（避免加载有缺陷的任务）
+    jobs = jobs.filter(j => j.status !== "unknown");
+
     // 如果用户之前关闭了批量面板，不再重新展示已完成的任务
     if (window.UiState.get("batchPanelDismissed", false)) {
       jobs = jobs.filter(j => !["done", "error", "stopped"].includes(j.status));
@@ -56,6 +59,8 @@ window.pollJob = async function(jobId) {
       }
     }
   } catch (e) {
+    // 超时是预期行为（后端正在处理），不打印错误
+    if (e.message && e.message.includes("请求超时")) return;
     console.error("pollJob", e);
   }
 };
@@ -67,11 +72,21 @@ window.pollJob = async function(jobId) {
 window.renderSingleJob = function(job) {
   const area = document.getElementById("outputArea");
   area.classList.add("show");
-  const item = job.items[0] || {};
+  const item = job.items && job.items.length > 0 ? job.items[0] : null;
   const title = document.getElementById("outputTitle");
   const fill = document.getElementById("progressFill");
   const info = document.getElementById("progressInfo");
   const body = document.getElementById("outputBody");
+
+  if (!item) {
+    // items 为空时显示占位信息
+    console.warn("[renderSingleJob] job has empty items, job:", job);
+    fill.style.width = "0%";
+    info.textContent = "等待中...";
+    title.textContent = "任务 #" + (job.id || "?");
+    return;
+  }
+
   if (item.status === "pending") {
     fill.style.width = "0%";
     info.textContent = "排队中...";
@@ -87,13 +102,31 @@ window.renderSingleJob = function(job) {
     info.textContent = "完成";
     title.textContent = "生成结果";
     body.innerHTML = "";
-    if (item.images && item.images.length) {
-      const grid = item.images.length > 1;
+    console.log("[renderSingleJob] item done, images:", item.images);
+    // 确保 images 是数组
+    const images = Array.isArray(item.images) ? item.images : [];
+    if (images.length > 0) {
+      const grid = images.length > 1;
       body.className = grid ? "output-body img-grid" : "output-body";
-      item.images.forEach(img => body.appendChild(window.createImageWrap(img)));
+      images.forEach(img => {
+        if (img && img.filename) {
+          console.log("[renderSingleJob] creating image:", img);
+          body.appendChild(window.createImageWrap(img));
+        } else {
+          console.warn("[renderSingleJob] invalid image data:", img);
+        }
+      });
     } else {
       body.className = "output-body";
-      body.innerHTML = '<div class="empty-tip">完成但未找到输出图片</div>';
+      // 判断是否为"处理历史图片"类任务（图片会写入画廊但未回填到 job items）
+      const promptParams = item.prompt_params ? (typeof item.prompt_params === "string" ? JSON.parse(item.prompt_params) : item.prompt_params) : null;
+      const isHistoryProcess = promptParams && promptParams.source === "history_process";
+      body.innerHTML = isHistoryProcess
+        ? '<div class="empty-tip">处理完成，请到 🖼️ 历史画廊 查看结果</div>'
+        : '<div class="empty-tip">完成但未找到输出图片</div>';
+      if (!isHistoryProcess) {
+        console.warn("[renderSingleJob] No images found in item:", item);
+      }
     }
   } else if (item.status === "error" || item.status === "cancelled") {
     fill.style.width = "0%";
@@ -101,6 +134,11 @@ window.renderSingleJob = function(job) {
     title.textContent = item.status === "cancelled" ? "已取消" : "生成失败";
     body.className = "output-body";
     body.innerHTML = `<div class="empty-tip" style="color:var(--danger)">${window.escHtml(item.error || "失败")}</div>`;
+  } else {
+    // 未知状态
+    console.warn("[renderSingleJob] unknown item status:", item.status, item);
+    title.textContent = "生成中...";
+    info.textContent = "状态: " + (item.status || "未知");
   }
 };
 
@@ -166,11 +204,33 @@ window.showBatchResults = function(job) {
 
 window.createImageWrap = function(img) {
   const wrap = document.createElement("div");
+  wrap.style.position = "relative";
+
+  const placeholder = document.createElement("div");
+  placeholder.style.cssText = "width:120px;height:120px;background:#2a2a2a;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px";
+  placeholder.textContent = "图片已删除";
+  placeholder.style.display = "none";
+
   const el = document.createElement("img");
-  el.src = window.imageUrl(img);
+  const url = window.imageUrl(img);
+  el.src = url;
   el.alt = img.filename;
-  el.onclick = () => window.openLightbox(window.imageUrl(img));
+  el.style.display = "none";
+  el.onclick = () => window.openLightbox(url);
+
+  el.onerror = () => {
+    el.style.display = "none";
+    placeholder.style.display = "flex";
+  };
+
+  el.onload = () => {
+    el.style.display = "";
+    placeholder.style.display = "none";
+  };
+
+  wrap.appendChild(placeholder);
   wrap.appendChild(el);
+
   const cap = document.createElement("div");
   cap.className = "img-caption";
   cap.textContent = img.filename;
@@ -179,6 +239,7 @@ window.createImageWrap = function(img) {
 };
 
 window.imageUrl = function(img) {
+  // 尝试走静态文件直读；若后端发现文件不存在会返回优雅的占位图
   return `/api/image?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || "")}&type=${encodeURIComponent(img.type || "output")}`;
 };
 

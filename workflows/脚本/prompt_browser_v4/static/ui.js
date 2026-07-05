@@ -194,5 +194,5 @@ window.switchTab = function(tabId, btn) {
     if (btn) btn.style.display = 'none';
   }
 
-  window.updateRoute();
+  window.updateRoute(true);
 };

@@ -723,3 +723,23 @@
   color: #10b981;
 }
 
+/* 画廊全选标签 */
+.gallery-select-all-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.gallery-select-all-label input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+  margin: 0;
+}
+.gallery-select-all-label:hover {
+  color: var(--text);
+}
+

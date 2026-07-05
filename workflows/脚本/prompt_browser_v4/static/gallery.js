@@ -31,6 +31,7 @@ window.renderGallery = function(items) {
   window._addProcessButtonsToGallery();
   window.updateGalleryActionButtons();
   window.updateCompareButton();
+  window.updateGallerySelectAllCheck();
 };
 
 /** 共享：创建单个画廊 item 的 DOM 元素 */
@@ -146,6 +147,36 @@ window.toggleGalleryItem = function(id, checkEl) {
   }
   window.updateCompareButton();
   window.updateGalleryActionButtons();
+  window.updateGallerySelectAllCheck();
+};
+
+// -------------------------------------------------------------------
+// 画廊全选 / 取消全选
+// -------------------------------------------------------------------
+
+window.selectAllGallery = function(checked) {
+  document.querySelectorAll('.gallery-item-check').forEach(el => {
+    const id = parseInt(el.dataset.id);
+    if (checked) {
+      window._gallerySelectedIds.add(id);
+      el.classList.add('checked');
+    } else {
+      window._gallerySelectedIds.delete(id);
+      el.classList.remove('checked');
+    }
+  });
+  window.updateCompareButton();
+  window.updateGalleryActionButtons();
+};
+
+window.updateGallerySelectAllCheck = function() {
+  const allCheck = document.getElementById('gallerySelectAll');
+  if (!allCheck) return;
+  const total = document.querySelectorAll('.gallery-item-check').length;
+  const checked = document.querySelectorAll('.gallery-item-check.checked').length;
+  allCheck.checked = total > 0 && total === checked;
+  // 如果有选中项但非全选，设为 indeterminate 状态
+  allCheck.indeterminate = checked > 0 && checked < total;
 };
 
 window.updateCompareButton = function() {
@@ -234,6 +265,7 @@ window.appendGalleryItems = function(items) {
   window._addProcessButtonsToGallery();
   window.updateGalleryActionButtons();
   window.updateCompareButton();
+  window.updateGallerySelectAllCheck();
 };
 
 window.updateGalleryLoadMore = function() {

@@ -252,6 +252,33 @@ window.batchDeleteHistory = async function() {
   }
 };
 
+/** 批量跑图：对每个选中的历史图片调用工作流处理 */
+window.batchProcessHistory = async function() {
+  const ids = Array.from(window._gallerySelectedIds);
+  if (!ids.length) return;
+  const wfPath = window._currentWorkflow || "";
+  if (!wfPath) { window.showToast("请先选择工作流", "warn"); return; }
+  const btn = document.getElementById('galleryBatchProcess');
+  if (btn) window.showButtonFeedback(btn, '✨ 提交中...', 3000);
+  let submitted = 0;
+  for (const id of ids) {
+    try {
+      const r = await window.api(`/api/history/${id}/process`, {
+        method: "POST",
+        body: JSON.stringify({ workflow_path: wfPath }),
+        headers: { "Content-Type": "application/json" },
+      });
+      if (r.success) {
+        submitted++;
+        window.trackJob(r.job_id);
+      }
+    } catch (e) {
+      console.error(`批量跑图 #${id} 失败:`, e);
+    }
+  }
+  window.showToast(`已提交 ${submitted} 个处理任务`, 'info');
+};
+
 window.downloadHistoryItem = function(id) {
   const a = document.createElement('a');
   a.href = `/api/history/${id}/download`;
@@ -315,10 +342,21 @@ window.regenerateFromHistory = async function(promptId) {
 
 window._gallerySearchTimer = null;
 
+/** 画廊搜索/排序/筛选变化时清空选中的 item */
+window._clearGallerySelection = function() {
+  window._gallerySelectedIds.clear();
+  document.querySelectorAll('.gallery-item-check').forEach(el => el.classList.remove('checked'));
+  window.updateGalleryActionButtons();
+  window.updateCompareButton();
+  const allCheck = document.getElementById('gallerySelectAll');
+  if (allCheck) { allCheck.checked = false; allCheck.indeterminate = false; }
+};
+
 window.onGallerySearch = function() {
   clearTimeout(window._gallerySearchTimer);
   window._gallerySearchTimer = setTimeout(() => {
     window._gallerySearch = document.getElementById('gallerySearch').value;
+    window._clearGallerySelection();
     if (document.body.dataset.htmxActive === "1") {
       document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
     } else {
@@ -329,6 +367,7 @@ window.onGallerySearch = function() {
 
 window.onGallerySortChange = function() {
   window._gallerySort = document.getElementById('gallerySort').value;
+  window._clearGallerySelection();
   if (document.body.dataset.htmxActive === "1") {
     document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
   } else {
@@ -338,6 +377,7 @@ window.onGallerySortChange = function() {
 
 window.onGalleryFilterChange = function() {
   window._galleryFilter = document.getElementById('galleryFilter').value;
+  window._clearGallerySelection();
   if (document.body.dataset.htmxActive === "1") {
     document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
   } else {
@@ -349,7 +389,10 @@ window.updateGalleryActionButtons = function() {
   const count = window._gallerySelectedIds.size;
   const batchDel = document.getElementById('galleryBatchDel');
   const batchDl = document.getElementById('galleryBatchDl');
+  const batchProc = document.getElementById('galleryBatchProcess');
   if (batchDel) batchDel.style.display = count >= 1 ? 'inline-flex' : 'none';
   if (batchDl) batchDl.style.display = count >= 1 ? 'inline-flex' : 'none';
+  if (batchProc) batchProc.style.display = count >= 1 ? 'inline-flex' : 'none';
   window.updateCompareButton();
+  window.updateGallerySelectAllCheck();
 };

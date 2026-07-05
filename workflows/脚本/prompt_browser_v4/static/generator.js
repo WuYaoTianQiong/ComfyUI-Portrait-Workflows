@@ -136,14 +136,21 @@ window.toggleSelectAll = function(checked) {
   window.UiState.set("selectedIds", Array.from(window.selectedIds));
 };
 
+window.toggleSelectAllPrompts = function(checked) {
+  window.toggleSelectAll(checked);
+};
+
 window.updateSelectionBar = function() {
   const bar = document.getElementById("selectionBar");
   const info = document.getElementById("selectionInfo");
   const allCheck = document.getElementById("selectAllCheck");
+  const promptAllCheck = document.getElementById("promptSelectAll");
   const count = window.selectedIds.size;
   bar.classList.toggle("show", count > 0);
   info.textContent = `已选 ${count} 项`;
-  allCheck.checked = count > 0 && window.allPrompts.length > 0 && window.allPrompts.every(p => window.selectedIds.has(p.id));
+  const allChecked = count > 0 && window.allPrompts.length > 0 && window.allPrompts.every(p => window.selectedIds.has(p.id));
+  allCheck.checked = allChecked;
+  if (promptAllCheck) promptAllCheck.checked = allChecked;
 };
 
 window.clearSelection = function() {

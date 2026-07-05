@@ -13,7 +13,7 @@ window.loadPrompts = async function(page) {
 
     // Phase 2: HTMX mode —— 构建 URL 参数后触发服务端渲染
     if (document.body.dataset.htmxActive === "1") {
-      const p = { search, sort, page: window._promptPage || 1 };
+      const p = { search, sort, page: window._promptPage || 1, page_size: window._promptPageSize };
       // 修复：只有 category_id 是有效整数时才传递
       if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
         p.category_id = window._currentCategoryId;
@@ -186,22 +186,43 @@ window.renderPagination = function() {
   const totalPages = Math.max(1, Math.ceil(window._promptTotal / window._promptPageSize));
   const el = document.getElementById("promptPagination");
   if (!el) return;
-  if (totalPages <= 1) { el.innerHTML = ""; return; }
+
+  const pageSizeOptions = [20, 50, 100, 200];
+  let pageSizeHtml = `每页 <select class="page-size-select" onchange="window.changePromptPageSize(parseInt(this.value))">`;
+  for (const sz of pageSizeOptions) {
+    pageSizeHtml += `<option value="${sz}"${sz === window._promptPageSize ? ' selected' : ''}>${sz}</option>`;
+  }
+  pageSizeHtml += `</select> 条`;
 
   let html = `<span class="page-info">第 ${window._promptPage}/${totalPages} 页，共 ${window._promptTotal} 条</span>`;
-  html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(1)">«</button>`;
-  html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage - 1})">‹</button>`;
+  html += `<span class="page-info">${pageSizeHtml}</span>`;
 
-  let start = Math.max(1, window._promptPage - 2);
-  let end = Math.min(totalPages, start + 4);
-  start = Math.max(1, end - 4);
-  for (let i = start; i <= end; i++) {
-    html += `<button class="page-btn${i === window._promptPage ? " active" : ""}" onclick="window.loadPrompts(${i})">${i}</button>`;
+  // 仅当超过1页时显示翻页按钮
+  if (totalPages > 1) {
+    html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(1)">«</button>`;
+    html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage - 1})">‹</button>`;
+
+    let start = Math.max(1, window._promptPage - 2);
+    let end = Math.min(totalPages, start + 4);
+    start = Math.max(1, end - 4);
+    for (let i = start; i <= end; i++) {
+      html += `<button class="page-btn${i === window._promptPage ? " active" : ""}" onclick="window.loadPrompts(${i})">${i}</button>`;
+    }
+
+    html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage + 1})">›</button>`;
+    html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${totalPages})">»</button>`;
   }
 
-  html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage + 1})">›</button>`;
-  html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${totalPages})">»</button>`;
   el.innerHTML = html;
+};
+
+/** 切换每页显示条数 */
+window.changePromptPageSize = function(size) {
+  if (size === window._promptPageSize) return;
+  window._promptPageSize = size;
+  window._promptPage = 1;
+  window.UiState.set("promptPageSize", size);
+  window.loadPrompts();
 };
 
 window.selectPrompt = async function(id, fetchDetail = true, shiftKey = false, ctrlKey = false, isRestore = false) {

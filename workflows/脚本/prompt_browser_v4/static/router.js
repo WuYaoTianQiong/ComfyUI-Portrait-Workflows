@@ -24,6 +24,8 @@ window.routePrompt = function(params) {
   }
 };
 
+window.routeStats = function() { window.switchTabByRoute('statsTab'); window.loadStats(); };
+
 window.routeHistory = function(params) {
   if (params && params.id) {
     const historyId = parseInt(params.id);
@@ -60,6 +62,8 @@ window.handleRoute = function(path) {
     window.routePrompt({});
   } else if (path === '/composer') {
     window.routeComposer();
+  } else if (path === '/stats') {
+    window.routeStats();
   } else {
     window.routeGallery();
   }
@@ -87,12 +91,18 @@ window.updateRoute = function(useReplace = false) {
     if (item) {
       url = `/history/${item.id}`;
     }
-  } else if (window.UiState.get('activeTab', 'galleryTab') === 'promptTab' && window.selectedId) {
-    url = `/prompt/${window.selectedId}`;
-  } else if (window.UiState.get('activeTab', 'galleryTab') === 'promptTab') {
-    url = '/prompt';
-  } else if (window.UiState.get('activeTab', 'galleryTab') === 'composerTab') {
-    url = '/composer';
+  } else {
+    const activeTab = window.UiState.get('activeTab', 'galleryTab');
+    if (activeTab === 'promptTab' && window.selectedId) {
+      url = `/prompt/${window.selectedId}`;
+    } else if (activeTab === 'promptTab') {
+      url = '/prompt';
+    } else if (activeTab === 'composerTab') {
+      url = '/composer';
+    } else if (activeTab === 'statsTab') {
+      url = '/stats';
+    }
+    // galleryTab → url 保持 '/gallery'
   }
   
   if (window.location.pathname !== url && !window._suppressRouteUpdate) {

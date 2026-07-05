@@ -4,8 +4,7 @@
     font-size: 13px;
 }
 .frag-tag::before {
-    content: "\A";
-    white-space: pre;
+    content: "";
 }
 .frag-tag:first-of-type::before {
     content: "";

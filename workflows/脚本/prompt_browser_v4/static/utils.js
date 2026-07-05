@@ -39,12 +39,23 @@ window.disableBtnWhilePending = function(btn, fn) {
 window.API = "";
 
 window.api = async function(path, opts = {}) {
-  const resp = await fetch(window.API + path, opts);
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`${resp.status} ${resp.statusText}${text ? ": " + text : ""}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30秒超时（与后端 push_prompt 超时一致）
+  try {
+    const resp = await fetch(window.API + path, { ...opts, signal: controller.signal });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(`${resp.status} ${resp.statusText}${text ? ": " + text : ""}`);
+    }
+    return resp.json();
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error("请求超时（15秒无响应）");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
   }
-  return resp.json();
 };
 
 /** 显示通用模态框（HTML 内容） */

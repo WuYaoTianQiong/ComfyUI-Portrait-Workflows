@@ -24,6 +24,9 @@ window._galleryFilter = "all";
 window._gallerySearch = "";
 window.searchTimer = null;
 
+// 从存储恢复每页条数
+window._promptPageSize = window.UiState.get("promptPageSize", 50);
+
 // -------------------------------------------------------------------
 // 初始化
 // -------------------------------------------------------------------
@@ -43,6 +46,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const container = document.getElementById("promptListContainer");
     if (container && container.contains(event.detail.elt)) {
       document.body.dispatchEvent(new CustomEvent("promptListLoaded"));
+    }
+    // 画廊 HTMX 交换后恢复选中状态和全选复选框
+    if (event.detail.elt.id === 'galleryContainer' || event.detail.elt.querySelector('#galleryGrid')) {
+      // 恢复每个 gallery-item 的选中状态
+      window._gallerySelectedIds.forEach(id => {
+        const checkEl = document.querySelector(`.gallery-item-check[data-id="${id}"]`);
+        if (checkEl) checkEl.classList.add('checked');
+      });
+      window.updateGalleryActionButtons();
+      window.updateCompareButton();
+      window.updateGallerySelectAllCheck();
     }
   });
 

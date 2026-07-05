@@ -61,27 +61,36 @@
 
   <div class="pagination" id="promptPagination">
     {% set total_pages = ((total + page_size - 1) // page_size) if total > 0 else 1 %}
-    {% if total_pages > 1 %}
     <span class="page-info">第 {{ page }}/{{ total_pages }} 页，共 {{ total }} 条</span>
+    <span class="page-info">每页
+      <select class="page-size-select" onchange="window.changePromptPageSize(parseInt(this.value))">
+        <option value="20" {{ 'selected' if page_size == 20 }}>20</option>
+        <option value="50" {{ 'selected' if page_size == 50 }}>50</option>
+        <option value="100" {{ 'selected' if page_size == 100 }}>100</option>
+        <option value="200" {{ 'selected' if page_size == 200 }}>200</option>
+      </select>
+      条
+    </span>
+    {% if total_pages > 1 %}
     <button class="page-btn" {{ 'disabled' if page <= 1 }}
-            hx-get="/api/prompts/html?page=1&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
+            hx-get="/api/prompts/html?page=1&page_size={{ page_size }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
             hx-target="#promptListContainer" hx-swap="outerHTML">«</button>
     <button class="page-btn" {{ 'disabled' if page <= 1 }}
-            hx-get="/api/prompts/html?page={{ page - 1 }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
+            hx-get="/api/prompts/html?page={{ page - 1 }}&page_size={{ page_size }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
             hx-target="#promptListContainer" hx-swap="outerHTML">‹</button>
     {% set start = [1, page - 2]|max %}
     {% set end = [total_pages, start + 4]|min %}
     {% set start = [1, end - 4]|max %}
     {% for i in range(start, end + 1) %}
     <button class="page-btn{{ ' active' if i == page }}"
-            hx-get="/api/prompts/html?page={{ i }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
+            hx-get="/api/prompts/html?page={{ i }}&page_size={{ page_size }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
             hx-target="#promptListContainer" hx-swap="outerHTML">{{ i }}</button>
     {% endfor %}
     <button class="page-btn" {{ 'disabled' if page >= total_pages }}
-            hx-get="/api/prompts/html?page={{ page + 1 }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
+            hx-get="/api/prompts/html?page={{ page + 1 }}&page_size={{ page_size }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
             hx-target="#promptListContainer" hx-swap="outerHTML">›</button>
     <button class="page-btn" {{ 'disabled' if page >= total_pages }}
-            hx-get="/api/prompts/html?page={{ total_pages }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
+            hx-get="/api/prompts/html?page={{ total_pages }}&page_size={{ page_size }}&search={{ search }}&sort={{ sort }}&category_id={{ category_id or '' }}&tag_ids={{ tag_ids or '' }}"
             hx-target="#promptListContainer" hx-swap="outerHTML">»</button>
     {% endif %}
   </div>

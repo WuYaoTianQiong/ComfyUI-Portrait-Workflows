@@ -8,9 +8,9 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="stylesheet" href="/base.css?v=1">
 <link rel="stylesheet" href="/components.css?v=1">
-<link rel="stylesheet" href="/prompts.css?v=1">
+<link rel="stylesheet" href="/prompts.css?v=2">
 <link rel="stylesheet" href="/frag.css?v=1">
-<link rel="stylesheet" href="/gallery.css?v=1">
+<link rel="stylesheet" href="/gallery.css?v=2">
 <link rel="stylesheet" href="/composer.css?v=4">
 <link rel="stylesheet" href="/composer2.css?v=7">
 <link rel="stylesheet" href="/modal.css?v=1">
@@ -126,6 +126,10 @@
             </select>
           </div>
           <div class="toolbar-stats">
+            <label class="gallery-select-all-label" style="margin-right:8px" title="全选当前页提示词">
+              <input type="checkbox" id="promptSelectAll" onchange="window.toggleSelectAllPrompts(this.checked)">
+              <span>全选</span>
+            </label>
             共 <span id="countBadge">0</span> 条
           </div>
         </div>
@@ -210,6 +214,11 @@
         <option value="favorite">仅收藏</option>
       </select>
       <span style="flex:1"></span>
+      <label class="gallery-select-all-label" title="全选当前页">
+        <input type="checkbox" id="gallerySelectAll" onchange="window.selectAllGallery(this.checked)">
+        <span>全选</span>
+      </label>
+      <button class="btn btn-sm btn-ghost" id="galleryBatchProcess" style="display:none" onclick="batchProcessHistory()">&#x2728; 跑图选中</button>
       <button class="btn btn-sm btn-ghost" id="galleryBatchDel" style="display:none" onclick="batchDeleteHistory()">&#x1F5D1; 删除选中</button>
       <button class="btn btn-sm btn-ghost" id="galleryBatchDl" style="display:none" onclick="batchDownloadHistory()">&#x2B07; 下载选中</button>
       <button class="btn btn-sm btn-ghost" onclick="clearHistory()" title="清空历史">清空</button>
@@ -573,14 +582,14 @@
 
 <!-- 按依赖顺序加载模块 -->
 <script src="/utils.js?v=2"></script>
-<script src="/ui.js?v=6"></script>
-<script src="/router.js?v=2"></script>
+<script src="/ui.js?v=7"></script>
+<script src="/router.js?v=3"></script>
 <script src="/workflow.js?v=1"></script>
-<script src="/prompt.js?v=5"></script>
-<script src="/generator.js?v=1"></script>
-<script src="/job.js?v=4"></script>
-<script src="/history.js?v=2"></script>
-<script src="/gallery.js?v=2"></script>
+<script src="/prompt.js?v=6"></script>
+<script src="/generator.js?v=2"></script>
+<script src="/job.js?v=5"></script>
+<script src="/history.js?v=3"></script>
+<script src="/gallery.js?v=3"></script>
 <script src="/imageViewer.js?v=1"></script>
 <script src="/app.js?v=4"></script>
 <script src="/category.js?v=2"></script>
