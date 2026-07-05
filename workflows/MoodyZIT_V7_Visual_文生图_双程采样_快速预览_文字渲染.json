@@ -144,7 +144,7 @@
       },
       "widgets_values": [
         "momoka-zib-v2_clean.safetensors",
-        0.3
+        0.8
       ]
     },
     {
@@ -392,8 +392,8 @@
       },
       "widgets_values": [
         "enable",
-        813972274184088,
-        "randomize",
+        700000000,
+        "increment",
         17,
         3.5,
         "euler",
@@ -495,8 +495,8 @@
       },
       "widgets_values": [
         "enable",
-        813972274184088,
-        "randomize",
+        700000000,
+        "increment",
         11,
         1,
         "dpmpp_2m_sde",

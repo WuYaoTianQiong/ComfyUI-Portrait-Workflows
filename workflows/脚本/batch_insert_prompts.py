@@ -1,28 +1,114 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-批量插入提示词 V2 — 支持【】分段、自动拆分、清洗检查。
+批量插入提示词 V3 — 支持【】分段、自动拆分、清洗检查、去重。
 
 用法：
     python batch_insert_prompts.py --file prompts.txt
     python batch_insert_prompts.py --file prompts.txt --dry-run
     python batch_insert_prompts.py --file prompts.txt --strict
+    # LLM智能命名：预览碎片 → 复制给AI生成标题 → 导入
+    python batch_insert_prompts.py --file prompts.txt --llm-name
+    python batch_insert_prompts.py --file prompts.txt --import-names llm_names.json
 
-输入格式（以两个以上空行分隔）：
-    方式1: 【人物外貌】...【姿态动作】... + 元数据行
+输入格式（以三个以上空行分隔，见 split_blocks）：
+    方式1: 【人物面部】...【姿态动作】... + 元数据行
     方式2: 三段式(人+衣 / 姿态 / 场景) + 元数据行 → 自动拆分
     方式3: 纯文本 + 元数据行
     方式4: 仅提示词，无元数据 → 元数据字段自动置空
 
-整理提示词时的坑点（2026-07-05 实测）：
-  - 外语提示词不要混入，全部翻译成中文再入库。
-  - 某碎片无内容时，直接移除整行【】，不要留空行标题。
-    因为 parse_fragments 使用 re.DOTALL 的正则，空碎片会导致
-    后续碎片内容被错误吞并（如【姿态动作】空 → 会吃掉【场景环境】）。
-  - 优先使用【】碎片格式（方式1），手动拆分为精准的碎片类型。
+============================= 信达雅规范（必读） =============================
+
+【核心原则】
+  prompt 正文的语言质量是第一位的。杜绝机械的词汇堆砌（如"韩风冷色调
+  网红美白滤镜，极致冷白皮，通体雪白"），代之以有人味、有画面感、有韵律
+  的中文文学描述。
+
+【碎片语义 —— 每类碎片只装对的内容】
+  拍摄视角：镜头参数、机位、构图、焦距、画幅比例
+  人物面部：脸型、五官、妆容、表情、发色、发型、肤色
+  人物身材：体型、曲线、比例、身高、四肢
+  人物服饰：衣服、配饰、鞋、包
+  姿态动作：身体姿势、手势、站位、眼神方向、动态
+  场景环境：地点、背景、道具、空间层次
+  光影色调：光源方向、色温、色调、明暗、氛围光
+  画风技术：画质、分辨率、摄影风格、流派、器材、胶片质感
+
+  ❌ 禁止：【人物身材】里写年龄或网红标签
+  ❌ 禁止：【画风技术】里写构图或镜头参数
+  ❌ 禁止：【人物面部】里写服饰描述（如"乳沟"）
+  ❌ 禁止：【拍摄视角】里写场景环境描述
+
+【语言质量 —— 什么才叫信达雅】
+  ✅ 好："她的皮肤在冷白荧光下呈现出瓷器上覆了一层薄釉般的通透感。"
+  ❌ 差："韩风冷色调网红美白滤镜，极致冷白皮，通体雪白。"
+  ✅ 好："她端着一碗水果，慵懒地靠在某处，姿态放松得像刚睡醒的午后。"
+  ❌ 差："端着一碗水果，姿态闲适。"
+  关键：每句都应有画面感，用比喻和细节让读者能"看见"这个场景。
+
+【标点与断句】
+  每条碎片的正文必须有完整的标点（句号、逗号等）。长句在自然边界处断开。
+  段落间有呼吸感，不堆砌成天书。
+
+【碎片标记的使用】
+  - 碎片标题【xxx】必须与 FRAGMENT_TYPES 中定义的完全一致
+  - 无内容的碎片直接移除整行，不留空标题（会导致正则吞并）
+  - 碎片间用一个空行分隔，方便前端展示
+
+【外语处理】
+  所有非中文的提示词必须翻译为中文再入库。翻译要达到信达雅标准，
+  不能是机器直译的僵硬感。
+
+【入库操作规范】
+  - 本脚本已内置 prompt 文本去重，同一条不会重复插入
+  - 但绝不能把整个文件重新全量跑一遍来"更新"已有条目
+  - 新增条目时只追加到源文件末尾，然后运行脚本
+  - 如需修改已有条目，直接改源文件的对应内容，脚本入库时会自动插入
+    新版本（prompt 文本不同），然后手动清理旧版本
+  - ⚠️ 禁止直接用 Python 命令字符串追加内容到源文件（如
+    `python -c "with open(...) as f: f.write(...)"`）
+    这种方式极易导致格式错误（如缺失标点、碎片化词汇）
+  - ✅ 正确做法：手动编辑源文件，或用脚本生成内容后手动复制到文件末尾
+
+【前端与出图联动】
+  - prompt 字段存带【】标题的展示格式（空行分隔碎片）
+  - 前端复制按钮用 JS 去标题：text.replace(/【[^】]+】\\s*/g, '')
+  - 传 ComfyUI 时 Python 去标题：re.sub(r'【[^】]+】\\s*', '', prompt)
+  - 前端展示碎片标题时用 .frag-tag CSS 类高亮显示（暖橙色加粗）
+
+============================= 以上规范于 2026-07-05 整理 =============================
+
+============================= 标题生成规范（必读） =============================
+
+【信达雅要求】
+  标题（name）不应机械截取【姿态动作】第一句话。必须使用场景+服饰+风格的三段
+  组合格式，如"热带海边·麻花辫与微风"、"古风庭院·薄纱长裙·韩系冷调"。
+  每次新入库后，建议用 --llm-name 模式让LLM分析碎片生成标题。
+
+【截断防护】
+  标题总长度不得超过 30 字，每段长度应控制在 8 字以内，防止 extract_kw 切断
+  中文词造成"渐变的交"、"电影级质"这类看不懂的乱码尾巴。
+  建议：场景段 ≤6 字，服饰段 ≤8 字，画风段 ≤4 字。
+
+【LLM 智能命名流程】
+  1. python batch_insert_prompts.py --file prompts.txt --llm-name
+     → 输出每条新提示词的碎片信息（场景、服饰、画风等）
+  2. 将输出复制给任意LLM（Claude/ChatGPT/通义千问），附上提示：
+     "为每条提示词生成一个信达雅的中文标题，15字以内，有画面感"
+  3. LLM 返回 JSON 格式：{"0":"标题1","1":"标题2",...}
+  4. python batch_insert_prompts.py --file prompts.txt --import-names llm_names.json
+     导入LLM生成的标题并执行入库
+
+【⚠️ 已知坑】
+  - 规则生成（extract_kw）会把长句截断，生成"渐变的交"、"电影级质"等乱码尾缀
+  - 必须用 LLM 精修或手动审核所有新标题，确保无截断
+  - 早期版本（2026-07-05之前）入库的提示词没有插入 template_fragments 表，
+    需要手动补全碎片记录才能使用 LLM 命名功能
+
+============================= 标题规范于 2026-07-05 整理 =============================
 """
 
-import argparse, re, sqlite3, sys
+import argparse, re, sqlite3, sys, json
 from datetime import datetime
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -132,6 +218,10 @@ def clean_fragments(frags):
         val = frags.get(ft, "")
         m = re.match(r'^([A-Za-z0-9_ ,()\-\.&/\']+?)\s*[，,]\s*(.*)', val)
         if m and m.group(1).strip() and any('\u4e00' <= c <= '\u9fff' for c in m.group(2)):
+            # ⚠️ 【拍摄视角】中的英文构图指令必须留在最前面（权重最高），
+            #    移到末尾会导致构图失控（如全身上下不对称、脚被裁剪）
+            if ft == "拍摄视角":
+                continue
             frags[ft] = m.group(2).strip() + "，" + m.group(1).strip()
             modified = True
 
@@ -190,14 +280,80 @@ def parse_negative_prompt(body):
     return (body[:m.start()].strip(), m.group(1).strip()) if m else (body, '')
 
 
-def generate_name(frags, body, idx):
-    for ft in ["姿态动作", "人物外貌"]:
-        val = frags.get(ft, "")
-        first = val.split("，")[0].split(",")[0].strip() if val else ""
-        if len(first) >= 4:
-            return first[:24].strip("。，、； ")
-    first = re.sub(r'^(一位|一名|一个|现实感|超写实|电影感|日式|韩风|Moody Photography,)', '', body.split('\n')[0], re.IGNORECASE).strip()
-    return first[:20].strip("。，、； ") or f'未命名-{idx+1}'
+def _resolve_name(name_result, idx, llm_name_map, args):
+    """处理名称：LLM 模式输出碎片信息，导入模式读取映射，否则返回规则名称"""
+    if isinstance(name_result, dict) and '_llm_input' in name_result:
+        # LLM 模式：记录碎片信息供后续生成
+        llm_name_map.setdefault(idx, name_result['_llm_input'])
+        return f'__LLM_NEED_NAME_{idx}'
+
+    if idx in llm_name_map and not isinstance(llm_name_map[idx], dict):
+        return llm_name_map[idx][:30]
+
+    return name_result
+
+
+def generate_name(frags, body, idx, args=None):
+    """生成信达雅标题
+
+    默认使用规则提取（场景·服饰·画风三段式）。
+    传入 --llm-name 时，输出碎片信息供外部 LLM 智能生成标题。
+    """
+
+    # ===== LLM 模式：输出碎片信息，由 AI 生成标题 =====
+    if args and getattr(args, 'llm_name', False):
+        scene = frags.get("场景环境", "")
+        cloth = frags.get("人物服饰", "")
+        tech = frags.get("画风技术", "")
+        face = frags.get("人物面部", "")
+        pose = frags.get("姿态动作", "")
+        light = frags.get("光影色调", "")
+        return {
+            '_llm_input': {
+                '场景环境': scene and scene[:60],
+                '人物服饰': cloth and cloth[:60],
+                '画风技术': tech and tech[:60],
+                '人物面部': face and face[:40],
+                '姿态动作': pose and pose[:40],
+                '光影色调': light and light[:40],
+            }
+        }
+
+    # ===== 规则模式：场景·服饰·画风三段组合 =====
+    scene = frags.get("场景环境", "")
+    cloth = frags.get("人物服饰", "")
+    tech = frags.get("画风技术", "")
+    pose = frags.get("姿态动作", "")
+    face = frags.get("人物面部", "")
+
+    def get_first_kw(text, max_len=12):
+        if not text: return ''
+        text = re.sub(r'^[，,。、；\s]+', '', text)
+        first = text.split("，")[0].split(",")[0].strip()
+        generic = {"一位", "一名", "一个", "亚洲"}
+        for g in generic:
+            if first.startswith(g):
+                rest = first[len(g):]
+                first = rest[:1] + rest[1:] if rest else ''
+        return first[:max_len].strip("。，、； ")
+
+    scene_kw = get_first_kw(scene, 10)
+    cloth_kw = get_first_kw(cloth, 12)
+    tech_kw = get_first_kw(tech, 6)
+
+    candidates = [s for s in [scene_kw, cloth_kw, tech_kw] if s]
+
+    if len(candidates) >= 2:
+        name = "·".join(candidates)
+    elif candidates:
+        name = candidates[0]
+    else:
+        first = re.sub(
+            r'^(一位|一名|一个|现实感|超写实|电影感|日式|韩风|Moody Photography,)',
+            '', body.split('\n')[0], re.IGNORECASE
+        ).strip()
+        name = first[:24].strip("。，、； ") or f'未命名-{idx+1}'
+    return name[:30].strip("。，、； ")
 
 
 def generate_tags(frags, prompt_text, model, width, height):
@@ -287,10 +443,21 @@ def main():
     p.add_argument('--file', required=True)
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--strict', action='store_true', help='严格：碎片不纯净则跳过')
+    p.add_argument('--llm-name', action='store_true',
+                   help='LLM模式：输出每个提示词的碎片信息，复制给AI生成标题后再用 --import-names 导入')
+    p.add_argument('--import-names', type=str, metavar='JSONFILE',
+                   help='导入LLM生成的信达雅标题（JSON文件，格式: {"序号": "标题名"}）')
     args = p.parse_args()
 
     with open(args.file, 'r', encoding='utf-8') as f:
         text = f.read()
+
+    # ---- 导入LLM生成的标题 ----
+    llm_name_map = {}
+    if args.import_names:
+        with open(args.import_names, 'r', encoding='utf-8') as f:
+            llm_name_map = json.load(f)
+        print(f'已加载 {len(llm_name_map)} 条 LLM 标题')
 
     records = []
     for idx, block in enumerate(split_blocks(text)):
@@ -327,7 +494,8 @@ def main():
             prompt_text = body
 
         records.append({
-            'name': generate_name(frags if has_frags else {}, body, idx),
+            'name': _resolve_name(generate_name(frags if has_frags else {}, body, idx, args),
+                                  idx, llm_name_map, args),
             'prompt': prompt_text, 'negative_prompt': neg,
             'steps': meta['steps'], 'cfg_scale': meta['cfg_scale'],
             'sampler': meta['sampler'], 'seed': meta['seed'],
@@ -343,6 +511,35 @@ def main():
     if not records:
         print('无有效数据')
         return
+
+    # ---- LLM 模式：输出碎片信息供 AI 生成标题 ----
+    if args.llm_name:
+        llm_inputs = {r['name']: r['fragments'] for r in records
+                      if r['name'].startswith('__LLM_NEED_NAME_')}
+        if llm_inputs:
+            print(f'\n{"="*60}')
+            print('  LLM 命名模式 — 请将以下信息复制给 AI 生成标题')
+            print(f'{"="*60}')
+            print('''
+请为以下每条提示词生成一个信达雅的中文标题（15字以内，有画面感，像写真集命名）：
+
+格式要求：
+- 用场景+风格+人物的精华组合
+- 不要机械截取关键词，要用自然中文
+- 示例： "热带海边·麻花辫与微风"、"纯白极简·轻熟侧影"
+''')
+            for name_key, frags in llm_inputs.items():
+                idx = name_key.replace('__LLM_NEED_NAME_', '')
+                print(f'--- 第{idx}条 ---')
+                for ft in FRAGMENT_TYPES:
+                    val = frags.get(ft, '')
+                    if val:
+                        print(f'  {ft}: {val[:80]}')
+                print()
+            print('完成后返回 JSON 格式：{"0":"标题1","1":"标题2",...}')
+            print('保存为文件后用 --import-names 导入\n')
+        return
+
     insert_records(records, dry_run=args.dry_run)
 
 
