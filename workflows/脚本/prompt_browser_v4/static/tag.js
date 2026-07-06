@@ -235,14 +235,10 @@ window.renderTagCheckboxes = async function(containerId, selectedIds) {
     const tags = data.tags || [];
     const ids = new Set(selectedIds || []);
     container.innerHTML = tags.map(t => {
-      const color = t.color || "#8b5cf6";
       const sel = ids.has(t.id) ? " selected" : "";
       return `<div class="tag-option${sel}" data-tag-id="${t.id}"
         onclick="window.toggleTagOption(this)"
-        style="display:inline-block;padding:4px 10px;margin:3px;
-        background:${sel ? color.replace(")", "30)") : color + "18"};
-        color:${color};border:1px solid ${color}20;
-        border-radius:6px;cursor:pointer;font-size:13px;user-select:none">
+        style="border-color:${t.color || '#8b5cf6'};color:${t.color || '#8b5cf6'}">
         ${window.escHtml(t.name)}
       </div>`;
     }).join("");
@@ -257,12 +253,6 @@ window.renderTagCheckboxes = async function(containerId, selectedIds) {
  */
 window.toggleTagOption = function(el) {
   el.classList.toggle("selected");
-  const color = el.style.borderColor || "#8b5cf6";
-  if (el.classList.contains("selected")) {
-    el.style.background = color.replace(")", "30)");
-  } else {
-    el.style.background = color + "18";
-  }
 };
 
 // ======== 挂载到 window 对象 ========

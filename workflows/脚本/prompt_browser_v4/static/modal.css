@@ -148,6 +148,28 @@
 }
 /* ===================================== */
 
+/* 模态框内 select 统一样式 */
+.modal-body select {
+  background: var(--input-bg, var(--panel-2));
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+  appearance: auto;
+}
+
+.modal-body select:focus {
+  border-color: var(--primary);
+}
+
+.modal-body select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
 /* ======== Phase 2: 模态框标签选择样式 ======== */
 .modal-tags-select {
   display: flex;
@@ -157,26 +179,30 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 6px;
-  max-height: 120px;
-  overflow-y: auto;
 }
 
 .modal-tags-select .tag-option {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 11px;
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 2px;
+  border-radius: 6px;
+  font-size: 12px;
   cursor: pointer;
+  user-select: none;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  color: var(--muted);
   transition: 0.15s;
-  border: 1px solid transparent;
 }
 
 .modal-tags-select .tag-option:hover {
   background: var(--panel-hover);
+  color: var(--text);
 }
 
 .modal-tags-select .tag-option.selected {
-  background: var(--primary);
-  color: #fff;
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--primary);
   border-color: var(--primary);
 }
 /* ===================================== */

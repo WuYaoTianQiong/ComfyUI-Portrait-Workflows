@@ -16,16 +16,20 @@ window.renderCategorySelect = async function(selectId, selectedId, showCount) {
   try {
     const data = await window.api("/api/categories?tree=true");
     const categories = data.categories || [];
+    function sumCounts(cats) {
+      return (cats || []).reduce((sum, c) => sum + (c.prompt_count || 0) + sumCounts(c.children || []), 0);
+    }
+    const totalCount = sumCounts(categories);
     select.innerHTML = selectId === "f_category"
       ? '<option value="">未分类</option>'
-      : '<option value="">全部分类</option>';
+      : `<option value="">全部分类 (${totalCount})</option>`;
 
     function addOpts(cats, level) {
       (cats || []).forEach(c => {
         const opt = document.createElement("option");
         opt.value = c.id;
         const indent = "　".repeat(level);
-        opt.textContent = indent + c.name + (showCount ? ` (${c.prompt_count || 0})` : "");
+        opt.textContent = indent + c.name + (showCount !== false ? ` (${c.prompt_count || 0})` : "");
         if (String(selectedId) === String(c.id)) opt.selected = true;
         select.appendChild(opt);
         if (c.children && c.children.length) addOpts(c.children, level + 1);

@@ -65,8 +65,6 @@ window.loadPrompts = async function(page) {
       window._promptTotal = data.total || 0;
       window.renderList(window.allPrompts);
       window.renderPagination();
-      const totalEl = document.getElementById("countBadge");
-      if (totalEl) totalEl.textContent = window._promptTotal;
 
       // 提示词筛选变化后，标记组合创作数据需要刷新
       window._composerDataStale = true;
@@ -89,8 +87,6 @@ window.loadTemplatesAsItems = async function () {
       window._promptTotal = data.total || 0;
       window.renderList(window.allPrompts);
       window.renderPagination();
-      const totalEl = document.getElementById("countBadge");
-      if (totalEl) totalEl.textContent = window._promptTotal;
     } catch (e) {
       window.showToast("加载模板失败: " + e.message, "error");
     }
@@ -243,38 +239,53 @@ window.renderList = function(prompts) {
   });
 };
 
-window.renderPagination = function() {
-  const totalPages = Math.max(1, Math.ceil(window._promptTotal / window._promptPageSize));
-  const el = document.getElementById("promptPagination");
+/** 通用分页组件：提示词与画廊复用同一套渲染逻辑 */
+window.renderPaginationCore = function(opts) {
+  const total = opts.total || 0;
+  const page = opts.page || 1;
+  const pageSize = opts.pageSize || 50;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const el = document.getElementById(opts.containerId);
   if (!el) return;
 
-  const pageSizeOptions = [20, 50, 100, 200];
-  let pageSizeHtml = `每页 <select class="page-size-select" onchange="window.changePromptPageSize(parseInt(this.value))">`;
+  const pageSizeOptions = opts.pageSizeOptions || [20, 50, 100, 200];
+  let pageSizeHtml = `每页 <select class="page-size-select" onchange="${opts.onPageSize}(parseInt(this.value))">`;
   for (const sz of pageSizeOptions) {
-    pageSizeHtml += `<option value="${sz}"${sz === window._promptPageSize ? ' selected' : ''}>${sz}</option>`;
+    pageSizeHtml += `<option value="${sz}"${sz === pageSize ? ' selected' : ''}>${sz}</option>`;
   }
   pageSizeHtml += `</select> 条`;
 
-  let html = `<span class="page-info">第 ${window._promptPage}/${totalPages} 页，共 ${window._promptTotal} 条</span>`;
+  let html = `<span class="page-info">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
   html += `<span class="page-info">${pageSizeHtml}</span>`;
 
   // 仅当超过1页时显示翻页按钮
   if (totalPages > 1) {
-    html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(1)">«</button>`;
-    html += `<button class="page-btn" ${window._promptPage <= 1 ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage - 1})">‹</button>`;
+    html += `<button class="page-btn" ${page <= 1 ? "disabled" : ""} onclick="${opts.onPage}(1)">«</button>`;
+    html += `<button class="page-btn" ${page <= 1 ? "disabled" : ""} onclick="${opts.onPage}(${page - 1})">‹</button>`;
 
-    let start = Math.max(1, window._promptPage - 2);
+    let start = Math.max(1, page - 2);
     let end = Math.min(totalPages, start + 4);
     start = Math.max(1, end - 4);
     for (let i = start; i <= end; i++) {
-      html += `<button class="page-btn${i === window._promptPage ? " active" : ""}" onclick="window.loadPrompts(${i})">${i}</button>`;
+      html += `<button class="page-btn${i === page ? " active" : ""}" onclick="${opts.onPage}(${i})">${i}</button>`;
     }
 
-    html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${window._promptPage + 1})">›</button>`;
-    html += `<button class="page-btn" ${window._promptPage >= totalPages ? "disabled" : ""} onclick="window.loadPrompts(${totalPages})">»</button>`;
+    html += `<button class="page-btn" ${page >= totalPages ? "disabled" : ""} onclick="${opts.onPage}(${page + 1})">›</button>`;
+    html += `<button class="page-btn" ${page >= totalPages ? "disabled" : ""} onclick="${opts.onPage}(${totalPages})">»</button>`;
   }
 
   el.innerHTML = html;
+};
+
+window.renderPagination = function() {
+  window.renderPaginationCore({
+    containerId: "promptPagination",
+    total: window._promptTotal,
+    page: window._promptPage,
+    pageSize: window._promptPageSize,
+    onPage: "window.loadPrompts",
+    onPageSize: "window.changePromptPageSize",
+  });
 };
 
 /** 切换每页显示条数 */
@@ -286,7 +297,67 @@ window.changePromptPageSize = function(size) {
   window.loadPrompts();
 };
 
+// 动态创建定位条（不依赖 index.html 结构）
+window._ensureLocateBar = function() {
+  if (document.getElementById("locateBar")) return;
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
+  const bar = document.createElement("div");
+  bar.id = "locateBar";
+  bar.style.cssText = "display:none;padding:4px 12px;text-align:center;border-bottom:1px solid var(--border);background:rgba(99,102,241,0.06)";
+  const btn = document.createElement("button");
+  btn.className = "btn btn-xxs btn-ghost";
+  btn.textContent = "📍 定位到已选";
+  btn.title = "滚动到当前选中的提示词";
+  btn.onclick = () => window.locateSelectedPrompt();
+  bar.appendChild(btn);
+  // 插入到 promptListContainer 之前
+  const container = document.getElementById("promptListContainer");
+  if (container) {
+    sidebar.insertBefore(bar, container);
+  } else {
+    sidebar.appendChild(bar);
+  }
+};
+
+window.locateSelectedPrompt = function() {
+  if (!window.selectedId) return;
+  let item = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+  if (item) {
+    item.scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
+  // 当前页找不到，计算页码并跳转
+  const idx = window.allPrompts.findIndex(p => p.id === window.selectedId);
+  if (idx >= 0) {
+    const targetPage = Math.floor(idx / window._promptPageSize) + 1;
+    window._promptPage = targetPage;
+    window.loadPrompts().then(() => {
+      setTimeout(() => {
+        const el = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+        if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 200);
+    });
+  } else {
+    // 不在当前列表中，清空筛选后重新加载
+    const searchEl = document.getElementById("searchInput");
+    if (searchEl) searchEl.value = "";
+    window._currentCategoryId = null;
+    window._promptPage = 1;
+    window.loadPrompts().then(() => {
+      setTimeout(() => {
+        const el = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+        if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 200);
+    });
+  }
+};
+
 window.selectPrompt = async function(id, fetchDetail = true, shiftKey = false, ctrlKey = false, isRestore = false) {
+  // 确保定位条存在并显示
+  window._ensureLocateBar();
+  const locateBar = document.getElementById("locateBar");
+  if (locateBar) locateBar.style.display = "flex";
   if (shiftKey && window.lastClickedId !== null) {
     const ids = window.allPrompts.map(p => p.id);
     const start = ids.indexOf(window.lastClickedId);
@@ -412,11 +483,85 @@ const FRAGMENT_ICONS = { "拍摄视角": "📷", "姿态动作": "🏃", "人物
 const FRAGMENT_COLORS = { "拍摄视角": "#f97316", "姿态动作": "#f59e0b", "人物身材": "#059669", "人物服饰": "#a855f7", "人物面部": "#10b981", "场景环境": "#3b82f6", "光影色调": "#06b6d4", "画风技术": "#ef4444" };
 
 window._fragmentEditMode = false;
+window._customFragmentKeys = [];  // 当前弹窗内用户新增的自定义碎片模块标题
+
+function allFragmentKeys() {
+  return [...FRAGMENT_KEYS, ...(window._customFragmentKeys || [])];
+}
+
+// 收集当前所有碎片 textarea 的内容
+function collectFragmentValues() {
+  const fragments = {};
+  for (const k of allFragmentKeys()) {
+    const ta = document.getElementById(`f_frag_${k}`);
+    if (ta) fragments[k] = ta.value;
+  }
+  return fragments;
+}
+
+// 渲染分段编辑器：固定八大碎片 + 自定义碎片模块 + 新增按钮
+window.renderFragmentEditor = function (fragments) {
+  const fragContainer = document.getElementById("f_fragments");
+  const ta = document.getElementById("f_prompt");
+  const btn = document.getElementById("f_toggleFragBtn");
+  if (!fragContainer) return;
+  let html = "";
+  for (const key of allFragmentKeys()) {
+    const color = FRAGMENT_COLORS[key] || "#6366f1";
+    const icon = FRAGMENT_ICONS[key] || "📝";
+    const val = fragments[key] || "";
+    const isCustom = !FRAGMENT_KEYS.includes(key);
+    const customIdx = window._customFragmentKeys ? window._customFragmentKeys.indexOf(key) : -1;
+    html += `
+      <div class="frag-field" id="frag_field_${key}">
+        <div class="frag-field-label" style="color:${color}">
+          ${icon} ${key}
+          ${isCustom ? `<button type="button" class="frag-remove-btn" onclick="window.removeCustomFragment(${customIdx})" title="删除该碎片模块">✕</button>` : ""}
+          <span class="frag-changed-dot" id="frag_dot_${key}" style="display:none;font-size:10px;color:#f59e0b;margin-left:4px">● 已修改</span>
+        </div>
+        <textarea id="f_frag_${key}" rows="2" data-fragkey="${key}" data-original="${window.escAttr(val)}"
+          oninput="window._markFragmentChanged(this)">${window.escHtml(val)}</textarea>
+      </div>`;
+  }
+  html += `
+    <div class="frag-add-row">
+      <button type="button" class="btn btn-sm btn-ghost" onclick="window.addCustomFragment()">＋ 新增碎片模块</button>
+    </div>`;
+  fragContainer.innerHTML = html;
+  if (ta) ta.style.display = "none";
+  fragContainer.style.display = "flex";
+  if (btn) { btn.style.display = ""; btn.textContent = "📝 切换到全文编辑"; }
+  window._fragmentEditMode = true;
+};
+
+window.addCustomFragment = function () {
+  const raw = window.prompt ? window.prompt("输入新碎片模块名称：") : prompt("输入新碎片模块名称：");
+  if (!raw) return;
+  const name = String(raw).trim();
+  if (!name) return;
+  if (FRAGMENT_KEYS.includes(name) || (window._customFragmentKeys || []).includes(name)) {
+    window.showToast("该碎片模块已存在", "warn");
+    return;
+  }
+  window._customFragmentKeys = window._customFragmentKeys || [];
+  window._customFragmentKeys.push(name);
+  window.renderFragmentEditor(collectFragmentValues());
+  const nta = document.getElementById(`f_frag_${name}`);
+  if (nta) nta.focus();
+};
+
+window.removeCustomFragment = function (idx) {
+  if (!window._customFragmentKeys || idx < 0 || idx >= window._customFragmentKeys.length) return;
+  const removed = window._customFragmentKeys.splice(idx, 1)[0];
+  const fragments = collectFragmentValues();
+  delete fragments[removed];
+  window.renderFragmentEditor(fragments);
+};
 
 function parsePromptFragments(text) {
   if (!text) return {};
   const result = {};
-  const pattern = /【([^】]+)】\s*(.*?)(?=\n【|$)/g;
+  const pattern = /【([^】]+)】\s*(.*?)(?=【|$)/gs;
   let m;
   while ((m = pattern.exec(text)) !== null) {
     result[m[1].trim()] = m[2].trim();
@@ -424,14 +569,24 @@ function parsePromptFragments(text) {
   return result;
 }
 
+window._markFragmentChanged = function(textarea) {
+  const key = textarea.dataset.fragkey;
+  const dot = document.getElementById(`frag_dot_${key}`);
+  const field = document.getElementById(`frag_field_${key}`);
+  if (!dot || !field) return;
+  const changed = textarea.value !== (textarea.dataset.original || "");
+  dot.style.display = changed ? "inline" : "none";
+  field.style.borderLeft = changed ? "3px solid #f59e0b" : "";
+};
+
 function reassemblePrompt(fragments) {
   const parts = [];
-  for (const key of FRAGMENT_KEYS) {
+  for (const key of allFragmentKeys()) {
     if (fragments[key]) {
       parts.push(`【${key}】${fragments[key]}`);
     }
   }
-  return parts.join("\n");
+  return parts.join("\n\n");
 }
 
 window.toggleFragmentEdit = function () {
@@ -442,22 +597,18 @@ window.toggleFragmentEdit = function () {
   if (!textarea || !fragContainer || !btn) return;
 
   if (window._fragmentEditMode) {
-    // 从 textarea 同步到碎片
+    // 从 textarea 同步到碎片（含自动识别的自定义标题）
     const fragments = parsePromptFragments(textarea.value);
-    for (const key of FRAGMENT_KEYS) {
-      const ta = document.getElementById(`f_frag_${key}`);
-      if (ta) ta.value = fragments[key] || "";
+    window._customFragmentKeys = (window._customFragmentKeys || []).filter(k => FRAGMENT_KEYS.includes(k));
+    for (const k of Object.keys(fragments)) {
+      if (!FRAGMENT_KEYS.includes(k) && !window._customFragmentKeys.includes(k)) {
+        window._customFragmentKeys.push(k);
+      }
     }
-    textarea.style.display = "none";
-    fragContainer.style.display = "flex";
-    btn.textContent = "📝 切换到全文编辑";
+    window.renderFragmentEditor(fragments);
   } else {
     // 从碎片同步到 textarea
-    const fragments = {};
-    for (const key of FRAGMENT_KEYS) {
-      const ta = document.getElementById(`f_frag_${key}`);
-      if (ta) fragments[key] = ta.value;
-    }
+    const fragments = collectFragmentValues();
     textarea.value = reassemblePrompt(fragments);
     textarea.style.display = "";
     fragContainer.style.display = "none";
@@ -477,65 +628,79 @@ window.setRating = function(rating) {
   });
 };
 
-window.openCreateModal = async function() {
-  document.getElementById("modalTitle").textContent = "新建提示词";
-  document.getElementById("f_id").value = "";
-  window._fragmentEditMode = false;
-  ["f_name","f_prompt","f_neg","f_steps","f_cfg","f_sampler","f_seed","f_model","f_tags","f_note"].forEach(id => document.getElementById(id).value = "");
-  window.setRating(0);
-  // 重置碎片编辑器
-  const fc = document.getElementById("f_fragments");
-  const btn = document.getElementById("f_toggleFragBtn");
-  const ta = document.getElementById("f_prompt");
-  if (fc) fc.style.display = "none";
-  if (btn) btn.style.display = "none";
-  if (ta) ta.style.display = "";
-  // 异步加载分类和标签选项（无预选）
-  await window.loadCategoriesForSelect();
-  await window.loadTagsForSelect();
-  document.getElementById("modalOverlay").classList.add("active");
+// 记录弹窗打开时的原始表单状态（JSON 字符串，最简单可靠的比对方式）
+window._promptFormSnapshot = null;
+
+window._promptGetFormState = function() {
+  const ids = ["f_name","f_prompt","f_neg","f_steps","f_cfg","f_sampler","f_seed","f_model","f_tags","f_note","f_rating_value"];
+  const state = {};
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    state[id] = el ? (el.value || "").trim() : "";
+  }
+  // 分段编辑模式下也要读碎片 textarea 的值（含自定义碎片）
+  if (window._fragmentEditMode) {
+    for (const key of allFragmentKeys()) {
+      const ta = document.getElementById(`f_frag_${key}`);
+      state[`frag_${key}`] = ta ? (ta.value || "").trim() : "";
+    }
+  }
+  return JSON.stringify(state);
+};
+
+window._promptHasChanges = function() {
+  if (!window._promptFormSnapshot) return false;
+  return window._promptGetFormState() !== window._promptFormSnapshot;
 };
 
 window.openEditModal = async function(id) {
-  document.getElementById("modalTitle").textContent = "编辑提示词 #" + id;
-  document.getElementById("f_id").value = id;
   window._fragmentEditMode = false;
+  window._promptFormSnapshot = null;
+  window._customFragmentKeys = [];
+
+  // ---- 新建模式 ----
+  if (id == null) {
+    document.getElementById("modalTitle").textContent = "新建提示词";
+    document.getElementById("f_id").value = "";
+    ["f_name", "f_prompt", "f_neg", "f_steps", "f_cfg", "f_sampler", "f_seed", "f_model", "f_tags", "f_note"].forEach(fid => document.getElementById(fid).value = "");
+    window.setRating(0);
+    window.renderFragmentEditor({});   // 默认分段模式：显示八大空碎片 + 新增模块按钮
+    await window.loadCategoriesForSelect();
+    await window.loadTagsForSelect();
+    document.getElementById("modalOverlay").classList.add("active");
+    return;
+  }
+
+  // ---- 编辑模式 ----
+  document.getElementById("f_id").value = id;
   try {
     const p = await window.api(`/api/prompts/${id}`);
+    document.getElementById("modalTitle").textContent = p.name ? `编辑：${p.name}` : `编辑提示词 #${id}`;
     document.getElementById("f_name").value = p.name || "";
     document.getElementById("f_prompt").value = p.prompt || "";
     document.getElementById("f_neg").value = p.negative_prompt || "";
 
-    // 设置分段编辑器
+    // 设置分段编辑器（固定八大碎片 + 自动识别的自定义碎片）
     const fragments = parsePromptFragments(p.prompt || "");
     const hasFrags = Object.keys(fragments).length > 0;
     const fragContainer = document.getElementById("f_fragments");
-    const btn = document.getElementById("f_toggleFragBtn");
-    const textarea = document.getElementById("f_prompt");
 
     if (fragContainer && hasFrags) {
-      let html = "";
-      for (const key of FRAGMENT_KEYS) {
-        const color = FRAGMENT_COLORS[key] || "#6366f1";
-        const icon = FRAGMENT_ICONS[key] || "📝";
-        const val = fragments[key] || "";
-        html += `
-          <div class="frag-field">
-            <div class="frag-field-label" style="color:${color}">${icon} ${key}</div>
-            <textarea id="f_frag_${key}" rows="2" data-fragkey="${key}">${window.escHtml(val)}</textarea>
-          </div>`;
+      // 收集自定义碎片标题（prompt 中含【非固定名】的）
+      window._customFragmentKeys = [];
+      for (const k of Object.keys(fragments)) {
+        if (!FRAGMENT_KEYS.includes(k) && !window._customFragmentKeys.includes(k)) {
+          window._customFragmentKeys.push(k);
+        }
       }
-      fragContainer.innerHTML = html;
-      // 自动切换到分段模式
-      textarea.style.display = "none";
-      fragContainer.style.display = "flex";
-      btn.style.display = "";
-      btn.textContent = "📝 切换到全文编辑";
-      window._fragmentEditMode = true;
+      window.renderFragmentEditor(fragments);
     } else if (fragContainer) {
+      // 无碎片的旧 prompt 保留全文编辑，但显示切换按钮（不丢内容）
       fragContainer.style.display = "none";
-      btn.style.display = "none";
-      textarea.style.display = "";
+      const ta = document.getElementById("f_prompt");
+      const btn = document.getElementById("f_toggleFragBtn");
+      if (ta) ta.style.display = "";
+      if (btn) { btn.style.display = ""; btn.textContent = "📝 切换到分段编辑"; }
     }
     document.getElementById("f_steps").value = p.steps || "";
     document.getElementById("f_cfg").value = p.cfg_scale || "";
@@ -544,10 +709,8 @@ window.openEditModal = async function(id) {
     document.getElementById("f_model").value = p.model || "";
     document.getElementById("f_tags").value = p.tags || "";
     document.getElementById("f_note").value = p.note || "";
-    const rating = p.rating || 0;
-    window.setRating(rating);
+    window.setRating(p.rating || 0);
 
-    // 直接传入预选值，共享函数内部处理选中状态
     const categories = p.categories || [];
     const catId = categories.length > 0 ? categories[0].id : null;
     const tagsDetail = p.tags_detail || [];
@@ -556,15 +719,21 @@ window.openEditModal = async function(id) {
     await window.loadCategoriesForSelect(catId);
     await window.loadTagsForSelect(tagIds);
 
+    window._promptFormSnapshot = window._promptGetFormState();
     document.getElementById("modalOverlay").classList.add("active");
   } catch (e) {
     window.showToast("加载失败: " + e.message, "error");
   }
 };
 
-window.closePromptModal = function() {
+window.closePromptModal = function(force = false) {
+  if (!force && window._promptFormSnapshot && window._promptHasChanges()) {
+    if (!confirm("有未保存的修改，确定关闭？")) return false;
+  }
   document.getElementById("modalOverlay").classList.remove("active");
   window._fragmentEditMode = false;
+  window._customFragmentKeys = [];
+  window._promptFormSnapshot = null;
   // 还原 textarea 显示
   const ta = document.getElementById("f_prompt");
   const fc = document.getElementById("f_fragments");
@@ -572,22 +741,24 @@ window.closePromptModal = function() {
   if (ta) ta.style.display = "";
   if (fc) fc.style.display = "none";
   if (btn) btn.style.display = "none";
+  return true;
 };
 
-// 兼容旧代码：closeModal 现在关闭所有弹窗
-window.closeModal = function() {
-  // 先尝试关闭提示词编辑弹窗
+// 通用关闭弹窗（提示词编辑 > 动态弹窗 > 其他）
+window.closeModal = function(force = false) {
+  // 提示词编辑弹窗（带未保存确认）
   const modalOverlay = document.getElementById("modalOverlay");
   if (modalOverlay && modalOverlay.classList.contains("active")) {
-    window.closePromptModal();
+    if (!force) {
+      const wasClosed = window.closePromptModal();
+      if (wasClosed === false) return;
+    } else {
+      window.closePromptModal(true);
+    }
     return;
   }
-  // 再尝试关闭动态弹窗
-  const dynamicModalOverlay = document.getElementById("dynamicModalOverlay");
-  if (dynamicModalOverlay && dynamicModalOverlay.classList.contains("active")) {
-    dynamicModalOverlay.classList.remove("active");
-    return;
-  }
+  // 动态弹窗（自定义碎片、另存为等）
+  if (window._closeDynamicModal) window._closeDynamicModal();
 };
 
 window.savePrompt = async function() {
@@ -597,11 +768,7 @@ window.savePrompt = async function() {
     // 如果处于分段编辑模式，从碎片重新组装
     let promptValue;
     if (window._fragmentEditMode) {
-      const frags = {};
-      for (const key of FRAGMENT_KEYS) {
-        const ta = document.getElementById(`f_frag_${key}`);
-        if (ta) frags[key] = ta.value;
-      }
+      const frags = collectFragmentValues();
       promptValue = reassemblePrompt(frags);
     } else {
       promptValue = document.getElementById("f_prompt").value;
@@ -632,12 +799,25 @@ window.savePrompt = async function() {
           await window.savePromptCategories(promptId, isEdit);
           await window.savePromptTags(promptId, isEdit);
         }
+        const isComposerSave = document.getElementById("modalTitle").textContent.includes("另存为");
         window.showToast(isEdit ? "已更新" : "已创建", "success");
-        window.closeModal();
+        window.closePromptModal(true);  // force close，跳过未保存确认
         window.loadTags();
         window.loadCategories();
         window.loadPrompts();
         if (isEdit) window.selectPrompt(parseInt(id));
+        // 从组合创作另存后自动跳转到提示词 tab
+        if (isComposerSave) {
+          const btn = document.querySelector('.tab-btn[data-tab="promptTab"]');
+          if (btn) {
+            window.switchTab("promptTab", btn);
+            setTimeout(() => {
+              window._promptPage = 1;
+              window._pendingCategoryFilter = "组合创作";
+              window.loadPrompts();
+            }, 200);
+          }
+        }
       } else {
         window.showToast(resp.error || "失败", "error");
       }
