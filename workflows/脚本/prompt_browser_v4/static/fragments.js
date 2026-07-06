@@ -121,8 +121,8 @@ window.updateFragmentStats = function (data) {
 // 新建/编辑
 // -------------------------------------------------------------------
 window.showCreateFragment = function () {
-  // 打开模态框，清空表单
   window._editingFragmentId = null;
+  window._fragmentModalOriginal = { name: "", content: "" };
   document.getElementById("fragFormTitle").textContent = "新建碎片";
   document.getElementById("fragName").value = "";
   document.getElementById("fragContent").value = "";
@@ -132,10 +132,10 @@ window.showCreateFragment = function () {
 };
 
 window.editFragment = async function (fragmentId) {
-  // 从列表中找数据
   const f = window._fragmentList.find(x => x.id === fragmentId);
   if (!f) { window.showToast("碎片不存在", "error"); return; }
   window._editingFragmentId = fragmentId;
+  window._fragmentModalOriginal = { name: f.name || "", content: f.content || "" };
   document.getElementById("fragFormTitle").textContent = "编辑碎片";
   document.getElementById("fragName").value = f.name || "";
   document.getElementById("fragContent").value = f.content || "";
@@ -145,41 +145,45 @@ window.editFragment = async function (fragmentId) {
 };
 
 window.saveFragment = async function () {
-  const name = document.getElementById("fragName").value.trim();
-  const content = document.getElementById("fragContent").value.trim();
-  const fragmentType = document.getElementById("fragType").value;
-  const tags = document.getElementById("fragTags").value.trim();
+  return window.withLock("saveFragment", async () => {
+    const name = document.getElementById("fragName").value.trim();
+    const content = document.getElementById("fragContent").value.trim();
+    const fragmentType = document.getElementById("fragType").value;
+    const tags = document.getElementById("fragTags").value.trim();
+    if (!content) { window.showToast("碎片内容不能为空", "warn"); return; }
 
-  if (!content) { window.showToast("碎片内容不能为空", "warn"); return; }
-
-  const body = { name, content, fragment_type: fragmentType, tags };
-
-  try {
-    if (window._editingFragmentId) {
-      await window.api(`/api/fragments/${window._editingFragmentId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      window.showToast("碎片已更新", "success");
-    } else {
-      await window.api("/api/fragments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      window.showToast("碎片已创建", "success");
+    const body = { name, content, fragment_type: fragmentType, tags };
+    try {
+      if (window._editingFragmentId) {
+        await window.api(`/api/fragments/${window._editingFragmentId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        window.showToast("碎片已更新", "success");
+      } else {
+        await window.api("/api/fragments", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        window.showToast("碎片已创建", "success");
+      }
+      window._fragmentModalOriginal = null;
+      window.closeFragmentModal();
+      window.refreshFragmentLibrary();
+      if (window.refreshComposer) window._composerDataStale = true;
+    } catch (e) {
+      window.showToast("保存碎片失败: " + e.message, "error");
     }
-    window.closeFragmentModal();
-    window.refreshFragmentLibrary();
-    // 通知 Composer 刷新
-    if (window.refreshComposer) window._composerDataStale = true;
-  } catch (e) {
-    window.showToast("保存碎片失败: " + e.message, "error");
-  }
+  });
 };
 
+window._fragmentModalOriginal = null;
+
 window.closeFragmentModal = function () {
+  const nameEl = document.getElementById("fragName");
+  const contentEl = document.getElementById("fragContent");
+  const nameChanged = nameEl && nameEl.value !== (window._fragmentModalOriginal?.name || "");
+  const contentChanged = contentEl && contentEl.value !== (window._fragmentModalOriginal?.content || "");
+  if ((nameChanged || contentChanged) && !confirm("有未保存的修改，确定关闭？")) return;
+  window._fragmentModalOriginal = null;
   document.getElementById("fragModalOverlay").classList.remove("active");
 };
 

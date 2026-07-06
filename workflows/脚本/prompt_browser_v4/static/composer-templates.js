@@ -1,111 +1,70 @@
 // 跑图
 // -------------------------------------------------------------------
 window.composerRun = async function () {
-  const prompt = window.getComposedPrompt();
-  if (!prompt) { window.showToast("请先组合提示词", "warn"); return; }
-
-  const workflowPath = window.currentWorkflowPath();
-  if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
-
-  const btn = document.getElementById("composerRunBtn");
-  if (btn) { btn.disabled = true; btn.textContent = "发送中..."; }
-
-  try {
-    const body = Object.assign({
-      prompt: prompt,
-      negative_prompt: "",
-      workflow_path: workflowPath,
-      orientation: window.currentOrientation,
-      quality: window.getQuality(),
-    }, window.workflowExtraBody());
-    const data = await window.api("/api/composer/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    window.showToast(`组合提示词已推送 (job ${data.job_id})`, "success");
-    window.trackJob(data.job_id);
-  } catch (e) {
-    window.showToast("跑图失败: " + e.message, "error");
-  } finally {
-    if (btn) { btn.textContent = "🚀 跑图"; btn.disabled = false; }
-  }
+  return window.withLock("composerRun", async () => {
+    const prompt = window.getComposedPrompt();
+    if (!prompt) { window.showToast("请先组合提示词", "warn"); return; }
+    const workflowPath = window.currentWorkflowPath();
+    if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
+    const btnState = window._runBtnState(document.getElementById("composerRunBtn"), "发送中...");
+    btnState.loading();
+    try {
+      const body = Object.assign({
+        prompt, negative_prompt: "",
+        workflow_path: workflowPath,
+        orientation: window.currentOrientation,
+        quality: window.getQuality(),
+      }, window.workflowExtraBody());
+      const data = await window.api("/api/composer/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      window.showToast(`组合提示词已推送 (job ${data.job_id})`, "success");
+      window._showPendingProgress("组合创作生成中");
+      window.trackJob(data.job_id);
+    } catch (e) {
+      window.showToast("跑图失败: " + e.message, "error");
+    } finally {
+      btnState.restore();
+    }
+  });
 };
 
 // -------------------------------------------------------------------
 // 另存为普通提示词
 // -------------------------------------------------------------------
 window.composerSaveAsPrompt = async function () {
-  const prompt = window.getComposedPrompt();
-  if (!prompt) { window.showToast("请先组合提示词", "warn"); return; }
+  const composed = window.getComposedPrompt();
+  if (!composed) { window.showToast("请先组合提示词", "warn"); return; }
 
-  // 使用自定义模态框替代原生 prompt
-  const defaultName = `组合 ${new Date().toLocaleString()}`;
-  const html = `
-    <div class="modal-header">
-      <h2>💾 另存为提示词</h2>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">将当前组合的提示词保存到提示词库，可在"提示词"标签页的"🔧 组合创作"分类中查看</p>
-      <div class="form-group">
-        <label>提示词名称</label>
-        <input type="text" id="saveAsPromptName" class="form-input" value="${defaultName}" style="width:100%" autofocus>
-      </div>
-      <div class="form-group" style="margin-top:8px">
-        <label>标签（可选，逗号分隔）</label>
-        <input type="text" id="saveAsPromptTags" class="form-input" value="组合创作" style="width:100%">
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-sm btn-primary" onclick="window._doSaveAsPrompt()">保存</button>
-      <button class="btn btn-sm btn-ghost" onclick="window.closeModal()">取消</button>
-    </div>
-  `;
-  window.showModal(html);
-  // 自动选中名称输入框的全部文本
-  setTimeout(() => {
-    const input = document.getElementById("saveAsPromptName");
-    if (input) { input.focus(); input.select(); }
-  }, 100);
+  // 复用编辑弹窗，预填组合内容
+  window._fragmentEditMode = false;
+  window._promptFormSnapshot = null;
+  window._customFragmentKeys = [];
+
+  document.getElementById("f_id").value = "";
+  document.getElementById("modalTitle").textContent = "💾 另存为提示词";
+  document.getElementById("f_name").value = `组合 ${new Date().toLocaleString()}`;
+  document.getElementById("f_prompt").value = composed;
+  document.getElementById("f_neg").value = "";
+  ["f_steps", "f_cfg", "f_sampler", "f_seed", "f_model", "f_note"].forEach(fid => document.getElementById(fid).value = "");
+  document.getElementById("f_tags").value = "组合创作";
+  window.setRating(0);
+
+  const fc = document.getElementById("f_fragments");
+  const btn = document.getElementById("f_toggleFragBtn");
+  const ta = document.getElementById("f_prompt");
+  if (fc) fc.style.display = "none";
+  if (btn) { btn.style.display = ""; btn.textContent = "📝 切换到分段编辑"; }
+  if (ta) ta.style.display = "";
+
+  await window.loadCategoriesForSelect();
+  await window.loadTagsForSelect();
+
+  document.getElementById("modalOverlay").classList.add("active");
 };
 
-window._doSaveAsPrompt = async function () {
-  const name = document.getElementById("saveAsPromptName")?.value?.trim();
-  const tags = document.getElementById("saveAsPromptTags")?.value?.trim() || "组合创作";
-  if (!name) { window.showToast("请输入提示词名称", "warn"); return; }
 
-  const prompt = window.getComposedPrompt();
-  try {
-    const data = await window.api("/api/prompts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: name,
-        prompt: prompt,
-        negative_prompt: "",
-        tags: tags,
-        auto_categorize: true,  // 新增：自动分类到"组合创作"
-      }),
-    });
-    window.closeModal();
-    window.showToast(`✅ 已保存到提示词库 #${data.id}（${name}）`, "success");
-
-    // 跳转到提示词 Tab，并筛选"组合创作"分类
-    const btn = document.querySelector('.tab-btn[data-tab="promptTab"]');
-    if (btn) {
-      window.switchTab("promptTab", btn);
-      // 延迟加载确保 tab 切换完成，并自动筛选到"组合创作"分类
-      setTimeout(() => {
-        window._promptPage = 1;
-        // 自动切换到"组合创作"分类（如果有）
-        window._pendingCategoryFilter = "组合创作";
-        window.loadPrompts();
-      }, 200);
-    }
-  } catch (e) {
-    window.showToast("另存失败: " + e.message, "error");
-  }
-};
 
 // -------------------------------------------------------------------
 // 保存模板（添加按钮反馈）
@@ -129,45 +88,33 @@ window.updateComposerStats = function (data) {
 // 模板管理（localStorage）
 // -------------------------------------------------------------------
 window.saveComposerTemplate = async function () {
-  const selected = window._composerSelection;
-  const keys = Object.keys(selected);
-  if (keys.length === 0) {
-    window.showToast("请先选择至少一个碎片", "warn");
-    return;
-  }
-
-  // 弹出命名对话框
-  const name = prompt("请输入模板名称：", `模板 ${window._composerTemplates.length + 1}`);
-  if (!name) return;
-
-  // 组装碎片引用列表
-  const fragments = [];
-  for (const ft of FRAGMENT_TYPES) {
-    const sel = selected[ft.key];
-    if (sel && sel.prompt_id) {
-      fragments.push({ prompt_id: sel.prompt_id, fragment_type: ft.key });
+  return window.withLock("saveComposerTemplate", async () => {
+    const selected = window._composerSelection;
+    if (Object.keys(selected).length === 0) {
+      window.showToast("请先选择至少一个碎片", "warn");
+      return;
     }
-  }
+    const name = prompt("请输入模板名称：", `模板 ${window._composerTemplates.length + 1}`);
+    if (!name) return;
 
-  // 可选的分类
-  let category_id = null;
-  // 简单版本：先不弹分类选择，留待后续 UI 扩展
+    const fragments = [];
+    for (const ft of FRAGMENT_TYPES) {
+      const sel = selected[ft.key];
+      if (sel && sel.prompt_id) fragments.push({ prompt_id: sel.prompt_id, fragment_type: ft.key });
+    }
 
-  // 找到保存模板按钮并添加反馈
-  const saveBtn = document.querySelector('.composer-toolbar-right .btn-ghost[onclick*="saveComposerTemplate"]');
-  if (saveBtn) window.showButtonFeedback(saveBtn, '💾 保存中...', 2000);
-
-  try {
-    await window.api("/api/templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, category_id, fragments }),
-    });
-    window.showToast(`模板"${name}"已保存`, "success");
-    window._loadTemplates();
-  } catch (e) {
-    window.showToast("保存模板失败: " + e.message, "error");
-  }
+    try {
+      await window.api("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, category_id: null, fragments }),
+      });
+      window.showToast(`模板"${name}"已保存`, "success");
+      window._loadTemplates();
+    } catch (e) {
+      window.showToast("保存模板失败: " + e.message, "error");
+    }
+  });
 };
 
 window.loadComposerTemplate = async function (index) {
@@ -239,17 +186,19 @@ window.loadComposerTemplateById = async function (templateId) {
 };
 
 window.deleteComposerTemplate = async function (index) {
-  const tpl = window._composerTemplates[index];
-  if (!tpl) return;
-  if (!confirm(`删除模板"${tpl.name}"？`)) return;
-  try {
-    await window.api(`/api/templates/${tpl.id}`, { method: "DELETE" });
-    window._composerTemplates.splice(index, 1);
-    window.renderTemplateList();
-    window.showToast(`模板"${tpl.name}"已删除`, "info");
-  } catch (e) {
-    window.showToast("删除失败: " + e.message, "error");
-  }
+  return window.withLock("deleteComposerTemplate", async () => {
+    const tpl = window._composerTemplates[index];
+    if (!tpl) return;
+    if (!confirm(`删除模板"${tpl.name}"？`)) return;
+    try {
+      await window.api(`/api/templates/${tpl.id}`, { method: "DELETE" });
+      window._composerTemplates.splice(index, 1);
+      window.renderTemplateList();
+      window.showToast(`模板"${tpl.name}"已删除`, "info");
+    } catch (e) {
+      window.showToast("删除失败: " + e.message, "error");
+    }
+  });
 };
 
 window._renderTemplateListTo = function (containerId, countId) {

@@ -79,52 +79,49 @@ window.randomComposerWithFeedback = function() {
 // 批量随机组合跑图
 // -------------------------------------------------------------------
 window.composerBatchRandomRun = async function () {
-  const count = parseInt(document.getElementById("composerBatchCount")?.value || "1");
-  const workflowPath = window.currentWorkflowPath();
-  if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
+  return window.withLock("composerBatchRandomRun", async () => {
+    const count = parseInt(document.getElementById("composerBatchCount")?.value || "1");
+    const workflowPath = window.currentWorkflowPath();
+    if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
 
-  // 收集固定碎片
-  const fixedFragments = {};
-  for (const ft of FRAGMENT_TYPES) {
-    if (window._composerFixed[ft.key] && window._composerSelection[ft.key]) {
-      fixedFragments[ft.key] = window._composerSelection[ft.key].content;
+    const fixedFragments = {};
+    for (const ft of FRAGMENT_TYPES) {
+      if (window._composerFixed[ft.key] && window._composerSelection[ft.key]) {
+        fixedFragments[ft.key] = window._composerSelection[ft.key].content;
+      }
     }
-  }
 
-  const btn = document.getElementById("composerBatchRunBtn");
-  if (btn) { btn.disabled = true; btn.textContent = "发送中..."; }
-
-  try {
-    const body = Object.assign({
-      count: count,
-      workflow_path: workflowPath,
-      orientation: window.currentOrientation,
-      quality: window.getQuality(),
-      negative_prompt: "",
-      fixed_fragments: fixedFragments,
-    }, window.workflowExtraBody());
-    const data = await window.api("/api/composer/batch_random_run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const fixedMsg = Object.keys(fixedFragments).length > 0
-      ? `（固定 ${Object.keys(fixedFragments).length} 个类型）`
-      : "";
-    window.showToast(`批量随机组合已推送 (job ${data.job_id})${fixedMsg}`, "success");
-    window.trackJob(data.job_id);
-  } catch (e) {
-    window.showToast("批量随机跑图失败: " + e.message, "error");
-  } finally {
-    if (btn) { btn.textContent = "🎲 批量随机跑图"; btn.disabled = false; }
-  }
+    const btnState = window._runBtnState(document.getElementById("composerBatchRunBtn"), "发送中...");
+    btnState.loading();
+    try {
+      const body = Object.assign({
+        count, workflow_path: workflowPath,
+        orientation: window.currentOrientation,
+        quality: window.getQuality(),
+        negative_prompt: "",
+        fixed_fragments: fixedFragments,
+      }, window.workflowExtraBody());
+      const data = await window.api("/api/composer/batch_random_run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const fixedN = Object.keys(fixedFragments).length;
+      window.showToast(`批量随机组合已推送 (job ${data.job_id})${fixedN ? `（固定 ${fixedN} 个）` : ""}`, "success");
+      window._showPendingProgress(`批量随机组合 (${count} 组)`);
+      window.trackJob(data.job_id);
+    } catch (e) {
+      window.showToast("批量随机跑图失败: " + e.message, "error");
+    } finally {
+      btnState.restore();
+    }
+  });
 };
 
 // -------------------------------------------------------------------
 // 随机组合提示词详情弹窗
 // -------------------------------------------------------------------
 window.showRandomPromptDetail = function(itemId) {
-  const item = window._historyItems?.find(it => it.id === itemId);
+  const item = (window._galleryAllItems || window._historyItems)?.find(it => it.id === itemId);
   if (!item || !item.prompt_params) { window.showToast("未找到提示词详情", "error"); return; }
   const pp = typeof item.prompt_params === "string" ? JSON.parse(item.prompt_params) : item.prompt_params;
   if (pp.source !== "composer_random") return;

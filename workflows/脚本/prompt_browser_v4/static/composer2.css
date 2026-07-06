@@ -21,6 +21,28 @@
   font-size: 11px;
   font-weight: 600;
   padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.frag-remove-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--danger, #ef4444);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.frag-remove-btn:hover { background: rgba(239, 68, 68, 0.12); }
+
+.frag-add-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 4px;
 }
 
 .frag-field textarea {

@@ -130,8 +130,62 @@ window._restoreComposerState = function () {
 // -------------------------------------------------------------------
 // 刷新碎片数据
 // -------------------------------------------------------------------
+window._updateComposerFilterBar = function () {
+  const bar = document.getElementById("composerFilterBar");
+  const text = document.getElementById("composerFilterText");
+  if (!bar || !text) return;
+
+  const parts = [];
+  // 检查提示词Tab的筛选条件
+  const search = (document.getElementById("searchInput")?.value || "").trim();
+  const catId = window._currentCategoryId;
+  const tagIds = window._selectedTags;
+  const hasTags = tagIds && tagIds.size > 0;
+
+  if (search) parts.push(`🔍 "${search}"`);
+  if (catId !== null && catId !== undefined && String(catId).match(/^\d+$/)) {
+    // Try to find category name from the dropdown
+    const sel = document.getElementById("categorySelect");
+    if (sel && sel.selectedOptions.length > 0) {
+      parts.push(`📂 ${sel.selectedOptions[0].textContent.replace(/^[\s　]+/, '')}`);
+    }
+  }
+  if (hasTags) {
+    const names = [];
+    document.querySelectorAll("#tagSelectorDropdown .dropdown-item.selected .tag-name").forEach(el => names.push(el.textContent));
+    if (names.length > 0) parts.push(`🏷️ ${names.join(", ")}`);
+  }
+
+  if (parts.length > 0) {
+    bar.style.display = "flex";
+    text.textContent = parts.join("  ·  ");
+  } else {
+    bar.style.display = "none";
+  }
+};
+
+window.clearComposerFilters = function () {
+  const searchEl = document.getElementById("searchInput");
+  if (searchEl) { searchEl.value = ""; window._promptPage = 1; window.loadPrompts(); }
+  const catSel = document.getElementById("categorySelect");
+  if (catSel) { catSel.value = ""; window._currentCategoryId = null; }
+  if (window._selectedTags) window._selectedTags.clear();
+  // Also update tag dropdown UI
+  document.querySelectorAll("#tagSelectorDropdown .dropdown-item.selected").forEach(el => el.classList.remove("selected"));
+  const label = document.getElementById("tagSelectorLabel");
+  if (label) label.textContent = "全部";
+  window.UiState.set("categoryFilter", "");
+  window.UiState.set("search", "");
+  window.loadPrompts();
+  // Refresh composer
+  window._composerDataStale = true;
+  window.refreshComposer();
+  window.showToast("已清除筛选条件", "info");
+};
+
 window.refreshComposer = async function () {
   window._composerDataStale = false;
+  window._updateComposerFilterBar();
   // 从当前提示词筛选条件取参
   const search = document.getElementById("searchInput").value;
   const params = { search };
@@ -390,9 +444,13 @@ window._saveCustomFragment = function (type) {
   // 自动固定（自定义内容不应被随机覆盖）
   window._composerFixed[type] = true;
   window.closeModal();
-  // 重新渲染列视图，让自定义碎片显示在列表中
+  // 重新渲染视图，让自定义碎片显示在列表中
   if (window._composerFragmentData) {
-    window.renderComposerColumns(window._composerFragmentData.grouped);
+    if (window._composerViewMode === "list") {
+      window.renderComposerList(window._composerFragmentData.grouped);
+    } else {
+      window.renderComposerColumns(window._composerFragmentData.grouped);
+    }
   }
   window._updateColumnSelectionUI(type);
   window._updateColumnFixUI(type);
@@ -414,9 +472,13 @@ window._removeCustomFragment = function (type, skipConfirm) {
   if (!skipConfirm && !confirm(`删除自定义${type}？`)) return false;
   delete window._composerSelection[type];
   delete window._composerFixed[type];
-  // 重新渲染列视图
+  // 重新渲染视图
   if (window._composerFragmentData) {
-    window.renderComposerColumns(window._composerFragmentData.grouped);
+    if (window._composerViewMode === "list") {
+      window.renderComposerList(window._composerFragmentData.grouped);
+    } else {
+      window.renderComposerColumns(window._composerFragmentData.grouped);
+    }
   }
   window.renderComposerWorkbench();
   window._saveComposerState();
@@ -427,26 +489,24 @@ window._removeCustomFragment = function (type, skipConfirm) {
 
 /** 将自定义碎片保存到碎片库（入库） */
 window._saveCustomFragmentToLibrary = async function (type) {
-  const sel = window._composerSelection[type];
-  if (!sel || !sel.custom) {
-    window.showToast("没有自定义内容", "warn");
-    return;
-  }
-  try {
-    await window.api("/api/fragments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: sel.content,
-        fragment_type: type,
-      }),
-    });
-    window.showToast(`已保存到碎片库`, "success");
-    // 刷新碎片数据
-    await window.refreshComposer();
-  } catch (e) {
-    window.showToast("保存失败: " + e.message, "error");
-  }
+  return window.withLock("saveCustomFragToLibrary", async () => {
+    const sel = window._composerSelection[type];
+    if (!sel || !sel.custom) {
+      window.showToast("没有自定义内容", "warn");
+      return;
+    }
+    try {
+      await window.api("/api/fragments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: sel.content, fragment_type: type }),
+      });
+      window.showToast(`已保存到碎片库`, "success");
+      await window.refreshComposer();
+    } catch (e) {
+      window.showToast("保存失败: " + e.message, "error");
+    }
+  });
 };
 
 // -------------------------------------------------------------------
@@ -495,7 +555,8 @@ window.renderComposerList = function (grouped) {
 
   for (const ft of FRAGMENT_TYPES) {
     const fragments = grouped[ft.key] || [];
-    if (fragments.length === 0) continue;
+    const selContent = window._composerSelection[ft.key]?.content;
+    const hasCustom = window._composerSelection[ft.key] && window._composerSelection[ft.key].custom;
 
     const section = document.createElement("div");
     section.className = "composer-list-section";
@@ -503,12 +564,14 @@ window.renderComposerList = function (grouped) {
     // 节标题（点击折叠/展开）
     const sectionKey = `composerSection_${ft.key}`;
     const isCollapsed = window.UiState.get(sectionKey, false);
+    const isFixed = !!window._composerFixed[ft.key];
     const header = document.createElement("div");
     header.className = "composer-list-header";
     header.style.cursor = "pointer";
     header.innerHTML = `
       <span style="color:${ft.color}">${ft.icon} ${ft.label}</span>
       <span class="composer-col-count">${fragments.length}</span>
+      <span class="list-fix-btn" style="cursor:pointer;font-size:11px;user-select:none;color:${isFixed ? 'var(--warning)' : 'var(--muted)'};margin-left:8px" onclick="event.stopPropagation();window.toggleFixFragmentType('${ft.key.replace(/'/g, "\\'")}')" title="固定此类型：批量随机时不再变动">📌 ${isFixed ? '已固定' : '固定'}</span>
       <span style="margin-left:auto;font-size:10px;color:var(--muted)">${isCollapsed ? "展开 ▼" : "收起 ▲"}</span>
     `;
     header.onclick = () => {
@@ -525,6 +588,30 @@ window.renderComposerList = function (grouped) {
     const list = document.createElement("div");
     list.className = "composer-list-items";
     if (isCollapsed) list.style.display = "none";
+
+    // 自定义碎片卡片（行视图）
+    if (hasCustom) {
+      const customCard = document.createElement("div");
+      customCard.className = "composer-list-card selected custom-frag-card";
+      customCard.style.borderColor = "var(--warning)";
+      customCard.style.background = "color-mix(in srgb, var(--warning) 8%, var(--panel-2))";
+      const contentShort = selContent.length > 80 ? selContent.slice(0, 80) + "…" : selContent;
+      customCard.innerHTML = `
+        <div class="clc-content"><span class="clc-text">✏️ ${window.escHtml(contentShort)}</span></div>
+        <div class="clc-source" style="color:var(--warning);display:flex;justify-content:space-between;align-items:center;width:100%">
+          自定义内容（已固定）
+          <span class="frag-actions-inline" onclick="event.stopPropagation()" style="flex-shrink:0;margin-left:8px">
+            <button class="wfa-btn wfa-save" onclick="window._saveCustomFragmentToLibrary('${ft.key.replace(/'/g, "\\'")}')" titie="保存到碎片库">💾</button>
+            <button class="wfa-btn wfa-del" onclick="window._removeCustomFragment('${ft.key.replace(/'/g, "\\'")}')" titie="删除自定义内容">🗑️</button>
+          </span>
+        </div>
+        <div class="frag-check">✓</div>
+      `;
+      customCard.addEventListener("click", (e) => {
+        if (!e.target.closest(".frag-actions")) window._editCustomFragment(ft.key);
+      });
+      list.appendChild(customCard);
+    }
 
     for (const f of fragments) {
       const isSelected = window._isFragmentSelected(ft.key, f);
@@ -561,6 +648,19 @@ window.renderComposerList = function (grouped) {
 
       list.appendChild(card);
     }
+
+    // 自定义按钮（行视图）
+    const customBtn = document.createElement("div");
+    customBtn.className = "composer-custom-btn";
+    customBtn.innerHTML = hasCustom
+      ? `<span style="color:var(--warning);font-size:11px">✏️ ${(selContent||'').slice(0,30)}${(selContent||'').length>30?'…':''}</span>`
+      : `<button class="btn btn-xxs btn-ghost" onclick="window._addCustomFragment('${ft.key}')" style="width:100%;font-size:11px">✏️ 自定义...</button>`;
+    list.appendChild(customBtn);
+
+    // 底部垫片（行视图）
+    const spacer = document.createElement("div");
+    spacer.className = "bottom-spacer";
+    list.appendChild(spacer);
 
     section.appendChild(list);
     container.appendChild(section);

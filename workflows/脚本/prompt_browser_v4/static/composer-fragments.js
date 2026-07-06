@@ -8,26 +8,20 @@ window.setupTemplatePanelResize = function () {
 // 碎片库面板
 // -------------------------------------------------------------------
 window.toggleFragmentLibrary = function () {
-  const panel = document.getElementById("fragmentLibraryPanel");
-  const backdrop = document.getElementById("fragmentLibraryBackdrop");
-  if (!panel || !backdrop) return;
-  const showing = panel.style.display !== "none";
+  const overlay = document.getElementById("fragmentLibraryOverlay");
+  if (!overlay) return;
+  const showing = overlay.classList.contains("active");
   if (showing) {
     window.hideFragmentLibrary();
-    window.showToast("已关闭碎片库", "info");
   } else {
-    panel.style.display = "flex";
-    backdrop.style.display = "block";
+    overlay.classList.add("active");
     if (window.initFragmentLibrary) window.initFragmentLibrary();
-    window.showToast("已打开碎片库", "info");
   }
 };
 
 window.hideFragmentLibrary = function () {
-  const panel = document.getElementById("fragmentLibraryPanel");
-  const backdrop = document.getElementById("fragmentLibraryBackdrop");
-  if (panel) panel.style.display = "none";
-  if (backdrop) backdrop.style.display = "none";
+  const overlay = document.getElementById("fragmentLibraryOverlay");
+  if (overlay) overlay.classList.remove("active");
   // 关闭后刷新 Composer
   window._composerDataStale = true;
   window.refreshComposer();
