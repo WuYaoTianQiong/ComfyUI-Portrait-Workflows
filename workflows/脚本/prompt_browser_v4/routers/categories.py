@@ -3,7 +3,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 
-from models import Category, PromptCategory, Prompt, db
+from models import (
+    Category, PromptCategory, Prompt, db,
+    classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
+)
 
 router = APIRouter(tags=["分类"])
 
@@ -155,4 +158,49 @@ def remove_prompt_from_category(cat_id: int, prompt_id: int):
         raise HTTPException(404, "关联关系不存在")
     
     pc.delete_instance()
+    return {"success": True}
+
+
+# ======== 自动分类 ========
+
+@router.post("/categories/auto-classify")
+def auto_classify_all():
+    """自动为所有提示词分配类型分类（组合/单项/零散）"""
+    ensure_auto_categories()
+
+    # 获取三个自动分类的 ID
+    cat_ids = {}
+    for key, info in AUTO_CATEGORIES.items():
+        cat = Category.get_or_none(Category.name == info["name"])
+        if cat:
+            cat_ids[key] = cat.id
+
+    classified = 0
+    skipped = 0
+    for p in Prompt.select():
+        ptype = classify_prompt_text(p.prompt)
+        if ptype is None or ptype not in cat_ids:
+            skipped += 1
+            continue
+        cid = cat_ids[ptype]
+        exists = PromptCategory.get_or_none(
+            (PromptCategory.prompt == p.id) & (PromptCategory.category == cid)
+        )
+        if not exists:
+            PromptCategory.create(prompt=p.id, category=cid)
+            classified += 1
+        else:
+            skipped += 1
+
+    return {"success": True, "classified": classified, "skipped": skipped}
+
+
+@router.post("/categories/auto-classify/{prompt_id}")
+def auto_classify_one(prompt_id: int):
+    """为单条提示词自动分类"""
+    ensure_auto_categories()
+
+    from models import auto_classify_prompt
+    auto_classify_prompt(prompt_id)
+
     return {"success": True}

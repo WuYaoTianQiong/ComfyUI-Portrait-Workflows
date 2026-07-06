@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
-from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag
+from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag, auto_classify_prompt
 from services.helpers import get_image_metadata
 from shared import templates
 
@@ -110,15 +110,16 @@ def list_prompts(
     category_id: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
     sort: str = Query("newest"),
+    order: str = Query("desc"),
     page: int = Query(1),
     page_size: int = Query(50),
 ):
     """搜索提示词列表，支持排序和分页"""
     query = Prompt.select()
     if search:
-        like = f"%{search}%"
         query = query.where(
             (Prompt.prompt.contains(search))
+            | (Prompt.name.contains(search))
             | (Prompt.tags.contains(search))
             | (Prompt.note.contains(search))
         )
@@ -137,31 +138,35 @@ def list_prompts(
             query = query.join(PromptTag).where(PromptTag.tag.in_(tag_id_list))
     # ================================================
 
-    total = query.count()
+    # ======== 排序逻辑 ========
+    # 兼容旧版 sort 参数 + 新增 order 参数
+    sort_field_map = {
+        "created": Prompt.created_at,
+        "name": Prompt.name,
+        "usage": Prompt.usage_count,
+        "rating": Prompt.rating,
+    }
+    is_asc = (order == "asc")
 
-    total = query.count()
-
-    # ======== Phase 1: 更新排序逻辑 ========
-    # "默认"排序：置顶 → 收藏 → 最新
-    # 其他排序：置顶 → 用户选择的排序字段（收藏不自动置顶）
     if sort == "default":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+    elif sort in sort_field_map:
+        field = sort_field_map[sort]
+        ordered = field.asc() if is_asc else field.desc()
+        order_list = [Prompt.is_pinned.desc(), ordered]
     elif sort == "oldest":
-        order = [Prompt.is_pinned.desc(), Prompt.id.asc()]
-    elif sort == "name_asc":
-        order = [Prompt.is_pinned.desc(), Prompt.name.asc()]
-    elif sort == "name_desc":
-        order = [Prompt.is_pinned.desc(), Prompt.name.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.id.asc()]
     elif sort == "updated":
-        order = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
-    elif sort == "most_used":  # 新增：按使用次数排序
-        order = [Prompt.is_pinned.desc(), Prompt.usage_count.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
     else:
-        order = [Prompt.is_pinned.desc(), Prompt.id.desc()]
+        # 默认 newest
+        order_list = [Prompt.is_pinned.desc(), Prompt.id.desc()]
     # ==========================================
+
+    total = query.count()
     
     offset = (page - 1) * page_size
-    rows = query.order_by(*order).offset(offset).limit(page_size)
+    rows = query.order_by(*order_list).offset(offset).limit(page_size)
 
     prompts = []
     for r in rows:
@@ -196,6 +201,7 @@ def prompts_list_html(
     category_id: Optional[str] = Query(None),
     tag_ids: Optional[str] = Query(None),
     sort: str = Query("newest"),
+    order: str = Query("desc"),
     page: int = Query(1),
     page_size: int = Query(50),
 ):
@@ -204,6 +210,7 @@ def prompts_list_html(
     if search:
         query = query.where(
             (Prompt.prompt.contains(search))
+            | (Prompt.name.contains(search))
             | (Prompt.tags.contains(search))
             | (Prompt.note.contains(search))
         )
@@ -226,23 +233,28 @@ def prompts_list_html(
     total = query.count()
 
     # 排序逻辑与 JSON 接口保持一致
+    is_asc = (order == "asc")
     if sort == "default":
-        order = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
     elif sort == "oldest":
-        order = [Prompt.is_pinned.desc(), Prompt.id.asc()]
-    elif sort == "name_asc":
-        order = [Prompt.is_pinned.desc(), Prompt.name.asc()]
-    elif sort == "name_desc":
-        order = [Prompt.is_pinned.desc(), Prompt.name.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.id.asc()]
     elif sort == "updated":
-        order = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
-    elif sort == "most_used":
-        order = [Prompt.is_pinned.desc(), Prompt.usage_count.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
+    elif sort in ("created", "name", "usage", "rating"):
+        field_map = {
+            "created": Prompt.created_at,
+            "name": Prompt.name,
+            "usage": Prompt.usage_count,
+            "rating": Prompt.rating,
+        }
+        field = field_map[sort]
+        ordered = field.asc() if is_asc else field.desc()
+        order_list = [Prompt.is_pinned.desc(), ordered]
     else:
-        order = [Prompt.is_pinned.desc(), Prompt.id.desc()]
+        order_list = [Prompt.is_pinned.desc(), Prompt.id.desc()]
 
     offset = (page - 1) * page_size
-    rows = query.order_by(*order).offset(offset).limit(page_size)
+    rows = query.order_by(*order_list).offset(offset).limit(page_size)
 
     prompts = []
     for r in rows:
@@ -401,6 +413,8 @@ def create_prompt(data: PromptCreate):
         data_dict["usage_count"] = 0
     # ==========================================
     r = Prompt.create(**data_dict)
+    # 自动类型分类
+    auto_classify_prompt(r.id)
     
     # 自动分类到"组合创作"
     if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
@@ -427,6 +441,11 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
 
     updates["updated_at"] = datetime.now()
     Prompt.update(**updates).where(Prompt.id == prompt_id).execute()
+
+    # 如果更新了 prompt 内容，重新自动分类
+    if "prompt" in updates:
+        auto_classify_prompt(prompt_id)
+
     return {"success": True}
 
 

@@ -199,6 +199,61 @@ def _migrate_column(db, table, col, col_def):
             pass
 
 
+# ======== 自动分类工具函数 ========
+import re
+
+AUTO_CATEGORIES = {
+    "composite": {"name": "组合提示词", "color": "#6366f1"},
+    "single":    {"name": "单项提示词", "color": "#f59e0b"},
+    "scattered": {"name": "零散提示词", "color": "#6b7280"},
+}
+
+def classify_prompt_text(prompt_text: str) -> str | None:
+    """根据提示词文本检测类型：
+    'composite'  ≥4种碎片
+    'single'     1-3种碎片
+    'scattered'  无【】标记
+    """
+    if not prompt_text:
+        return None
+    frags = re.findall(r"【([^】]+)】", prompt_text)
+    n_types = len(set(frags))
+    if n_types == 0:
+        return "scattered"
+    elif n_types >= 4:
+        return "composite"
+    else:
+        return "single"
+
+
+def auto_classify_prompt(prompt_id: int):
+    """为单条提示词自动分配类型分类（不删除已有自定义分类）"""
+    p = Prompt.get_or_none(Prompt.id == prompt_id)
+    if p is None:
+        return
+    ptype = classify_prompt_text(p.prompt)
+    if ptype is None:
+        return
+    cat_info = AUTO_CATEGORIES[ptype]
+    cat = Category.get_or_none(Category.name == cat_info["name"])
+    if cat is None:
+        cat = Category.create(name=cat_info["name"], color=cat_info["color"], parent_id=None)
+    exists = PromptCategory.get_or_none(
+        (PromptCategory.prompt == prompt_id) & (PromptCategory.category == cat.id)
+    )
+    if not exists:
+        PromptCategory.create(prompt=prompt_id, category=cat.id)
+
+
+def ensure_auto_categories():
+    """确保三个自动分类在 categories 表中存在"""
+    for key, info in AUTO_CATEGORIES.items():
+        cat = Category.get_or_none(Category.name == info["name"])
+        if cat is None:
+            Category.create(name=info["name"], color=info["color"], parent_id=None)
+# ================================
+
+
 def init_db():
     """确保表存在，并迁移新列（兼容 v3 旧库）。"""
     db.connect()

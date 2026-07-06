@@ -9,11 +9,11 @@ window.loadPrompts = async function(page) {
   return window.withLock("loadPrompts", async () => {
     if (page) window._promptPage = page;
     const search = document.getElementById("searchInput").value;
-    const sort = document.getElementById("sortFilter").value;
+    const sortParams = window.getSortParams();
 
     // Phase 2: HTMX mode —— 构建 URL 参数后触发服务端渲染
     if (document.body.dataset.htmxActive === "1") {
-      const p = { search, sort, page: window._promptPage || 1, page_size: window._promptPageSize };
+      const p = { search, ...sortParams, page: window._promptPage || 1, page_size: window._promptPageSize };
       // 修复：只有 category_id 是有效整数时才传递
       if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
         p.category_id = window._currentCategoryId;
@@ -44,7 +44,7 @@ window.loadPrompts = async function(page) {
 
     const params = {
       search: search,
-      sort: sort,
+      ...sortParams,
       page: window._promptPage,
       page_size: window._promptPageSize,
     };
@@ -82,8 +82,9 @@ window.loadPrompts = async function(page) {
 window.loadTemplatesAsItems = async function () {
   return window.withLock("loadTemplates", async () => {
     try {
-      const sort = document.getElementById("sortFilter").value;
-      const data = await window.api(`/api/templates/as_items?sort=${sort}`);
+      const sp = window.getSortParams();
+      const sortStr = sp.sort + (sp.order ? `&order=${sp.order}` : "");
+      const data = await window.api(`/api/templates/as_items?sort=${sortStr}`);
       window.allPrompts = data.prompts || [];
       window._promptTotal = data.total || 0;
       window.renderList(window.allPrompts);
@@ -104,15 +105,75 @@ window.selectTemplateItem = function (templateId, name) {
   if (btn) window.switchTab("composerTab", btn);
 };
 
-window.onSortChange = function() {
+// ======== 排序相关 ========
+window._sortField = "default";
+window._sortOrder = "desc";
+
+window.initSortState = function() {
+  window._sortField = window.UiState.get("sortField", "default");
+  window._sortOrder = window.UiState.get("sortOrder", "desc");
+  const fieldEl = document.getElementById("sortField");
+  if (fieldEl) fieldEl.value = window._sortField;
+  window._updateSortOrderBtn();
+};
+
+window._updateSortOrderBtn = function() {
+  const btn = document.getElementById("sortOrderBtn");
+  if (!btn) return;
+  if (window._sortField === "default") {
+    btn.style.display = "none";
+  } else {
+    btn.style.display = "";
+    btn.textContent = window._sortOrder === "asc" ? "↑" : "↓";
+    btn.title = window._sortOrder === "asc" ? "升序" : "降序";
+  }
+};
+
+window.toggleSortOrder = function() {
+  window._sortOrder = window._sortOrder === "asc" ? "desc" : "asc";
+  window._updateSortOrderBtn();
+  window.UiState.set("sortOrder", window._sortOrder);
+  window.onSortFieldChange();
+};
+
+window.onSortFieldChange = function() {
+  const fieldEl = document.getElementById("sortField");
+  if (fieldEl) window._sortField = fieldEl.value;
+  window._updateSortOrderBtn();
   window._promptPage = 1;
-  // 修复：如果是"📦 组合模板"分类，调用 loadTemplatesAsItems() 而不是 loadPrompts()
+  window.UiState.set("sortField", window._sortField);
+  window.UiState.set("sortOrder", window._sortOrder);
   if (window._currentCategoryId === "__templates__") {
     window.loadTemplatesAsItems();
   } else {
     window.loadPrompts();
   }
-  window.UiState.set("sortFilter", document.getElementById("sortFilter").value);
+};
+
+// 兼容旧调用
+window.onSortChange = window.onSortFieldChange;
+
+window.getSortParams = function() {
+  if (window._sortField === "default") return { sort: "default" };
+  return { sort: window._sortField, order: window._sortOrder };
+};
+
+// ======== 自动分类 ========
+window.autoClassifyAll = async function() {
+  const btn = document.querySelector('[onclick="autoClassifyAll()"]');
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ 分类中..."; }
+  try {
+    const r = await window.api("/api/categories/auto-classify", { method: "POST" });
+    let msg = `已分类 ${r.classified} 条`;
+    if (r.skipped) msg += `，${r.skipped} 条已有分类`;
+    window.showToast(msg, "success");
+    window.loadCategories();
+    window.loadPrompts();
+  } catch (e) {
+    window.showToast("自动分类失败: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "🔄 自动分类"; }
+  }
 };
 
 window.renderList = function(prompts) {

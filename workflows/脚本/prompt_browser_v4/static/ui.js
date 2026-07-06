@@ -136,11 +136,12 @@ window.applyUiState = function() {
   const sw = window.UiState.get("sidebarWidth", "");
   if (sw) document.getElementById("sidebar").style.width = sw;
 
-  const savedSort = window.UiState.get("sortFilter", "default");
-  const sortEl = document.getElementById("sortFilter");
-  if (sortEl && [...sortEl.options].some(o => o.value === savedSort)) {
-    sortEl.value = savedSort;
-  }
+  // 恢复排序状态
+  window._sortField = window.UiState.get("sortField", "default");
+  window._sortOrder = window.UiState.get("sortOrder", "desc");
+  const sortFieldEl = document.getElementById("sortField");
+  if (sortFieldEl) sortFieldEl.value = window._sortField;
+  if (typeof window._updateSortOrderBtn === "function") window._updateSortOrderBtn();
 
   // 恢复上次的分类筛选（含模板特殊值）
   window._pendingCategoryFilter = window.UiState.get("categoryFilter", "");
