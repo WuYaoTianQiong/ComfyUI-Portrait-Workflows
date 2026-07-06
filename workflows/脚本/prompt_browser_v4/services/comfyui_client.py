@@ -68,8 +68,9 @@ def get_queue() -> dict:
 
 
 def get_history(max_items: int = 100) -> dict:
-    """获取 ComfyUI 最近历史（限制条数以加速）"""
-    result = fetch_json(f"{COMFYUI_API}/history?max_items={max_items}", timeout=5)
+    """获取 ComfyUI 最近历史（限制条数以加速），超时随条数自动缩放"""
+    timeout = max(5, min(30, max_items // 20))  # 100条=5s, 500条=25s, 上限30s
+    result = fetch_json(f"{COMFYUI_API}/history?max_items={max_items}", timeout=timeout)
     return result or {}
 
 

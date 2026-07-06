@@ -86,13 +86,14 @@ def get_job_status_snapshot(job: dict) -> dict:
             if isinstance(item, list) and len(item) > 1:
                 pending.add(str(item[1]))
 
-    # 先拉最近历史（用于快速判断），未命中的 pid 单独精确查询
-    hist = get_history(max_items=200)
+    # 批量拉取最近历史（增大上限，减少后续单条查询）
+    hist = get_history(max_items=500)
     # 收集所有 comfyui_prompt_id
     all_pids = {item.get("comfyui_prompt_id") for item in items if item.get("comfyui_prompt_id")}
-    # 未命中最近历史的 pid，批量精确查询
+    # 仅对批量历史未命中的 pid 做精确查询（已完成的才会在 history 命中，在队列中的不会命中）
     miss_pids = {pid for pid in all_pids if pid and pid not in hist}
-    if miss_pids:
+    # 未命中数量不多时才逐条查询（避免 160 条全查导致后端响应超时）
+    if miss_pids and len(miss_pids) <= 10:
         try:
             from services.comfyui_client import get_history_for_prompt
             for pid in miss_pids:
@@ -125,18 +126,8 @@ def get_job_status_snapshot(job: dict) -> dict:
         status = item.get("status", "pending")
         iprogress = None
 
-        # 优先用 hist 快速判断，miss 时单独精确查询
+        # 在上面的批量查询中已尽可能补齐 hist，此处直接判断
         found_in_hist = pid and pid in hist
-        if pid and not found_in_hist:
-            # 精确查询该 pid 是否已完成
-            try:
-                from services.comfyui_client import get_history_for_prompt
-                single_hist = get_history_for_prompt(pid)
-                if single_hist and pid in single_hist:
-                    found_in_hist = True
-                    hist[pid] = single_hist[pid]
-            except Exception:
-                pass
 
         if pid and found_in_hist:
             status = "done"
@@ -253,6 +244,7 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", p
                     GenHistory.prompt_id: prompt_id,
                     GenHistory.prompt_params: prompt_params,
                     GenHistory.source: "local",
+                    GenHistory.is_deleted: False,  # 恢复被软删除的记录
                 },
             ).execute()
         except Exception:
