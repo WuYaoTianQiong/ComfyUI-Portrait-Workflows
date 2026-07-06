@@ -263,19 +263,32 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
 
     # 4. 注入画质
     quality = prompt_data.get("quality", "4K")
-    quality_map = {
-        "2K": (2160, 3840),
-        "4K": (2560, 4096),
-        "6K": (3200, 5120),
-        "8K": (3840, 6400),
-        "12K": (5120, 8192),
+    quality_scale_map = {"2K": 0.75, "4K": 1.0, "6K": 1.25, "8K": 1.5, "12K": 2.0}
+    scale = quality_scale_map.get(quality, 1.0)
+
+    # 4a. SeedVR 工作流：设置超分分辨率
+    seedvr_quality_map = {
+        "2K": (2160, 3840), "4K": (2560, 4096),
+        "6K": (3200, 5120), "8K": (3840, 6400), "12K": (5120, 8192),
     }
-    if quality in quality_map:
-        res, max_res = quality_map[quality]
+    has_seedvr = False
+    if quality in seedvr_quality_map:
+        res, max_res = seedvr_quality_map[quality]
         for node_id, node in api_workflow.items():
             if isinstance(node, dict) and node.get("class_type") == "SeedVR2VideoUpscaler":
                 node["inputs"]["resolution"] = res
                 node["inputs"]["max_resolution"] = max_res
+                has_seedvr = True
+                break
+
+    # 4b. 非 SeedVR 工作流：按比例缩放 EmptyLatentImage 尺寸
+    if not has_seedvr and scale != 1.0:
+        for node_id, node in api_workflow.items():
+            if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
+                w = node["inputs"].get("width", 640)
+                h = node["inputs"].get("height", 960)
+                node["inputs"]["width"] = max(256, min(4096, int(w * scale)))
+                node["inputs"]["height"] = max(256, min(4096, int(h * scale)))
                 break
 
     # 5. 为输出节点注入唯一文件名前缀，避免批量跑图时文件互相覆盖
