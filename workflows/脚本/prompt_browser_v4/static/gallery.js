@@ -20,7 +20,7 @@ window.renderGallery = function(items) {
     return;
   }
 
-  countEl.textContent = items.length;
+  countEl.textContent = window._galleryTotal || items.length;
   grid.innerHTML = '';
 
   items.forEach((item, idx) => {
@@ -32,6 +32,18 @@ window.renderGallery = function(items) {
   window.updateGalleryActionButtons();
   window.updateCompareButton();
   window.updateGallerySelectAllCheck();
+};
+
+/** 画廊分页组件：复用提示词的分页渲染核心 */
+window.renderGalleryPagination = function() {
+  window.renderPaginationCore({
+    containerId: "galleryPagination",
+    total: window._galleryTotal || 0,
+    page: window._galleryPage || 1,
+    pageSize: window._galleryPageSize || 50,
+    onPage: "window.loadGalleryPage",
+    onPageSize: "window.changeGalleryPageSize",
+  });
 };
 
 /** 共享：创建单个画廊 item 的 DOM 元素 */
@@ -101,7 +113,7 @@ window._createGalleryItemDiv = function(item, idx) {
   if (filenameEl) filenameEl.onclick = (e) => { e.stopPropagation(); window.copyFilename(filenameEl.dataset.filename); };
 
   div.onclick = (e) => {
-    const realIdx = window._historyItems.findIndex(it => it.id === item.id);
+    const realIdx = (window._galleryAllItems || window._historyItems).findIndex(it => it.id === item.id);
     window.openLightbox(item.view_url, meta, e, realIdx);
   };
 
@@ -133,7 +145,7 @@ window._addProcessButtonsToGallery = function() {
     promptBtn.className = 'gallery-item-prompt-btn';
     promptBtn.innerHTML = '📝';
     promptBtn.title = '查看提示词参数';
-    const item = window._historyItems.find(it => it.id === parseInt(id));
+    const item = (window._galleryAllItems || window._historyItems).find(it => it.id === parseInt(id));
     if (item && item.prompt_params) {
       promptBtn.onclick = (e) => { e.stopPropagation(); window.showImagePromptDetail(item.prompt_params, item.id); };
       el.appendChild(promptBtn);
@@ -219,7 +231,7 @@ window.enterCompareMode = function() {
     return;
   }
 
-  window._compareItems = window._historyItems.filter(item => window._gallerySelectedIds.has(item.id));
+  window._compareItems = (window._galleryAllItems || window._historyItems).filter(item => window._gallerySelectedIds.has(item.id));
   window._compareMode = 'sync';
 
   document.getElementById('compareToolbar').classList.remove('show');
@@ -253,51 +265,8 @@ window.updateGalleryBadge = function() {
 };
 
 // -------------------------------------------------------------------
-// 分页：追加渲染 + 加载更多
+// 分页：画廊分页组件在 renderGalleryPagination() 中渲染（复用提示词核心）
 // -------------------------------------------------------------------
-
-window.appendGalleryItems = function(items) {
-  const grid = document.getElementById('galleryGrid');
-  const countEl = document.getElementById('galleryCount');
-  if (!grid || !items || !items.length) return;
-  countEl.textContent = window._historyItems.length;
-
-  items.forEach((item, idx) => {
-    const globalIdx = window._historyItems.length - items.length + idx;
-    const div = window._createGalleryItemDiv(item, globalIdx);
-    const checkEl = div.querySelector('.gallery-item-check');
-    if (window._gallerySelectedIds.has(item.id)) checkEl.classList.add('checked');
-    grid.appendChild(div);
-  });
-
-  window._addProcessButtonsToGallery();
-  window.updateGalleryActionButtons();
-  window.updateCompareButton();
-  window.updateGallerySelectAllCheck();
-};
-
-window.updateGalleryLoadMore = function() {
-  let indicator = document.getElementById('galleryLoadMore');
-  const grid = document.getElementById('galleryGrid');
-  if (!indicator && grid) {
-    indicator = document.createElement('div');
-    indicator.id = 'galleryLoadMore';
-    indicator.className = 'gallery-load-more';
-    grid.parentNode.insertBefore(indicator, null);
-  }
-  if (!indicator) return;
-  const loaded = window._historyItems.length;
-  const total = window._galleryTotal || 0;
-  if (window._galleryLoading) {
-    indicator.style.display = 'block';
-    indicator.innerHTML = '<span style="color:var(--muted);font-size:12px">加载中...</span>';
-  } else if (loaded >= total) {
-    indicator.style.display = 'none';
-  } else {
-    indicator.style.display = 'block';
-    indicator.innerHTML = `<span style="color:var(--muted);font-size:12px">滚动加载更多（${loaded} / ${total}）</span>`;
-  }
-};
 
 // ====================================================================
 // 新增：历史图片处理 + prompt 详情

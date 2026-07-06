@@ -8,7 +8,7 @@ window._galleryTotal = 0;
 window._galleryLoading = false;
 
 // -------------------------------------------------------------------
-// 历史加载
+// 历史加载（分页：复用画廊分页组件）
 // -------------------------------------------------------------------
 
 window.loadHistory = async function(sync = false) {
@@ -21,21 +21,23 @@ window.loadHistory = async function(sync = false) {
   }
 
   try {
-    let url;
     if (sync) {
-      url = "/api/history_sync";
+      // 同步并加载第一页
+      const url = `/api/history_sync?page_size=${window._galleryPageSize}`;
       const data = await window.api(url);
-      window._historyItems = data.items || [];
-      window._galleryTotal = data.total || window._historyItems.length;
+      window._galleryAllItems = data.items || [];
+      window._historyItems = window._galleryAllItems;
+      window._galleryTotal = data.total || window._galleryAllItems.length;
       window._galleryPage = 1;
       window.renderGallery(window._historyItems);
+      window.renderGalleryPagination();
       window.updateGalleryBadge();
-      window.updateGalleryLoadMore();
       return;
     }
 
     // 普通加载：重置为第一页
     window._galleryPage = 1;
+    window._galleryAllItems = [];
     window._historyItems = [];
     await window._loadHistoryPage();
   } catch (e) {
@@ -47,7 +49,10 @@ window._loadHistoryPage = async function() {
   if (window._galleryLoading) return;
   window._galleryLoading = true;
   try {
-    const params = [`page=${window._galleryPage}`, `page_size=50`];
+    const params = [
+      `page=${window._galleryPage}`,
+      `page_size=${window._galleryPageSize}`,
+    ];
     if (window._galleryFilter === "favorite") params.push("favorite=1");
     if (window._gallerySort) params.push(`sort=${window._gallerySort}`);
     if (window._gallerySearch) params.push(`search=${encodeURIComponent(window._gallerySearch)}`);
@@ -55,16 +60,18 @@ window._loadHistoryPage = async function() {
     const data = await window.api(url);
     const items = data.items || [];
     window._galleryTotal = data.total || 0;
-    if (window._galleryPage === 1) {
-      window._historyItems = items;
-      window.renderGallery(items);
-      window._setupGalleryScroll();
-    } else {
-      window._historyItems = window._historyItems.concat(items);
-      window.appendGalleryItems(items);
+    window._historyItems = items;
+
+    // 累积所有已加载页，供灯箱 / 对比跨页使用
+    if (!window._galleryAllItems) window._galleryAllItems = [];
+    const seen = new Set(window._galleryAllItems.map(it => it.id));
+    for (const it of items) {
+      if (!seen.has(it.id)) { window._galleryAllItems.push(it); seen.add(it.id); }
     }
+
+    window.renderGallery(items);
+    window.renderGalleryPagination();
     window.updateGalleryBadge();
-    window.updateGalleryLoadMore();
   } catch (e) {
     console.error("_loadHistoryPage", e);
   } finally {
@@ -72,26 +79,39 @@ window._loadHistoryPage = async function() {
   }
 };
 
-window.loadMoreHistory = async function() {
-  if (window._galleryLoading) return;
-  const loaded = window._historyItems.length;
-  if (loaded >= window._galleryTotal) return;
-  window._galleryPage += 1;
-  await window._loadHistoryPage();
+// 切换每页显示条数（与提示词分页组件同一交互）
+window.changeGalleryPageSize = function(size) {
+  if (size === window._galleryPageSize) return;
+  window._galleryPageSize = size;
+  window._galleryPage = 1;
+  window.UiState.set("galleryPageSize", size);
+  if (document.body.dataset.htmxActive === "1") {
+    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+  } else {
+    window.loadHistory(false);
+  }
 };
 
-// 无限滚动：监听画廊容器滚动
-window._setupGalleryScroll = function() {
-  const container = document.querySelector('.gallery-container');
-  if (!container || window._galleryScrollReady) return;
-  window._galleryScrollReady = true;
-  container.addEventListener('scroll', () => {
-    if (window._galleryLoading) return;
-    const threshold = 200;
-    if (container.scrollTop + container.clientHeight >= container.scrollHeight - threshold) {
-      window.loadMoreHistory();
+// 跳转到指定页（JS 模式直接加载；HTMX 模式由模板按钮驱动，此处兜底刷新）
+window.loadGalleryPage = function(page) {
+  if (!page || page < 1) return;
+  window._galleryPage = page;
+  if (document.body.dataset.htmxActive === "1") {
+    const container = document.getElementById("galleryGridContainer");
+    if (container) {
+      const params = new URLSearchParams({
+        page: String(page),
+        sort: window._gallerySort,
+        favorite: window._galleryFilter === "favorite" ? "1" : "",
+        search: window._gallerySearch,
+        page_size: String(window._galleryPageSize),
+      });
+      container.setAttribute("hx-get", "/api/history/html?" + params.toString());
+      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
     }
-  });
+  } else {
+    window._loadHistoryPage();
+  }
 };
 
 window.renderHistory = function(items) {
@@ -105,15 +125,38 @@ window.buildImageMeta = function(item) {
   return parts.join(" · ");
 };
 
-window.jumpToPrompt = function(promptId) {
+window.jumpToPrompt = async function(promptId) {
   window.closeCompareModal();
   
   window._suppressRouteUpdate = true;
   const tabBtn = document.querySelector('.tab-btn[data-tab="promptTab"]');
   if (tabBtn) window.switchTab("promptTab", tabBtn);
-  window.selectPrompt(promptId, true, false, false, false);
-  window._suppressRouteUpdate = false;
   
+  // 确保目标提示词在列表中：清空搜索和分类，加载所有提示词
+  const searchEl = document.getElementById("searchInput");
+  if (searchEl) searchEl.value = "";
+  window._currentCategoryId = null;
+  window._promptPageSize = 200;
+  window._promptPage = 1;
+  await window.loadPrompts();
+  
+  // 计算目标在第几页，加载到对应页
+  const idx = window.allPrompts.findIndex(p => p.id === promptId);
+  if (idx >= 0) {
+    window._promptPageSize = 50;
+    window._promptPage = Math.floor(idx / window._promptPageSize) + 1;
+    await window.loadPrompts();
+  }
+  
+  window.selectPrompt(promptId, true, false, false, false);
+  
+  // 滚动到目标
+  setTimeout(() => {
+    const item = document.querySelector(`.prompt-item[data-id="${promptId}"]`);
+    if (item) item.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 300);
+  
+  window._suppressRouteUpdate = false;
   window.updateRoute();
 };
 
@@ -137,13 +180,35 @@ window.loadPromptHistory = async function(promptId) {
     const grid = document.getElementById("promptHistoryGrid");
     if (!grid) return;
     items.forEach((item, idx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "prompt-history-item";
+
       const img = document.createElement("img");
       img.className = "prompt-history-thumb";
       img.src = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || "")}&type=${encodeURIComponent(item.img_type || "output")}&size=400`;
       img.alt = item.filename;
       img.title = item.filename + (item.created_at ? "\n" + item.created_at : "");
       img.onclick = () => window.openPromptHistoryLightbox(idx);
-      grid.appendChild(img);
+      wrap.appendChild(img);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "hist-del";
+      delBtn.textContent = "✕";
+      delBtn.title = "删除";
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm("删除此图片的历史记录？")) return;
+        try {
+          await window.api(`/api/history/${item.id}`, { method: "DELETE" });
+          window.loadPromptHistory(promptId);
+          if (typeof window.loadHistory === "function") window.loadHistory(false);
+        } catch (err) {
+          window.showToast("删除失败: " + err.message, "error");
+        }
+      };
+      wrap.appendChild(delBtn);
+
+      grid.appendChild(wrap);
     });
   } catch (e) {
     section.classList.add("visible");
@@ -199,7 +264,7 @@ window.toggleFavorite = async function(id, btn) {
   try {
     const r = await window.api(`/api/history/${id}/favorite`, { method: "POST" });
     if (r.success) {
-      const item = window._historyItems.find(it => it.id === id);
+      const item = (window._galleryAllItems || window._historyItems).find(it => it.id === id);
       if (item) item.favorite = r.favorite;
       const lbItem = window._lightboxItems.find(it => it && it.id === id);
       if (lbItem) lbItem.favorite = r.favorite;

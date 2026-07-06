@@ -42,6 +42,7 @@ window.openUnifiedImageModal = function() {
           <button id="imageRotateBtn" class="lightbox-action-btn" onclick="window.rotateImage()" title="旋转 90°">⟳</button>
           <button id="imageFitBtn" class="lightbox-action-btn" onclick="window.toggleFitMode()" title="适应/原始尺寸">1:1</button>
           <button id="compareResetBtn" onclick="window.resetImageZoom()">重置</button>
+          <button id="lightboxDelBtn" class="lightbox-action-btn" style="display:none;color:var(--danger)" onclick="window.deleteFromLightbox()" title="删除">🗑️</button>
           <button onclick="window.closeCompareModal(true)">✕ 退出</button>
         </div>
       </div>
@@ -68,6 +69,7 @@ window.openUnifiedImageModal = function() {
   const flipBtn = document.getElementById('imageFlipBtn');
   const rotateBtn = document.getElementById('imageRotateBtn');
   const fitBtn = document.getElementById('imageFitBtn');
+  const delBtn = document.getElementById('lightboxDelBtn');
   const wfSelector = document.getElementById('lightboxWfSelector');
   const wfNameBtn = document.getElementById('lightboxWfName');
 
@@ -99,6 +101,7 @@ window.openUnifiedImageModal = function() {
     flipBtn.style.display = '';
     rotateBtn.style.display = '';
     fitBtn.style.display = '';
+    delBtn.style.display = '';
     wfSelector.style.display = '';
     titleText.textContent = `图片查看（${window._lightboxIndex + 1} / ${window._lightboxItems.length}）`;
   } else {
@@ -142,7 +145,7 @@ window.closeCompareModal = function(navigateBack = false) {
   if (window._compareMode !== 'single') {
     window._gallerySelectedIds.clear();
     window.updateCompareButton();
-    window.renderGallery();
+    window.renderGallery(window._historyItems);
   }
 
   if (window._compareMode === 'single') {
@@ -397,6 +400,36 @@ window.regenFromLightbox = function() {
     return;
   }
   window.regenerateFromHistory(item.prompt_id);
+};
+
+window.deleteFromLightbox = async function() {
+  const item = window._lightboxItems[window._lightboxIndex];
+  if (!item) return;
+  if (!confirm("删除此图片的历史记录？")) return;
+  try {
+    await window.api(`/api/history/${item.id}`, { method: "DELETE" });
+    // 从列表中移除
+    window._lightboxItems.splice(window._lightboxIndex, 1);
+    if (window._lightboxItems.length === 0) {
+      window.closeCompareModal(true);
+      window.showToast("已删除", "info");
+      return;
+    }
+    if (window._lightboxIndex >= window._lightboxItems.length) {
+      window._lightboxIndex = window._lightboxItems.length - 1;
+    }
+    window._lightboxRouteReplace = true;
+    window.renderUnifiedImageGrid();
+    window.showToast("已删除", "info");
+    // 同步刷新画廊和提示词历史
+    if (typeof window.loadHistory === "function") window.loadHistory(false);
+    if (typeof window.selectedId === "number" && window.selectedId > 0
+        && typeof window.loadPromptHistory === "function") {
+      window.loadPromptHistory(window.selectedId);
+    }
+  } catch (e) {
+    window.showToast("删除失败: " + e.message, "error");
+  }
 };
 
 // -------------------------------------------------------------------
@@ -1023,7 +1056,7 @@ window.openLightbox = function(src, meta, event, clickedIndex) {
 
 /** 旧版灯箱 */
 window._openLightboxLegacy = function(src, meta, event, clickedIndex) {
-  const allItems = window._historyItems.map((item) => {
+  const allItems = (window._galleryAllItems || window._historyItems).map((item) => {
     return {
       ...item,
       view_url: item.view_url || `/api/image?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}`

@@ -323,13 +323,16 @@
 }
 .prompt-history-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 240px));
   gap: 10px;
   margin-top: 8px;
   align-items: start;
 }
+.prompt-history-item {
+  position: relative;
+}
 .prompt-history-thumb {
-  width: 100%;
+  max-width: 100%;
   height: auto;
   object-fit: contain;
   display: block;
@@ -341,6 +344,27 @@
 .prompt-history-thumb:hover {
   transform: scale(1.05);
   box-shadow: var(--shadow);
+}
+.prompt-history-item .hist-del {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 2;
+}
+.prompt-history-item:hover .hist-del {
+  display: block;
+}
+.prompt-history-item .hist-del:hover {
+  background: var(--danger);
 }
 
 /* 对比模式 */
