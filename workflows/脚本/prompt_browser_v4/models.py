@@ -208,6 +208,22 @@ AUTO_CATEGORIES = {
     "scattered": {"name": "零散提示词", "color": "#6b7280"},
 }
 
+# 自动类型分类当前包含的名称集合；含已废弃的“片段提示词”以便清洗历史残留
+_AUTO_TYPE_NAMES = {info["name"] for info in AUTO_CATEGORIES.values()} | {"片段提示词"}
+
+
+def _clear_auto_type_categories(prompt_id: int):
+    """清除该提示词上所有「自动类型」旧标签（含旧体系的片段提示词），
+    避免重分类时新旧标签叠加成互相矛盾的标签。不影响用户的自定义主题分类。"""
+    old_cats = list(Category.select().where(Category.name.in_(_AUTO_TYPE_NAMES)))
+    if not old_cats:
+        return
+    old_ids = [c.id for c in old_cats]
+    PromptCategory.delete().where(
+        (PromptCategory.prompt == prompt_id) & (PromptCategory.category.in_(old_ids))
+    ).execute()
+
+
 def classify_prompt_text(prompt_text: str) -> str | None:
     """根据提示词文本检测类型：
     'composite'  ≥4种碎片
@@ -227,22 +243,21 @@ def classify_prompt_text(prompt_text: str) -> str | None:
 
 
 def auto_classify_prompt(prompt_id: int):
-    """为单条提示词自动分配类型分类（不删除已有自定义分类）"""
+    """为单条提示词自动分配类型分类（幂等：先清旧自动类型标签，再赋正确值）。
+    只管理自动类型分类，不删除用户自定义的主题分类。"""
     p = Prompt.get_or_none(Prompt.id == prompt_id)
     if p is None:
         return
     ptype = classify_prompt_text(p.prompt)
     if ptype is None:
         return
+    # 先清掉该提示词上所有旧自动类型标签（含旧体系的片段提示词），避免叠加
+    _clear_auto_type_categories(prompt_id)
     cat_info = AUTO_CATEGORIES[ptype]
     cat = Category.get_or_none(Category.name == cat_info["name"])
     if cat is None:
         cat = Category.create(name=cat_info["name"], color=cat_info["color"], parent_id=None)
-    exists = PromptCategory.get_or_none(
-        (PromptCategory.prompt == prompt_id) & (PromptCategory.category == cat.id)
-    )
-    if not exists:
-        PromptCategory.create(prompt=prompt_id, category=cat.id)
+    PromptCategory.create(prompt=prompt_id, category=cat.id)
 
 
 def ensure_auto_categories():

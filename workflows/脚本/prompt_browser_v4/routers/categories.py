@@ -6,6 +6,7 @@ from typing import Optional, List
 from models import (
     Category, PromptCategory, Prompt, db,
     classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
+    auto_classify_prompt,
 )
 
 router = APIRouter(tags=["分类"])
@@ -165,34 +166,30 @@ def remove_prompt_from_category(cat_id: int, prompt_id: int):
 
 @router.post("/categories/auto-classify")
 def auto_classify_all():
-    """自动为所有提示词分配类型分类（组合/单项/零散）"""
+    """自动为所有提示词分配类型分类（组合/单项/零散）。
+    幂等：重分类前清除旧自动类型标签，并删除已废弃的「片段提示词」分类。"""
     ensure_auto_categories()
 
-    # 获取三个自动分类的 ID
-    cat_ids = {}
-    for key, info in AUTO_CATEGORIES.items():
-        cat = Category.get_or_none(Category.name == info["name"])
-        if cat:
-            cat_ids[key] = cat.id
-
     classified = 0
-    skipped = 0
     for p in Prompt.select():
-        ptype = classify_prompt_text(p.prompt)
-        if ptype is None or ptype not in cat_ids:
-            skipped += 1
-            continue
-        cid = cat_ids[ptype]
-        exists = PromptCategory.get_or_none(
-            (PromptCategory.prompt == p.id) & (PromptCategory.category == cid)
-        )
-        if not exists:
-            PromptCategory.create(prompt=p.id, category=cid)
+        before = set()
+        for c in Category.select().join(PromptCategory, on=(PromptCategory.category == Category.id)).where(PromptCategory.prompt == p.id):
+            before.add(c.name)
+        auto_classify_prompt(p.id)
+        after = set()
+        for c in Category.select().join(PromptCategory, on=(PromptCategory.category == Category.id)).where(PromptCategory.prompt == p.id):
+            after.add(c.name)
+        if before != after:
             classified += 1
-        else:
-            skipped += 1
 
-    return {"success": True, "classified": classified, "skipped": skipped}
+    # 删除已废弃且已清空的「片段提示词」分类（若仍有残留关联则跳过）
+    legacy = Category.get_or_none(Category.name == "片段提示词")
+    if legacy is not None:
+        remain = PromptCategory.select().where(PromptCategory.category == legacy.id).count()
+        if remain == 0:
+            legacy.delete_instance(recursive=False)
+
+    return {"success": True, "reclassified": classified}
 
 
 @router.post("/categories/auto-classify/{prompt_id}")
