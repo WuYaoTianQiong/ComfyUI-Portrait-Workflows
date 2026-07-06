@@ -407,12 +407,26 @@
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .btn-new {
   white-space: nowrap;
   padding: 6px 12px;
   flex-shrink: 0;
+}
+
+.sort-order-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 .toolbar-field {

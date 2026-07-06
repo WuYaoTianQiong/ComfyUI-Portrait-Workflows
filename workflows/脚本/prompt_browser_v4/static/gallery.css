@@ -323,14 +323,16 @@
 }
 .prompt-history-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
   margin-top: 8px;
+  align-items: start;
 }
 .prompt-history-thumb {
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
+  height: auto;
+  object-fit: contain;
+  display: block;
   border-radius: 6px;
   cursor: pointer;
   transition: 0.15s;
