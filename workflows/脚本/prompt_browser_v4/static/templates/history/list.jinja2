@@ -2,7 +2,7 @@
   <div class="gallery-grid" id="galleryGrid">
     {% if items and items|length > 0 %}
     {% for item in items %}
-    {% set thumb_url = '/api/thumbnail?filename=' + item.filename|urlencode + '&subfolder=' + (item.subfolder or '')|urlencode + '&type=' + (item.img_type or 'output')|urlencode + '&size=300' %}
+    {% set thumb_url = '/api/thumbnail?filename=' + item.filename|urlencode + '&subfolder=' + (item.subfolder or '')|urlencode + '&type=' + (item.img_type or 'output')|urlencode + '&size=600' %}
     {% set has_prompt = item.prompt_id is not none %}
     {% set prompt_params = item.prompt_params %}
     {% set composer_prompt = '' %}

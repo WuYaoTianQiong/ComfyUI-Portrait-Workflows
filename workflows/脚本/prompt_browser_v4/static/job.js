@@ -25,13 +25,17 @@ window.loadActiveJobs = async function() {
     let data = await window.api("/api/jobs?active=1");
     let jobs = data.jobs || [];
 
-    // 如果没有活跃任务，查最近 5 条完成任务（页面刷新后任务可能已完成）
+    // 如果没有活跃任务，查最近 5 条任务（页面刷新后任务可能仍在运行）
     if (jobs.length === 0) {
       data = await window.api("/api/jobs?limit=5");
-      jobs = (data.jobs || []).filter(j => j.job_type === "batch" || j.items?.length > 1);
+      // 仅追踪仍处于 pending/running 状态的任务，避免把旧任务的错误/空结果展示到界面
+      jobs = (data.jobs || []).filter(j =>
+        (j.job_type === "batch" || j.items?.length > 1) &&
+        ["pending", "running"].includes(j.status)
+      );
     }
 
-    // 过滤掉状态异常的 unknown 任务（避免加载有缺陷的任务）
+    // 过滤掉状态异常的 unknown 任务
     jobs = jobs.filter(j => j.status !== "unknown");
 
     // 如果用户之前关闭了批量面板，不再重新展示已完成的任务

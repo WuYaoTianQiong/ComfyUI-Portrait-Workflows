@@ -139,7 +139,7 @@ window.loadPromptHistory = async function(promptId) {
     items.forEach((item, idx) => {
       const img = document.createElement("img");
       img.className = "prompt-history-thumb";
-      img.src = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || "")}&type=${encodeURIComponent(item.img_type || "output")}&size=120`;
+      img.src = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || "")}&type=${encodeURIComponent(item.img_type || "output")}&size=400`;
       img.alt = item.filename;
       img.title = item.filename + (item.created_at ? "\n" + item.created_at : "");
       img.onclick = () => window.openPromptHistoryLightbox(idx);

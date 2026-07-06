@@ -115,16 +115,16 @@
         <div class="toolbar-row toolbar-row-3">
           <div class="toolbar-field">
             <label class="field-label">排序</label>
-            <select id="sortFilter" onchange="onSortChange()">
+            <select id="sortField" onchange="onSortFieldChange()">
               <option value="default">默认</option>
-              <option value="oldest">最早创建</option>
-              <option value="name_asc">名称 A→Z</option>
-              <option value="name_desc">名称 Z→A</option>
-              <option value="updated">最近更新</option>
-              <option value="most_used">使用最多</option>
-              <option value="newest">最新创建</option>
+              <option value="created">创建时间</option>
+              <option value="name">名称</option>
+              <option value="usage">使用次数</option>
+              <option value="rating">评级</option>
             </select>
+            <button id="sortOrderBtn" class="btn btn-sm btn-ghost sort-order-btn" onclick="toggleSortOrder()" title="升序" style="display:none">↑</button>
           </div>
+          <button class="btn btn-sm btn-ghost" onclick="autoClassifyAll()" title="自动分析所有提示词并分配类型分类">🔄 自动分类</button>
           <div class="toolbar-stats">
             <label class="gallery-select-all-label" style="margin-right:8px" title="全选当前页提示词">
               <input type="checkbox" id="promptSelectAll" onchange="window.toggleSelectAllPrompts(this.checked)">

@@ -41,7 +41,7 @@ window._createGalleryItemDiv = function(item, idx) {
   div.dataset.id = item.id;
   div.dataset.index = idx;
 
-  const thumbUrl = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=300`;
+  const thumbUrl = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=600`;
 
   const meta = window.buildImageMeta(item);
   const filename = item.filename || '';
@@ -52,11 +52,14 @@ window._createGalleryItemDiv = function(item, idx) {
   // 从 prompt_params 提取组合创作的提示词
   let composerPrompt = "";
   let isRandomComposer = false;
+  let promptParamsPrompt = "";
   if (item.prompt_params) {
     try {
       const pp = typeof item.prompt_params === "string" ? JSON.parse(item.prompt_params) : item.prompt_params;
       if (pp.source === "composer" && pp.prompt) composerPrompt = pp.prompt.slice(0, 80) + (pp.prompt.length > 80 ? "…" : "");
       if (pp.source === "composer_random") isRandomComposer = true;
+      // 兜底：prompt_name 为空时用 prompt_params 中的提示词文本
+      if (pp.prompt) promptParamsPrompt = pp.prompt;
     } catch(e) {}
   }
 
@@ -64,6 +67,11 @@ window._createGalleryItemDiv = function(item, idx) {
   const promptBadges = [];
   if (item.prompt_name) {
     promptBadges.push(`<div class="gallery-item-prompt" style="top:${badgeTop}px" onclick="event.stopPropagation();window.jumpToPrompt(${item.prompt_id})">📝 ${window.escHtml(item.prompt_name)}</div>`);
+    badgeTop += 30;
+  } else if (item.prompt_id && item.prompt_id > 0) {
+    // prompt_name 缺失但 prompt_id 有效：用 prompt_params 中的提示词文本兜底
+    const fallback = promptParamsPrompt ? promptParamsPrompt.slice(0, 40) + (promptParamsPrompt.length > 40 ? "…" : "") : `提示词 #${item.prompt_id}`;
+    promptBadges.push(`<div class="gallery-item-prompt" style="top:${badgeTop}px;opacity:0.85" onclick="event.stopPropagation();window.jumpToPrompt(${item.prompt_id})">📝 ${window.escHtml(fallback)}</div>`);
     badgeTop += 30;
   }
   if (composerPrompt) {

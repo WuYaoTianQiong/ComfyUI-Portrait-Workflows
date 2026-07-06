@@ -221,6 +221,9 @@ window.renderUnifiedImageGrid = function() {
     if (window._compareMode === 'single') {
       const rows = [];
       if (item.filename) rows.push(`<div class="label-param-row"><span class="label-param-key">文件名：</span><span class="label-param-val label-filename-clickable" title="点击复制文件名" data-filename="${window.escAttr(item.filename)}">${window.escHtml(item.filename)}</span></div>`);
+      if (item.prompt_name && item.prompt_id) {
+        rows.push(`<div class="label-param-row"><span class="label-param-key">提示词：</span><span class="label-param-val"><span class="lightbox-prompt-link" onclick="window.jumpToPrompt(${item.prompt_id})" title="跳转到提示词详情">📝 ${window.escHtml(item.prompt_name)}</span></span></div>`);
+      }
       if (item.created_at) rows.push(`<div class="label-param-row"><span class="label-param-key">时间：</span><span class="label-param-val">${item.created_at}</span></div>`);
       const p = item.prompt_params || {};
       // 组合创作：展示完整提示词
