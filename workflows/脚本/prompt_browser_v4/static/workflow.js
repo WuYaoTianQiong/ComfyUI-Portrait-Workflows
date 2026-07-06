@@ -1,8 +1,9 @@
 // workflow.js - 工作流模块
 // 依赖：utils.js
 
-const LS_CUSTOM_WF = "promptBrowserCustomWorkflow_v3";
-const LS_HIDDEN_WF = "promptBrowserHiddenWorkflows";
+const LS_CUSTOM_WF = "pb_workflow_custom_v1";
+const LS_HIDDEN_WF = "pb_workflow_hidden_v1";
+const CUSTOM_WF_PREFIX = "__custom__";
 
 window.workflowList = [];
 window.workflowSort = "mtime";
@@ -19,7 +20,7 @@ window.loadWorkflows = async function() {
       const data = await window.api(`/api/workflows?sort=${window.workflowSort}`);
       window.workflowList = data.workflows || [];
       if (window._customWorkflow) {
-        window.workflowList.unshift({ path: "__custom__" + window._customWorkflow.name, name: "📁 " + window._customWorkflow.name });
+        window.workflowList.unshift({ path: CUSTOM_WF_PREFIX + window._customWorkflow.name, name: "📁 " + window._customWorkflow.name });
       }
       window.hiddenWorkflows = window.getHiddenWorkflows();
       window.renderWorkflows();
@@ -118,7 +119,11 @@ window.selectWorkflowByPath = function(path) {
 // -------------------------------------------------------------------
 
 window.getHiddenWorkflows = function() {
-  try { return JSON.parse(localStorage.getItem(LS_HIDDEN_WF) || "[]"); } catch (_) { return []; }
+  try {
+    let raw = localStorage.getItem(LS_HIDDEN_WF);
+    if (!raw) raw = localStorage.getItem("promptBrowserHiddenWorkflows"); // 旧键迁移
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
 };
 
 window.setHiddenWorkflows = function(list) {
@@ -179,7 +184,7 @@ window.pickWorkflowFile = function(event) {
     try { localStorage.setItem(LS_CUSTOM_WF, JSON.stringify(window._customWorkflow)); } catch (_) {}
     window.showToast("已加载自定义工作流: " + file.name, "success");
     window.loadWorkflows();
-    window.selectWorkflowByPath("__custom__" + file.name);
+    window.selectWorkflowByPath(CUSTOM_WF_PREFIX + file.name);
   };
   reader.readAsText(file);
   event.target.value = "";
@@ -187,8 +192,9 @@ window.pickWorkflowFile = function(event) {
 
 window.loadCustomWorkflow = function() {
   try {
-    const raw = localStorage.getItem(LS_CUSTOM_WF);
-    if (raw) window._customWorkflow = JSON.parse(raw);
+    let raw = localStorage.getItem(LS_CUSTOM_WF);
+    if (!raw) raw = localStorage.getItem("promptBrowserCustomWorkflow_v3"); // 旧键迁移
+    if (raw) { window._customWorkflow = JSON.parse(raw); localStorage.setItem(LS_CUSTOM_WF, raw); }
   } catch (_) {}
 };
 
@@ -198,5 +204,5 @@ window.currentWorkflowPath = function() {
 
 window.workflowExtraBody = function() {
   const path = window.currentWorkflowPath();
-  return path.startsWith("__custom__") ? { workflow_content: window._customWorkflow?.content || "" } : {};
+  return path.startsWith(CUSTOM_WF_PREFIX) ? { workflow_content: window._customWorkflow?.content || "" } : {};
 };
