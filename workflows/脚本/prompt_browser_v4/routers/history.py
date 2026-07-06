@@ -39,19 +39,25 @@ def _image_exists(filename: str, subfolder: str, img_type: str) -> bool:
 def _enrich_item(r, prompt_cache=None) -> dict:
     meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
     prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
+    prompt_id = r.prompt_id  # 可能为 None（竞态条件导致）
 
-    # 补写逻辑：如果 prompt_params 为空且有 job_id，尝试从 job items 里找回
-    if prompt_params is None and r.job_id:
+    # 补写逻辑：如果 prompt_params / prompt_id 为空且有 job_id，尝试从 job items 里找回
+    if (prompt_params is None or prompt_id is None) and r.job_id:
         try:
             from models import GenJob
             job = GenJob.get_or_none(GenJob.id == r.job_id)
             if job and job.items:
                 items = json.loads(job.items) if isinstance(job.items, str) else job.items
                 for it in items:
-                    if it.get("comfyui_prompt_id") == r.comfyui_prompt_id and it.get("prompt_params"):
-                        # 补写到数据库，下次就不需要再查了
-                        Gh.update(prompt_params=it["prompt_params"]).where(Gh.id == r.id).execute()
-                        prompt_params = json.loads(it["prompt_params"]) if isinstance(it["prompt_params"], str) else it["prompt_params"]
+                    if it.get("comfyui_prompt_id") == r.comfyui_prompt_id:
+                        # 补写 prompt_params
+                        if prompt_params is None and it.get("prompt_params"):
+                            Gh.update(prompt_params=it["prompt_params"]).where(Gh.id == r.id).execute()
+                            prompt_params = json.loads(it["prompt_params"]) if isinstance(it["prompt_params"], str) else it["prompt_params"]
+                        # 补写 prompt_id
+                        if prompt_id is None and it.get("prompt_id"):
+                            Gh.update(prompt_id=it["prompt_id"]).where(Gh.id == r.id).execute()
+                            prompt_id = it["prompt_id"]
                         break
         except Exception:
             pass
@@ -59,7 +65,7 @@ def _enrich_item(r, prompt_cache=None) -> dict:
     item = {
         "id": r.id,
         "job_id": r.job_id,
-        "prompt_id": r.prompt_id,
+        "prompt_id": prompt_id,
         "comfyui_prompt_id": r.comfyui_prompt_id,
         "filename": r.filename,
         "subfolder": r.subfolder,
@@ -74,13 +80,13 @@ def _enrich_item(r, prompt_cache=None) -> dict:
         **meta,
     }
     # 优先从缓存获取提示词名称
-    if r.prompt_id and prompt_cache:
-        item["prompt_name"] = prompt_cache.get(r.prompt_id, "")
+    if prompt_id and prompt_cache:
+        item["prompt_name"] = prompt_cache.get(prompt_id, "")
     # 如果缓存中没有，直接从数据库查询
-    if r.prompt_id and not item["prompt_name"]:
+    if prompt_id and not item["prompt_name"]:
         try:
             from models import Prompt
-            prompt = Prompt.get_or_none(Prompt.id == r.prompt_id)
+            prompt = Prompt.get_or_none(Prompt.id == prompt_id)
             if prompt:
                 item["prompt_name"] = prompt.name
         except Exception:
@@ -112,16 +118,20 @@ def _sync_comfyui_history() -> int:
 
         for node_out in outputs.values():
             for img in node_out.get("images", []):
+                filename = img.get("filename", "")
+                # 跳过 prompt_browser 生成的图片（由 job poller 入库，自带提示词关联）
+                if filename.startswith("prompt_browser_"):
+                    continue
                 try:
                     Gh.insert(
                         job_id=None,
                         prompt_id=prompt_id,
                         comfyui_prompt_id=pid,
-                        filename=img["filename"],
+                        filename=filename,
                         subfolder=img.get("subfolder", ""),
                         img_type=img.get("type", "output"),
                         view_url=build_view_url(
-                            img["filename"],
+                            filename,
                             img.get("subfolder", ""),
                             img.get("type", "output"),
                         ),

@@ -24,6 +24,7 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
     if search:
         query = query.where(
             Prompt.prompt.contains(search)
+            | Prompt.name.contains(search)
             | Prompt.tags.contains(search)
             | Prompt.note.contains(search)
         )

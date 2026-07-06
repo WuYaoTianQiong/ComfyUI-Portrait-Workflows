@@ -147,11 +147,15 @@ def ensure_api_format(workflow: dict) -> dict:
             w_entries = _get_widget_order(node_type)
             if w_entries:
                 covered = set(api[nid]["inputs"].keys())
-                remaining = [wname for wname, _ in w_entries if wname not in covered]
-                for i, wname in enumerate(remaining):
-                    idx = wv_idx + i
-                    if idx < len(wv):
-                        api[nid]["inputs"][wname] = wv[idx]
+                slot_pos = wv_idx
+                for wname, slots in w_entries:
+                    # 跳过已覆盖的连接型输入（如 model/image/vae），它们不消耗 widgets_values
+                    if wname in covered:
+                        continue
+                    if slot_pos >= len(wv):
+                        break
+                    api[nid]["inputs"][wname] = wv[slot_pos]
+                    slot_pos += slots
 
     return api
 
@@ -170,47 +174,35 @@ def load_workflow(workflow_path: str, workflow_content: str | None = None) -> di
 
 
 def _inject_sampler_params(node: dict, prompt_data: dict):
-    """为采样器节点（KSampler/KSamplerAdvanced）显式覆盖关键参数，避免 workflow 解析器值错位"""
+    """为采样器节点（KSampler/KSamplerAdvanced）按需覆盖参数。
+
+    重要设计原则：只覆盖 prompt_data 中显式传入了值的参数，
+    保留工作流原有的采样器参数（steps/cfg/sampler/scheduler/start/end/return_with_leftover_noise等）。
+    这样才能兼容双程采样（two-pass）等特殊工作流的设计意图。
+    """
     inputs = node.get("inputs", {})
     is_advanced = node.get("class_type") == "KSamplerAdvanced"
 
-    # 步数：prompt 有则用，无则用默认值（解析器值已错位，必须覆盖）
+    # 步数：只有 prompt_data 显式传入了才覆盖
     steps_val = prompt_data.get("steps")
-    if steps_val is None:
-        steps_val = 30
-    if "steps" in inputs:
+    if steps_val is not None and "steps" in inputs:
         inputs["steps"] = int(steps_val)
 
-    # CFG
+    # CFG：只有 prompt_data 显式传入了才覆盖
     cfg_val = prompt_data.get("cfg_scale")
     if cfg_val is not None and "cfg" in inputs:
         inputs["cfg"] = float(cfg_val)
 
-    # sampler_name：prompt 数据或默认值
+    # sampler_name：只有 prompt_data 显式传入了才覆盖
     sampler_name = prompt_data.get("sampler")
-    if not sampler_name:
-        sampler_name = "euler"
-    if "sampler_name" in inputs:
+    if sampler_name and "sampler_name" in inputs:
         inputs["sampler_name"] = str(sampler_name)
 
-    # scheduler：KSamplerAdvanced 只能用 ['simple','sgm_uniform','karras','exponential','ddim_uniform','beta','normal','linear_quadratic','kl_optimal']
+    # scheduler：只有 prompt_data 显式传入了才覆盖
     if is_advanced and "scheduler" in inputs:
         scheduler = prompt_data.get("scheduler")
         if scheduler:
             inputs["scheduler"] = str(scheduler)
-        else:
-            inputs["scheduler"] = "simple"
-
-    # KSamplerAdvanced 特定字段
-    if is_advanced:
-        if "start_at_step" in inputs:
-            inputs["start_at_step"] = 0
-        if "end_at_step" in inputs:
-            inputs["end_at_step"] = int(steps_val)
-        if "return_with_leftover_noise" in inputs:
-            inputs["return_with_leftover_noise"] = "disable"
-        if "add_noise" in inputs:
-            inputs["add_noise"] = "enable"
 
 
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:

@@ -89,23 +89,27 @@ def list_templates(category_id: Optional[int] = Query(None)):
 @router.get("/templates/as_items", response_model=dict)
 def list_templates_as_prompt_items(
     sort: str = Query("updated"),
+    order: str = Query("desc"),
 ):
     """返回模板列表，格式兼容 prompt 列表前端渲染，支持排序"""
     # 排序逻辑
-    if sort == "newest":
-        order = [Template.id.desc()]
+    is_asc = (order == "asc")
+    if sort == "default":
+        order_list = [Template.id.desc()]
+    elif sort == "name":
+        order_list = [Template.name.asc() if is_asc else Template.name.desc()]
+    elif sort == "created":
+        order_list = [Template.created_at.asc() if is_asc else Template.created_at.desc()]
+    elif sort == "newest":
+        order_list = [Template.id.desc()]
     elif sort == "oldest":
-        order = [Template.id.asc()]
-    elif sort == "name_asc":
-        order = [Template.name.asc()]
-    elif sort == "name_desc":
-        order = [Template.name.desc()]
+        order_list = [Template.id.asc()]
     elif sort == "updated":
-        order = [Template.updated_at.desc()]
+        order_list = [Template.updated_at.desc()]
     else:
-        order = [Template.updated_at.desc()]
+        order_list = [Template.updated_at.desc()]
     
-    rows = Template.select().order_by(*order)
+    rows = Template.select().order_by(*order_list)
     items = []
     for t in rows:
         fragments = list(TemplateFragment.select().where(TemplateFragment.template == t.id).order_by(TemplateFragment.sort_order))

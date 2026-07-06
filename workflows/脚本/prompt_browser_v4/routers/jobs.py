@@ -229,7 +229,7 @@ def get_job_status_snapshot(job: dict) -> dict:
 
 
 def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", prompt_params=None):
-    """将生成结果写入历史表"""
+    """将生成结果写入历史表（upsert：始终覆盖 prompt_id / job_id 等关键字段，防止全局同步的竞态覆盖）"""
     for img in images:
         try:
             GenHistory.insert(
@@ -246,7 +246,15 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", p
                 preview=preview,
                 prompt_params=prompt_params,
                 source="local",
-            ).on_conflict_ignore().execute()
+            ).on_conflict(
+                conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
+                update={
+                    GenHistory.job_id: job_id,
+                    GenHistory.prompt_id: prompt_id,
+                    GenHistory.prompt_params: prompt_params,
+                    GenHistory.source: "local",
+                },
+            ).execute()
         except Exception:
             traceback.print_exc()
 
