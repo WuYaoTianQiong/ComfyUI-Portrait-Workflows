@@ -30,10 +30,11 @@ window.routeHistory = function(params) {
   if (params && params.id) {
     const historyId = parseInt(params.id);
     const checkAndOpen = () => {
-      const item = window._historyItems.find(it => it.id === historyId);
+      const src = window._galleryAllItems || window._historyItems;
+      const item = src.find(it => it.id === historyId);
       if (item) {
-        window._lightboxItems = window._historyItems;
-        window._lightboxIndex = window._historyItems.findIndex(it => it.id === historyId);
+        window._lightboxItems = src;
+        window._lightboxIndex = src.findIndex(it => it.id === historyId);
         window._compareMode = 'single';
         window.openUnifiedImageModal();
       } else if (window._historyItems.length === 0) {

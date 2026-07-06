@@ -55,17 +55,17 @@
 
 <!-- Tab 导航 -->
 <nav class="tab-nav">
-  <button class="tab-btn active" data-tab="promptTab" onclick="switchTab('promptTab', this)">
+  <button class="tab-btn active" data-tab="promptTab" onclick="window.switchTab('promptTab', this)">
     📝 提示词
   </button>
-  <button class="tab-btn" data-tab="galleryTab" onclick="switchTab('galleryTab', this)">
+  <button class="tab-btn" data-tab="galleryTab" onclick="window.switchTab('galleryTab', this)">
     🖼️ 历史画廊
     <span class="tab-badge" id="galleryBadge" style="display:none">0</span>
   </button>
-  <button class="tab-btn" data-tab="composerTab" onclick="switchTab('composerTab', this)">
+  <button class="tab-btn" data-tab="composerTab" onclick="window.switchTab('composerTab', this)">
     🔧 组合创作
   </button>
-  <button class="tab-btn" data-tab="statsTab" onclick="switchTab('statsTab', this);loadStats()">
+  <button class="tab-btn" data-tab="statsTab" onclick="window.switchTab('statsTab', this);loadStats()">
     📊 统计
   </button>
 </nav>
@@ -76,7 +76,7 @@
     <aside class="sidebar" id="sidebar">
       <div class="toolbar">
         <div class="toolbar-row">
-          <button class="btn btn-success btn-new" onclick="openCreateModal()">
+          <button class="btn btn-success btn-new" onclick="window.openEditModal()">
             ＋ 新建
           </button>
           <button class="btn btn-sm btn-ghost" onclick="exportPrompts()" title="导出提示词为 JSON">📤 导出</button>
@@ -125,16 +125,8 @@
             <button id="sortOrderBtn" class="btn btn-sm btn-ghost sort-order-btn" onclick="toggleSortOrder()" title="升序" style="display:none">↑</button>
           </div>
           <button class="btn btn-sm btn-ghost" onclick="autoClassifyAll()" title="自动分析所有提示词并分配类型分类">🔄 自动分类</button>
-          <div class="toolbar-stats">
-            <label class="gallery-select-all-label" style="margin-right:8px" title="全选当前页提示词">
-              <input type="checkbox" id="promptSelectAll" onchange="window.toggleSelectAllPrompts(this.checked)">
-              <span>全选</span>
-            </label>
-            共 <span id="countBadge">0</span> 条
-          </div>
         </div>
 
-        <button id="manageCategoriesBtn" class="btn btn-sm btn-ghost" onclick="manageCategories()" style="display:none">管理分类</button>
       </div>
 
       <div class="batch-panel" id="batchPanel">
@@ -234,11 +226,13 @@
          hx-swap="outerHTML"
          hx-vals='js:{
            page: 1,
+           page_size: window._galleryPageSize || 50,
            sort: document.getElementById("gallerySort")?.value || "newest",
            favorite: document.getElementById("galleryFilter")?.value === "favorite" ? "1" : "",
            search: document.getElementById("gallerySearch")?.value || ""
          }'>
       <div class="gallery-grid" id="galleryGrid"></div>
+      <div class="pagination" id="galleryPagination"></div>
     </div>
   </div>
 </div>
@@ -276,6 +270,12 @@
         </select>
         <button class="btn btn-accent" id="composerBatchRunBtn" onclick="window.composerBatchRandomRun()" disabled title="按选定组数批量随机组合并跑图">&#x1F3B2; 批量随机跑图</button>
       </div>
+    </div>
+
+    <div class="composer-filter-bar" id="composerFilterBar" style="display:none">
+      <span class="composer-filter-label">📎 跟随提示词筛选：</span>
+      <span id="composerFilterText"></span>
+      <button class="btn btn-xxs btn-ghost" onclick="window.clearComposerFilters()" title="清除提示词Tab的筛选条件">✕ 清除筛选</button>
     </div>
 
     <div class="composer-body">
@@ -418,48 +418,50 @@
   </div>
 </div>
 
-<!-- 碎片库背景遮罩 -->
-<div class="frag-panel-backdrop" id="fragmentLibraryBackdrop" style="display:none" onclick="window.hideFragmentLibrary()"></div>
 
 <!-- Modal: 碎片库面板 -->
-<div class="frag-panel" id="fragmentLibraryPanel" style="display:none">
-  <div class="frag-panel-header">
-    <span>&#x1F4E6; 碎片库</span>
-    <span class="frag-panel-stats" id="fragmentStats">0 个独立碎片</span>
-    <div class="frag-panel-actions">
-      <button class="btn btn-sm btn-success" onclick="window.showCreateFragment()">＋ 新建</button>
-      <button class="btn btn-sm btn-ghost" onclick="window.hideFragmentLibrary()">✕</button>
+<div class="modal-overlay" id="fragmentLibraryOverlay" onclick="window.closeModalOnBackdrop(event, window.hideFragmentLibrary)">
+  <div class="modal" style="width:700px;max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h2>&#x1F4E6; 碎片库</h2>
+      <span class="frag-panel-stats" id="fragmentStats" style="font-size:11px;color:var(--muted);margin-left:12px">0 个独立碎片</span>
+      <div class="frag-panel-actions" style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-sm btn-success" onclick="window.showCreateFragment()">＋ 新建</button>
+        <button class="close-btn" onclick="window.hideFragmentLibrary()">&#x00d7;</button>
+      </div>
     </div>
-  </div>
-  <div class="frag-panel-toolbar">
-    <div class="frag-search-box">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="fragSearchInput" placeholder="搜索碎片内容..." oninput="window.refreshFragmentLibrary()">
+    <div class="frag-panel-toolbar">
+      <div class="frag-search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="fragSearchInput" placeholder="搜索碎片内容..." oninput="window.refreshFragmentLibrary()">
+      </div>
+      <select id="fragTypeFilter" onchange="window.onFragmentTypeFilter()">
+        <option value="">全部类型</option>
+        <option value="拍摄视角">拍摄视角</option>
+        <option value="姿态动作">姿态动作</option>
+        <option value="人物身材">人物身材</option>
+        <option value="人物服饰">人物服饰</option>
+        <option value="人物面部">人物面部</option>
+        <option value="场景环境">场景环境</option>
+        <option value="光影色调">光影色调</option>
+        <option value="画风技术">画风技术</option>
+      </select>
     </div>
-    <select id="fragTypeFilter" onchange="window.onFragmentTypeFilter()">
-      <option value="">全部类型</option>
-      <option value="拍摄视角">拍摄视角</option>
-      <option value="姿态动作">姿态动作</option>
-      <option value="人物身材">人物身材</option>
-      <option value="人物服饰">人物服饰</option>
-      <option value="人物面部">人物面部</option>
-      <option value="场景环境">场景环境</option>
-      <option value="光影色调">光影色调</option>
-      <option value="画风技术">画风技术</option>
-    </select>
-  </div>
-  <!-- Phase 2: HTMX 驱动的碎片列表 -->
-  <div id="fragmentListContainer"
-       hx-get="/api/fragments/html"
-       hx-trigger="load, fragmentListRefresh from:body"
-       hx-target="this"
-       hx-swap="outerHTML"
-       hx-vals='js:{
-         search: document.getElementById("fragSearchInput")?.value || "",
-         fragment_type: document.getElementById("fragTypeFilter")?.value || ""
-       }'>
-    <div class="frag-panel-list" id="fragmentList">
-      <div class="frag-empty">暂无碎片</div>
+    <div class="modal-body" style="flex:1;overflow-y:auto;padding:0 12px 12px">
+      <!-- Phase 2: HTMX 驱动的碎片列表 -->
+      <div id="fragmentListContainer"
+           hx-get="/api/fragments/html"
+           hx-trigger="load, fragmentListRefresh from:body"
+           hx-target="this"
+           hx-swap="outerHTML"
+           hx-vals='js:{
+             search: document.getElementById("fragSearchInput")?.value || "",
+             fragment_type: document.getElementById("fragTypeFilter")?.value || ""
+           }'>
+        <div class="frag-panel-list" id="fragmentList">
+          <div class="frag-empty">暂无碎片</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -581,12 +583,12 @@
 </div>
 
 <!-- 按依赖顺序加载模块 -->
-<script src="/utils.js?v=2"></script>
+<script src="/utils.js?v=3"></script>
 <script src="/ui.js?v=7"></script>
 <script src="/router.js?v=3"></script>
 <script src="/workflow.js?v=1"></script>
-<script src="/prompt.js?v=6"></script>
-<script src="/generator.js?v=2"></script>
+<script src="/prompt.js?v=9"></script>
+<script src="/generator.js?v=3"></script>
 <script src="/job.js?v=5"></script>
 <script src="/history.js?v=3"></script>
 <script src="/gallery.js?v=3"></script>
@@ -597,7 +599,7 @@
 <script src="/composer-core.js?v=3"></script>
 <script src="/composer-workbench.js?v=6"></script>
 <script src="/composer-random.js?v=2"></script>
-<script src="/composer-templates.js?v=2"></script>
+<script src="/composer-templates.js?v=4"></script>
 <script src="/composer-fragments.js?v=5"></script>
 <script src="/fragments.js?v=1"></script>
 </body>

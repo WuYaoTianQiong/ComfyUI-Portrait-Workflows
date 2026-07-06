@@ -67,15 +67,6 @@ window.setupResize = function() {
   });
 };
 
-window.setupWorkflowPopover = function() {
-  // 工作流已改为弹窗
-};
-
-window.closeWorkflowPopover = function() {
-  document.getElementById("wfPopover").classList.remove("show");
-  window._wfPopoverOpen = false;
-};
-
 // 通用函数：点击弹窗背景关闭
 window.closeModalOnBackdrop = function(event, closeFunc) {
   if (event.target === event.currentTarget) {
@@ -101,7 +92,7 @@ window.setupKeyboard = function() {
     if (e.key === "Escape") {
       window.closeModal();
       window.closeVarModal();
-      window.closeWorkflowPopover();
+      window.closeWfModal();
       window.closeCompareModal(true);
     }
     if (e.ctrlKey && e.key === "Enter" && window.selectedId && window.comfyStatus === "online") {
@@ -115,10 +106,6 @@ window.setupKeyboard = function() {
       }
     }
   });
-};
-
-window.setupUnloadGuard = function() {
-  // 不再注册 beforeunload 监听，避免 Chrome 无差别弹窗
 };
 
 // -------------------------------------------------------------------
@@ -173,10 +160,11 @@ window.switchTab = function(tabId, btn) {
 
   window.UiState.set("activeTab", tabId);
 
-  const isNotPrompt = (tabId !== 'promptTab');
+  // 画廊和统计 Tab 隐藏方向/画质/跑图控件，提示词和组合创作 Tab 保持可见
+  const hideControls = (tabId === 'galleryTab' || tabId === 'statsTab');
   ['qualitySelect', 'orientBtn', 'runBtn'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = isNotPrompt ? 'none' : '';
+    if (el) el.style.display = hideControls ? 'none' : '';
   });
 
   if (tabId === 'galleryTab') {

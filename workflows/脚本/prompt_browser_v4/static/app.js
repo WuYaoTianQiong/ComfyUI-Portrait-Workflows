@@ -22,10 +22,14 @@ window._promptTotal = 0;
 window._gallerySort = "newest";
 window._galleryFilter = "all";
 window._gallerySearch = "";
+window._galleryPage = 1;
+window._galleryPageSize = 50;
+window._galleryAllItems = [];
 window.searchTimer = null;
 
 // 从存储恢复每页条数
 window._promptPageSize = window.UiState.get("promptPageSize", 50);
+window._galleryPageSize = window.UiState.get("galleryPageSize", 50);
 
 // -------------------------------------------------------------------
 // 初始化
@@ -38,6 +42,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window._useHtmx) {
     document.body.dataset.htmxActive = "1";
     // 移除 `hx-trigger` 上的 `load` 以防止初始化时重复请求
+  } else {
+    // 非 HTMX 模式：移除所有 hx-* 属性，由前端 JS 完全接管渲染（含画廊分页组件）
+    document.querySelectorAll('[hx-get]').forEach(el => {
+      ['hx-get', 'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-swap-oob'].forEach(a => el.removeAttribute(a));
+    });
   }
 
   // HTMX 事件监听：在提示词列表加载完成后触发自定义事件
@@ -65,9 +74,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.hiddenWorkflows = window.getHiddenWorkflows();
   window.applyUiState();
   window.setupResize();
-  window.setupWorkflowPopover();
   window.setupKeyboard();
-  window.setupUnloadGuard();
 
   // 初始化路由
   window.handleRoute(window.location.pathname);

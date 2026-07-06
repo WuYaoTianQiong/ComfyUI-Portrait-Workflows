@@ -40,9 +40,21 @@ window.API = "";
 
 window.api = async function(path, opts = {}) {
   try {
+    // 支持调用方传入自定义 timeout，根据请求类型设置合理默认值
+    let timeoutMs = Number(opts.timeout) || 0;
+    if (!timeoutMs) {
+      if (opts.method === "POST" && path.includes("/batch_generate")) {
+        timeoutMs = 300000;  // 批量跑图：5 分钟（160 张图逐一推送可能很慢）
+      } else if (path.startsWith("/api/jobs/") && !path.includes("/cancel")) {
+        timeoutMs = 120000;  // 任务状态轮询：2 分钟（后端需要查 ComfyUI queue/history）
+      } else {
+        timeoutMs = 30000;   // 其他请求：30 秒
+      }
+    }
+    const { timeout: _, ...restOpts } = opts;  // 剥离自定义 timeout，不传给 fetch
     const resp = await fetch(window.API + path, {
-      ...opts,
-      signal: AbortSignal.timeout(30000), // 30秒超时
+      ...restOpts,
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
@@ -51,7 +63,7 @@ window.api = async function(path, opts = {}) {
     return resp.json();
   } catch (e) {
     if (e.name === "AbortError") {
-      throw new Error("请求超时（15秒无响应）");
+      throw new Error("请求超时（服务器响应时间过长，请检查 ComfyUI 运行状态）");
     }
     throw e;
   }
@@ -75,7 +87,8 @@ window.showModal = function(html) {
   overlay.classList.add('active');
 };
 
-window.closeModal = function() {
+// 仅关闭动态弹窗（不检查提示词编辑弹窗）
+window._closeDynamicModal = function() {
   const overlay = document.getElementById('dynamicModalOverlay');
   if (overlay) overlay.classList.remove('active');
 };
