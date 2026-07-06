@@ -135,10 +135,15 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
     """在静态文件挂载返回 404 后，返回 index.html 以支持前端路由"""
     async def dispatch(self, request, call_next):
         response = await call_next(request)
+        # 静态资源的响应不缓存（html/js/css），方便开发调试
+        if response.status_code < 400 and not request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         if response.status_code == 404 and not request.url.path.startswith("/api/"):
             index_file = settings.static_dir / "index.html"
             if index_file.exists():
-                return FileResponse(index_file)
+                resp = FileResponse(index_file)
+                resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                return resp
         return response
 
 # 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
