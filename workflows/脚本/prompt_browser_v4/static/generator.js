@@ -2,6 +2,27 @@
 // 依赖：utils.js, workflow.js, prompt.js
 
 // -------------------------------------------------------------------
+// 跑图辅助：统一锁 + 按钮状态
+// -------------------------------------------------------------------
+window._runBtnState = function(btn, loadingText) {
+  const orig = btn ? btn.innerHTML : '';
+  return {
+    loading() { if (btn) { btn.disabled = true; btn.textContent = loadingText; } },
+    restore() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } },
+  };
+};
+
+// 占位进度：在 trackJob 第一次轮询返回前，立即显示"排队中..."避免空窗期
+window._showPendingProgress = function(title) {
+  const area = document.getElementById("outputArea");
+  if (!area) return;
+  area.classList.add("show");
+  document.getElementById("outputTitle").textContent = title || "生成中";
+  document.getElementById("progressFill").style.width = "0%";
+  document.getElementById("progressInfo").textContent = "排队中...";
+};
+
+// -------------------------------------------------------------------
 // 生成控制
 // -------------------------------------------------------------------
 
@@ -11,25 +32,26 @@ window.runPrompt = async function(id) {
     if (!id) return;
     const workflowPath = window.currentWorkflowPath();
     if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
-    const btn = document.getElementById("runBtn");
-    btn.disabled = true; btn.textContent = "发送中...";
+    const btnState = window._runBtnState(document.getElementById("runBtn"), "发送中...");
+    btnState.loading();
     try {
       const body = Object.assign({
-        id,
-        workflow_path: workflowPath,
+        id, workflow_path: workflowPath,
         orientation: window.currentOrientation,
-        quality: window.getQuality()
+        quality: window.getQuality(),
       }, window.workflowExtraBody());
-      const data = await window.api("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await window.api("/api/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       window.showToast(`已推送 ${data.dimensions || ""} (job ${data.job_id})`, "success");
-      
       await window.markPromptUsed(id);
-      
+      window._showPendingProgress("生成中");
       window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("跑图失败: " + e.message, "error");
     } finally {
-      btn.textContent = "🚀 跑图";
+      btnState.restore();
       window.updateRunBtn();
     }
   });
@@ -40,32 +62,29 @@ window.batchRun = async function() {
     if (!window.selectedIds.size) return;
     const workflowPath = window.currentWorkflowPath();
     if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
-    const btn = document.getElementById("runBtn");
-    if (btn) btn.disabled = true;
     const ids = Array.from(window.selectedIds);
-    const items = ids.map(id => ({ prompt_id: id, seed: 0 }));
+    const btnState = window._runBtnState(document.getElementById("runBtn"), `批量 (${ids.length})...`);
+    btnState.loading();
     try {
       const body = Object.assign({
-        items,
+        items: ids.map(id => ({ prompt_id: id, seed: 0 })),
         workflow_path: workflowPath,
         orientation: window.currentOrientation,
         quality: window.getQuality(),
-        title: `批量跑图 (${items.length} 张)`
+        title: `批量跑图 (${ids.length} 张)`,
       }, window.workflowExtraBody());
-      const data = await window.api("/api/batch_generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (data.errors && data.errors.length) {
-        window.showToast(`${data.errors.length} 个任务提交失败`, "error");
-      }
-      
-      for (const id of ids) {
-        await window.markPromptUsed(id);
-      }
-      
+      const data = await window.api("/api/batch_generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (data.errors?.length) window.showToast(`${data.errors.length} 个任务提交失败`, "error");
+      for (const id of ids) await window.markPromptUsed(id);
+      window._showPendingProgress(`批量生成 (${ids.length} 张)`);
       window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("批量提交失败: " + e.message, "error");
     } finally {
-      if (btn) btn.disabled = false;
+      btnState.restore();
     }
   });
 };
@@ -78,30 +97,36 @@ window.startVariationRun = async function() {
     if (!window.selectedId) return;
     const workflowPath = window.currentWorkflowPath();
     if (!workflowPath) { window.showToast("请先选择工作流", "error"); return; }
-    const confirmBtn = document.getElementById("varConfirmBtn");
-    if (confirmBtn) confirmBtn.disabled = true;
+    const btnState = window._runBtnState(document.getElementById("varConfirmBtn"), "提交中...");
+    btnState.loading();
     const count = parseInt(document.getElementById("varCount").value) || 4;
     const startSeed = document.getElementById("varStartSeed").value;
     window.closeVarModal();
-    const items = [];
-    for (let i = 0; i < count; i++) {
-      const seed = startSeed ? parseInt(startSeed) + i : Math.floor(Math.random() * 999999999999999);
-      items.push({ prompt_id: window.selectedId, seed });
-    }
     try {
+      const items = [];
+      for (let i = 0; i < count; i++) {
+        items.push({
+          prompt_id: window.selectedId,
+          seed: startSeed ? parseInt(startSeed) + i : Math.floor(Math.random() * 999999999999999),
+        });
+      }
       const body = Object.assign({
-        items,
-        workflow_path: workflowPath,
+        items, workflow_path: workflowPath,
         orientation: window.currentOrientation,
         quality: window.getQuality(),
-        title: `变体生成 (${items.length} 张)`
+        title: `变体生成 (${count} 张)`,
       }, window.workflowExtraBody());
-      const data = await window.api("/api/batch_generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await window.api("/api/batch_generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      window._showPendingProgress(`变体生成 (${count} 张)`);
       window.trackJob(data.job_id);
+      await window.markPromptUsed(window.selectedId);
     } catch (e) {
       window.showToast("变体生成失败: " + e.message, "error");
     } finally {
-      if (confirmBtn) confirmBtn.disabled = false;
+      btnState.restore();
     }
   });
 };
@@ -136,21 +161,15 @@ window.toggleSelectAll = function(checked) {
   window.UiState.set("selectedIds", Array.from(window.selectedIds));
 };
 
-window.toggleSelectAllPrompts = function(checked) {
-  window.toggleSelectAll(checked);
-};
-
 window.updateSelectionBar = function() {
   const bar = document.getElementById("selectionBar");
   const info = document.getElementById("selectionInfo");
   const allCheck = document.getElementById("selectAllCheck");
-  const promptAllCheck = document.getElementById("promptSelectAll");
   const count = window.selectedIds.size;
   bar.classList.toggle("show", count > 0);
   info.textContent = `已选 ${count} 项`;
   const allChecked = count > 0 && window.allPrompts.length > 0 && window.allPrompts.every(p => window.selectedIds.has(p.id));
   allCheck.checked = allChecked;
-  if (promptAllCheck) promptAllCheck.checked = allChecked;
 };
 
 window.clearSelection = function() {
@@ -167,9 +186,13 @@ window.clearSelection = function() {
 
 window.updateRunBtn = function() {
   const wf = window.currentWorkflowPath();
-  const online = window.comfyStatus === "online" && wf;
+  const hasActiveJobs = window.activeJobs && window.activeJobs.size > 0;
+  const online = window.comfyStatus === "online" && wf && !hasActiveJobs;
   const btn = document.getElementById("runBtn");
-  if (window.selectedIds.size >= 2) {
+  if (hasActiveJobs) {
+    btn.textContent = "⏳ 生成中...";
+    btn.disabled = true;
+  } else if (window.selectedIds.size >= 2) {
     btn.textContent = `🚀 批量跑图 (${window.selectedIds.size})`;
     btn.disabled = !online;
   } else if (window.selectedIds.size === 1) {
@@ -181,6 +204,18 @@ window.updateRunBtn = function() {
   } else {
     btn.textContent = "🚀 跑图";
     btn.disabled = true;
+  }
+
+  // 同步 Composer 按钮
+  const composerBtn = document.getElementById("composerRunBtn");
+  if (composerBtn) {
+    composerBtn.disabled = !wf || hasActiveJobs;
+    if (hasActiveJobs) composerBtn.textContent = "⏳ 生成中...";
+  }
+  const composerBatchBtn = document.getElementById("composerBatchRunBtn");
+  if (composerBatchBtn) {
+    composerBatchBtn.disabled = !wf || hasActiveJobs;
+    if (hasActiveJobs) composerBatchBtn.textContent = "⏳ 生成中...";
   }
 };
 

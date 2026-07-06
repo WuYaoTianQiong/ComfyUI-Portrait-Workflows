@@ -58,9 +58,19 @@ window.pollJob = async function(jobId) {
       clearInterval(window.jobPollTimer);
       window.jobPollTimer = null;
       window.activeJobs.delete(jobId);
+      // 恢复跑图按钮
+      if (typeof window.updateRunBtn === "function") window.updateRunBtn();
       if (typeof window.loadHistory === "function") {
         window.loadHistory(false);
       }
+      // 防抖刷新当前选中提示词的生成历史
+      clearTimeout(window._refreshHistoryTimer);
+      window._refreshHistoryTimer = setTimeout(() => {
+        if (typeof window.selectedId === "number" && window.selectedId > 0
+            && typeof window.loadPromptHistory === "function") {
+          window.loadPromptHistory(window.selectedId);
+        }
+      }, 300);
     }
   } catch (e) {
     // 超时是预期行为（后端正在处理），不打印错误
@@ -93,51 +103,34 @@ window.renderSingleJob = function(job) {
 
   if (item.status === "pending") {
     fill.style.width = "0%";
+    fill.style.background = "";
     info.textContent = "排队中...";
     title.textContent = "生成中";
   } else if (item.status === "running") {
+    fill.style.background = "";
     const prog = item.progress || {};
     const pct = prog.max > 0 ? Math.round(prog.progress / prog.max * 100) : -1;
     fill.style.width = pct >= 0 ? pct + "%" : "30%";
-    info.textContent = pct >= 0 ? `${pct}% ${prog.current_node || ""}`.trim() : "模型加载中...";
+    info.textContent = pct >= 0 ? `${pct}% ${prog.current_node || ""}`.trim() : "处理中...";
     title.textContent = pct >= 0 ? `生成中 ${pct}%` : "生成中";
   } else if (item.status === "done") {
     fill.style.width = "100%";
-    info.textContent = "完成";
-    title.textContent = "生成结果";
-    body.innerHTML = "";
-    console.log("[renderSingleJob] item done, images:", item.images);
-    // 确保 images 是数组
-    const images = Array.isArray(item.images) ? item.images : [];
-    if (images.length > 0) {
-      const grid = images.length > 1;
-      body.className = grid ? "output-body img-grid" : "output-body";
-      images.forEach(img => {
-        if (img && img.filename) {
-          console.log("[renderSingleJob] creating image:", img);
-          body.appendChild(window.createImageWrap(img));
-        } else {
-          console.warn("[renderSingleJob] invalid image data:", img);
-        }
-      });
-    } else {
-      body.className = "output-body";
-      // 判断是否为"处理历史图片"类任务（图片会写入画廊但未回填到 job items）
-      const promptParams = item.prompt_params ? (typeof item.prompt_params === "string" ? JSON.parse(item.prompt_params) : item.prompt_params) : null;
-      const isHistoryProcess = promptParams && promptParams.source === "history_process";
-      body.innerHTML = isHistoryProcess
-        ? '<div class="empty-tip">处理完成，请到 🖼️ 历史画廊 查看结果</div>'
-        : '<div class="empty-tip">完成但未找到输出图片</div>';
-      if (!isHistoryProcess) {
-        console.warn("[renderSingleJob] No images found in item:", item);
-      }
-    }
-  } else if (item.status === "error" || item.status === "cancelled") {
-    fill.style.width = "0%";
-    info.textContent = item.status === "cancelled" ? "已取消" : "失败";
-    title.textContent = item.status === "cancelled" ? "已取消" : "生成失败";
+    fill.style.background = "";
     body.className = "output-body";
-    body.innerHTML = `<div class="empty-tip" style="color:var(--danger)">${window.escHtml(item.error || "失败")}</div>`;
+    const count = Array.isArray(item.images) ? item.images.length : 0;
+    title.textContent = count > 1 ? `完成 · ${count} 张` : "生成完成";
+    info.textContent = "✓ 已刷新到生成历史";
+    body.innerHTML = "";  // 不展示大图，缩略图在生成历史区域
+    // 3 秒后自动收起
+    setTimeout(() => {
+      const area = document.getElementById("outputArea");
+      if (area && !window._outputPinned) area.classList.remove("show");
+    }, 3000);
+  } else if (item.status === "error" || item.status === "cancelled") {
+    fill.style.width = "100%";
+    fill.style.background = "var(--danger)";
+    title.textContent = item.status === "cancelled" ? "已取消" : "生成失败";
+    info.innerHTML = `<span style="color:var(--danger)">${window.escHtml(item.error || "失败")}</span>`;
   } else {
     // 未知状态
     console.warn("[renderSingleJob] unknown item status:", item.status, item);
@@ -185,21 +178,11 @@ window.renderBatchJob = function(job) {
 window.showBatchResults = function(job) {
   const area = document.getElementById("outputArea");
   area.classList.add("show");
-  document.getElementById("outputTitle").textContent = job.title || "批量结果";
+  document.getElementById("outputTitle").textContent = `批量完成 · ${job.done_count}/${job.total}`;
   document.getElementById("progressFill").style.width = "100%";
-  document.getElementById("progressInfo").textContent = `${job.done_count} 完成 / ${job.error_count} 失败`;
-  const body = document.getElementById("outputBody");
-  body.innerHTML = "";
-  let images = [];
-  job.items.forEach(item => { if (item.images) images = images.concat(item.images); });
-  if (!images.length) {
-    body.className = "output-body";
-    body.innerHTML = '<div class="empty-tip">无输出图片</div>';
-    return;
-  }
-  const grid = images.length > 1;
-  body.className = grid ? "output-body img-grid" : "output-body";
-  images.forEach(img => body.appendChild(window.createImageWrap(img)));
+  document.getElementById("progressInfo").textContent = `${job.error_count} 失败`;
+  document.getElementById("outputBody").className = "output-body";
+  document.getElementById("outputBody").innerHTML = "";
 };
 
 // -------------------------------------------------------------------
