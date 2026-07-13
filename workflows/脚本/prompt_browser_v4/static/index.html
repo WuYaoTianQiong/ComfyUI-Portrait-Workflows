@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="/gallery.css?v=2">
 <link rel="stylesheet" href="/composer.css?v=4">
 <link rel="stylesheet" href="/composer2.css?v=7">
-<link rel="stylesheet" href="/modal.css?v=1">
+<link rel="stylesheet" href="/modal.css?v=2">
 <link rel="stylesheet" href="/stats.css?v=1">
 <link rel="stylesheet" href="https://unpkg.com/viewerjs@1.11.6/dist/viewer.min.css">
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -82,6 +82,7 @@
           <button class="btn btn-sm btn-ghost" onclick="exportPrompts()" title="导出提示词为 JSON">📤 导出</button>
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('importFileInput').click()" title="导入提示词 JSON">📥 导入</button>
           <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importPrompts(this)">
+          <button class="btn btn-sm btn-ghost" onclick="window.openImportModal()" title="批量粘贴 AI 润色后的多条提示词，自动智能分段后入库">📋 智能导入</button>
           <div class="search-box">
             <span class="search-icon">🔍</span>
             <input type="text" id="searchInput" placeholder="搜索提示词、标签、备注..." oninput="debounceSearch()">
@@ -311,15 +312,17 @@
     <div class="modal-body" id="modalBody">
       <label>名称<input id="f_name" placeholder="方便识别的名称，如：冰品店打卡"></label>
       <label>正面提示词
+        <button type="button" class="copy-btn" onclick="window.copyModalPrompt(this, 0)">复制</button>
         <div class="prompt-edit-wrap">
-          <textarea id="f_prompt" rows="4" placeholder="提示词内容..."></textarea>
+          <textarea id="f_prompt" rows="12" style="min-height:240px" placeholder="提示词内容..."></textarea>
           <div id="f_fragments" class="frag-editor" style="display:none"></div>
           <div class="frag-toggle-wrap">
+            <button class="btn btn-sm btn-ghost" id="f_smartSegBtn" onclick="window.smartSegment()" title="把扁平/AI 润色的长提示词，按关键词智能拆分为碎片格式">🪄 智能分段</button>
             <button class="btn btn-sm btn-ghost" id="f_toggleFragBtn" onclick="window.toggleFragmentEdit()" style="display:none">&#x1F4DD; 切换分段/全文编辑</button>
           </div>
         </div>
       </label>
-      <label>负面提示词<textarea id="f_neg" rows="2"></textarea></label>
+      <label>负面提示词<button type="button" class="copy-btn" onclick="window.copyModalPrompt(this, 1)">复制</button><textarea id="f_neg" rows="2"></textarea></label>
       <div class="form-row">
         <label>步数<input type="number" id="f_steps" placeholder="30"></label>
         <label>CFG<input type="number" step="0.1" id="f_cfg" placeholder="4.0"></label>
@@ -348,13 +351,31 @@
           <option value="">未分类</option>
         </select>
       </label>
-      <label>标签（多选）
-        <div class="modal-tags-select" id="f_tags_select"></div>
-      </label>
+      <div class="collapsible-field">
+        <div class="collapsible-head" onclick="window.toggleTagsSelect()" title="展开/折叠标签区">
+          <span>标签（多选）</span>
+          <span class="collapsible-arrow" id="tagsSelectArrow">&#x25BC;</span>
+        </div>
+        <div class="collapsible-body" id="tagsSelectBody">
+          <div class="modal-tags-select" id="f_tags_select"></div>
+        </div>
+      </div>
       <input type="hidden" id="f_id" value="">
+      <!-- 试跑记录区域 -->
+      <div id="trialLog" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:600; font-size:13px; color:var(--accent);">📸 试跑记录</span>
+          <span style="display:flex; gap:6px;">
+            <button class="btn btn-ghost btn-sm" id="undoFillBtn" onclick="window.undoFillFromTrial()" title="撤销上次回填，恢复原内容" style="display:none">↩ 撤销回填</button>
+            <button class="btn btn-ghost btn-sm" onclick="window._trialRuns=[];window._trialFillBackup=null;{const u=document.getElementById('undoFillBtn');if(u)u.style.display='none';}window.renderTrialLog()" title="清空记录">清空</button>
+          </span>
+        </div>
+        <div id="trialLogItems" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="window.closePromptModal()">取消</button>
+      <button class="btn btn-ghost" id="trialRunBtn" onclick="window.trialRun()" style="display:none">🔬 试跑</button>
       <button class="btn btn-success" id="modalSaveBtn" onclick="savePrompt()">保存</button>
     </div>
   </div>
@@ -582,12 +603,51 @@
   </div>
 </div>
 
+<!-- Modal: 批量导入（AI 润色回流） -->
+<style>
+  .import-hint { font-size:12px; color:var(--muted); line-height:1.6; margin:0 0 8px; }
+  .import-hint code { background:rgba(255,255,255,.08); padding:1px 5px; border-radius:4px; color:var(--accent); }
+  #importText { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px;
+    background:var(--bg); color:var(--text); font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; }
+  .import-preview { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+  .import-card { border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:rgba(255,255,255,.03); }
+  .import-card-head { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .import-name-input { flex:0 0 200px; padding:3px 6px; border:1px solid var(--border); border-radius:5px;
+    background:var(--bg); color:var(--text); font-size:13px; }
+  .import-frag-count { font-size:11px; color:var(--primary); margin-left:auto; white-space:nowrap; }
+  .import-card-body { font-size:12px; color:var(--text); white-space:pre-wrap; max-height:120px; overflow:auto; line-height:1.5; }
+  .import-card-neg { font-size:11px; color:#e06c75; margin-top:4px; }
+</style>
+<div class="modal-overlay" id="importModalOverlay" onclick="window.closeModalOnBackdrop(event, window.closeImportModal)">
+  <div class="modal" style="width:780px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h2>📋 批量导入提示词</h2>
+      <button class="close-btn" onclick="window.closeImportModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto">
+      <p class="import-hint">把 AI 润色后返回的一大堆提示词粘贴到下方，<b>用空行分隔多条</b>。每条首行可写 <code>名称：xxx</code> 作为标题；负面提示词可在某条内以 <code>Negative:</code> 或 <code>负面：</code> 开头的一行给出。点击「解析预览」会自动按关键词智能分段为碎片格式，勾选后入库。</p>
+      <textarea id="importText" rows="8" placeholder="示例：&#10;名称：樱花少女&#10;masterpiece, best quality, 1girl, long hair, red dress, outdoors, cherry blossoms, sunny, anime style&#10;Negative: lowres, bad hands&#10;&#10;名称：夜景少年&#10;1boy, short hair, school uniform, night city, neon lights, cinematic lighting, realistic"></textarea>
+      <div style="margin:8px 0; display:flex; gap:8px; align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="window.parseImportText()">🔍 解析预览</button>
+        <span id="importParseStat" style="color:var(--muted);font-size:12px"></span>
+        <span style="flex:1"></span>
+        <label class="sel-check"><input type="checkbox" id="importSelectAll" onchange="window.toggleImportSelectAll(this.checked)"> 全选</label>
+      </div>
+      <div id="importPreview" class="import-preview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="window.closeImportModal()">取消</button>
+      <button class="btn btn-success" id="importSubmitBtn" onclick="window.doBatchImport()" disabled>入库选中</button>
+    </div>
+  </div>
+</div>
+
 <!-- 按依赖顺序加载模块 -->
 <script src="/utils.js?v=3"></script>
 <script src="/ui.js?v=7"></script>
 <script src="/router.js?v=3"></script>
 <script src="/workflow.js?v=1"></script>
-<script src="/prompt.js?v=9"></script>
+<script src="/prompt.js?v=11"></script>
 <script src="/generator.js?v=3"></script>
 <script src="/job.js?v=5"></script>
 <script src="/history.js?v=3"></script>

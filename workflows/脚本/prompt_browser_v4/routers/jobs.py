@@ -172,11 +172,15 @@ def get_job_status_snapshot(job: dict) -> dict:
             elif status in ("error", "cancelled"):
                 error_count += 1
         else:
-            # 没有 comfyui_prompt_id 或找不到匹配状态 → 标记为错误
-            status = "error"
-            item["error"] = item.get("error") or "任务提交到 ComfyUI 失败（无 prompt_id），请检查 ComfyUI 连接"
-            error_count += 1
-            print(f"[JOB] ERROR: item missing comfyui_prompt_id or unmatched: pid={pid!r}, preview={item.get('prompt_preview', '')[:60]}")
+            # pid 在队列和历史中都未命中（可能是 ComfyUI 负载高导致 API 超时，或刚提交尚未入队）
+            # 只对确实没有 pid 的 item 标错，有 pid 的保留已有状态下次轮询再查
+            if not pid:
+                status = "error"
+                item["error"] = item.get("error") or "任务提交到 ComfyUI 失败（无 prompt_id），请检查 ComfyUI 连接"
+                error_count += 1
+                print(f"[JOB] ERROR: item missing comfyui_prompt_id: preview={item.get('prompt_preview', '')[:60]}")
+            else:
+                print(f"[JOB] WARN: pid={pid} not in queue/history (ComfyUI maybe busy), keep existing status={status}")
 
         item["status"] = status
         item["progress"] = iprogress

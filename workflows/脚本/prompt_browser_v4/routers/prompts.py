@@ -536,12 +536,22 @@ class BatchImportRequest(BaseModel):
 
 @router.post("/prompts/import")
 def import_prompts(data: BatchImportRequest):
-    """批量导入提示词（JSON 格式）"""
+    """批量导入提示词（JSON 格式）
+
+    修复：PromptCreate 含 prompts 表不存在的字段（如 auto_categorize），
+    直接 model_dump 建库会报错，需先剥离；并复用单条创建的自动类型分类逻辑。
+    """
     imported = 0
     errors = []
+    # prompts 表不存在、需在建库前剔除的字段
+    non_columns = {"auto_categorize"}
     for i, item in enumerate(data.prompts):
         try:
-            Prompt.create(**item.model_dump())
+            d = item.model_dump()
+            for k in non_columns:
+                d.pop(k, None)
+            r = Prompt.create(**d)
+            auto_classify_prompt(r.id)  # 与单条创建保持一致，自动归入 组合/单项/零散
             imported += 1
         except Exception as e:
             errors.append({"index": i, "error": str(e)})

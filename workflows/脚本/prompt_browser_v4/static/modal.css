@@ -206,3 +206,35 @@
   border-color: var(--primary);
 }
 /* ===================================== */
+
+/* ======== 编辑弹窗：可折叠字段（标签多选） ======== */
+.collapsible-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+.collapsible-head:hover { color: var(--text); }
+.collapsible-arrow {
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.collapsible-field.collapsed .collapsible-arrow { transform: rotate(-90deg); }
+.collapsible-body {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+/* 折叠态默认收起（无 !important，交由 JS 内联 max-height 控制平滑过渡） */
+.collapsible-field.collapsed .collapsible-body {
+  max-height: 0;
+}
+/* ===================================== */

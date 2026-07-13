@@ -107,6 +107,8 @@ window._createGalleryItemDiv = function(item, idx) {
   `;
 
   const checkEl = div.querySelector('.gallery-item-check');
+  // 重渲染时根据已选集合恢复勾选样式（数据状态 _gallerySelectedIds 与视觉状态保持一致）
+  if (window._gallerySelectedIds.has(item.id)) checkEl.classList.add('checked');
   checkEl.onclick = (e) => { e.stopPropagation(); window.toggleGalleryItem(item.id, checkEl); };
 
   const filenameEl = div.querySelector('.gallery-item-filename');

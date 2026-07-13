@@ -62,8 +62,8 @@ def push_prompt(api_workflow: dict) -> dict:
 
 
 def get_queue() -> dict:
-    """获取 ComfyUI 队列状态"""
-    result = fetch_json(f"{COMFYUI_API}/queue", timeout=3)
+    """获取 ComfyUI 队列状态（ComfyUI 重负载时响应较慢，提高超时）"""
+    result = fetch_json(f"{COMFYUI_API}/queue", timeout=30)
     return result or {}
 
 

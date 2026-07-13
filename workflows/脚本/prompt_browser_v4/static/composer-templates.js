@@ -43,6 +43,7 @@ window.composerSaveAsPrompt = async function () {
   window._customFragmentKeys = [];
 
   document.getElementById("f_id").value = "";
+  document.getElementById("trialRunBtn").style.display = "none";  // 另存为模式不显示试跑
   document.getElementById("modalTitle").textContent = "💾 另存为提示词";
   document.getElementById("f_name").value = `组合 ${new Date().toLocaleString()}`;
   document.getElementById("f_prompt").value = composed;

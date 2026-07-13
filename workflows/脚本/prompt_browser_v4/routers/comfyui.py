@@ -74,6 +74,7 @@ class RunTextRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     seed: int = 0
+    source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
 
 
 class BatchItem(BaseModel):
@@ -321,7 +322,7 @@ def run_text_prompt(req: RunTextRequest):
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
         prompt_data = {
-            "prompt": req.prompt or "",
+            "prompt": re.sub(r'【[^】]+】\s*', '', req.prompt or ""),
             "negative_prompt": req.negative_prompt or "",
             "seed": req.seed or 0,
             "orientation": req.orientation,
@@ -334,9 +335,12 @@ def run_text_prompt(req: RunTextRequest):
             "negative_prompt": req.negative_prompt or "",
             "seed": req.seed or 0,
             "source": "text_run",
+            "source_prompt_id": req.source_prompt_id or 0,
         }
+        # 试跑若指定了来源提示词，直接关联到该提示词的 history（否则关弹窗就找不到了）
+        linked_prompt_id = req.source_prompt_id or 0
         items = [{
-            "prompt_id": 0,
+            "prompt_id": linked_prompt_id,
             "seed": req.seed or 0,
             "prompt_preview": (req.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),

@@ -8,7 +8,7 @@ from config import settings
 
 db = SqliteDatabase(
     str(settings.db_path),
-    pragmas={"journal_mode": "wal", "foreign_keys": 1},
+    pragmas={"journal_mode": "delete", "foreign_keys": 1},
 )
 print(f"[models] Using database: {settings.db_path} (exists: {settings.db_path.exists()})")
 

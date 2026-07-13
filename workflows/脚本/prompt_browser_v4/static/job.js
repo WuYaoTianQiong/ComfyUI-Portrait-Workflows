@@ -4,6 +4,7 @@
 window.activeJobId = null;
 window.jobPollTimer = null;
 window.activeJobs = new Set();
+window._trialWatchers = new Map();  // trial run callbacks: jobId → callback(job)
 
 // -------------------------------------------------------------------
 // 任务追踪
@@ -71,6 +72,12 @@ window.pollJob = async function(jobId) {
           window.loadPromptHistory(window.selectedId);
         }
       }, 300);
+      // 试跑任务完成回调：通知编辑弹窗更新试跑记录
+      if (window._trialWatchers && window._trialWatchers.has(jobId)) {
+        const cb = window._trialWatchers.get(jobId);
+        try { cb(job); } catch (_) {}
+        window._trialWatchers.delete(jobId);
+      }
     }
   } catch (e) {
     // 超时是预期行为（后端正在处理），不打印错误
