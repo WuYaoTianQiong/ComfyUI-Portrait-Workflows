@@ -1,0 +1,1186 @@
+{
+  "599": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "649",
+        0
+      ],
+      "steps": 9,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "beta",
+      "start_at_step": 5,
+      "end_at_step": 8,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "822",
+        0
+      ],
+      "positive": [
+        "841",
+        0
+      ],
+      "negative": [
+        "832",
+        0
+      ],
+      "latent_image": [
+        "823",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "608": {
+    "inputs": {
+      "conditioning_a": [
+        "620",
+        0
+      ],
+      "conditioning_b": [
+        "841",
+        0
+      ],
+      "boolean": [
+        "652",
+        0
+      ]
+    },
+    "class_type": "Conditioning Input Switch",
+    "_meta": {
+      "title": "Conditioning Input Switch"
+    }
+  },
+  "609": {
+    "inputs": {
+      "samples": [
+        "599",
+        0
+      ],
+      "vae": [
+        "757",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "610": {
+    "inputs": {
+      "samples": [
+        "638",
+        0
+      ],
+      "vae": [
+        "757",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "618": {
+    "inputs": {
+      "image": [
+        "610",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "619": {
+    "inputs": {
+      "conditioning": [
+        "608",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "620": {
+    "inputs": {
+      "text": [
+        "635",
+        0
+      ],
+      "clip": [
+        "755",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Clip from additional prompts"
+    }
+  },
+  "630": {
+    "inputs": {
+      "value": "(a*b + (96 * 2))/2",
+      "a": [
+        "618",
+        1
+      ],
+      "b": [
+        "637",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "Calculate optimized height"
+    }
+  },
+  "631": {
+    "inputs": {
+      "value": "(a*b + (96 * 2))/2",
+      "a": [
+        "618",
+        0
+      ],
+      "b": [
+        "637",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "Calculate optimized width"
+    }
+  },
+  "635": {
+    "inputs": {
+      "value": "韩风冷色调网红美白滤镜，极致冷白皮，白嫩幼，overexposure，通体雪白。高清现实主义风格，细节丰富，动态光影，8K超清"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "SD UPSCALE Custom Prompt 自定义提示词"
+    }
+  },
+  "637": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "SD Upscale Factor (放大大小）"
+    }
+  },
+  "638": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "771",
+        0
+      ],
+      "steps": 10,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "sgm_uniform",
+      "start_at_step": 5,
+      "end_at_step": 999,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "756",
+        0
+      ],
+      "positive": [
+        "841",
+        0
+      ],
+      "negative": [
+        "841",
+        0
+      ],
+      "latent_image": [
+        "647",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "644": {
+    "inputs": {
+      "model_name": "4xNomosWebPhoto_RealPLKSR.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "加载放大模型"
+    }
+  },
+  "647": {
+    "inputs": {
+      "upscale_method": "bislerp",
+      "scale_by": 1.7,
+      "samples": [
+        "599",
+        0
+      ]
+    },
+    "class_type": "LatentUpscaleBy",
+    "_meta": {
+      "title": "缩放Latent（比例）"
+    }
+  },
+  "649": {
+    "inputs": {
+      "seed": 1100636310886374
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (1ST)"
+    }
+  },
+  "650": {
+    "inputs": {
+      "images": [
+        "609",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image 1ST (ZIT) - Grainy"
+    }
+  },
+  "651": {
+    "inputs": {
+      "images": [
+        "610",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image 2ND (ZIT) Fine Details"
+    }
+  },
+  "652": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Use custom prompts？用自定义提示词？"
+    }
+  },
+  "653": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cbfqi_00001_.png&type=temp&subfolder=&rand=0.6954340348445022"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cbfqi_00002_.png&type=temp&subfolder=&rand=0.8102694749454982"
+          }
+        ]
+      },
+      "image_a": [
+        "663",
+        0
+      ],
+      "image_b": [
+        "610",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "SD Upscale Comapre"
+    }
+  },
+  "663": {
+    "inputs": {
+      "upscale_by": [
+        "637",
+        0
+      ],
+      "seed": [
+        "774",
+        0
+      ],
+      "steps": 3,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "sgm_uniform",
+      "denoise": 0.23,
+      "mode_type": "Linear",
+      "tile_width": [
+        "631",
+        0
+      ],
+      "tile_height": [
+        "630",
+        0
+      ],
+      "mask_blur": 64,
+      "tile_padding": 96,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 1,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "batch_size": 1,
+      "image": [
+        "610",
+        0
+      ],
+      "model": [
+        "756",
+        0
+      ],
+      "positive": [
+        "608",
+        0
+      ],
+      "negative": [
+        "619",
+        0
+      ],
+      "vae": [
+        "757",
+        0
+      ],
+      "upscale_model": [
+        "644",
+        0
+      ]
+    },
+    "class_type": "UltimateSDUpscale",
+    "_meta": {
+      "title": "Ultimate SD Upscale"
+    }
+  },
+  "702": {
+    "inputs": {
+      "model_name": "1xSkinContrast-High-SuperUltraCompact.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "加载放大模型"
+    }
+  },
+  "703": {
+    "inputs": {
+      "upscale_model": [
+        "702",
+        0
+      ],
+      "image": [
+        "735",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "使用模型放大图像"
+    }
+  },
+  "707": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": false,
+        "lora": "zimage base\\Salttaro ZIB - Better Pussy Spread V1.0.safetensors",
+        "strength": 0.38
+      },
+      "lora_2": {
+        "on": false,
+        "lora": "zimage\\salttaro_zit_better_pussy_v1.0_15000.safetensors",
+        "strength": 0.4666687011718747
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "761",
+        0
+      ],
+      "clip": [
+        "755",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "Power Lora Loader (rgthree)"
+    }
+  },
+  "709": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "707",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "711": {
+    "inputs": {
+      "blend_factor": 0.4,
+      "blend_mode": "normal",
+      "image1": [
+        "735",
+        0
+      ],
+      "image2": [
+        "703",
+        0
+      ]
+    },
+    "class_type": "ImageBlend",
+    "_meta": {
+      "title": "Intensity - 强度"
+    }
+  },
+  "718": {
+    "inputs": {
+      "dilation": 8,
+      "mask": [
+        "735",
+        1
+      ]
+    },
+    "class_type": "ImpactDilateMask",
+    "_meta": {
+      "title": "Dilate Mask 扩展涂抹区域"
+    }
+  },
+  "719": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_lzptm_00007_.png&type=temp&subfolder=&rand=0.7948407310396807"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_lzptm_00008_.png&type=temp&subfolder=&rand=0.5712806550628892"
+          }
+        ]
+      },
+      "image_a": [
+        "711",
+        0
+      ],
+      "image_b": [
+        "735",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Skin Contrast Compare"
+    }
+  },
+  "720": {
+    "inputs": {
+      "seed": 337934705089687
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "721": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "821",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "726": {
+    "inputs": {
+      "mask": [
+        "735",
+        1
+      ]
+    },
+    "class_type": "MaskPreview",
+    "_meta": {
+      "title": "预览遮罩"
+    }
+  },
+  "729": {
+    "inputs": {
+      "seed": 470193541057063
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "730": {
+    "inputs": {
+      "text": "Lisu, 19 years old cute chinese girl",
+      "clip": [
+        "707",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Detailer CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "731": {
+    "inputs": {
+      "combined": false,
+      "crop_factor": 3.5,
+      "bbox_fill": false,
+      "drop_size": 10,
+      "contour_fill": true,
+      "mask": [
+        "718",
+        0
+      ]
+    },
+    "class_type": "MaskToSEGS",
+    "_meta": {
+      "title": "MASK to SEGS"
+    }
+  },
+  "732": {
+    "inputs": {
+      "filename_prefix": "image/2026-07-04/ZIT-231139",
+      "images": [
+        "711",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "735": {
+    "inputs": {
+      "image": "$735-0",
+      "block": false,
+      "restore_mask": "if_same_size",
+      "images": [
+        "663",
+        0
+      ]
+    },
+    "class_type": "PreviewBridge",
+    "_meta": {
+      "title": "Mask Inpaint Area 涂抹重绘区域"
+    }
+  },
+  "737": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cygoh_00001_.png&type=temp&subfolder=&rand=0.7842655524194353"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cygoh_00002_.png&type=temp&subfolder=&rand=0.19950518199343714"
+          }
+        ]
+      },
+      "image_a": [
+        "711",
+        0
+      ],
+      "image_b": [
+        "663",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Detailer Compare (with SD upscale) 跟SD放大原图对比"
+    }
+  },
+  "738": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_nlkur_00001_.png&type=temp&subfolder=&rand=0.13047557997430814"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_nlkur_00002_.png&type=temp&subfolder=&rand=0.1900047787761926"
+          }
+        ]
+      },
+      "image_a": [
+        "735",
+        0
+      ],
+      "image_b": [
+        "735",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Detailer Compare"
+    }
+  },
+  "739": {
+    "inputs": {
+      "text": "Lisu, 19 years old cute chinese girl",
+      "clip": [
+        "821",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Detailer CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "740": {
+    "inputs": {
+      "mask": [
+        "798",
+        0
+      ]
+    },
+    "class_type": "MaskPreview+",
+    "_meta": {
+      "title": "🔧 Mask Preview"
+    }
+  },
+  "742": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_bmgnc_00001_.png&type=temp&subfolder=&rand=0.5923848539375788"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_bmgnc_00002_.png&type=temp&subfolder=&rand=0.144667063134422"
+          }
+        ]
+      },
+      "image_a": [
+        "663",
+        0
+      ],
+      "image_b": [
+        "663",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Detailer Compare"
+    }
+  },
+  "745": {
+    "inputs": {
+      "conditioning": [
+        "739",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "746": {
+    "inputs": {
+      "conditioning": [
+        "730",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "755": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "756": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "822",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "757": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "761": {
+    "inputs": {
+      "unet_name": "moodyRealMix_zitV7GlobalFP8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "771": {
+    "inputs": {
+      "value": "a+b",
+      "a": [
+        "649",
+        0
+      ],
+      "b": [
+        "773",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "773": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed (2ND) - Keep 0 by default"
+    }
+  },
+  "774": {
+    "inputs": {
+      "value": "a+b",
+      "a": [
+        "775",
+        0
+      ],
+      "b": [
+        "771",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "775": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed (SD) - Keep 0 by default"
+    }
+  },
+  "787": {
+    "inputs": {
+      "target": "confidence",
+      "order": true,
+      "take_start": 0,
+      "take_count": 1,
+      "segs": [
+        "790",
+        0
+      ]
+    },
+    "class_type": "ImpactSEGSOrderedFilter",
+    "_meta": {
+      "title": "SEGS Filter (ordered)"
+    }
+  },
+  "790": {
+    "inputs": {
+      "threshold": 0.5,
+      "dilation": 10,
+      "crop_factor": 2.4,
+      "drop_size": 10,
+      "labels": "all",
+      "bbox_detector": [
+        "792",
+        0
+      ],
+      "image": [
+        "663",
+        0
+      ]
+    },
+    "class_type": "BboxDetectorSEGS",
+    "_meta": {
+      "title": "BBOX Detector (SEGS)"
+    }
+  },
+  "792": {
+    "inputs": {
+      "model_name": "bbox/face_yolov8m.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "798": {
+    "inputs": {
+      "segs": [
+        "787",
+        0
+      ]
+    },
+    "class_type": "SegsToCombinedMask",
+    "_meta": {
+      "title": "SEGS to MASK (combined)"
+    }
+  },
+  "821": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": true,
+        "lora": "zimage base\\char\\yoki-zib-v1.safetensors",
+        "strength": 1
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "761",
+        0
+      ],
+      "clip": [
+        "755",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "Power Lora Loader (rgthree)"
+    }
+  },
+  "822": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "761",
+        0
+      ],
+      "clip": [
+        "755",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "Power Lora Loader (rgthree)"
+    }
+  },
+  "823": {
+    "inputs": {
+      "pixels": [
+        "830",
+        0
+      ],
+      "vae": [
+        "757",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "824": {
+    "inputs": {
+      "sharpen_radius": 1,
+      "sigma": 0.5,
+      "alpha": 0.3,
+      "image": [
+        "827",
+        0
+      ]
+    },
+    "class_type": "ImageSharpen",
+    "_meta": {
+      "title": "ImageSharpen (Default: 1/0.5/0.3)"
+    }
+  },
+  "827": {
+    "inputs": {
+      "measurement": "pixels",
+      "width": 640,
+      "height": 960,
+      "fit": "crop",
+      "method": "lanczos",
+      "image": [
+        "831",
+        0
+      ]
+    },
+    "class_type": "Image Resize (rgthree)",
+    "_meta": {
+      "title": "Image Resize (rgthree)"
+    }
+  },
+  "828": {
+    "inputs": {
+      "images": [
+        "830",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "829": {
+    "inputs": {
+      "factor": 1,
+      "images": [
+        "824",
+        0
+      ]
+    },
+    "class_type": "AdjustBrightness",
+    "_meta": {
+      "title": "Adjust Brightness (Default: 1.0)"
+    }
+  },
+  "830": {
+    "inputs": {
+      "factor": 1,
+      "images": [
+        "829",
+        0
+      ]
+    },
+    "class_type": "AdjustContrast",
+    "_meta": {
+      "title": "Adjust Contrast (Default: 1.0)"
+    }
+  },
+  "831": {
+    "inputs": {
+      "image": "00012-3242054843.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "832": {
+    "inputs": {
+      "conditioning": [
+        "841",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "833": {
+    "inputs": {
+      "model": "MiaoshouAI/Florence-2-base-PromptGen-v2.0",
+      "precision": "fp16",
+      "convert_to_safetensors": "sdpa"
+    },
+    "class_type": "DownloadAndLoadFlorence2Model",
+    "_meta": {
+      "title": "DownloadAndLoadFlorence2Model"
+    }
+  },
+  "834": {
+    "inputs": {
+      "text_input": "",
+      "task": "detailed_caption",
+      "fill_mask": true,
+      "keep_model_loaded": true,
+      "max_new_tokens": 1024,
+      "num_beams": 3,
+      "do_sample": true,
+      "output_mask_select": "",
+      "seed": [
+        "649",
+        0
+      ],
+      "image": [
+        "831",
+        0
+      ],
+      "florence2_model": [
+        "833",
+        0
+      ]
+    },
+    "class_type": "Florence2Run",
+    "_meta": {
+      "title": "Florence2Run"
+    }
+  },
+  "836": {
+    "inputs": {
+      "source": [
+        "847",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Generated Prompt (自动生成提示词）"
+    }
+  },
+  "837": {
+    "inputs": {
+      "value": "韩风冷色调网红美白滤镜，极致冷白皮。 "
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Additional Prompt Prefixes (额外自定义提示词)"
+    }
+  },
+  "838": {
+    "inputs": {
+      "string": [
+        "839",
+        0
+      ],
+      "find": "watermark",
+      "replace": "nothing"
+    },
+    "class_type": "StringReplace",
+    "_meta": {
+      "title": "替换"
+    }
+  },
+  "839": {
+    "inputs": {
+      "string": [
+        "834",
+        2
+      ],
+      "find": "[LAB]\n[1] ",
+      "replace": ""
+    },
+    "class_type": "StringReplace",
+    "_meta": {
+      "title": "替换"
+    }
+  },
+  "840": {
+    "inputs": {
+      "string_a": [
+        "837",
+        0
+      ],
+      "string_b": [
+        "847",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "连接"
+    }
+  },
+  "841": {
+    "inputs": {
+      "text": [
+        "840",
+        0
+      ],
+      "clip": [
+        "755",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive"
+    }
+  },
+  "847": {
+    "inputs": {
+      "string": [
+        "838",
+        0
+      ],
+      "find": "toenail fungus",
+      "replace": ""
+    },
+    "class_type": "StringReplace",
+    "_meta": {
+      "title": "替换"
+    }
+  }
+}
