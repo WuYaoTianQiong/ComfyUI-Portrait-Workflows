@@ -124,7 +124,7 @@ import argparse, re, sqlite3, sys, json
 from datetime import datetime
 sys.stdout.reconfigure(encoding='utf-8')
 
-DB_PATH = r'd:\Entertainment\ComfyUI-aki-v2\ComfyUI-aki-v3\workflows\文档\提示词收藏.db'
+DB_PATH = r'F:\ComfyUI_Migration\ComfyUI-Portrait-Workflows\workflows\文档\提示词收藏.db'
 STYLE_PREFIXES = ["Moody Photography", "Moody Distillation photography style",
                   "Moody Distillation", "Huihui(辉辉)", "Dori"]
 FRAGMENT_TYPES = ["姿态动作", "拍摄视角", "人物面部", "人物身材", "人物服饰", "场景环境", "光影色调", "画风技术"]

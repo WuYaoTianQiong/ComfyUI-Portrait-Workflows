@@ -93,6 +93,7 @@
 | `NoobAI-XL-Vpred-v1.0.safetensors` | 6.62 GB | SDXL | 纯日式动漫文生图 |
 | `wan2.2_ti2v_5B_fp16.safetensors` | 9.31 GB | Wan2.2 | 视频生成（12G 基本不可用） |
 | `Real-Qwen-Image-V2-2512-Q4_K_M.gguf` | 12.17 GB | Qwen GGUF | 写实+亚洲人脸优化版 |
+| `qwen-image-2512-Q4_K_M.gguf` | 13.2 GB | Qwen GGUF | Qwen 2512 量化版（早期测试，位于 `diffusion_models/`） |
 
 ### 3.2 文本编码器（text_encoders/ + clip/）
 
@@ -1900,6 +1901,38 @@ masterpiece, best quality, highres, (1girl, solo:1.5),
 
 ---
 
+## 三十、已实测验证的优质提示词片段
+
+> 2026-07-17 新增。基于 moodyProMix_zitV13FP8 写实风格，按【人物服饰】【人物身材】【姿态动作】【光影色调】【画风技术】分类收藏。
+
+### 服饰描写
+
+#### 丝袜/腿袜
+
+```
+腿部穿着高光泽的浅肤色丝袜，呈现马油袜的质感，光滑顺滑且带有微妙的反射光芒。
+```
+
+> **说明**：写实风格的丝袜质感。"马油袜"是中文网络用词，指油亮透明的高光泽丝袜，模型理解良好。适合配合腿部特写或站姿展示。
+
+#### 汉服/古风系列
+
+> （待补充，可按此格式继续添加）
+
+### 姿态动作
+
+> （待补充）
+
+### 光影色调
+
+> （待补充）
+
+### 画风技术
+
+> （待补充）
+
+---
+
 ## 二十七、Moody_ZIT 开发最终结论（2026-07-04）
 
 > 历时 6 小时系统性测试的最终总结。
@@ -1940,6 +1973,47 @@ SeedVR2（慢）→ DiT 4K 超分，比 SD Upscale 细腻
 - CLIP：`qwen_3_4b`（lumina2）
 - 常用 LoRA：`momoka-zib-v2_clean`（w=0.3~0.5）
 - 备用模型：`moodyRealMix_zitV7GlobalFP8`
+
+### 工作流部署说明（你发给别人跑不起来的根因）
+
+`MoodyZIT_V7_Visual_文生图_双程采样_快速预览_文字渲染.json` 依赖以下资源，直接发 JSON 给他人无法运行：
+
+#### 必须准备的资源
+
+| 类型 | 名称 | 大小 | 下载方式 |
+|:----|:----|:---:|:--------|
+| **底模** | `moodyProMix_zitV13FP8.safetensors` | 5.73 GB | CivitAI 搜索 catlover1937 → moodyProMix |
+| **CLIP** | `qwen_3_4b.safetensors` | 7.49 GB | HuggingFace Qwen/Qwen3-4B |
+| **VAE** | `ae.safetensors` | 319 MB | Flux.1 标准 VAE |
+| **LoRA（可选）** | `momoka-zib-v2_clean.safetensors` | 162 MB | CivitAI catlover1937 角色 LoRA |
+| **自定义节点** | `ResolutionPresetPicker` | — | 见下方安装说明 |
+
+#### 自定义节点安装
+
+工作流使用了 `分辨率预设选择器` 节点（`comfyui_resolution_preset_picker`），这是一个自写的自定义节点，位于项目目录：
+
+```
+custom_nodes/comfyui_resolution_preset_picker/__init__.py
+```
+
+**安装到他人的 ComfyUI：**
+1. 在 `custom_nodes/` 下创建 `comfyui_resolution_preset_picker/` 目录
+2. 把 `__init__.py` 复制进去
+3. 重启 ComfyUI
+
+#### 文件放置路径
+
+```
+ComfyUI/models/diffusion_models/moodyProMix_zitV13FP8.safetensors
+ComfyUI/models/text_encoders/qwen_3_4b.safetensors
+ComfyUI/models/vae/ae.safetensors
+ComfyUI/models/loras/momoka-zib-v2_clean.safetensors    （可选）
+ComfyUI/custom_nodes/comfyui_resolution_preset_picker/__init__.py
+```
+
+#### 验证启动
+
+确保 ComfyUI 启动参数包含 `--lowvram`（12GB 显存必需），不支持 `--highvram`。
 
 ---
 
