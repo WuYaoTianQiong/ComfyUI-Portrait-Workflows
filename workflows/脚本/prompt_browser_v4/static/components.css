@@ -12,7 +12,7 @@
 .brand { display: flex; align-items: baseline; gap: 8px; min-width: 140px; }
 .brand h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
 .version { font-size: 10px; color: var(--muted); background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
-.header-center { flex: 2; display: flex; justify-content: center; min-width: 0; }
+.header-spacer { flex: 1 1 auto; min-width: 0; }
 .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
 .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-right: 8px; min-width: 220px; white-space: nowrap; justify-content: flex-end; }
@@ -83,9 +83,9 @@
 /* Workflow selector */
 .wf-selector {
   position: relative;
-  flex: 1 1 380px;
-  min-width: 180px;
-  max-width: 500px;
+  flex: 0 1 360px;
+  min-width: 160px;
+  max-width: 420px;
 }
 /* 继承 .dropdown-trigger，只补充布局需要 */
 .wf-trigger {
@@ -416,4 +416,31 @@
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
+}
+
+/* 窄屏：表头换行，保证右侧 状态/画质/跑图 不被挤出可视区 */
+@media (max-width: 900px) {
+  .app-header {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 54px;
+    padding: 8px 12px;
+    gap: 8px 12px;
+  }
+  .header-spacer { display: none; }
+  .brand { min-width: auto; order: 0; }
+  .wf-selector { flex: 1 1 200px; min-width: 160px; max-width: 100%; order: 1; }
+  .header-right {
+    order: 2;
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .status {
+    min-width: 0;
+    flex: 1 1 auto;
+    margin-right: 0;
+    justify-content: flex-start;
+  }
 }

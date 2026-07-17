@@ -238,7 +238,7 @@ window.renderTagCheckboxes = async function(containerId, selectedIds) {
       const sel = ids.has(t.id) ? " selected" : "";
       return `<div class="tag-option${sel}" data-tag-id="${t.id}"
         onclick="window.toggleTagOption(this)"
-        style="border-color:${t.color || '#8b5cf6'};color:${t.color || '#8b5cf6'}">
+        style="border-color:${t.color || '#5b8fb9'};color:${t.color || '#5b8fb9'}">
         ${window.escHtml(t.name)}
       </div>`;
     }).join("");

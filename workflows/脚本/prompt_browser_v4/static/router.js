@@ -51,7 +51,9 @@ window.handleRoute = function(path) {
     window.closeCompareModal();
   }
   
-  if (path === '/' || path === '/gallery') {
+  if (path === '/') {
+    window.routePrompt({});
+  } else if (path === '/gallery') {
     window.routeGallery();
   } else if (path.startsWith('/history/')) {
     const match = path.match(/\/history\/(\d+)/);

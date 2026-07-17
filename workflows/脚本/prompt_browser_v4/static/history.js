@@ -7,11 +7,22 @@ window._galleryPage = 1;
 window._galleryTotal = 0;
 window._galleryLoading = false;
 
+// 持久化画廊的分页与筛选状态（刷新后保持）
+window._persistGalleryState = function() {
+  window.UiState.set("galleryPage", window._galleryPage || 1);
+  window.UiState.set("gallerySort", window._gallerySort || "newest");
+  window.UiState.set("galleryFilter", window._galleryFilter || "all");
+  window.UiState.set("gallerySearch", window._gallerySearch || "");
+  window.UiState.set("galleryPageSize", window._galleryPageSize || 50);
+  window.UiState.set("galleryCategoryId", window._galleryCategoryId || "");
+  window.UiState.set("galleryTagIds", (window._galleryTagIds || []).join(","));
+};
+
 // -------------------------------------------------------------------
 // 历史加载（分页：复用画廊分页组件）
 // -------------------------------------------------------------------
 
-window.loadHistory = async function(sync = false) {
+window.loadHistory = async function(sync = false, resetPage = true) {
   // Phase 2: HTMX 模式 —— 画廊由 HTMX 自动加载
   if (document.body.dataset.htmxActive === "1") {
     if (!sync) {
@@ -28,18 +39,20 @@ window.loadHistory = async function(sync = false) {
       window._galleryAllItems = data.items || [];
       window._historyItems = window._galleryAllItems;
       window._galleryTotal = data.total || window._galleryAllItems.length;
-      window._galleryPage = 1;
+      if (resetPage) window._galleryPage = 1;
       window.renderGallery(window._historyItems);
       window.renderGalleryPagination();
       window.updateGalleryBadge();
+      window._persistGalleryState();
       return;
     }
 
     // 普通加载：重置为第一页
-    window._galleryPage = 1;
+    if (resetPage) window._galleryPage = 1;
     window._galleryAllItems = [];
     window._historyItems = [];
     await window._loadHistoryPage();
+    window._persistGalleryState();
   } catch (e) {
     console.error("loadHistory", e);
   }
@@ -56,6 +69,12 @@ window._loadHistoryPage = async function() {
     if (window._galleryFilter === "favorite") params.push("favorite=1");
     if (window._gallerySort) params.push(`sort=${window._gallerySort}`);
     if (window._gallerySearch) params.push(`search=${encodeURIComponent(window._gallerySearch)}`);
+    if (window._galleryCategoryId) params.push(`category_id=${window._galleryCategoryId}`);
+    if (window._galleryTagIds && window._galleryTagIds.length) params.push(`tag_ids=${window._galleryTagIds.join(",")}`);
+    if (window._gallerySource) params.push(`source=${encodeURIComponent(window._gallerySource)}`);
+    if (window._galleryDate) params.push(`date=${encodeURIComponent(window._galleryDate)}`);
+    if (window._galleryModel) params.push(`model=${encodeURIComponent(window._galleryModel)}`);
+    if (window._galleryOrientation) params.push(`orientation=${encodeURIComponent(window._galleryOrientation)}`);
     const url = "/api/history?" + params.join("&");
     const data = await window.api(url);
     const items = data.items || [];
@@ -72,6 +91,8 @@ window._loadHistoryPage = async function() {
     window.renderGallery(items);
     window.renderGalleryPagination();
     window.updateGalleryBadge();
+    // 同步刷新侧栏标签/分类计数，避免自动刷新后侧栏数据过时
+    window.loadGallerySidebar?.();
   } catch (e) {
     console.error("_loadHistoryPage", e);
   } finally {
@@ -92,25 +113,15 @@ window.changeGalleryPageSize = function(size) {
   }
 };
 
-// 跳转到指定页（JS 模式直接加载；HTMX 模式由模板按钮驱动，此处兜底刷新）
-window.loadGalleryPage = function(page) {
+// 跳转到指定页（JS 模式直接加载；HTMX 模式由 hx-vals 统一携带参数，兜底刷新）
+window.loadGalleryPage = async function(page) {
   if (!page || page < 1) return;
   window._galleryPage = page;
   if (document.body.dataset.htmxActive === "1") {
-    const container = document.getElementById("galleryGridContainer");
-    if (container) {
-      const params = new URLSearchParams({
-        page: String(page),
-        sort: window._gallerySort,
-        favorite: window._galleryFilter === "favorite" ? "1" : "",
-        search: window._gallerySearch,
-        page_size: String(window._galleryPageSize),
-      });
-      container.setAttribute("hx-get", "/api/history/html?" + params.toString());
-      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-    }
+    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
   } else {
-    window._loadHistoryPage();
+    await window._loadHistoryPage();
+    window._persistGalleryState();
   }
 };
 
@@ -241,6 +252,32 @@ window.deleteHistoryItem = async function(id) {
       window.showToast("删除失败: " + e.message, "error");
     }
   });
+};
+
+window.cleanupMissingFiles = async function() {
+  if (!confirm("将执行以下操作：\n\n1. 扫描所有历史记录，清理文件已被手动删除的条目（软删除）\n2. 清空全部缩略图缓存（下次浏览时自动重新生成）\n\n缩略图缓存键格式已修复，旧格式缩略图需整体重建。")) return;
+  try {
+    // 步骤 1：清理失效记录
+    const data = await window.api("/api/history/cleanup_missing", { method: "POST", timeout: 60000 });
+    // 步骤 2：清空缩略图缓存
+    let thumbDeleted = 0;
+    try {
+      const td = await window.api("/api/thumbnail/clear", { method: "POST", timeout: 30000 });
+      thumbDeleted = td.deleted || 0;
+    } catch (e) { console.error("thumbnail clear failed", e); }
+
+    const parts = [];
+    if (data.cleaned > 0) parts.push(`${data.cleaned} 条失效记录`);
+    if (thumbDeleted > 0) parts.push(`${thumbDeleted} 个旧缩略图`);
+    if (parts.length) {
+      window.showToast(`已清理 ${parts.join("、")}（共扫描 ${data.total} 条记录）`, "success");
+    } else {
+      window.showToast(`扫描完成，${data.total} 条记录均有效，无需清理`, "info");
+    }
+    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
+  } catch (e) {
+    window.showToast("清理失败: " + e.message, "error");
+  }
 };
 
 window.clearHistory = async function() {
@@ -410,6 +447,7 @@ window._gallerySearchTimer = null;
 /** 画廊搜索/排序/筛选变化时清空选中的 item */
 window._clearGallerySelection = function() {
   window._gallerySelectedIds.clear();
+  window._galleryLastIndex = null;
   document.querySelectorAll('.gallery-item-check').forEach(el => el.classList.remove('checked'));
   window.updateGalleryActionButtons();
   window.updateCompareButton();
@@ -458,6 +496,9 @@ window.updateGalleryActionButtons = function() {
   if (batchDel) batchDel.style.display = count >= 1 ? 'inline-flex' : 'none';
   if (batchDl) batchDl.style.display = count >= 1 ? 'inline-flex' : 'none';
   if (batchProc) batchProc.style.display = count >= 1 ? 'inline-flex' : 'none';
+  // 更新"全选全部"按钮文案（显示当前筛选条件下的总数）
+  const allPagesBtn = document.getElementById('gallerySelectAllPages');
+  if (allPagesBtn) allPagesBtn.textContent = `全选全部 (${window._galleryTotal || 0})`;
   window.updateCompareButton();
   window.updateGallerySelectAllCheck();
 };

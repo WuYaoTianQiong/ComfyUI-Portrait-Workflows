@@ -213,6 +213,12 @@
   z-index: 2;
   backdrop-filter: blur(8px);
   text-align: left;
+  transition: opacity 0.2s ease;
+}
+.compare-item-label.hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 /* label 内部：详细参数行（label: value 格式） */
 .compare-item-label .label-param-row {

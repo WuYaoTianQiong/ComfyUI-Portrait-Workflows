@@ -20,16 +20,15 @@ window.openUnifiedImageModal = function() {
     overlay.tabIndex = -1;
     overlay.innerHTML = `
       <div class="compare-modal-header">
-        <div class="compare-modal-title" id="imageModalTitle" style="display:flex;align-items:center;gap:8px">
+        <div class="compare-modal-title" id="imageModalTitle">
           <span id="imageModalTitleText">图片查看（<span id="compareModalCount">0</span> 张）</span>
           <span id="compareZoomDisplay" class="compare-zoom-display">100%</span>
-          <span id="lightboxHeaderPrompt" class="lightbox-header-prompt"></span>
+        </div>
+        <div class="lightbox-wf-selector" id="lightboxWfSelector" style="display:none">
+          <span class="lightbox-wf-label">工作流:</span>
+          <button class="lightbox-wf-name" id="lightboxWfName">选择工作流</button>
         </div>
         <div class="compare-modal-actions" id="compareModalActions">
-          <div class="lightbox-wf-selector" id="lightboxWfSelector" style="display:none">
-            <span class="lightbox-wf-label">工作流:</span>
-            <button class="lightbox-wf-name" id="lightboxWfName">选择工作流</button>
-          </div>
           <button id="compareSyncBtn2" class="active" onclick="window.setCompareMode('sync')">同步</button>
           <button id="compareSplitBtn2" onclick="window.setCompareMode('split')">分屏</button>
           <button id="lightboxFavBtn" class="lightbox-action-btn" style="display:none" onclick="window.toggleFavoriteFromLightbox()">☆</button>
@@ -43,7 +42,8 @@ window.openUnifiedImageModal = function() {
           <button id="imageFitBtn" class="lightbox-action-btn" onclick="window.toggleFitMode()" title="适应/原始尺寸">1:1</button>
           <button id="compareResetBtn" onclick="window.resetImageZoom()">重置</button>
           <button id="lightboxDelBtn" class="lightbox-action-btn" style="display:none;color:var(--danger)" onclick="window.deleteFromLightbox()" title="删除">🗑️</button>
-          <button onclick="window.closeCompareModal(true)">✕ 退出</button>
+          <button id="lightboxInfoBtn" class="lightbox-action-btn active" onclick="window.toggleLightboxInfo()" title="显示/隐藏图片信息">ⓘ 信息</button>
+          <button onclick="window.closeCompareModal(true)" class="lightbox-close-btn">✕ 退出</button>
         </div>
       </div>
       <div class="compare-modal-body" id="compareModalBody"></div>
@@ -70,6 +70,7 @@ window.openUnifiedImageModal = function() {
   const rotateBtn = document.getElementById('imageRotateBtn');
   const fitBtn = document.getElementById('imageFitBtn');
   const delBtn = document.getElementById('lightboxDelBtn');
+  const infoBtn = document.getElementById('lightboxInfoBtn');
   const wfSelector = document.getElementById('lightboxWfSelector');
   const wfNameBtn = document.getElementById('lightboxWfName');
 
@@ -265,35 +266,6 @@ window.renderUnifiedImageGrid = function() {
     body.appendChild(wrap);
   });
 
-  const headerPrompt = document.getElementById('lightboxHeaderPrompt');
-  if (headerPrompt) {
-    if (window._compareMode === 'single' && window._lightboxItems.length > 0) {
-      const item = window._lightboxItems[window._lightboxIndex];
-      let promptName = item.prompt_name || '';
-      if (!promptName && item.prompt_id) {
-        const found = window.allPrompts.find(p => p.id === item.prompt_id);
-        promptName = found ? found.name : '';
-      }
-      if (!promptName) {
-        promptName = item.prompt_id ? `提示词 #${item.prompt_id}` : `图片 #${item.id}`;
-      }
-      if (promptName && promptName !== `图片 #${item.id}`) {
-        if (item.prompt_id) {
-          headerPrompt.innerHTML = `<span class="lightbox-prompt-link" onclick="window.jumpToPrompt(${item.prompt_id})">📝 ${window.escHtml(promptName)}</span>`;
-        } else {
-          headerPrompt.textContent = `📝 ${promptName}`;
-        }
-        headerPrompt.title = promptName;
-      } else if (promptName === `图片 #${item.id}`) {
-        headerPrompt.innerHTML = '';
-      } else {
-        headerPrompt.innerHTML = '';
-      }
-    } else {
-      headerPrompt.innerHTML = '';
-    }
-  }
-
   if (window._compareMode === 'single') {
     window.setupImageModalKeyboardNav();
     window.updateLightboxActions();
@@ -400,6 +372,20 @@ window.regenFromLightbox = function() {
     return;
   }
   window.regenerateFromHistory(item.prompt_id);
+};
+
+window._lightboxInfoVisible = true;
+
+window.toggleLightboxInfo = function() {
+  window._lightboxInfoVisible = !window._lightboxInfoVisible;
+  const btn = document.getElementById('lightboxInfoBtn');
+  if (btn) {
+    btn.classList.toggle('active', window._lightboxInfoVisible);
+    btn.title = window._lightboxInfoVisible ? '隐藏图片信息' : '显示图片信息';
+  }
+  document.querySelectorAll('.compare-item-label').forEach(el => {
+    el.classList.toggle('hidden', !window._lightboxInfoVisible);
+  });
 };
 
 window.deleteFromLightbox = async function() {

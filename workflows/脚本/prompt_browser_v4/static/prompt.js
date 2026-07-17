@@ -8,6 +8,7 @@
 window.loadPrompts = async function(page) {
   return window.withLock("loadPrompts", async () => {
     if (page) window._promptPage = page;
+    window.UiState.set("promptPage", window._promptPage || 1);
     const search = document.getElementById("searchInput").value;
     const sortParams = window.getSortParams();
 
@@ -248,7 +249,7 @@ window.renderPaginationCore = function(opts) {
   const el = document.getElementById(opts.containerId);
   if (!el) return;
 
-  const pageSizeOptions = opts.pageSizeOptions || [20, 50, 100, 200];
+  const pageSizeOptions = opts.pageSizeOptions || [20, 50, 100, 200, 500, 1000];
   let pageSizeHtml = `每页 <select class="page-size-select" onchange="${opts.onPageSize}(parseInt(this.value))">`;
   for (const sz of pageSizeOptions) {
     pageSizeHtml += `<option value="${sz}"${sz === pageSize ? ' selected' : ''}>${sz}</option>`;
@@ -320,36 +321,59 @@ window._ensureLocateBar = function() {
   }
 };
 
-window.locateSelectedPrompt = function() {
-  if (!window.selectedId) return;
-  let item = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+window.locateSelectedPrompt = async function() {
+  // 目标：优先当前激活的单条提示词；否则取最近勾选的多选项（"已选 N 项"）
+  let targetId = window.selectedId;
+  if (!targetId && window.selectedIds && window.selectedIds.size > 0) {
+    targetId = Array.from(window.selectedIds).pop();
+  }
+  if (!targetId) {
+    window.showToast("请先选择一条提示词", "info");
+    return;
+  }
+  // 1) 当前页直接滚动
+  let item = document.querySelector(`.prompt-item[data-id="${targetId}"]`);
   if (item) {
     item.scrollIntoView({ block: "center", behavior: "smooth" });
     return;
   }
-  // 当前页找不到，计算页码并跳转
-  const idx = window.allPrompts.findIndex(p => p.id === window.selectedId);
-  if (idx >= 0) {
-    const targetPage = Math.floor(idx / window._promptPageSize) + 1;
-    window._promptPage = targetPage;
-    window.loadPrompts().then(() => {
+  // 2) 跨页：向后端查询全局序号，计算页码并跳转
+  try {
+    const search = document.getElementById("searchInput").value;
+    const sortParams = window.getSortParams();
+    const p = { search, ...sortParams, prompt_id: targetId };
+    if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
+      p.category_id = window._currentCategoryId;
+    }
+    if (window._selectedTags && window._selectedTags.size > 0) {
+      p.tag_ids = Array.from(window._selectedTags).join(",");
+    }
+    const qs = new URLSearchParams(p).toString();
+    const data = await window.api(`/api/prompts/position?${qs}`);
+    if (data.found) {
+      const targetPage = Math.floor(data.index / window._promptPageSize) + 1;
+      window._promptPage = targetPage;
+      await window.loadPrompts();
       setTimeout(() => {
-        const el = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+        const el = document.querySelector(`.prompt-item[data-id="${targetId}"]`);
         if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
-      }, 200);
-    });
-  } else {
-    // 不在当前列表中，清空筛选后重新加载
-    const searchEl = document.getElementById("searchInput");
-    if (searchEl) searchEl.value = "";
-    window._currentCategoryId = null;
-    window._promptPage = 1;
-    window.loadPrompts().then(() => {
+        else window.showToast("已跳转到对应页，但未找到该项", "warn");
+      }, 250);
+    } else {
+      // 当前筛选下不存在：清空筛选后重试
+      const searchEl = document.getElementById("searchInput");
+      if (searchEl) searchEl.value = "";
+      window._currentCategoryId = null;
+      window._promptPage = 1;
+      await window.loadPrompts();
       setTimeout(() => {
-        const el = document.querySelector(`.prompt-item[data-id="${window.selectedId}"]`);
+        const el = document.querySelector(`.prompt-item[data-id="${targetId}"]`);
         if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
-      }, 200);
-    });
+        else window.showToast("未找到该提示词（可能已被删除）", "warn");
+      }, 250);
+    }
+  } catch (e) {
+    window.showToast("定位失败: " + e.message, "error");
   }
 };
 

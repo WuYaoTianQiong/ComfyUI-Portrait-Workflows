@@ -138,7 +138,10 @@ window.applyUiState = function() {
   window.lastClickedId = window.selectedId;
 
   const activeTab = window.UiState.get("activeTab", "promptTab");
-  if (activeTab === "galleryTab") {
+  if (activeTab === "promptTab") {
+    const btn = document.querySelector('.tab-btn[data-tab="promptTab"]');
+    if (btn) window.switchTab("promptTab", btn);
+  } else if (activeTab === "galleryTab") {
     const btn = document.querySelector('.tab-btn[data-tab="galleryTab"]');
     if (btn) window.switchTab("galleryTab", btn);
   } else if (activeTab === "composerTab") {

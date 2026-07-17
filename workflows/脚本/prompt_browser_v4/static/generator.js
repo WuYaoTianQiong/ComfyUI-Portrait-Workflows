@@ -89,6 +89,112 @@ window.batchRun = async function() {
   });
 };
 
+// 补全缺图：先拉缺图清单 -> 审核模态框（看清有哪些 + 可取消部分）-> 提交勾选子集
+window.generateMissing = async function() {
+  return window.withLock("generateMissing", async () => {
+    const workflowPath = window.currentWorkflowPath();
+    if (!workflowPath) { window.showToast("请先选择工作文件", "error"); return; }
+    if (window.comfyStatus !== "online") { window.showToast("ComfyUI 未连接", "error"); return; }
+    if (window.activeJobs && window.activeJobs.size > 0) { window.showToast("有任务进行中，请等待完成后再补全", "error"); return; }
+    let items = [];
+    try {
+      const data = await window.api("/api/generate_missing/list", { timeout: 30000 });
+      items = data.items || [];
+    } catch (e) { window.showToast("获取缺图清单失败: " + e.message, "error"); return; }
+    if (!items.length) { window.showToast("没有缺图的提示词，全部已生成 ✅", "success"); return; }
+    window._openMissingModal(items, workflowPath);
+  });
+};
+
+// 审核模态框：展示缺图清单，默认全选，用户可取消部分或用搜索过滤
+window._openMissingModal = function(items, workflowPath) {
+  const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>"']/g, (m) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]
+  ));
+  const rows = items.map((it) => {
+    const ps = [];
+    if (it.width && it.height) ps.push(it.width + "×" + it.height);
+    if (it.model) ps.push(it.model);
+    if (it.sampler) ps.push(it.sampler);
+    if (it.steps) ps.push("步" + it.steps);
+    if (it.cfg_scale != null && it.cfg_scale !== "") ps.push("cfg" + it.cfg_scale);
+    const paramStr = ps.length ? ps.join(" · ") : "默认参数";
+    return '<div class="mm-row" data-name="' + (it.name || "").toLowerCase() + '" data-cat="' + (it.category || "").toLowerCase() + '">'
+      + '<label class="mm-check">'
+      + '<input type="checkbox" class="mm-item" value="' + it.id + '" checked>'
+      + '<span class="mm-title">' + esc(it.name || "(未命名)") + '</span>'
+      + '<span class="mm-cat">' + esc(it.category || "") + '</span>'
+      + '<span class="mm-params">' + esc(paramStr) + '</span>'
+      + '</label></div>';
+  }).join("");
+  const html =
+    '<div class="mm-head">'
+    + '<div class="mm-count">补全缺图 · 共 <b id="mmTotal">' + items.length + '</b> 条 · 已选 <b id="mmSel">' + items.length + '</b> 条</div>'
+    + '<div class="mm-tools">'
+    + '<input id="mmSearch" class="mm-search" placeholder="搜索标题/分类…">'
+    + '<button class="btn btn-sm" id="mmAll">全选</button>'
+    + '<button class="btn btn-sm" id="mmNone">全不选</button>'
+    + '<button class="btn btn-sm" id="mmInv">反选</button>'
+    + '</div></div>'
+    + '<div class="mm-list" id="mmList">' + rows + '</div>'
+    + '<div class="mm-foot">'
+    + '<button class="btn" id="mmCancel">取消</button>'
+    + '<button class="btn btn-primary" id="mmOk">确定生成已选</button>'
+    + '</div>';
+  window.showModal(html);
+  const list = document.getElementById("mmList");
+  const selEl = document.getElementById("mmSel");
+  const syncSel = () => { selEl.textContent = list.querySelectorAll(".mm-item:checked").length; };
+  list.addEventListener("change", syncSel);
+  document.getElementById("mmSearch").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    list.querySelectorAll(".mm-row").forEach((r) => {
+      const hit = !q || r.dataset.name.indexOf(q) >= 0 || r.dataset.cat.indexOf(q) >= 0;
+      r.style.display = hit ? "" : "none";
+    });
+  });
+  document.getElementById("mmAll").onclick = () => { list.querySelectorAll(".mm-item").forEach((c) => { c.checked = true; }); syncSel(); };
+  document.getElementById("mmNone").onclick = () => { list.querySelectorAll(".mm-item").forEach((c) => { c.checked = false; }); syncSel(); };
+  document.getElementById("mmInv").onclick = () => { list.querySelectorAll(".mm-item").forEach((c) => { c.checked = !c.checked; }); syncSel(); };
+  document.getElementById("mmCancel").onclick = () => window.closeModal();
+  document.getElementById("mmOk").onclick = () => {
+    const ids = [];
+    list.querySelectorAll(".mm-item:checked").forEach((c) => ids.push(parseInt(c.value, 10)));
+    window.closeModal();
+    if (!ids.length) { window.showToast("未选择任何提示词", "error"); return; }
+    window._submitMissing(ids, workflowPath);
+  };
+  syncSel();
+};
+
+// 提交用户勾选的缺图提示词子集
+window._submitMissing = async function(ids, workflowPath) {
+  const btn = document.getElementById("genMissingBtn");
+  const btnState = btn && window._runBtnState ? window._runBtnState(btn, "提交中...") : null;
+  if (btnState) btnState.loading();
+  try {
+    const body = Object.assign({
+      workflow_path: workflowPath,
+      orientation: window.currentOrientation,
+      quality: window.getQuality(),
+      prompt_ids: ids,
+    }, window.workflowExtraBody());
+    const data = await window.api("/api/generate_missing", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), timeout: 300000,
+    });
+    if (!data.count) { window.showToast("没有缺图的提示词，全部已生成 ✅", "success"); return; }
+    if (data.errors && data.errors.length) window.showToast(ids.length + " 条待补全，" + data.errors.length + " 个提交失败", "error");
+    else window.showToast("已提交 " + ids.length + " 条缺图提示词", "success");
+    window._showPendingProgress("补全缺图 (" + ids.length + " 条)");
+    window.trackJob(data.job_id);
+  } catch (e) {
+    window.showToast("补全缺图失败: " + e.message, "error");
+  } finally {
+    if (btnState) btnState.restore();
+  }
+};
+
 window.openVariationDialog = function() { document.getElementById("varModalOverlay").classList.add("active"); };
 window.closeVarModal = function() { document.getElementById("varModalOverlay").classList.remove("active"); };
 

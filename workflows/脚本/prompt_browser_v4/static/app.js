@@ -27,27 +27,62 @@ window._galleryPageSize = 50;
 window._galleryAllItems = [];
 window.searchTimer = null;
 
+// 提前从存储加载 UI 状态：UiState.get 读取的是内存中的 data，
+// 必须在读取前调用 load()（原代码在 DOMContentLoaded 里才 load，导致这里的恢复读到的是空 data）。
+window.UiState.load();
+
 // 从存储恢复每页条数
 window._promptPageSize = window.UiState.get("promptPageSize", 50);
 window._galleryPageSize = window.UiState.get("galleryPageSize", 50);
+
+// 从存储恢复分页/筛选状态（刷新后保持页码、排序、分类、标签等）
+window._promptPage = window.UiState.get("promptPage", 1);
+window._galleryPage = window.UiState.get("galleryPage", 1);
+window._gallerySort = window.UiState.get("gallerySort", "newest");
+window._galleryFilter = window.UiState.get("galleryFilter", "all");
+window._gallerySearch = window.UiState.get("gallerySearch", "");
+// 分类与标签筛选也需要恢复，否则刷新后侧栏已选标签会被重置为空
+window._galleryCategoryId = window.UiState.get("galleryCategoryId", "") || "";
+window._galleryTagIds = (function () {
+  const raw = window.UiState.get("galleryTagIds", "");
+  return (typeof raw === "string" && raw) ? raw.split(",").filter(Boolean).map(Number) : [];
+})();
+// 同步画廊筛选控件，使 HTMX 初始请求的 hx-vals 能读到已恢复的值
+const _gsEl = document.getElementById("gallerySort");
+if (_gsEl) _gsEl.value = window._gallerySort;
+const _gfEl = document.getElementById("galleryFilter");
+if (_gfEl) _gfEl.value = window._galleryFilter;
+const _gseEl = document.getElementById("gallerySearch");
+if (_gseEl) _gseEl.value = window._gallerySearch;
+// 让提示词列表初始 HTMX 请求也使用已恢复的页码（避免被写死的 page=1 覆盖）
+const _plc = document.getElementById("promptListContainer");
+if (_plc) _plc.setAttribute("hx-get", `/api/prompts/html?search=&sort=default&page=${window._promptPage || 1}`);
+
+// -------------------------------------------------------------------
+// HTMX 模式检测 —— 必须在 DOMContentLoaded 之前执行，否则 HTMX 库的
+// 内部 handler 会抢先处理 hx-trigger="load" → 发出一次 HTML 端请求，
+// 与我们 JS 端 loadHistory 的 JSON 请求形成竞态（HTMX 的 outerHTML swap
+// 会销毁 JS 已渲染好的过滤结果，导致"过滤图闪现后被全部图片覆盖"）。
+// -------------------------------------------------------------------
+{
+  const _urlParams = new URLSearchParams(window.location.search);
+  window._useHtmx = _urlParams.get("htmx") === "1" || localStorage.getItem("htmxMode") === "1";
+  if (window._useHtmx) {
+    document.body.dataset.htmxActive = "1";
+  } else {
+    // 非 HTMX 模式：立即移除所有 hx-* 属性，HTMX 库在 DOMContentLoaded
+    // 时将看不到任何 hx-trigger → 不会发出额外请求
+    document.querySelectorAll('[hx-get]').forEach(el => {
+      ['hx-get', 'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-swap-oob'].forEach(a => el.removeAttribute(a));
+    });
+  }
+}
 
 // -------------------------------------------------------------------
 // 初始化
 // -------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Phase 2: 检测 HTMX 模式（URL 参数 ?htmx=1 或 localStorage）
-  const urlParams = new URLSearchParams(window.location.search);
-  window._useHtmx = urlParams.get("htmx") === "1" || localStorage.getItem("htmxMode") === "1";
-  if (window._useHtmx) {
-    document.body.dataset.htmxActive = "1";
-    // 移除 `hx-trigger` 上的 `load` 以防止初始化时重复请求
-  } else {
-    // 非 HTMX 模式：移除所有 hx-* 属性，由前端 JS 完全接管渲染（含画廊分页组件）
-    document.querySelectorAll('[hx-get]').forEach(el => {
-      ['hx-get', 'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-swap-oob'].forEach(a => el.removeAttribute(a));
-    });
-  }
 
   // HTMX 事件监听：在提示词列表加载完成后触发自定义事件
   document.body.addEventListener("htmx:afterSwap", (event) => {
@@ -57,7 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.body.dispatchEvent(new CustomEvent("promptListLoaded"));
     }
     // 画廊 HTMX 交换后恢复选中状态和全选复选框
-    if (event.detail.elt.id === 'galleryContainer' || event.detail.elt.querySelector('#galleryGrid')) {
+    if (event.detail.elt.id === 'galleryGridInner' || event.detail.elt.id === 'galleryContainer' || event.detail.elt.querySelector('#galleryGrid')) {
       // 恢复每个 gallery-item 的选中状态
       window._gallerySelectedIds.forEach(id => {
         const checkEl = document.querySelector(`.gallery-item-check[data-id="${id}"]`);
@@ -69,7 +104,33 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  window.UiState.load();
+  // 画廊刷新时同步更新侧栏标签/分类计数；非 HTMX 模式下同时手动触发画廊内容刷新
+  document.body.addEventListener("galleryRefresh", () => {
+    window.loadGallerySidebar?.();
+    if (document.body.dataset.htmxActive !== "1") {
+      window.loadHistory?.(false);
+    }
+  });
+
+  // 持久化画廊/提示词的分页与筛选状态（HTMX 模式下翻页/筛选请求都带参数）
+  document.body.addEventListener("htmx:beforeRequest", (event) => {
+    const cfg = event.detail && event.detail.requestConfig;
+    if (!cfg || !cfg.url) return;
+    const u = cfg.url;
+    if (u.indexOf("/api/history/html") !== -1) {
+      const params = new URLSearchParams(u.split("?")[1] || "");
+      const p = params.get("page"); if (p) window._galleryPage = parseInt(p, 10) || 1;
+      const s = params.get("sort"); if (s) window._gallerySort = s;
+      window._galleryFilter = params.get("favorite") === "1" ? "favorite" : "all";
+      window._gallerySearch = params.get("search") || "";
+      window._persistGalleryState();
+    } else if (u.indexOf("/api/prompts/html") !== -1) {
+      const params = new URLSearchParams(u.split("?")[1] || "");
+      const p = params.get("page");
+      if (p) { window._promptPage = parseInt(p, 10) || 1; window.UiState.set("promptPage", window._promptPage); }
+    }
+  });
+
   window.loadCustomWorkflow();
   window.hiddenWorkflows = window.getHiddenWorkflows();
   window.applyUiState();
@@ -108,12 +169,14 @@ document.addEventListener("DOMContentLoaded", () => {
     window.updateRunBtn();
     window.updateSelectionBar();
   });
-  window.loadHistory(true);
+  // 页面加载时不触发 sync（后台 job_monitor_loop 每 30s 已自动同步），
+  // 避免每次 F5 都扫描 ComfyUI 全量历史 + 逐图读元数据（实测 ~5s）
+  window.loadHistory(false, false);
   window.loadActiveJobs();
 
   window.checkStatus();
   setInterval(window.checkStatus, 5000);
-  setInterval(() => window.loadHistory(false), 30000);
+  setInterval(() => window.loadHistory(false, false), 30000);
 
   // 恢复灯箱状态
   window.restoreLightboxState();
