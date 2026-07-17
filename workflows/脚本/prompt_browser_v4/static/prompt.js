@@ -476,6 +476,7 @@ window.renderDetail = function(p) {
 
   panel.innerHTML =
     (p.name ? `<div class="detail-header"><div class="detail-name">${window.escHtml(p.name)}</div><div class="detail-actions">` +
+      `<button class="btn btn-sm btn-primary" onclick="window.runPrompt(${p.id})" title="使用当前选中工作流跑图">🚀 跑图</button>` +
       `<button id="detailFavBtn" class="btn btn-sm ${favClass}" onclick="window.togglePromptFavorite(${p.id}, this)" title="收藏">${favIcon}</button>` +
       `<button id="detailPinBtn" class="btn btn-sm ${pinClass}" onclick="window.togglePromptPin(${p.id}, this)" title="置顶">${pinIcon}</button>` +
       `<button class="btn btn-sm btn-warning" onclick="window.openVariationDialog()">🎲 变体</button>` +

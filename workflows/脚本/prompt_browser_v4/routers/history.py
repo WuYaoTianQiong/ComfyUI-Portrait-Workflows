@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
-from peewee import fn
+from peewee import fn, SQL
 from pydantic import BaseModel
 
 from config import settings
@@ -142,32 +142,38 @@ def _sync_comfyui_history() -> int:
                 if filename.startswith("prompt_browser_"):
                     continue
                 try:
+                    subfolder = img.get("subfolder", "")
+                    img_type = img.get("type", "output")
+                    pp = _build_prompt_params_from_comfy(data, filename, subfolder, img_type)
                     Gh.insert(
                         job_id=None,
                         prompt_id=prompt_id,
                         comfyui_prompt_id=pid,
                         filename=filename,
-                        subfolder=img.get("subfolder", ""),
-                        img_type=img.get("type", "output"),
-                        view_url=build_view_url(
-                            filename,
-                            img.get("subfolder", ""),
-                            img.get("type", "output"),
-                        ),
+                        subfolder=subfolder,
+                        img_type=img_type,
+                        view_url=build_view_url(filename, subfolder, img_type),
                         preview="",
-                        prompt_params=_build_prompt_params_from_comfy(
-                            data, filename, img.get("subfolder", ""), img.get("type", "output")
-                        ),
+                        prompt_params=pp,
                         favorite=False,
                         source="comfyui_sync",
-                    ).on_conflict_ignore().execute()
+                    ).on_conflict_do_update(
+                        conflict_target=[Gh.filename, Gh.subfolder, Gh.img_type],
+                        set_={
+                            Gh.comfyui_prompt_id: pid,
+                            Gh.prompt_id: prompt_id,
+                            Gh.view_url: build_view_url(filename, subfolder, img_type),
+                            Gh.prompt_params: pp,
+                            Gh.created_at: SQL("CURRENT_TIMESTAMP"),
+                        },
+                    ).execute()
                     added += 1
                     try:
                         nr = Gh.get_or_none(
-                            (Gh.comfyui_prompt_id == pid)
-                            & (Gh.filename == filename)
-                            & (Gh.subfolder == img.get("subfolder", ""))
-                            & (Gh.img_type == img.get("type", "output"))
+                            (Gh.filename == filename)
+                            & (Gh.subfolder == subfolder)
+                            & (Gh.img_type == img_type)
+                            & (Gh.is_deleted == False)
                         )
                         if nr:
                             inherit_prompt_taxonomy(nr.id)

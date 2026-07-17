@@ -24,10 +24,8 @@ def _resolve_if_reparse(p: Path) -> Path:
 
 
 def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
-    """构建图片访问 URL（优先直读静态文件）"""
-    if not subfolder and img_type in ("output", "input", "temp"):
-        # 直接返回静态文件 URL，绕过 Python FileResponse
-        return f"/{img_type}/{quote(filename)}"
+    """构建图片访问 URL（始终走 /api/image，确保统一的 Cache-Control 策略，
+    避免静态文件路径缺失缓存控制导致浏览器旧缓存与新文件内容不一致）"""
     return (
         f"/api/image"
         f"?filename={quote(filename)}"

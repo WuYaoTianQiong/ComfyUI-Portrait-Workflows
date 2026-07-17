@@ -144,7 +144,7 @@ def proxy_image(
         return FileResponse(
             str(local),
             media_type=mt or "image/png",
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers={"Cache-Control": "no-cache"},
         )
 
     # 本地没有，代理到 ComfyUI（带超时，避免阻塞整个服务）
@@ -177,7 +177,7 @@ def proxy_image(
     return StreamingResponse(
         iter([content]),
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 
@@ -224,13 +224,14 @@ def serve_thumbnail(
     subfolder: str = Query(""),
     type: str = Query("output"),
     size: int = Query(300),
+    v: str = Query(None),  # cache-busting 版本号，仅用于生成不同 URL，不参与处理逻辑
 ):
     thumb_path = generate_thumbnail(filename, subfolder, type, size)
     if thumb_path is not None:
         return FileResponse(
             str(thumb_path),
             media_type="image/webp",
-            headers={"Cache-Control": "public, max-age=604800"},
+            headers={"Cache-Control": "no-cache"},
         )
 
     # 本地原图不存在：回退到 ComfyUI 代理取图并即时生成缩略图
@@ -249,7 +250,7 @@ def serve_thumbnail(
         return StreamingResponse(
             buf,
             media_type="image/webp",
-            headers={"Cache-Control": "public, max-age=604800"},
+            headers={"Cache-Control": "no-cache"},
         )
     except Exception:
         raise HTTPException(500, "缩略图生成失败")

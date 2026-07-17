@@ -114,11 +114,11 @@ class GenHistory(BaseModel):
 
     class Meta:
         table_name = "gen_history"
-        indexes = (
-            # 唯一约束包含 comfyui_prompt_id：不同 ComfyUI 运行产出的同名文件
-            # 各存各的记录，不再被静默合并（v4.1 迁移）
-            (("comfyui_prompt_id", "filename", "subfolder", "img_type"), True),
-        )
+        # 唯一索引不由 peewee Meta.indexes 管理，而是由
+        # _migrate_genhistory_unique_constraint 在 init_db 中创建
+        # 部分唯一索引 (filename, subfolder, img_type) WHERE is_deleted=0，
+        # 避免 peewee 创建非部分索引时被 is_deleted=1 的重复行触发 IntegrityError。
+        indexes = ()
 
 
 
@@ -329,36 +329,40 @@ def ensure_auto_categories():
 
 
 def _migrate_genhistory_unique_constraint(database):
-    """将 gen_history 唯一约束从 (filename, subfolder, img_type) 
-    迁移为 (comfyui_prompt_id, filename, subfolder, img_type)。
+    """将 gen_history 唯一约束回退到 (filename, subfolder, img_type) 三字段（部分索引）。
 
-    旧约束导致不同 ComfyUI 运行的同名文件被静默合并为一条记录（on_conflict_ignore /
-    on_conflict update），表现为"缩略图不匹配""旧记录被覆盖"。
+    历史：
+      - v4.0 及之前: (filename, subfolder, img_type) —— 不同运行的同名文件被静默合并
+      - v4.1: 升级为 (comfyui_prompt_id, filename, subfolder, img_type) —— 解决"合并覆盖"问题，
+        却引入了新问题：不同运行的同名文件各存一条，但物理文件已被后者覆盖，
+        导致多条记录指向同一份文件内容，画廊出现重复图。
+      - v4.2 (本迁移): 降回 (filename, subfolder, img_type)，但改用 `WHERE is_deleted=0`
+        部分唯一索引。不同运行的同名文件通过 ON CONFLICT DO UPDATE 覆写旧记录
+        （id 不变，标签/分类/收藏不丢失），而非新插入。
     """
-    # 查找旧唯一索引（包含 filename/subfolder/img_type 但不含 comfyui_prompt_id）
-    old_rows = database.execute_sql(
+    # 删除含 comfyui_prompt_id 的旧唯一索引
+    old = database.execute_sql(
         "SELECT name FROM sqlite_master "
         "WHERE type='index' AND tbl_name='gen_history' "
-        "AND sql LIKE '%filename%' "
-        "AND sql LIKE '%subfolder%' "
-        "AND sql LIKE '%img_type%' "
-        "AND sql NOT LIKE '%comfyui_prompt_id%'"
+        "AND sql LIKE '%comfyui_prompt_id%'"
     ).fetchall()
-    for (idx_name,) in old_rows:
+    for (idx_name,) in old:
         try:
-            database.execute_sql(f'DROP INDEX IF EXISTS "{idx_name}"')
+            database.execute_sql(f'DROP INDEX "{idx_name}"')
             print(f"[migrate] 已删除旧唯一索引: {idx_name}")
         except Exception as e:
-            print(f"[migrate] 删除旧索引 {idx_name} 失败（可能已不存在）: {e}")
+            print(f"[migrate] 删除 {idx_name} 失败: {e}")
 
-    # 创建新唯一索引（SQLite 中 NULL 被视为不同值，多条 comfyui_prompt_id=NULL 
-    # 但同名的记录不会冲突，符合旧数据的兼容需求）
-    database.execute_sql(
-        "CREATE UNIQUE INDEX IF NOT EXISTS "
-        "gen_history_comfyui_prompt_id_filename_subfolder_img_type "
-        "ON gen_history(comfyui_prompt_id, filename, subfolder, img_type)"
-    )
-    print("[migrate] gen_history 唯一约束已迁移: (comfyui_prompt_id, filename, subfolder, img_type)")
+    # 创建部分唯一索引 (已存在则跳过)
+    try:
+        database.execute_sql("""
+            CREATE UNIQUE INDEX IF NOT EXISTS gen_history_filename_subfolder_img_type
+            ON gen_history(filename, subfolder, img_type)
+            WHERE is_deleted = 0
+        """)
+        print("[migrate] 已创建部分唯一索引 (filename, subfolder, img_type) WHERE is_deleted=0")
+    except Exception as e:
+        print(f"[migrate] 创建部分唯一索引（可能已存在）: {e}")
 
 
 def init_db():

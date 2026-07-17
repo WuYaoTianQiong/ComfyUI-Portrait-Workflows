@@ -60,7 +60,7 @@ window._createGalleryItemDiv = function(item, idx) {
   div.dataset.id = item.id;
   div.dataset.index = idx;
 
-  const thumbUrl = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=600`;
+  const thumbUrl = `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=600&v=${encodeURIComponent(item.created_at || item.id)}`;
 
   const meta = window.buildImageMeta(item);
   const filename = item.filename || '';
