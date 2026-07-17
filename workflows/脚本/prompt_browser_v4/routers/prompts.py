@@ -103,18 +103,8 @@ class PromptDetail(BaseModel):
 
 # ---------- Routes ----------
 
-@router.get("/prompts", response_model=dict)
-def list_prompts(
-    search: str = Query(""),
-    tag: str = Query(""),
-    category_id: Optional[int] = Query(None),
-    tag_ids: Optional[str] = Query(None),
-    sort: str = Query("newest"),
-    order: str = Query("desc"),
-    page: int = Query(1),
-    page_size: int = Query(50),
-):
-    """搜索提示词列表，支持排序和分页"""
+def _build_prompt_query(search, tag, category_id, tag_ids, sort, order):
+    """构造提示词筛选 + 排序后的查询（不含分页），供列表与"定位到已选"共用，保证排序一致。"""
     query = Prompt.select()
     if search:
         query = query.where(
@@ -162,11 +152,44 @@ def list_prompts(
         # 默认 newest
         order_list = [Prompt.is_pinned.desc(), Prompt.id.desc()]
     # ==========================================
+    return query.order_by(*order_list)
 
+
+@router.get("/prompts/position", response_model=dict)
+def prompt_position(
+    prompt_id: int = Query(...),
+    search: str = Query(""),
+    tag: str = Query(""),
+    category_id: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+    sort: str = Query("newest"),
+    order: str = Query("desc"),
+):
+    """返回某条提示词在给定筛选/排序下的 0-based 全局序号，用于"定位到已选"跨页跳转。"""
+    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order)
+    ids = [r.id for r in query]
+    if prompt_id in ids:
+        return {"found": True, "index": ids.index(prompt_id), "total": len(ids)}
+    return {"found": False, "index": -1, "total": len(ids)}
+
+
+@router.get("/prompts", response_model=dict)
+def list_prompts(
+    search: str = Query(""),
+    tag: str = Query(""),
+    category_id: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+    sort: str = Query("newest"),
+    order: str = Query("desc"),
+    page: int = Query(1),
+    page_size: int = Query(50),
+):
+    """搜索提示词列表，支持排序和分页"""
+    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order)
     total = query.count()
     
     offset = (page - 1) * page_size
-    rows = query.order_by(*order_list).offset(offset).limit(page_size)
+    rows = query.offset(offset).limit(page_size)
 
     prompts = []
     for r in rows:

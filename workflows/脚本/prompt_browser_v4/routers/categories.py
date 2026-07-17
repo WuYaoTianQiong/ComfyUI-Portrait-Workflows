@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from models import (
-    Category, PromptCategory, Prompt, db,
+    Category, PromptCategory, Prompt, db, ImageCategory,
     classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
     auto_classify_prompt,
 )
@@ -32,12 +32,13 @@ class CategoryUpdate(BaseModel):
 def list_categories(
     parent_id: Optional[int] = Query(None, description="父分类 ID，NULL=顶级分类"),
     tree: bool = Query(False, description="是否返回树形结构"),
+    count_scope: str = Query("prompt", description="计数维度: prompt=提示词数, image=图片数"),
 ):
     """获取分类列表（支持树形结构）"""
     if tree:
         # 返回树形结构
         all_cats = list(Category.select().order_by(Category.sort_order, Category.id))
-        tree_data = build_category_tree(all_cats)
+        tree_data = build_category_tree(all_cats, count_scope)
         return {"categories": tree_data}
     else:
         # 返回扁平列表
@@ -56,12 +57,14 @@ def list_categories(
                 "parent_id": c.parent_id,
                 "color": c.color,
                 "sort_order": c.sort_order,
-                "prompt_count": PromptCategory.select().where(PromptCategory.category_id == c.id).count(),
+                "prompt_count": (ImageCategory.select().where(ImageCategory.category == c.id).count()
+                             if count_scope == "image"
+                             else PromptCategory.select().where(PromptCategory.category_id == c.id).count()),
             })
         return {"categories": cats}
 
 
-def build_category_tree(categories: list, parent_id: Optional[int] = None) -> list:
+def build_category_tree(categories: list, parent_id: Optional[int] = None, count_scope: str = "prompt") -> list:
     """递归构建分类树"""
     tree = []
     for c in categories:
@@ -72,8 +75,10 @@ def build_category_tree(categories: list, parent_id: Optional[int] = None) -> li
                 "parent_id": c.parent_id,
                 "color": c.color,
                 "sort_order": c.sort_order,
-                "prompt_count": PromptCategory.select().where(PromptCategory.category_id == c.id).count(),
-                "children": build_category_tree(categories, c.id),
+                "prompt_count": (ImageCategory.select().where(ImageCategory.category == c.id).count()
+                                 if count_scope == "image"
+                                 else PromptCategory.select().where(PromptCategory.category_id == c.id).count()),
+                "children": build_category_tree(categories, c.id, count_scope),
             }
             tree.append(node)
     return tree

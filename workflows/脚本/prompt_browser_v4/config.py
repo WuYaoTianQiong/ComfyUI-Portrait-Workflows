@@ -10,25 +10,54 @@ def _resolve_project_root(script_dir: Path) -> Path:
     return script_dir.parent  # workflows/prompt_browser_v4 → workflows/
 
 
+def _safe_is_dir(p: Path) -> bool:
+    """容错 is_dir：junction/符号链接在 Windows 上可能抛 WinError 448，视为不存在。
+
+    用 os.readlink 解析单层重解析点（junction）得到真实目标后再判目录，与
+    services.helpers._resolve_if_reparse 一致；避免 os.path.realpath/exists 在
+    不受信任的装入点上抛 WinError 448 而被误判为不存在。
+    """
+    import os
+    try:
+        try:
+            target = os.readlink(p)
+            if target:
+                p = Path(target)
+        except (OSError, ValueError):
+            pass
+        return os.path.isdir(p)
+    except OSError:
+        return False
+
+
 def _resolve_comfyui_root(project_root: Path, env_override: str | None = None) -> Path:
-    """自适应 ComfyUI 安装目录，支持三种结构"""
+    """自适应 ComfyUI 安装目录：从 project_root 向上逐级查找首个含 output 子目录的根。
+
+    覆盖 v4 位于 workflows/脚本/prompt_browser_v4 等深层目录、而 ComfyUI 根在更上层的情况
+    （如 ComfyUI-aki-v3/ComfyUI）。旧逻辑仅检查固定两层，会误选不存在的目录，导致
+    get_image_metadata / 缩略图 / 模型提取全部定位失败。
+    """
     if env_override:
         p = Path(env_override)
-        if p.exists():
+        if _safe_is_dir(p):
             return p
 
-    # 结构 A: ComfyUI-aki-v3/ComfyUI/  (D 盘 style)
-    candidate_a = project_root.parent / "ComfyUI"
-    if candidate_a.exists():
-        return candidate_a
+    cur = project_root
+    for _ in range(8):
+        # 当前层直接是 ComfyUI 根（含 output）
+        if _safe_is_dir(cur / "output"):
+            return cur
+        # 当前层下有 ComfyUI 子目录（含 output）
+        cand = cur / "ComfyUI"
+        if _safe_is_dir(cand / "output"):
+            return cand
+        parent = cur.parent
+        if parent == cur:  # 抵达盘符根，停止
+            break
+        cur = parent
 
-    # 结构 B: 再往上一级就是 ComfyUI 根目录 (F 盘 style: 根目录/output/)
-    candidate_b = project_root.parent.parent
-    if candidate_b.exists() and (candidate_b / "output").is_dir():
-        return candidate_b
-
-    # 兜底：返回默认路径（即使不存在）
-    return candidate_a
+    # 兜底：保持旧行为（即使不存在）
+    return project_root.parent / "ComfyUI"
 
 
 class Settings(BaseSettings):
@@ -57,5 +86,5 @@ settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
 
 # 启动时打印确认
 print(f"[config] comfyui_root = {settings.comfyui_root}")
-print(f"[config]   output dir exists = {(settings.comfyui_root / 'output').is_dir()}")
+print(f"[config]   output dir exists = {_safe_is_dir(settings.comfyui_root / 'output')}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")

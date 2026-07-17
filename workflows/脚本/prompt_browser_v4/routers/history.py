@@ -6,17 +6,18 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from peewee import fn
 from pydantic import BaseModel
 
 from config import settings
-from models import GenHistory as Gh, Prompt
-from services.helpers import build_view_url, get_image_metadata
+from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from services.helpers import build_view_url, get_image_metadata, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
 from shared import templates
 
 router = APIRouter(tags=["历史"])
 
 COMFYUI_API = settings.comfyui_api
-OUTPUT_ROOT = settings.comfyui_root / "output"
+OUTPUT_ROOT = _resolve_if_reparse(settings.comfyui_root / "output")
 
 
 # ---------------------------------------------------------------------------
@@ -36,8 +37,9 @@ def _image_exists(filename: str, subfolder: str, img_type: str) -> bool:
     return bool(meta)
 
 
-def _enrich_item(r, prompt_cache=None) -> dict:
-    meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) -> dict:
+    if meta is None:
+        meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
     prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
     prompt_id = r.prompt_id  # 可能为 None（竞态条件导致）
 
@@ -58,6 +60,11 @@ def _enrich_item(r, prompt_cache=None) -> dict:
                         if prompt_id is None and it.get("prompt_id"):
                             Gh.update(prompt_id=it["prompt_id"]).where(Gh.id == r.id).execute()
                             prompt_id = it["prompt_id"]
+                            # 补回 prompt_id 后，继承来源提示词的分类/标签
+                            try:
+                                inherit_prompt_taxonomy(r.id, force=True)
+                            except Exception:
+                                pass
                         break
         except Exception:
             pass
@@ -91,6 +98,18 @@ def _enrich_item(r, prompt_cache=None) -> dict:
                 item["prompt_name"] = prompt.name
         except Exception:
             pass
+    if categories is None:
+        categories = list(ImageCategory.select().where(ImageCategory.image == r.id))
+    if tags is None:
+        tags = list(ImageTag.select().where(ImageTag.image == r.id))
+    item["categories"] = [
+        {"id": c.category.id, "name": c.category.name, "color": c.category.color}
+        for c in categories
+    ]
+    item["tags"] = [
+        {"id": t.tag.id, "name": t.tag.name, "color": t.tag.color}
+        for t in tags
+    ]
     return item
 
 
@@ -136,14 +155,60 @@ def _sync_comfyui_history() -> int:
                             img.get("type", "output"),
                         ),
                         preview="",
-                        prompt_params=None,
+                        prompt_params=_build_prompt_params_from_comfy(
+                            data, filename, img.get("subfolder", ""), img.get("type", "output")
+                        ),
                         favorite=False,
                         source="comfyui_sync",
                     ).on_conflict_ignore().execute()
                     added += 1
+                    try:
+                        nr = Gh.get_or_none(
+                            (Gh.comfyui_prompt_id == pid)
+                            & (Gh.filename == filename)
+                            & (Gh.subfolder == img.get("subfolder", ""))
+                            & (Gh.img_type == img.get("type", "output"))
+                        )
+                        if nr:
+                            inherit_prompt_taxonomy(nr.id)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
     return added
+
+
+def _build_prompt_params_from_comfy(data: dict, filename: str = "", subfolder: str = "", img_type: str = "output") -> str | None:
+    """从 ComfyUI history 条目构造 prompt_params JSON（含 model，可选宽高/orientation）。
+
+    用于 _sync_comfyui_history 在同步新图时即写入模型与方向，不依赖文件是否仍在磁盘；
+    若传入图片定位参数，则进一步从实际像素尺寸补写 width/height/orientation。
+    """
+    pp: dict = {}
+    try:
+        prompt_dict = data.get("prompt")
+        if prompt_dict:
+            model = extract_model_from_comfy_prompt(prompt_dict)
+            if model:
+                pp["model"] = model
+    except Exception:
+        pass
+    # 从实际出图文件补宽高 / orientation（文件缺失时退化为仅 model）
+    if filename:
+        try:
+            meta = get_image_metadata(filename, subfolder, img_type)
+            w, h = meta.get("width"), meta.get("height")
+            if w and h:
+                pp["width"] = w
+                pp["height"] = h
+                o = compute_orientation(w, h)
+                if o:
+                    pp["orientation"] = o
+        except Exception:
+            pass
+    if not pp:
+        return None
+    return json.dumps(pp, ensure_ascii=False)
 
 
 def _build_prompt_cache(rows) -> dict:
@@ -179,6 +244,12 @@ def list_history(
     favorite: bool = Query(None),
     sort: str = Query("newest"),
     search: str = Query(""),
+    category_id: int = Query(None),
+    tag_ids: str = Query(""),
+    source: str = Query(""),
+    date: str = Query(""),
+    model: str = Query(""),
+    orientation: str = Query(""),
 ):
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
@@ -196,48 +267,200 @@ def list_history(
             condition = condition | (Gh.prompt_id << prompt_matches)
         q = q.where(condition)
 
+    if category_id is not None:
+        q = q.join(ImageCategory).where(ImageCategory.category == category_id)
+    if tag_ids:
+        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
+        if tid_list:
+            # 多标签取交集（图像必须同时拥有所有选中标签）
+            for tid in tid_list:
+                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
+                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
+                q = q.where(direct | via_prompt)
+
+    if source:
+        q = q.where(Gh.source == source)
+    if date:
+        q = q.where(fn.strftime("%Y-%m", Gh.created_at) == date)
+    if model:
+        mq = fn.json_extract(Gh.prompt_params, "$.model")
+        if model == "未记录":
+            q = q.where((mq.is_null(True)) | (mq == "") | (mq == "unknown") | (mq == "null"))
+        else:
+            q = q.where(mq == model)
+
+    if orientation:
+        oq = fn.json_extract(Gh.prompt_params, "$.orientation")
+        if orientation == "未记录":
+            q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
+        else:
+            q = q.where(oq == orientation)
+
     total = q.count()
 
     offset = (page - 1) * page_size
     q = q.order_by(Gh.id.desc()).offset(offset).limit(page_size)
     rows = list(q)
+    ids = [r.id for r in rows]
 
-    deleted_ids = []
-    deleted_records = []  # 记录完整信息用于缩略图清理
+    # 批量预取 tags / categories，避免逐图 N+1 子查询
+    tags_map = {}
+    for t in ImageTag.select().where(ImageTag.image.in_(ids)):
+        tags_map.setdefault(t.image_id, []).append(t)
+    cats_map = {}
+    for c in ImageCategory.select().where(ImageCategory.image.in_(ids)):
+        cats_map.setdefault(c.image_id, []).append(c)
+
     alive = []
+    meta_cache = {}
+    missing_meta_ids = []
     for r in rows:
-        if not _image_exists(r.filename, r.subfolder or "", r.img_type or "output"):
-            deleted_ids.append(r.id)
-            deleted_records.append(r)
-            continue
+        # 每张图只解码一次元数据，复用于存在性检查与 enrich（消除重复 PIL 解码）
+        meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+        if not meta:
+            # 图片文件暂时读不到（junction 解析抖动 / 文件被锁 / 解码失败）并不等于
+            # 该历史记录应被删除。旧逻辑在此处硬删记录，曾多次误删正常图片（Windows
+            # 跨卷 junction 上 exists() 抛 WinError 448 被 except 吞掉 → 误判为文件缺失），
+            # 表现为“刷新页面后操作历史丢失”。改为：保留数据库记录，仅以空元数据呈现，
+            # 绝不在列表查询路径上静默销毁用户数据。真正的清理请走显式删除接口。
+            meta = {}
+            missing_meta_ids.append(r.id)
+        meta_cache[r.id] = meta
         alive.append(r)
 
-    if deleted_ids:
-        try:
-            Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
-            # 清理已删除图片的缩略图
-            for r in deleted_records:
-                _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
-        except Exception as e:
-            print(f"[history] 清理已删除图片记录失败: {e}")
-
-    def _get_meta(item):
-        return get_image_metadata(item.filename, item.subfolder or "", item.img_type or "output")
+    if missing_meta_ids:
+        print(f"[history] 警告: {len(missing_meta_ids)} 张图的元数据读取失败（文件可能暂不可读），"
+              f"已保留记录未删除")
 
     if sort == "oldest":
         alive.sort(key=lambda r: r.id)
     elif sort == "size_asc":
-        alive.sort(key=lambda r: _get_meta(r).get("file_size", 0) or 0)
+        alive.sort(key=lambda r: meta_cache[r.id].get("file_size", 0) or 0)
     elif sort == "size_desc":
-        alive.sort(key=lambda r: _get_meta(r).get("file_size", 0) or 0, reverse=True)
+        alive.sort(key=lambda r: meta_cache[r.id].get("file_size", 0) or 0, reverse=True)
     elif sort == "res_asc":
-        alive.sort(key=lambda r: (_get_meta(r).get("width", 0) or 0))
+        alive.sort(key=lambda r: (meta_cache[r.id].get("width", 0) or 0))
     elif sort == "res_desc":
-        alive.sort(key=lambda r: (_get_meta(r).get("width", 0) or 0), reverse=True)
+        alive.sort(key=lambda r: (meta_cache[r.id].get("width", 0) or 0), reverse=True)
 
     cache = _build_prompt_cache(alive)
-    result = [_enrich_item(r, cache) for r in alive]
+    result = [
+        _enrich_item(r, cache, meta_cache.get(r.id, {}), cats_map.get(r.id), tags_map.get(r.id))
+        for r in alive
+    ]
     return {"items": result, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/history/ids", response_model=dict)
+def _facet_base(favorite, search, category_id, tag_ids):
+    q = Gh.select().where(Gh.is_deleted == False)
+    if favorite is not None:
+        q = q.where(Gh.favorite == favorite)
+    if search:
+        like = f"%{search}%"
+        condition = (
+            (Gh.filename ** like)
+            | (Gh.subfolder ** like)
+            | (Gh.comfyui_prompt_id ** like)
+        )
+        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
+        if prompt_matches:
+            condition = condition | (Gh.prompt_id << prompt_matches)
+        q = q.where(condition)
+    if category_id is not None:
+        q = q.join(ImageCategory).where(ImageCategory.category == category_id)
+    if tag_ids:
+        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
+        if tid_list:
+            # 多标签取交集（图像必须同时拥有所有选中标签）
+            for tid in tid_list:
+                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
+                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
+                q = q.where(direct | via_prompt)
+    return q
+
+
+@router.get("/history/facets")
+def history_facets(
+    favorite: bool = Query(None),
+    search: str = Query(""),
+    category_id: int = Query(None),
+    tag_ids: str = Query(""),
+):
+    """分面计数：基于 favorite/search/category/tag 当前筛选（不含分面维度自身），
+    返回 source / date(年-月) / model 各取值的数量。"""
+    sub = _facet_base(favorite, search, category_id, tag_ids).select(Gh.id).distinct()
+    q0 = Gh.select().where(Gh.id.in_(sub))
+    src_rows = q0.select(Gh.source, fn.COUNT(Gh.id).alias("c")).group_by(Gh.source)
+    sources = {r.source: r.c for r in src_rows}
+    d_rows = q0.select(
+        fn.strftime("%Y-%m", Gh.created_at).alias("d"), fn.COUNT(Gh.id).alias("c")
+    ).group_by(fn.strftime("%Y-%m", Gh.created_at))
+    dates = {r.d: r.c for r in d_rows}
+    m_expr = fn.json_extract(Gh.prompt_params, "$.model")
+    m_rows = q0.select(m_expr.alias("m"), fn.COUNT(Gh.id).alias("c")).group_by(m_expr)
+    models = {}
+    for r in m_rows:
+        m = r.m
+        if m in (None, "", "null", "unknown"):
+            m = "未记录"
+        models[m] = models.get(m, 0) + r.c
+    o_expr = fn.json_extract(Gh.prompt_params, "$.orientation")
+    o_rows = q0.select(o_expr.alias("o"), fn.COUNT(Gh.id).alias("c")).group_by(o_expr)
+    orients = {}
+    for r in o_rows:
+        o = r.o
+        if o in (None, "", "null", "unknown"):
+            o = "未记录"
+        orients[o] = orients.get(o, 0) + r.c
+    return {"source": sources, "date": dates, "model": models, "orientation": orients}
+
+
+
+def history_ids(
+    favorite: str = Query(""),
+    sort: str = Query("newest"),
+    search: str = Query(""),
+    category_id: int = Query(None),
+    tag_ids: str = Query(""),
+    source: str = Query(""),
+    date: str = Query(""),
+    model: str = Query(""),
+    orientation: str = Query(""),
+):
+    """返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。"""
+    q = Gh.select(Gh.id).where(Gh.is_deleted == False)
+    if favorite == "1":
+        q = q.where(Gh.favorite == True)
+    if search:
+        like = f"%{search}%"
+        condition = (
+            (Gh.filename ** like)
+            | (Gh.subfolder ** like)
+            | (Gh.comfyui_prompt_id ** like)
+        )
+        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
+        if prompt_matches:
+            condition = condition | (Gh.prompt_id << prompt_matches)
+        q = q.where(condition)
+    if source:
+        q = q.where(Gh.source == source)
+    if date:
+        q = q.where(fn.strftime("%Y-%m", Gh.created_at) == date)
+    if model:
+        mq = fn.json_extract(Gh.prompt_params, "$.model")
+        if model == "未记录":
+            q = q.where((mq.is_null(True)) | (mq == "") | (mq == "unknown") | (mq == "null"))
+        else:
+            q = q.where(mq == model)
+    if orientation:
+        oq = fn.json_extract(Gh.prompt_params, "$.orientation")
+        if orientation == "未记录":
+            q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
+        else:
+            q = q.where(oq == orientation)
+    ids = [r.id for r in q]
+    return {"ids": ids, "total": len(ids)}
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +470,40 @@ def list_history(
 @router.api_route("/history_sync", methods=["GET", "POST"])
 def sync_history(page_size: int = Query(500)):
     added = _sync_comfyui_history()
-    data = list_history(page=1, page_size=page_size, favorite=None, sort="newest", search="")
+    # 注意：list_history 是 FastAPI 路由函数，直接 Python 调用时未显式传入的参数
+    # 会拿到 Query(...) 默认对象（FieldInfo）而非真正的 None/""，
+    # 会导致 `if category_id is not None` / `tag_ids.split` 等分支误触发并 500。
+    # 因此这里必须显式传入全部参数的真实默认值。
+    data = list_history(
+        page=1, page_size=page_size, favorite=None, sort="newest", search="",
+        category_id=None, tag_ids="", source="", date="", model="", orientation="",
+    )
     return {"added": added, "items": data["items"], "total": data["total"]}
+
+
+# ---------------------------------------------------------------------------
+# 清理文件已被手动删除的记录
+# ---------------------------------------------------------------------------
+
+@router.post("/history/cleanup_missing")
+def cleanup_missing_files():
+    """扫描所有未删除的历史记录，将对应文件已不存在的记录标记为软删除，
+    同时清理残留的缩略图缓存。用于手动从磁盘删除图片后的数据库同步。"""
+    from services.thumbnail import _get_image_path
+
+    rows = list(Gh.select().where(Gh.is_deleted == False))
+    missing: list[Gh] = []
+    for r in rows:
+        path = _get_image_path(r.filename, r.subfolder or "", r.img_type or "output")
+        if path is None:
+            missing.append(r)
+            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
+
+    if missing:
+        ids = [r.id for r in missing]
+        Gh.update(is_deleted=True).where(Gh.id.in_(ids)).execute()
+
+    return {"success": True, "cleaned": len(missing), "total": len(rows)}
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +610,8 @@ def history_list_html(
     favorite: str = Query(""),
     sort: str = Query("newest"),
     search: str = Query(""),
+    category_id: str = Query(""),
+    tag_ids: str = Query(""),
 ):
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite:
@@ -366,24 +623,26 @@ def history_list_html(
         if prompt_matches:
             condition = condition | (Gh.prompt_id << prompt_matches)
         q = q.where(condition)
+    if category_id:
+        q = q.join(ImageCategory).where(ImageCategory.category == category_id)
+    if tag_ids:
+        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
+        if tid_list:
+            # 多标签取交集（图像必须同时拥有所有选中标签）
+            for tid in tid_list:
+                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
+                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
+                q = q.where(direct | via_prompt)
     total = q.count()
     rows = list(q.order_by(Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
 
-    # 自动清理本地已不存在的图片记录，与 /history 端点保持一致
-    deleted_ids = []
-    deleted_records = []
+    # 不再自动删除记录：图片文件暂不可读（junction 抖动/文件被锁/解码失败）并不代表
+    # 该历史记录应被删除。旧逻辑在此硬删，曾多次误删正常图片（表现为“刷新页面后
+    # 操作历史丢失”）。改为：保留数据库记录，仅以空元数据呈现，绝不在列表/同步路径上
+    # 静默销毁用户数据。真正的清理请走显式删除接口。
     alive = []
     for r in rows:
-        if not _image_exists(r.filename, r.subfolder or "", r.img_type or "output"):
-            deleted_ids.append(r.id)
-            deleted_records.append(r)
-            continue
         alive.append(r)
-
-    if deleted_ids:
-        Gh.delete().where(Gh.id.in_(deleted_ids)).execute()
-        for r in deleted_records:
-            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
 
     items = []
     for r in alive:
@@ -415,6 +674,13 @@ def history_list_html(
 # 新增：以历史图片为输入，使用指定工作流处理（超分/重绘等）
 # ====================================================================
 
+@router.post("/history/backfill_taxonomy")
+def backfill_taxonomy():
+    """为所有带 prompt_id 且尚未分类的图片批量补齐来源提示词的分类/标签。"""
+    done = backfill_image_taxonomy()
+    return {"success": True, "backfilled": done}
+
+
 class ProcessImageRequest(BaseModel):
     workflow_path: str
     workflow_content: str | None = None
@@ -440,6 +706,7 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
         src_dir = settings.comfyui_root / "input"
     else:
         src_dir = settings.comfyui_root / "output"
+    src_dir = _resolve_if_reparse(src_dir)
     src_path = src_dir / (r.subfolder or "") / r.filename if r.subfolder else src_dir / r.filename
 
     if not src_path.exists():
@@ -496,3 +763,58 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     except Exception as e:
         update_job_items(job_id, items, status="error")
         raise HTTPException(500, f"推送 ComfyUI 失败: {e}")
+
+
+# ======== Phase 5: 图片分类 / 标签管理 ========
+@router.post("/history/{item_id}/categories/{cat_id}")
+def add_image_category(item_id: int, cat_id: int):
+    r = Gh.get_or_none(Gh.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+    c = Category.get_or_none(Category.id == cat_id)
+    if c is None:
+        raise HTTPException(404, "分类不存在")
+    _, created = ImageCategory.get_or_create(image=item_id, category=cat_id)
+    return {"success": True, "created": created}
+
+
+@router.delete("/history/{item_id}/categories/{cat_id}")
+def remove_image_category(item_id: int, cat_id: int):
+    pc = ImageCategory.get_or_none((ImageCategory.image == item_id) & (ImageCategory.category == cat_id))
+    if pc is None:
+        raise HTTPException(404, "关联关系不存在")
+    pc.delete_instance()
+    return {"success": True}
+
+
+@router.post("/history/{item_id}/tags/{tag_id}")
+def add_image_tag(item_id: int, tag_id: int):
+    r = Gh.get_or_none(Gh.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+    t = Tag.get_or_none(Tag.id == tag_id)
+    if t is None:
+        raise HTTPException(404, "标签不存在")
+    _, created = ImageTag.get_or_create(image=item_id, tag=tag_id)
+    if created:
+        Tag.update(usage_count=Tag.usage_count + 1).where(Tag.id == tag_id).execute()
+    return {"success": True, "created": created}
+
+
+@router.delete("/history/{item_id}/tags/{tag_id}")
+def remove_image_tag(item_id: int, tag_id: int):
+    it = ImageTag.get_or_none((ImageTag.image == item_id) & (ImageTag.tag == tag_id))
+    if it is None:
+        raise HTTPException(404, "关联关系不存在")
+    it.delete_instance()
+    Tag.update(usage_count=Tag.usage_count - 1).where(Tag.id == tag_id).execute()
+    return {"success": True}
+
+
+@router.post("/history/{item_id}/inherit")
+def inherit_image_taxonomy(item_id: int):
+    r = Gh.get_or_none(Gh.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+    added = inherit_prompt_taxonomy(item_id, force=True)
+    return {"success": True, "added": added}

@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 
 from config import settings
 from models import init_db, db, GenJob
+from services.helpers import _resolve_if_reparse
 
 
 # ======== 后台任务监控 ========
@@ -138,6 +139,10 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
         # 静态资源的响应不缓存（html/js/css），方便开发调试
         if response.status_code < 400 and not request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        # 数据 API 默认禁止浏览器缓存，避免前端刷新/轮询/翻页时吃到旧数据
+        # （缩略图/原图等自带 Cache-Control 长缓存的端点不受影响）
+        if request.url.path.startswith("/api/") and "cache-control" not in {k.lower() for k in response.headers.keys()}:
+            response.headers["Cache-Control"] = "no-store"
         if response.status_code == 404 and not request.url.path.startswith("/api/"):
             index_file = settings.static_dir / "index.html"
             if index_file.exists():
@@ -147,15 +152,17 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
         return response
 
 # 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
-_output_dir = settings.comfyui_root / "output"
+# 注意：comfyui_root/output 可能是跨卷 junction，未解析时 .exists() 在 Windows
+# “不受信任装入点”上会抛 WinError 448 导致整个服务启动崩溃，必须先解析。
+_output_dir = _resolve_if_reparse(settings.comfyui_root / "output")
 if _output_dir.exists():
     app.mount("/output", StaticFiles(directory=str(_output_dir)), name="output")
     print(f"  [mount] /output -> {_output_dir}")
-_input_dir = settings.comfyui_root / "input"
+_input_dir = _resolve_if_reparse(settings.comfyui_root / "input")
 if _input_dir.exists():
     app.mount("/input", StaticFiles(directory=str(_input_dir)), name="input")
     print(f"  [mount] /input -> {_input_dir}")
-_temp_dir = settings.comfyui_root / "temp"
+_temp_dir = _resolve_if_reparse(settings.comfyui_root / "temp")
 if _temp_dir.exists():
     app.mount("/temp", StaticFiles(directory=str(_temp_dir)), name="temp")
     print(f"  [mount] /temp -> {_temp_dir}")

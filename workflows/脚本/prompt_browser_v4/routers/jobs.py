@@ -8,10 +8,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
 from models import GenJob, GenHistory
+from models import inherit_prompt_taxonomy
 from services.comfyui_client import (
     get_queue, get_history, get_progress, interrupt, clear_queue,
 )
-from services.helpers import build_view_url
+from services.helpers import build_view_url, extract_model_name, get_image_metadata, compute_orientation
 from state import batch_stop_flag
 
 router = APIRouter(tags=["任务"])
@@ -131,6 +132,7 @@ def get_job_status_snapshot(job: dict) -> dict:
 
         if pid and found_in_hist:
             status = "done"
+            prev_status = item.get("status")
             images = []
             for node_out in hist[pid].get("outputs", {}).values():
                 for img in node_out.get("images", []):
@@ -149,16 +151,20 @@ def get_job_status_snapshot(job: dict) -> dict:
 
             item["images"] = images
             done_count += 1
-            print(f"[JOB] item done, prompt_id={pid}, found {len(images)} valid images")
-            if not images:
-                print(f"[JOB] WARNING: pid={pid} marked done but no valid images remain (all deleted?)")
 
-            # 写入历史表，携带 prompt_params（含随机组合的 selection 等信息）
-            _insert_history_for_item(
-                job["id"], item.get("prompt_id"), pid, images,
-                item.get("prompt_preview", ""),
-                item.get("prompt_params"),
-            )
+            # 仅在状态真正从「非 done」转为「done」时打印日志并写历史表，
+            # 避免前端/后台轮询对已完成的任务反复打印与重复入库（日志刷屏）。
+            if prev_status != "done":
+                print(f"[JOB] item done, prompt_id={pid}, found {len(images)} valid images")
+                if not images:
+                    print(f"[JOB] WARNING: pid={pid} marked done but no valid images remain (all deleted?)")
+
+                # 写入历史表，携带 prompt_params（含随机组合的 selection 等信息）
+                _insert_history_for_item(
+                    job["id"], item.get("prompt_id"), pid, images,
+                    item.get("prompt_preview", ""),
+                    item.get("prompt_params"),
+                )
 
         elif pid and pid in running:
             status = "running"
@@ -225,6 +231,35 @@ def get_job_status_snapshot(job: dict) -> dict:
 
 def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", prompt_params=None):
     """将生成结果写入历史表（upsert：始终覆盖 prompt_id / job_id 等关键字段，防止全局同步的竞态覆盖）"""
+    # 规范化 prompt_params 并补写 model（若缺失）：从首张出图 PNG 元数据提取
+    if isinstance(prompt_params, str):
+        try:
+            pp = json.loads(prompt_params) if prompt_params else {}
+        except Exception:
+            pp = {}
+    else:
+        pp = prompt_params or {}
+    if not pp.get("model") and images:
+        first = images[0]
+        m = extract_model_name(
+            first["filename"], first.get("subfolder", ""), first.get("type", "output")
+        )
+        if m:
+            pp["model"] = m
+    # 补写宽高与 orientation（若缺失）：从首张出图实际像素尺寸推导
+    if (not pp.get("width") or not pp.get("height") or not pp.get("orientation")) and images:
+        first = images[0]
+        meta = get_image_metadata(
+            first["filename"], first.get("subfolder", ""), first.get("type", "output")
+        )
+        w, h = meta.get("width"), meta.get("height")
+        if w and h:
+            pp["width"] = w
+            pp["height"] = h
+            o = compute_orientation(w, h)
+            if o:
+                pp["orientation"] = o
+    prompt_params = json.dumps(pp, ensure_ascii=False)
     for img in images:
         try:
             GenHistory.insert(
@@ -242,7 +277,7 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", p
                 prompt_params=prompt_params,
                 source="local",
             ).on_conflict(
-                conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
+                conflict_target=[GenHistory.comfyui_prompt_id, GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
                 update={
                     GenHistory.job_id: job_id,
                     GenHistory.prompt_id: prompt_id,
@@ -251,6 +286,17 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", p
                     GenHistory.is_deleted: False,  # 恢复被软删除的记录
                 },
             ).execute()
+            try:
+                nh = GenHistory.get_or_none(
+                    (GenHistory.comfyui_prompt_id == comfy_pid)
+                    & (GenHistory.filename == img["filename"])
+                    & (GenHistory.subfolder == img.get("subfolder", ""))
+                    & (GenHistory.img_type == img.get("type", "output"))
+                )
+                if nh:
+                    inherit_prompt_taxonomy(nh.id)
+            except Exception:
+                traceback.print_exc()
         except Exception:
             traceback.print_exc()
 

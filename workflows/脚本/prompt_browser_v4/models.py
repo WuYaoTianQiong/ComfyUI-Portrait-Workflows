@@ -36,7 +36,7 @@ class Tag(BaseModel):
     """标签表（独立管理）"""
     id = AutoField()
     name = TextField(unique=True)  # 标签名称（唯一）
-    color = TextField(default="#8b5cf6")  # 标签颜色
+    color = TextField(default="#5b8fb9")  # 标签颜色（统一钢蓝）
     usage_count = IntegerField(default=0)  # 使用次数
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
 
@@ -115,7 +115,9 @@ class GenHistory(BaseModel):
     class Meta:
         table_name = "gen_history"
         indexes = (
-            (("filename", "subfolder", "img_type"), True),  # unique
+            # 唯一约束包含 comfyui_prompt_id：不同 ComfyUI 运行产出的同名文件
+            # 各存各的记录，不再被静默合并（v4.1 迁移）
+            (("comfyui_prompt_id", "filename", "subfolder", "img_type"), True),
         )
 
 
@@ -142,6 +144,63 @@ class PromptTag(BaseModel):
         indexes = (
             (("prompt", "tag"), True),  # 联合唯一索引
         )
+
+# ======== Phase 5: 图片分类 / 标签（复用提示词同一套分类法）========
+class ImageCategory(BaseModel):
+    """图片-分类 多对多关系表（快照拷贝，独立于提示词）"""
+    image = ForeignKeyField(GenHistory, backref="image_categories")
+    category = ForeignKeyField(Category, backref="images")
+
+    class Meta:
+        table_name = "image_categories"
+        indexes = (
+            (("image", "category"), True),  # 联合唯一索引
+        )
+
+
+class ImageTag(BaseModel):
+    """图片-标签 多对多关系表（快照拷贝，独立于提示词）"""
+    image = ForeignKeyField(GenHistory, backref="image_tags")
+    tag = ForeignKeyField(Tag, backref="images")
+
+    class Meta:
+        table_name = "image_tags"
+        indexes = (
+            (("image", "tag"), True),  # 联合唯一索引
+        )
+
+
+def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
+    """将来源提示词【当前】的分类/标签【快照拷贝】到图片。
+    仅新增、绝不删除（尊重用户后续手动调整）。
+    force=False 时若图片已有任意分类/标签则跳过（避免每次轮询重复写）。"""
+    gh = GenHistory.get_or_none(GenHistory.id == history_id)
+    if gh is None or not gh.prompt_id:
+        return 0
+    if not force:
+        existing = (ImageCategory.select().where(ImageCategory.image == history_id).count()
+                    + ImageTag.select().where(ImageTag.image == history_id).count())
+        if existing > 0:
+            return 0
+    added = 0
+    for pc in PromptCategory.select().where(PromptCategory.prompt == gh.prompt_id):
+        _, created = ImageCategory.get_or_create(image=history_id, category=pc.category)
+        if created:
+            added += 1
+    for pt in PromptTag.select().where(PromptTag.prompt == gh.prompt_id):
+        _, created = ImageTag.get_or_create(image=history_id, tag=pt.tag)
+        if created:
+            added += 1
+    return added
+
+
+def backfill_image_taxonomy() -> int:
+    """为所有带 prompt_id 且尚未分类的图片补齐来源提示词的分类/标签。"""
+    done = 0
+    for gh in GenHistory.select().where(GenHistory.prompt_id.is_null(False), GenHistory.is_deleted == False):
+        if inherit_prompt_taxonomy(gh.id):
+            done += 1
+    return done
 
 
 # ======== Phase 3: 模板系统 ========
@@ -269,9 +328,47 @@ def ensure_auto_categories():
 # ================================
 
 
+def _migrate_genhistory_unique_constraint(database):
+    """将 gen_history 唯一约束从 (filename, subfolder, img_type) 
+    迁移为 (comfyui_prompt_id, filename, subfolder, img_type)。
+
+    旧约束导致不同 ComfyUI 运行的同名文件被静默合并为一条记录（on_conflict_ignore /
+    on_conflict update），表现为"缩略图不匹配""旧记录被覆盖"。
+    """
+    # 查找旧唯一索引（包含 filename/subfolder/img_type 但不含 comfyui_prompt_id）
+    old_rows = database.execute_sql(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='index' AND tbl_name='gen_history' "
+        "AND sql LIKE '%filename%' "
+        "AND sql LIKE '%subfolder%' "
+        "AND sql LIKE '%img_type%' "
+        "AND sql NOT LIKE '%comfyui_prompt_id%'"
+    ).fetchall()
+    for (idx_name,) in old_rows:
+        try:
+            database.execute_sql(f'DROP INDEX IF EXISTS "{idx_name}"')
+            print(f"[migrate] 已删除旧唯一索引: {idx_name}")
+        except Exception as e:
+            print(f"[migrate] 删除旧索引 {idx_name} 失败（可能已不存在）: {e}")
+
+    # 创建新唯一索引（SQLite 中 NULL 被视为不同值，多条 comfyui_prompt_id=NULL 
+    # 但同名的记录不会冲突，符合旧数据的兼容需求）
+    database.execute_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "gen_history_comfyui_prompt_id_filename_subfolder_img_type "
+        "ON gen_history(comfyui_prompt_id, filename, subfolder, img_type)"
+    )
+    print("[migrate] gen_history 唯一约束已迁移: (comfyui_prompt_id, filename, subfolder, img_type)")
+
+
 def init_db():
     """确保表存在，并迁移新列（兼容 v3 旧库）。"""
     db.connect()
+
+    # 唯一约束迁移必须在 create_tables 之前，否则 peewee 的 safe=True 
+    # 可能新建旧约束；新约束这里手动建好，后续 create_tables 的 IF NOT EXISTS 会跳过
+    _migrate_genhistory_unique_constraint(db)
+
     db.create_tables([Prompt, GenJob, GenHistory], safe=True)
 
     # 迁移 GenHistory 新列
@@ -295,6 +392,8 @@ def init_db():
 
     # ======== Phase 2: 创建新表 ========
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
+    # ======== Phase 5: 图片分类/标签表 ========
+    db.create_tables([ImageCategory, ImageTag], safe=True)
     # ==========================================
 
     # 迁移：软删除字段

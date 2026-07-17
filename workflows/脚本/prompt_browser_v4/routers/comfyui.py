@@ -8,12 +8,15 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
+from io import BytesIO
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse
+from PIL import Image
 from pydantic import BaseModel
 
 from config import settings
-from models import Prompt
+from models import Prompt, PromptCategory, Category
+from services.helpers import _resolve_if_reparse
 from services.thumbnail import generate_thumbnail
 from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt, get_queue as fetch_queue
@@ -91,6 +94,15 @@ class BatchRequest(BaseModel):
     title: str = "批量生成"
 
 
+class GenerateMissingRequest(BaseModel):
+    """为所有「没有生成过图片」的提示词批量出图"""
+    workflow_path: str = ""
+    workflow_content: str | None = None
+    orientation: str = "portrait"
+    quality: str = "4K"
+    prompt_ids: list[int] | None = None  # 可选：仅补全指定提示词（与缺图集合取交集）
+
+
 # ---------- Status ----------
 
 @router.get("/status")
@@ -114,6 +126,7 @@ def _find_image_locally(filename: str, subfolder: str, img_type: str) -> Path | 
         base = settings.comfyui_root / "input"
     else:
         base = settings.comfyui_root / "output"
+    base = _resolve_if_reparse(base)
     path = base / (subfolder or "") / filename if subfolder else base / filename
     return path if path.exists() else None
 
@@ -134,7 +147,7 @@ def proxy_image(
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    # 本地没有，代理到 ComfyUI
+    # 本地没有，代理到 ComfyUI（带超时，避免阻塞整个服务）
     url = (
         f"{COMFYUI_API}/view"
         f"?filename={quote(filename)}"
@@ -142,22 +155,67 @@ def proxy_image(
         f"&type={quote(type)}"
     )
     try:
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
             resp = client.get(url)
             if resp.status_code == 404:
                 raise HTTPException(404, "图片文件不存在（可能已被删除）")
             resp.raise_for_status()
-        return StreamingResponse(
-            iter([resp.content]),
-            media_type=resp.headers.get("Content-Type", "image/png"),
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
+            content = resp.content
+            media_type = resp.headers.get("Content-Type", "image/png")
     except httpx.ConnectError:
         raise HTTPException(404, "图片文件不存在（已在磁盘上被删除）")
+    except httpx.TimeoutException:
+        raise HTTPException(504, "获取图片超时（ComfyUI 响应过慢）")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"获取图片失败: {e}")
+
+    # 把代理回来的图片落盘到本地，下次直接走本地路径，不再代理
+    _cache_proxied_image(filename, subfolder, type, content)
+
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def _cache_proxied_image(filename: str, subfolder: str, img_type: str, content: bytes) -> None:
+    """将代理获取到的图片保存到 ComfyUI 本地目录，便于后续直接读取。"""
+    try:
+        if img_type == "input":
+            base = settings.comfyui_root / "input"
+        else:
+            base = settings.comfyui_root / "output"
+        base = _resolve_if_reparse(base)
+        target_dir = base / (subfolder or "")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / filename).write_bytes(content)
+    except Exception:
+        # 落盘失败不影响本次返回
+        pass
+
+
+def _fetch_remote_image(filename: str, subfolder: str, img_type: str) -> bytes | None:
+    """从 ComfyUI /view 代理取回原图字节（带超时，失败返回 None）。"""
+    url = (
+        f"{COMFYUI_API}/view"
+        f"?filename={quote(filename)}"
+        f"&subfolder={quote(subfolder)}"
+        f"&type={quote(img_type)}"
+    )
+    try:
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
+            resp = client.get(url)
+            if resp.status_code in (404, 400):
+                return None
+            resp.raise_for_status()
+            return resp.content
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return None
+    except Exception:
+        return None
 
 
 @router.get("/thumbnail")
@@ -168,13 +226,49 @@ def serve_thumbnail(
     size: int = Query(300),
 ):
     thumb_path = generate_thumbnail(filename, subfolder, type, size)
-    if thumb_path is None:
-        raise HTTPException(404, "无法生成缩略图")
-    return FileResponse(
-        str(thumb_path),
-        media_type="image/webp",
-        headers={"Cache-Control": "public, max-age=604800"},
-    )
+    if thumb_path is not None:
+        return FileResponse(
+            str(thumb_path),
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+
+    # 本地原图不存在：回退到 ComfyUI 代理取图并即时生成缩略图
+    # （与 /api/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
+    raw = _fetch_remote_image(filename, subfolder, type)
+    if raw is None:
+        raise HTTPException(404, "无法生成缩略图（本地与 ComfyUI 均无此图）")
+    try:
+        with Image.open(BytesIO(raw)) as img:
+            img.thumbnail((size, size), Image.LANCZOS)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, "WEBP", quality=80)
+            buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    except Exception:
+        raise HTTPException(500, "缩略图生成失败")
+
+
+@router.post("/thumbnail/clear")
+def clear_thumbnail_cache():
+    """清空所有缩略图缓存文件。下次访问时自动按新缓存键重新生成。"""
+    from config import settings
+    import shutil
+    import os
+
+    td = settings.thumbnail_dir
+    count = 0
+    if td.exists():
+        count = len(list(td.glob("*.webp")))
+        shutil.rmtree(td)
+        td.mkdir(parents=True, exist_ok=True)
+    return {"success": True, "deleted": count}
 
 
 @router.get("/validate_workflow")
@@ -439,3 +533,105 @@ def batch_generate(req: BatchRequest):
     update_job_items(job_id, items_raw, status=status)
 
     return {"success": len(results) > 0, "job_id": job_id, "results": results, "errors": errors}
+
+
+# ---------- 补全缺图 ----------
+
+def _missing_prompt_ids():
+    """返回所有「没有生成过图片」的提示词 ID 列表（DB 关联判定）。
+
+    缺图判定：GenHistory 中不存在该 prompt_id 的未删除记录，即视为缺图。
+    """
+    from models import GenHistory
+
+    have_ids = {
+        r.prompt_id
+        for r in GenHistory
+        .select(GenHistory.prompt_id)
+        .where(
+            (GenHistory.is_deleted == False)
+            & (GenHistory.prompt_id.is_null(False))
+        )
+        .distinct()
+    }
+    return [p.id for p in Prompt.select(Prompt.id).order_by(Prompt.id)
+            if p.id not in have_ids]
+
+
+@router.get("/generate_missing/count")
+def generate_missing_count():
+    """仅统计缺图提示词数量，不触发出图（供前端二次确认使用）。"""
+    missing_ids = _missing_prompt_ids()
+    total = Prompt.select().count()
+    return {"count": len(missing_ids), "total": total}
+
+
+@router.get("/generate_missing/list")
+def generate_missing_list():
+    """返回所有缺图提示词的概要清单，供前端审核模态框展示与勾选。"""
+    missing_ids = _missing_prompt_ids()
+    if not missing_ids:
+        return {"items": []}
+    # 分类映射（一个提示词可能多个分类）
+    cat_rows = (
+        PromptCategory
+        .select(PromptCategory.prompt, Category.name)
+        .join(Category)
+        .where(PromptCategory.prompt.in_(missing_ids))
+    )
+    cat_map: dict = {}
+    for r in cat_rows:
+        cat_map.setdefault(r.prompt_id, []).append(r.category.name)
+    prompts = {p.id: p for p in Prompt.select().where(Prompt.id.in_(missing_ids))}
+    items = []
+    for pid in missing_ids:
+        p = prompts.get(pid)
+        if not p:
+            continue
+        items.append({
+            "id": p.id,
+            "name": p.name or "(未命名)",
+            "category": ", ".join(cat_map.get(pid, [])),
+            "steps": p.steps,
+            "cfg_scale": p.cfg_scale,
+            "sampler": p.sampler,
+            "seed": p.seed,
+            "model": p.model,
+            "width": p.width,
+            "height": p.height,
+        })
+    return {"items": items}
+
+
+@router.post("/generate_missing")
+def generate_missing(req: GenerateMissingRequest):
+    """为所有「没有生成过图片」的提示词统一批量出图。
+
+    缺图判定（DB 关联）：GenHistory 中不存在该 prompt_id 的未删除记录，即视为缺图。
+    每条提示词使用其自身保存的参数（steps/cfg/sampler/seed/分辨率），
+    实际出图逻辑完全复用 batch_generate。
+    """
+    # 缺图集合（DB 关联判定）：复用辅助函数
+    missing_ids = _missing_prompt_ids()
+    if req.prompt_ids:  # 仅补全用户勾选的子集（与缺图集合取交集，防御重复出图）
+        want = set(req.prompt_ids)
+        missing_ids = [pid for pid in missing_ids if pid in want]
+
+    if not missing_ids:
+        return {
+            "success": True, "job_id": None, "count": 0,
+            "results": [], "errors": [],
+            "message": "所有提示词都已有图片，无需补全",
+        }
+
+    batch_req = BatchRequest(
+        items=[BatchItem(prompt_id=pid, seed=0) for pid in missing_ids],
+        workflow_path=req.workflow_path,
+        workflow_content=req.workflow_content,
+        orientation=req.orientation,
+        quality=req.quality,
+        title=f"补全缺图 ({len(missing_ids)} 条)",
+    )
+    result = batch_generate(batch_req)
+    result["count"] = len(missing_ids)
+    return result
