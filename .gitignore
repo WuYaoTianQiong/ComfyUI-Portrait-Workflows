@@ -98,6 +98,12 @@ workflows/catlover1937_downloads/
 *_损坏备份*.db
 *.db.bak*
 
+# Database broken/safety files (WAL corruption artifacts)
+workflows/文档/*.db.broken_*
+workflows/文档/*.db.safety_*
+workflows/文档/*.db-shm.broken_*
+workflows/文档/*.db-wal.broken_*
+
 # Git export/history files (temporary analysis artifacts)
 git_history_export.txt
 git_log_simple.txt
@@ -110,3 +116,16 @@ workflows/脚本/fix*.txt
 # Temporary working files (import logs, SQL scripts, etc.)
 workflows/脚本/insert_log.txt
 workflows/脚本/rename_*.sql
+
+# Server runtime logs
+workflows/server_err.txt
+workflows/server_out.txt
+workflows/脚本/*/_svc_err.txt
+workflows/脚本/*/_svc_out.txt
+
+# Untracked file lists / analysis artifacts
+workflows/_untracked_list.txt
+
+# Old data backups
+workflows/脚本/organized_prompts_old.txt
+workflows/脚本/monitor_resources.bat
