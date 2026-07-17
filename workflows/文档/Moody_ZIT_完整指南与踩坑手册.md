@@ -60,16 +60,103 @@
 
 ---
 
-## 三、已下载的重要模型
+## 三、完整模型清单
 
-| 模型 | 路径 | 大小 | 用途 |
-|---|---|---|---|
-| Qwen-Rapid-AIO-NSFW-v18 | `checkpoints/QWEN/` | 26.5G | Work-Fisher姿势编辑 |
-| Qwen-Image-ControlNet-Union | `controlnet/Qwen-Image-ControlNet-Union/` | 3.5G | Qwen的ControlNet（当前12G无法有效使用） |
-| FLUX.2-dev-Fun-Controlnet-Union | `controlnet/FLUX.2-dev-Fun-Controlnet-Union/` | 7.7G | Flux2 dev专用，不与klein兼容 |
-| flux_union_controlnet | `controlnet/` | 6.2G | Flux1 ControlNet |
-| qwen-image-2512-Q4_K_M.gguf | `unet/` | 13.2G | Qwen 2512 GGUF量化 |
-| Real-Qwen-Image-V2-2512-Q4_K_M.gguf | `diffusion_models/` | 13.1G | 写实+亚洲人脸优化版(2026.1) |
+### ⚠️ 重要说明：模型目录分为两个路径
+
+本 ComfyUI 安装存在**两个 `models/` 目录**，搜索时容易遗漏：
+
+| 目录路径 | 用途 | 主要包含 |
+|----------|------|---------|
+| `ComfyUI-aki-v3/ComfyUI/models/` | **ComfyUI 运行时主目录** | UNET、CLIP/Text Encoder、VAE、ControlNet、LoRA、Checkpoint、PuLID、InsightFace等全部核心模型 |
+| `ComfyUI-aki-v3/models/` | 独立辅助目录 | 少量模型副本/备用（仅 flux2-vae、wan2.2_vae 等） |
+
+**实际运行时 ComfyUI 读取的是 `ComfyUI/models/` 下的文件**（`ComfyUI/` 是其根目录下的子目录，注意与项目根目录 `ComfyUI-aki-v3/` 下的 `models/` 区分）。
+
+### 3.1 扩散模型（diffusion_models/）
+
+位于 `ComfyUI-aki-v3\ComfyUI\models\diffusion_models\`：
+
+| 模型 | 大小 | 架构 | 用途 |
+|------|:----:|:----|------|
+| `moodyProMix_zitV13FP8.safetensors` | 5.73 GB | Z-Image Turbo (NextDiT) | ⭐ **MoodyZIT 亚洲写实文生图主力** |
+| `moodyRealMix_zitV6R1DPO.safetensors` | 5.73 GB | Z-Image Turbo | 备用写实模型 |
+| `moodyRealMix_zitV7GlobalFP8.safetensors` | 5.73 GB | Z-Image Turbo | 备用写实模型 |
+| `moodyWild_zibV4Base40steps_fp8.safetensors` | 5.73 GB | Z-Image Turbo | 备用 |
+| `flux1-dev-fp8.safetensors` | 11.08 GB | **Flux.1 Dev (FP8)** | **PuLID 换脸等工作流必须用（纯 Flux 架构）** |
+| `flux1-dev-bnb-nf4-v2.safetensors` | 11.22 GB | Flux.1 Dev NF4 | ⚠️ **PuLID 不兼容**（bitsandbytes 与 UNETLoader 冲突），位于 `checkpoints/` |
+| `flux1-dev-Q4_0.gguf` | 9.56 GB | Flux.1 GGUF 4-bit | 已下载但画质差（纯 4-bit 无 K-quant），**废弃** |
+| `flux1-dev-Q4_K_S.gguf` | **6.34 GB** | **Flux.1 GGUF K-quant** | ⭐ **PuLID 换脸唯一可行底模**（ModelScope/HF-Mirror 下载） |
+| `flux-2-klein-4b-fp8.safetensors` | 3.79 GB | Flux2 Klein 4B Distilled | 快速预览（4步），CLIP type=`flux2` |
+| `flux-2-klein-9b-Q4_K_M.gguf` | 5.5 GB | Flux2 Klein 9B GGUF | 主力 Flux2 文生图（位于 `aki-v3/models/diffusion_models/`） |
+| `Qwen-Rapid-AIO-NSFW-v18.safetensors` | 26.48 GB | Qwen | 位于 `checkpoints/QWEN/`，Work-Fisher姿势编辑 |
+| `NoobAI-XL-Vpred-v1.0.safetensors` | 6.62 GB | SDXL | 纯日式动漫文生图 |
+| `wan2.2_ti2v_5B_fp16.safetensors` | 9.31 GB | Wan2.2 | 视频生成（12G 基本不可用） |
+| `Real-Qwen-Image-V2-2512-Q4_K_M.gguf` | 12.17 GB | Qwen GGUF | 写实+亚洲人脸优化版 |
+
+### 3.2 文本编码器（text_encoders/ + clip/）
+
+位于 `ComfyUI-aki-v3\ComfyUI\models\text_encoders\` 和 `clip\`：
+
+| 文件 | 大小 | 所属模型 | 加载方式 |
+|------|:----:|---------|---------|
+| `qwen_3_4b.safetensors` | 7.49 GB | MoodyZIT 系列 | CLIPLoader type=`lumina2` |
+| `qwen_3_8b_fp8mixed.safetensors` | 8.07 GB | Flux2 Klein 等 | CLIPLoader type=`flux2` |
+| `clip_l.safetensors` | 234 MB | Flux.1 标准 | DualCLIPLoader（配合 t5xxl） |
+| `t5xxl_fp8_e4m3fn.safetensors` | 4.56 GB | Flux.1 标准 | DualCLIPLoader（配合 clip_l） |
+| `umt5_xxl_fp8_e4m3fn_scaled.safetensors` | 6.27 GB | Flux2 / Wan | 多用途 |
+| `EVA02_CLIP_L_336_psz14_s6B.pt` | 816 MB | **PuLID Flux** | PulidFluxEvaClipLoader，存在于 `clip/` 和 `text_encoders/` 两个目录 |
+
+⚠️ **关键**：MoodyZIT 系模型（NextDiT）用 `qwen_3_4b` + `CLIPLoader`，PuLID 等标准 Flux 模型用 `clip_l + t5xxl` + `DualCLIPLoader`。**混用会报维度错误**。
+
+### 3.3 VAE（vae/）
+
+| 文件 | 大小 | 用途 |
+|------|:----:|------|
+| `ae.safetensors` | 319 MB | Flux.1 / Z-Image Turbo 标准 VAE |
+| `flux2-vae.safetensors` | 320 MB | Flux2 Klein 专用 VAE |
+| `qwen_image_vae.safetensors` | 242 MB | Qwen 系列专用 |
+
+### 3.4 PuLID 换脸组件（完整！位于 `ComfyUI\models\` 下）
+
+| 组件 | 路径 | 大小 | 状态 |
+|------|------|:----:|:----:|
+| PuLID 模型 | `pulid/pulid_flux_v0.9.1.safetensors` | 1.06 GB | ✅ |
+| EVA02 CLIP | `clip/EVA02_CLIP_L_336_psz14_s6B.pt` | 816 MB | ✅ |
+| 人脸检测 | `insightface/models/antelopev2/1k3d68.onnx` | 136 MB | ✅ |
+| 人脸检测 | `insightface/models/antelopev2/2d106det.onnx` | 4.8 MB | ✅ |
+| 性别年龄 | `insightface/models/antelopev2/genderage.onnx` | 1.26 MB | ✅ |
+| 人脸识别 | `insightface/models/antelopev2/glintr100.onnx` | 248 MB | ✅ |
+| 人脸检测 | `insightface/models/antelopev2/scrfd_10g_bnkps.onnx` | 16 MB | ✅ |
+| 换脸 | `insightface/inswapper_128.onnx` | 528 MB | ✅ |
+| 自定义节点 | `ComfyUI_PuLID_Flux_ll` | — | ✅ 已安装 |
+
+> **结论**：PuLID Flux 换脸所需的**所有模型文件齐全**，只需使用正确的 Flux.1 底模（不支持 NextDiT/Z-Image Turbo 架构）。
+
+### 3.5 LoRA 角色模型
+
+位于 `ComfyUI-aki-v3\ComfyUI\models\loras\`，共 47+ 个。核心列表已在第十八节「catlover1937 Moody Gals 系列角色 LoRA 全览」中列出，此处不重复。
+
+### 3.6 ControlNet
+
+| 文件 | 大小 | 用途 |
+|------|:----:|------|
+| `flux_union_controlnet.safetensors` | 6.15 GB | Flux.1 ControlNet |
+| `Qwen-Image-ControlNet-Union/` | 3.29 GB | Qwen ControlNet（12G 无法有效使用） |
+| `FLUX.2-dev-Fun-Controlnet-Union/` | ~7.7 GB x2 | Flux2 dev 专用（不与 Klein 兼容） |
+
+### 3.7 传统 Checkpoint 模型
+
+位于 `ComfyUI-aki-v3\ComfyUI\models\checkpoints\`，包括：
+
+| 模型 | 大小 | 用途 |
+|------|:----:|------|
+| `flux1-dev-bnb-nf4-v2.safetensors` | 11.22 GB | ⚠️ 在 checkpoints/，UNETLoader 默认搜 diffusion_models/ 找不到 |
+| `Qwen-Rapid-AIO-NSFW-v18.safetensors` | 26.48 GB | Work-Fisher 姿势编辑主力 |
+| `NoobAI-XL-Vpred-v1.0.safetensors` | 6.62 GB | 动漫文生图 |
+| `Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors` | 6.62 GB | SDXL 写实 |
+| `pearlyAnimaMix_v10.safetensors` | 4.13 GB | Anima 动漫混合底模 |
+| `animagine-xl-3.1.safetensors` | 6.46 GB | 动漫风格 |
 
 ---
 
@@ -1853,6 +1940,157 @@ SeedVR2（慢）→ DiT 4K 超分，比 SD Upscale 细腻
 - CLIP：`qwen_3_4b`（lumina2）
 - 常用 LoRA：`momoka-zib-v2_clean`（w=0.3~0.5）
 - 备用模型：`moodyRealMix_zitV7GlobalFP8`
+
+---
+
+## 二十八、2026-07-13 Wan2.2 5B TI2V 视频生成实测总结
+
+> 历时约 3 小时系统测试，基于 `wan2.2_ti2v_5B_fp16`（~9.5GB）、`wan2.2_vae`、`umt5_xxl_fp8`，RTX 5070 12GB，ComfyUI 官方原生工作流。
+
+### 1. 测试结论（一句话）
+
+**5B TI2V 在 12GB 上跑文生视频 = 糊、短、比例不对，基本不可用。** 图生视频尚可但画质上限远不如 NoobAI-XL 单帧。
+
+### 2. 实测数据
+
+| 模式 | 分辨率 | 帧数 | 时长 | 耗时 | 画质评价 |
+|:---|:---:|:---:|:---:|:---:|:---|
+| 文生视频 | 1280×704 | 121 | ~5s | ~10min | ❌ 模糊，辨不出风格 |
+| 文生视频 | 640×640 | 49 | ~3s | ~1min | ❌ 模糊，1:1 无法用 |
+| 文生视频 | 576×576 | 81 | ~5s | ~3min | ❌ 依然模糊 |
+| 图生视频（未测） | — | — | — | — | 可试但显存吃紧 |
+
+### 3. 根因
+
+| 瓶颈 | 说明 |
+|:---|:---|
+| **显存不足** | 5B fp16 模型本身 ~9.5GB，加载后 12GB 所剩无几。`--lowvram` 模式 GPU 利用率 ~50%，速度慢且不稳定 |
+| **模型黄金分辨率** | 5B 训练锁定的标准输出为 1280×704，在这个分辨率下才能看清细节。但 12GB 内存不够跑这个分辨率的 81+ 帧 |
+| **文生视频 vs 图生视频** | 纯文本驱动无起始帧锚定，模型自由发挥空间大→漂移→模糊。只有图生视频（提供起始图）才能稳定输出可接受的画质 |
+| **视频 vs 静帧** | Wan2.2 5B 的单帧细节上限远不如 NoobAI-XL Vpred 或 MoodyZIT V13。视频模型要为 81 帧分配算力，不可能达到静帧的画质水平 |
+
+### 4. 与本地已有方案对比
+
+| 方案 | 可输出 | 显存 | 画质 | 技术路线 |
+|:---|:---|:---:|:---:|:---|
+| **NoobAI-XL Vpred** | 单帧 768×1344 动漫图 | 6~7GB | ⭐⭐⭐⭐⭐ | SDXL 单帧，成熟 |
+| **MoodyZIT V13 + SeedVR2** | 单帧 4K 写实图 | 8~10GB | ⭐⭐⭐⭐⭐ | Flux 双程采样，天花板 |
+| **Qwen-Rapid + VNCCS** | 单帧姿势控制 | 8~10GB | ⭐⭐⭐⭐ | VL 视觉理解，姿势控制 |
+| **Wan2.2 5B TI2V（12GB）** | 模糊 3~5s 短视频 | 12GB 吃满 | ⭐⭐ | **本次测试目标** |
+
+### 5. 如果真要做本地视频，两条可行路
+
+| 路线 | 做法 | 画质 | 代价 |
+|:---|:---|:---:|:---|
+| **NoobAI-XL 出图 + Wan2.2 图生视频** | 高精起始帧→图生视频~3s | ⭐⭐⭐⭐ | 工序复杂，视频短 |
+| **云端 API** | 调 Kling / MiniMax / Runway | ⭐⭐⭐⭐⭐ | 按量付费 |
+
+### 6. 文件状态
+
+| 文件 | 位置 | 状态 |
+|:---|:---|:---:|
+| `wan2.2_5B_ti2v.json` | `workflows/` | 保留，后续换显卡可能有用 |
+| `wan2.2_ti2v_5B_fp16.safetensors` | `models/diffusion_models/` | 保留，9.5GB 暂不删除 |
+| `wan2.2_vae.safetensors` | `models/vae/` | 保留 |
+| `umt5_xxl_fp8_e4m3fn_scaled.safetensors` | `models/text_encoders/` | 保留（Qwen 系列也用 UMT5） |
+
+### 7. 最终结论
+
+**2026 年 7 月，12GB VRAM（RTX 5070）+ Wan2.2 5B TI2V 做本地视频生成：**
+- 文生视频：❌ 不推荐，画质不可用
+- 图生视频：⚠️ 勉强可用但上限低，不如 NoobAI-XL 单帧+帧插值的组合
+- 需要高质量漫剧/视频 → 走云端 API（ComfyUI 已内置 Kling/MiniMax 等节点）
+- 需要精确角色/姿势/画质 → 回到 NoobAI-XL + MoodyZIT 静帧管线
+
+---
+
+## 二十九、2026-07-13~14 PuLID Flux 换脸完整实测（最终定论）
+
+> 历时约 5 小时系统测试，涵盖 FP8 / NF4 / GGUF Q4_0 / Q4_K_S 四种底模 + PuLID Flux + INSwapper + FaceDetailer + InstantID + FaceFusion 六条技术路线。最终结论：**GGUF Q4_K_S 是 12GB 卡上 PuLID 换脸的唯一可行方案。**
+
+### 1. 已废弃的方案（全部实测过，不可用）
+
+| 方案 | 结果 | 根因 |
+|:----|:---:|:-----|
+| **PuLID + FP8 (11GB)** | ⚠️ 345KB 模糊 | 11GB 模型 + CLIP 5GB = 16GB，`--lowvram` 反复交换丢失精度 |
+| **PuLID + BNB NF4** | ❌ 报错 | bitsandbytes NF4 与 UNETLoader 不兼容（分配 79TB 内存） |
+| **PuLID + GGUF Q4_0 (9.56GB)** | ❌ 287KB 严重模糊 | Q4_0 是纯 4-bit 量化，精度损失最大 |
+| **INSwapper 像素换脸** | ❌ 面具感 | 128×128 输出贴回原图，边缘生硬不自然 |
+| **FaceDetailer** | ❌ 不换脸 | 只做面部增强/重绘，不改变身份特征 |
+| **ReActor** | ❌ 装不了 | GitHub 仓库已关，且 onnxruntime DLL 与 Python 3.13 不兼容 |
+| **FaceFusion** | ❌ 跑不起来 | onnxruntime DLL 同一兼容性问题 |
+| **InstantID** | ❌ 卡在 API | 节点已装、模型齐全，但 insightface v0.2.1 版本兼容 bug 未解决 |
+
+### 2. 唯一可行方案：PuLID + GGUF Q4_K_S
+
+**模型下载：**
+```
+https://hf-mirror.com/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_K_S.gguf
+```
+放到 `ComfyUI\models\diffusion_models\`。
+
+**核心配置：**
+```
+底模：flux1-dev-Q4_K_S.gguf（6.34GB，UnetLoaderGGUF）
+CLIP：DualCLIPLoader(clip_l.safetensors + t5xxl_fp8_e4m3fn.safetensors, type=flux)
+VAE：ae.safetensors
+采样：ModelSamplingAuraFlow(shift=3) → ApplyPulidFlux(weight=1.0) → KSamplerAdvanced(steps=30, cfg=3.5, euler+simple)
+分辨率：512×768（最佳清晰度！）
+启动参数：--highvram（不要 --lowvram）
+去除：LoRA（省显存）、双程采样
+```
+
+**实测数据：**
+
+| 分辨率 | 像素 | 文件大小 | 清晰度 | 说明 |
+|:---|:---:|:---:|:---:|:---|
+| **512×768** | 39万 | **376KB** | ⭐⭐⭐⭐ **最佳！** | 面部最清晰，换脸效果可辨识 |
+| 640×960 | 61万 | 429KB | ⭐⭐⭐ | 开始模糊 |
+| 768×1152 | 88万 | 659KB | ⭐⭐ | 明显高斯模糊 |
+| 1024×1536 | 157万 | 943KB | ⭐ | 模糊加剧，不推荐 |
+
+> ⚠️ **关键发现：分辨率越高越模糊！** Q4_K_S 的 4-bit 精度固定，像素越多，每个像素分到的有效信息越少。512×768 是 12GB 卡上 PuLID GGUF 的最佳分辨率。
+
+### 3. 为什么模糊：根因分析
+
+PuLID GGUF 换脸的模糊来自三个叠加因素：
+
+| 因素 | 贡献 |
+|:---|:---|
+| **4-bit 量化精度损失** | ⭐⭐⭐⭐⭐ 主因。4-bit 只有 16 个离散值，皮肤纹理等连续渐变在量化时被抹平 |
+| **`--lowvram` 模式交换** | ⭐⭐⭐⭐ 加 `--highvram` 后 6.34GB + CLIP 5GB + PuLID 1GB ≈ 12.3GB，仍然轻微交换 |
+| **Flux dev 原生风格** | ⭐⭐ dev 模型偏卡通/柔化，不是写实底模 |
+
+### 4. 已做的环境修复（下次不再踩坑）
+
+| 修复 | 文件 | 原因 |
+|:---|:---|:---|
+| insightface providers 参数 | `pulidflux.py` L193 | v0.2.1 不接受 `providers=`，改为 `name="buffalo_l"` |
+| insightface providers 参数 | `InstantID.py` L203 | 同上 |
+| onnxruntime CUDA13 DLL | `_insight_swap.py` | 需 `os.add_dll_directory()` 加载 nvidia cublas/cuda_runtime DLL |
+| ReActor PickableInferenceSession | `reactor_patcher.py` | insightface v0.2.1 无此类，改为 `onnxruntime.InferenceSession` |
+
+### 5. 最终方案评估（2026-07-14）
+
+| 方案 | 可用性 | 清晰度 | 相似度 | 总分 |
+|:----|:---:|:---:|:---:|:---:|
+| **PuLID GGUF Q4_K_S 512×768** | ✅ | ⭐⭐⭐ | ⭐⭐⭐⭐ | **7/10** |
+| moodyProMix 无换脸 | ✅ | ⭐⭐⭐⭐⭐ | ❌ | 5/10 |
+| INSwapper 换脸 | ✅ | ⭐ | ⭐⭐⭐⭐ | 3/10 |
+
+> **结论**：12GB 5070 上 PuLID 换脸能跑、能认出面、但清晰度有限（4-bit 量化天花板）。若追求完美效果，需要 24GB+ 显卡跑 FP8/FP16 版 flux1-dev 或使用在线 API。
+
+### 6. 相关脚本文件
+
+| 文件 | 用途 |
+|:---|:---|
+| `_pulid_gguf.py` | **主力**：PuLID + GGUF Q4_K_S 换脸（直接运行） |
+| `_pulid_final.py` | 旧版 PuLID + FP8（已废弃） |
+| `_run_now.py` / `_swap_align.py` | moodyProMix 出图 + INSwapper 换脸（两步法，面具感） |
+| `_test_facedetailer.py` | FaceDetailer 测试（仅增强，不换脸） |
+| workfows/`MoodyZIT_V7_Visual_FaceDetailer.json` | FaceDetailer 可视化工作流 |
+
+
 
 
 
