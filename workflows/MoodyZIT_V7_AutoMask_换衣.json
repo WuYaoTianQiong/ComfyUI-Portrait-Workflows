@@ -1,0 +1,78 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "moodyRealMix_zitV7GlobalFP8.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "4": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "model": ["1", 0], "lora_name": "momoka-zib-v2_clean.safetensors", "strength_model": 0.5 }
+  },
+  "5": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["4", 0], "shift": 1.8 }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "example.png" }
+  },
+  "7": {
+    "class_type": "ImageScaleBy",
+    "inputs": { "image": ["6", 0], "upscale_method": "lanczos", "scale_by": 0.36 }
+  },
+  "22": {
+    "class_type": "PreviewImage",
+    "inputs": { "images": ["6", 0] }
+  },
+  "det": {
+    "class_type": "UltralyticsDetectorProvider",
+    "inputs": { "model_name": "bbox/face_yolov8m.pt" }
+  },
+  "segs": {
+    "class_type": "BboxDetectorSEGS",
+    "inputs": { "bbox_detector": ["det", 0], "image": ["7", 0], "threshold": 0.5, "dilation": 30, "crop_factor": 3.0, "drop_size": 10, "labels": "all" }
+  },
+  "mask": {
+    "class_type": "SegsToCombinedMask",
+    "inputs": { "segs": ["segs", 0] }
+  },
+  "invert": {
+    "class_type": "InvertMask",
+    "inputs": { "mask": ["mask", 0] }
+  },
+  "expand": {
+    "class_type": "GrowMask",
+    "inputs": { "mask": ["invert", 0], "expand": 4, "incremental": 0, "tapered_corners": true }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "best quality, photorealistic, detailed" }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "nsfw, low quality, worst quality, distortion, blurry" }
+  },
+  "10": {
+    "class_type": "VAEEncodeForInpaint",
+    "inputs": { "pixels": ["7", 0], "vae": ["3", 0], "mask": ["expand", 0], "grow_mask_by": 6 }
+  },
+  "11": {
+    "class_type": "KSampler",
+    "inputs": { "model": ["5", 0], "seed": 0, "steps": 10, "cfg": 1.0, "sampler_name": "dpmpp_2m_sde", "scheduler": "sgm_uniform", "positive": ["8", 0], "negative": ["9", 0], "latent_image": ["10", 0], "denoise": 0.5 }
+  },
+  "14": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["11", 0], "vae": ["3", 0] }
+  },
+  "20": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["14", 0], "filename_prefix": "MoodyZIT-AutoMask" }
+  }
+}

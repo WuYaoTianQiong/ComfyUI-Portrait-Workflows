@@ -1,0 +1,78 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "moodyProMix_zitV13FP8.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "4": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "model": ["1", 0], "lora_name": "momoka-zib-v2_clean.safetensors", "strength_model": 0.5 }
+  },
+  "5": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["4", 0], "shift": 1.8 }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "example.png" }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "white bikini swimsuit, smooth skin exposed, bare arms and shoulders, no clothes, no fabric covering torso" }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "clothes, dress, shirt, pants, jacket, coat, extra fabric, bad anatomy, ugly" }
+  },
+  "10": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["6", 0], "vae": ["3", 0] }
+  },
+  "12": {
+    "class_type": "GrowMask",
+    "inputs": { "mask": ["6", 1], "expand": 80, "fixed_width": 0, "fixed_height": 0, "grow_ratio": 0, "taper_direction": "none", "flip_input": false, "blur": 16 }
+  },
+  "19": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": { "samples": ["10", 0], "mask": ["12", 0] }
+  },
+  "11": {
+    "class_type": "KSampler",
+    "inputs": { "model": ["5", 0], "seed": 0, "steps": 30, "cfg": 5.0, "sampler_name": "dpmpp_3m_sde", "scheduler": "sgm_uniform", "positive": ["8", 0], "negative": ["9", 0], "latent_image": ["19", 0], "denoise": 1.0 }
+  },
+  "13": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["11", 0], "vae": ["3", 0] }
+  },
+  "15": {
+    "class_type": "FaceRestoreModelLoader",
+    "inputs": { "model_name": "codeformer.pth" }
+  },
+  "16": {
+    "class_type": "FaceRestoreCFWithModel",
+    "inputs": { "facerestore_model": ["15", 0], "image": ["13", 0], "facedetection": "retinaface_resnet50", "codeformer_fidelity": 0.85 }
+  },
+  "17": {
+    "class_type": "GrowMask",
+    "inputs": { "mask": ["6", 1], "expand": 0, "fixed_width": 0, "fixed_height": 0, "grow_ratio": 0, "taper_direction": "none", "flip_input": false, "blur": 20 }
+  },
+  "18": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": { "destination": ["6", 0], "source": ["sw", 0], "x": 0, "y": 0, "resize_source": false, "mask": ["17", 0] }
+  },
+  "sw": {
+    "class_type": "LazySwitchKJ",
+    "inputs": { "switch": false, "on_false": ["13", 0], "on_true": ["16", 0] }
+  },
+  "20": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["18", 0], "filename_prefix": "MoodyZIT-Inpaint" }
+  }
+}
