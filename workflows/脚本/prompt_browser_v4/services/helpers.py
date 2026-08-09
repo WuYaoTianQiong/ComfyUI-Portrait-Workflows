@@ -35,7 +35,7 @@ def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
 
 
 def get_image_metadata(filename: str, subfolder: str, img_type: str) -> dict:
-    """读取图片文件的分辨率和大小"""
+    """读取图片文件的分辨率和大小（始终从磁盘读取）"""
     if not filename:
         return {}
     try:
@@ -63,6 +63,68 @@ def get_image_metadata(filename: str, subfolder: str, img_type: str) -> dict:
         return {"width": width, "height": height, "file_size": file_size}
     except Exception:
         return {}
+
+
+def get_image_metadata_fast(filename: str, subfolder: str, img_type: str,
+                            prompt_params: str | None = None) -> dict:
+    """优化的元数据读取：优先从 prompt_params JSON 获取宽高（已在同步/入库时写入），
+    file_size 用 os.stat 秒读（无需 PIL），仅当 prompt_params 无宽高时回退 PIL 解码。
+
+    性能：page_size=1000 时 PIL 打开 1000 次大 PNG 可耗时 5-20s 导致前端超时。
+    本函数将 1000 次 PIL 打开的极端情况降为 0 次（所有图片都有 prompt_params 时）
+    或极少次（仅缺失图片）。"""
+    if not filename:
+        return {}
+    # ---- file_size 直接用 os.stat，无需 PIL ----
+    try:
+        if img_type == "input":
+            base_dir = settings.comfyui_root / "input"
+        else:
+            base_dir = settings.comfyui_root / "output"
+        base_dir = _resolve_if_reparse(base_dir)
+        cur = base_dir
+        if subfolder:
+            for part in subfolder.replace("\\", "/").split("/"):
+                if not part:
+                    continue
+                cur = cur / part
+                cur = _resolve_if_reparse(cur)
+        img_path = cur / filename
+        if not img_path.exists():
+            return {}
+        file_size = img_path.stat().st_size
+    except Exception:
+        file_size = 0
+
+    # ---- 宽/高优先从 prompt_params JSON 取（同步/入库时已写入）----
+    width = None
+    height = None
+    if prompt_params:
+        try:
+            pp = json.loads(prompt_params) if isinstance(prompt_params, str) else prompt_params
+            w = pp.get("width")
+            h = pp.get("height")
+            if w and h:
+                width, height = int(w), int(h)
+        except Exception:
+            pass
+
+    # ---- 回退：PIL 打开读取 ----
+    if not width or not height:
+        try:
+            from PIL import Image
+            with Image.open(img_path) as img:
+                width, height = img.size
+        except Exception:
+            pass
+
+    meta = {}
+    if file_size:
+        meta["file_size"] = file_size
+    if width and height:
+        meta["width"] = width
+        meta["height"] = height
+    return meta
 
 
 def compute_orientation(width, height):

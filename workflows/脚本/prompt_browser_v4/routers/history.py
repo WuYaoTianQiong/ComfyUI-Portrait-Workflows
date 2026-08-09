@@ -11,7 +11,8 @@ from pydantic import BaseModel
 
 from config import settings
 from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, inherit_prompt_taxonomy, backfill_image_taxonomy
-from services.helpers import build_view_url, get_image_metadata, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
+from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
+from services.thumbnail import _get_image_path
 from shared import templates
 
 router = APIRouter(tags=["历史"])
@@ -138,9 +139,10 @@ def _sync_comfyui_history() -> int:
         for node_out in outputs.values():
             for img in node_out.get("images", []):
                 filename = img.get("filename", "")
-                # 跳过 prompt_browser 生成的图片（由 job poller 入库，自带提示词关联）
-                if filename.startswith("prompt_browser_"):
-                    continue
+                # 不再跳过 prompt_browser_ 前缀的图片：当服务重启/刷新页面导致
+                # job poller 丢失追踪状态时，这些图片将永远无法入库。sync 作为兜底
+                # 手段应当正常处理它们（upsert 确保不会覆盖 job poller 已写入的
+                # prompt_id/job_id 等字段）。
                 try:
                     subfolder = img.get("subfolder", "")
                     img_type = img.get("type", "output")
@@ -181,6 +183,112 @@ def _sync_comfyui_history() -> int:
                         pass
                 except Exception:
                     pass
+    return added
+
+
+# 从 GenJob.items 按文件名查找提示词关联的缓存
+_job_index = {}
+_job_index_built = False
+
+
+def _build_job_index():
+    """构建 filename → (job_id, prompt_id, prompt_text) 索引。
+    仅当 _sync_disk_orphans 需要查找时才生成（避免每30秒全量扫描 GenJob）。"""
+    global _job_index, _job_index_built
+    if _job_index_built:
+        return
+    from models import GenJob, Prompt
+
+    prompt_map = {}
+    for p in Prompt.select():
+        prompt_map[p.id] = p
+
+    idx = {}
+    for j in GenJob.select().where(GenJob.status == 'done'):
+        items = json.loads(j.items) if j.items else []
+        for it in items:
+            pid = it.get('prompt_id')
+            prompt_text = ""
+            if pid:
+                p = prompt_map.get(int(pid)) if pid else None
+                if p:
+                    prompt_text = p.prompt or ""
+            # 收集 items 中每张图片的文件名
+            for img in it.get('images', []):
+                fn = img.get('filename', '')
+                if fn and fn not in idx:
+                    idx[fn] = (j.id, pid, prompt_text)
+    _job_index = idx
+    _job_index_built = True
+
+
+def _sync_disk_orphans() -> int:
+    """兜底：扫描磁盘 output 目录，将不在 DB 中的 .png 文件插入 gen_history。
+
+    当 ComfyUI 的 /history API 中 outputs 已被清除（已完成的历史），或 prompt_browser_
+    前缀文件因服务重启导致 job poller 丢失追踪时，sync 无法通过 API 发现这些图。
+    此函数作为最后兜底，直接扫描磁盘。
+
+    仅处理 output 目录下的直接文件（不递归 subfolder），因为 prompt_browser 出图
+    都在 output 根目录（subfolder=""）。
+    """
+    try:
+        output_dir = _resolve_if_reparse(settings.comfyui_root / "output")
+        if not output_dir.exists():
+            return 0
+    except Exception:
+        return 0
+
+    # 收集 DB 中已有的所有 (filename, subfolder, img_type) 组合
+    existing = set()
+    for r in Gh.select(Gh.filename, Gh.subfolder, Gh.img_type).where(Gh.is_deleted == False).tuples():
+        existing.add((r[0], r[1] or "", r[2] or "output"))
+
+    added = 0
+    try:
+        for fpath in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime):
+            if not fpath.is_file() or fpath.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+                continue
+            fname = fpath.name
+            if (fname, "", "output") in existing:
+                continue
+            try:
+                sz = fpath.stat().st_size
+                # 尝试从 GenJob 匹配同名文件，恢复提示词关联
+                job_id = None
+                prompt_id = None
+                prompt_text = ""
+                if not _job_index:
+                    _build_job_index()
+                match = _job_index.get(fname)
+                if match:
+                    job_id, prompt_id, prompt_text = match
+
+                pp_fields = {"width": 0, "height": 0, "file_size": sz, "source": "disk_scan"}
+                if prompt_text:
+                    pp_fields["prompt"] = prompt_text
+                pp = json.dumps(pp_fields)
+
+                Gh.insert(
+                    job_id=job_id,
+                    prompt_id=prompt_id,
+                    comfyui_prompt_id="",
+                    filename=fname,
+                    subfolder="",
+                    img_type="output",
+                    view_url=build_view_url(fname, "", "output"),
+                    preview="",
+                    prompt_params=pp,
+                    favorite=False,
+                    source="disk_scan",
+                ).execute()
+                added += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if added:
+        print(f"[sync] disk scan: added {added} orphan images")
     return added
 
 
@@ -305,7 +413,10 @@ def list_history(
     total = q.count()
 
     offset = (page - 1) * page_size
-    q = q.order_by(Gh.id.desc()).offset(offset).limit(page_size)
+    # 按 created_at DESC 排序，确保最新生成的图片始终排最前。
+    # 之前用 id DESC 的问题：prompt_browser_ 图片由 job poller 入库时
+    # 可能晚于 sync 写入的普通图，导致 id 顺序 ≠ 实际生成时间顺序。
+    q = q.order_by(Gh.created_at.desc(), Gh.id.desc()).offset(offset).limit(page_size)
     rows = list(q)
     ids = [r.id for r in rows]
 
@@ -321,14 +432,13 @@ def list_history(
     meta_cache = {}
     missing_meta_ids = []
     for r in rows:
-        # 每张图只解码一次元数据，复用于存在性检查与 enrich（消除重复 PIL 解码）
-        meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+        # 性能优化：优先从 prompt_params JSON 取宽高（同步/入库时已写入），
+        # file_size 用 os.stat 秒读，仅缺失时回退 PIL 打开
+        meta = get_image_metadata_fast(
+            r.filename, r.subfolder or "", r.img_type or "output",
+            prompt_params=r.prompt_params,
+        )
         if not meta:
-            # 图片文件暂时读不到（junction 解析抖动 / 文件被锁 / 解码失败）并不等于
-            # 该历史记录应被删除。旧逻辑在此处硬删记录，曾多次误删正常图片（Windows
-            # 跨卷 junction 上 exists() 抛 WinError 448 被 except 吞掉 → 误判为文件缺失），
-            # 表现为“刷新页面后操作历史丢失”。改为：保留数据库记录，仅以空元数据呈现，
-            # 绝不在列表查询路径上静默销毁用户数据。真正的清理请走显式删除接口。
             meta = {}
             missing_meta_ids.append(r.id)
         meta_cache[r.id] = meta
@@ -476,6 +586,7 @@ def history_ids(
 @router.api_route("/history_sync", methods=["GET", "POST"])
 def sync_history(page_size: int = Query(500)):
     added = _sync_comfyui_history()
+    added += _sync_disk_orphans()
     # 注意：list_history 是 FastAPI 路由函数，直接 Python 调用时未显式传入的参数
     # 会拿到 Query(...) 默认对象（FieldInfo）而非真正的 None/""，
     # 会导致 `if category_id is not None` / `tag_ids.split` 等分支误触发并 500。
@@ -640,7 +751,7 @@ def history_list_html(
                 via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
                 q = q.where(direct | via_prompt)
     total = q.count()
-    rows = list(q.order_by(Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
+    rows = list(q.order_by(Gh.created_at.desc(), Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
 
     # 不再自动删除记录：图片文件暂不可读（junction 抖动/文件被锁/解码失败）并不代表
     # 该历史记录应被删除。旧逻辑在此硬删，曾多次误删正常图片（表现为“刷新页面后
@@ -652,7 +763,10 @@ def history_list_html(
 
     items = []
     for r in alive:
-        meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
+        meta = get_image_metadata_fast(
+            r.filename, r.subfolder or "", r.img_type or "output",
+            prompt_params=r.prompt_params,
+        )
         prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
         prompt_name = ""
         if r.prompt_id:
