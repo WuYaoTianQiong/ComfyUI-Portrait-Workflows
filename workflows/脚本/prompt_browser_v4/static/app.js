@@ -176,7 +176,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.checkStatus();
   setInterval(window.checkStatus, 5000);
-  setInterval(() => window.loadHistory(false, false), 30000);
+  // 每 30 秒先同步后台新图片（/api/history_sync），再重新读取当前页（resetPage=false 保留页码）
+  // 避免前端刷新与后端同步两个 30 秒循环时钟不同步导致的新图延迟（最差 60s → 最差 30s）
+  setInterval(async () => {
+    try {
+      await window.api('/api/history_sync?page_size=1'); // 后台同步，body 小忽略
+    } catch (_) {}
+    window.loadHistory(false, false); // 刷新当前页
+  }, 30000);
 
   // 恢复灯箱状态
   window.restoreLightboxState();

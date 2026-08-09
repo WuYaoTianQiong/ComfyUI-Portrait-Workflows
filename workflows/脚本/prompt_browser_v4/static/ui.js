@@ -172,7 +172,8 @@ window.switchTab = function(tabId, btn) {
 
   if (tabId === 'galleryTab') {
     if (typeof window.loadHistory === "function") {
-      window.loadHistory(false);
+      // 切换到画廊时触发同步，确保新生成/外部 ComfyUI 图片也出现在画廊
+      window.loadHistory(true);
     }
   }
 
