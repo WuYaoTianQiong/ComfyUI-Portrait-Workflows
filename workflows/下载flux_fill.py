@@ -2,7 +2,7 @@
 import os
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
-HF_TOKEN = "***REMOVED***"
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 target_dir = r"F:\ComfyUI_Migration\models\diffusion_models"
 os.makedirs(target_dir, exist_ok=True)
 
