@@ -2209,6 +2209,97 @@ PuLID GGUF 换脸的模糊来自三个叠加因素：
 | `_test_facedetailer.py` | FaceDetailer 测试（仅增强，不换脸） |
 | workfows/`MoodyZIT_V7_Visual_FaceDetailer.json` | FaceDetailer 可视化工作流 |
 
+---
+
+## 三十一、2026-08-09~10 MiniMax H3 本地视频生成部署与极限测试
+
+> 历时约 2 天，从零完成 H3 开源权重本地部署（内核升级 + 模型下载 + 工作流展开）并全自动极限测试。**结论：5070 12GB 能跑满官方规格 1344×768 / 10 秒，15 秒在 768P 下 OOM，低分辨率 1056×608 可跑 15 秒。**
+
+### 1. 部署背景
+
+MiniMax H3（2026-08-03 开源）是 33B 单流 Omni Transformer 视频模型，开放两个 checkpoint：
+- `H3-Base-FL2VA`：文生视频 / 首帧 / 尾帧 / 首尾帧
+- `H3-Base-Ref2VA`：参考图/视频/音频复合编辑（最多 9 图 + 3 视频 + 3 音频）
+
+**本机（5070 12GB）跑的是 Comfy-Org 量化版**，关键点：12GB 能跑依赖 INT8 扩散模型 + NVFP4 4bit 文本编码器（50 系 Blackwell 硬件加速红利）。
+
+### 2. 部署动作清单
+
+| 步骤 | 动作 | 说明 |
+|:---|:---|:---|
+| 内核升级 | `git pull` 0.24.0 → **0.31.0** | H3 原生节点需 0.30+，落后 287 提交补齐 |
+| junction 补丁 | `folder_paths.py` 加 `_resolve_reparse()` | 修复升级后 `WinError 448` 启动崩溃（`custom_nodes`/`models`/`input` 全是跨卷 junction，Python 3.13 对"不受信任装入点"直接 listdir 报 448，必须先 `os.readlink` 解析再访问） |
+| fp4 加速 | comfy-kitchen 0.2.10 → **0.2.28** | 老版本缺 `TensorCoreConvRotW4A4Layout`，NVFP4 文本编码器无法加载 |
+| 模型下载 | ModelScope 5 文件共 **59GB** | 国内源 ~25MB/s，比 PyPI/HF 快得多 |
+| 模板包 | 0.10.0 → **0.11.37** | 阿里云镜像（PyPI 国外源卡死），新版含 H3 本地模板 |
+| 工作流展开 | UUID 内嵌节点 → 标准节点图 | 官方 t2v/i2v 模板用 `definitions.subgraphs` 内嵌，复制成 JSON 会显示孤立组件，需复刻前端展开逻辑 |
+
+### 3. 模型文件清单（F:\ComfyUI_Migration\models\，即 ComfyUI 实际读取路径）
+
+| 文件 | 大小 | 放置目录 |
+|:---|:---:|:---|
+| `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | 19.53 GB | `diffusion_models/` |
+| `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | 19.53 GB | `diffusion_models/` |
+| `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | 14.61 GB | `text_encoders/` |
+| `minimax_h3_video_vae_fp16.safetensors` | 4.85 GB | `vae/` |
+| `minimax_h3_audio_vae_fp32.safetensors` | 0.56 GB | `vae/` |
+
+### 4. 工作流
+
+`workflows/` 下两个官方原版（已通过后端 `/prompt` 完整验证，链接自洽、坐标正常）：
+- `MiniMax_H3_文生视频_官方原版.json`（T2V，20 节点 21 链接）
+- `MiniMax_H3_图生视频_官方原版.json`（I2V，23 节点 23 链接，带首帧 LoadImage）
+
+> 官方模板库升级 0.11.37 后也内置同款 3 个模板（含 R2V 参考生视频），可从界面模板库直接加载。
+> **注意**：官方模板默认 **1344×768 / 5 秒 / 20 步**，首次打开时前端文件列表是旧缓存，保存会报 409 Conflict——**按 F5 刷新页面即可**（前端重新拉取 `/v2/userdata` 列表后 `isPersisted=true`，保存带 `overwrite=true`）。
+
+### 5. 全自动极限测试结果（实测）
+
+通过 ComfyUI API 直接覆盖 `MiniMaxH3ImageToVideo` 的 width/height/length 逐个提交，pynvml 后台监控显存峰值。帧数规则：24fps，`n % 17 == 5` 对齐网格（3 秒=73 帧，5 秒=124，8 秒=192，10 秒=243，15 秒=360）。
+
+| 档位 | 分辨率 | 时长 | 结果 | 耗时 | 显存峰值 |
+|:---|:---|:---:|:---:|:---:|:---:|
+| 档1 | 1056×608 | 5s | ✅ | 4分16秒 | 11765MB (96%) |
+| 档2 | 1216×672 | 5s | ✅ | 5分46秒 | 11669MB (95%) |
+| 档3 | **1344×768** | 5s | ✅ | 7分43秒 | 11764MB (96%) |
+| 档4 | 1056×608 | 8s | ✅ | 7分22秒 | 11805MB (97%) |
+| 档5 | 1056×608 | **10s** | ✅ | 10分18秒 | 11674MB (95%) |
+| 极限1 | **1344×768** | **10s** | ✅ | **21分整** | 12004MB (98%) |
+| 极限2 | **1344×768** | **12s** | ❌ OOM | 25s | 12094MB (99%) |
+| 极限3 | **1344×768** | **15s** | ❌ OOM | 25s | 12046MB (99%) |
+
+### 6. 结论：12GB 能力地图
+
+| 分辨率 | 最长可跑时长 | 说明 |
+|:---|:---:|:---|
+| 1056×608 | **15 秒**（趋势可行） | 低分辨率时长上限最宽 |
+| 1216×672 | 5 秒+（未测更长） | 平衡点 |
+| **1344×768** | **10 秒** | 768P 的硬上限 |
+| 864×480 | 15 秒+ | 起步安全区 |
+
+**关键洞察**：
+1. **分辨率 vs 时长互斥**：分辨率吃满显存基线后，时长只能到 10 秒；降分辨率可把时长拉到 15 秒。15 秒官方上限在 768P 下必然 OOM
+2. **OOM 特征**：都在 `SamplerCustomAdvanced` 采样阶段，帧数 → latent 空间 → 显存溢出，峰值 99% 即临界
+3. **显存基线不随分辨率降**：模型驻留（编码器+扩散模型）恒定，省显存最有效变量是时长，其次是分辨率
+
+**实用推荐**：
+- 追求画质：**1344×768 / 10 秒**（21 分钟，贴极限，别开其他程序）
+- 追求时长：**1056×608 / 15 秒**（约 15 分钟）
+- 平衡：**1216×672 / 8 秒**（约 10 分钟）
+
+### 7. 踩坑记录（重要）
+
+| 坑 | 教训 |
+|:---|:---|
+| **跨卷 junction 启动崩溃** | 0.31 内核 `os.listdir(custom_nodes)` 对 D→F junction 抛 `WinError 448`，必须 `folder_paths.py` 里 `os.readlink` 解析（返回 `\\?\` 前缀需去掉，否则 `os.path.join` 拼 `..` 报 `Errno 22`） |
+| **comfy-kitchen 过旧** | 0.2.10 < 0.2.28 时 NVFP4 文本编码器报 `TensorCoreConvRotW4A4Layout` 缺失，fp4 加速不可用，必须升级 |
+| **模型下载写错目录** | `ComfyUI-aki-v3/models/`（外层孤岛）≠ `ComfyUI-aki-v3/ComfyUI/models/`（内核 junction → F 盘）。下载脚本必须写内核路径，否则 ComfyUI 找不到模型 |
+| **官方模板 UUID 内嵌节点** | t2v/i2v 模板的 `4c314f31-...` 节点靠 `definitions.subgraphs` 在前端模板库展开，复制成独立 JSON 打开显示"孤立组件"。解法：复刻前端展开逻辑转标准节点图（重编号、槽位映射、widget 回填） |
+| **前端 409 Conflict** | 文件由脚本写盘、早于前端列表缓存 → `isPersisted=false` → 保存带 `overwrite=false` → 409。**F5 刷新即可** |
+| **pip 走国外源卡死** | PyPI 国外网络极慢，`comfyui-workflow-templates` 升级用**阿里云镜像**秒装 |
+| **PowerShell 引号/GBK 坑** | 临时脚本必须 `write_to_file` 成文件再跑（`python -c` 引号转义必错）；输出文件用 UTF-8 写再 read_file 读 |
+| **显存峰值贴边** | 95-97% 运行时别开浏览器/其他占用显存的程序，否则挤爆 OOM |
+
 
 
 
