@@ -1,0 +1,1982 @@
+{
+  "id": "6aa22b9a-045a-471b-866c-f5ce8df390f2",
+  "revision": 0,
+  "last_node_id": 208,
+  "last_link_id": 491,
+  "nodes": [
+    {
+      "id": 149,
+      "type": "VAEEncode",
+      "pos": [
+        -285.4955884571461,
+        797.9509059989294
+      ],
+      "size": [
+        148.59375,
+        47.388192309075976
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 482
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 397
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            401
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.60"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 96,
+      "type": "Fast Groups Bypasser (rgthree)",
+      "pos": [
+        -877.0667736943827,
+        -264.85381282979534
+      ],
+      "size": [
+        961.9949350494769,
+        194.93890573685627
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "OPT_CONNECTION",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "title": "Fast Groups Bypasser (rgthree) 開關",
+      "properties": {
+        "matchColors": "",
+        "matchTitle": "",
+        "showNav": true,
+        "showAllGraphs": true,
+        "sort": "position",
+        "customSortAlphabet": "",
+        "toggleRestriction": "default"
+      },
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 30,
+      "type": "VAEDecode",
+      "pos": [
+        -120.78152122059777,
+        812.1873809971681
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 404
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 313
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            412,
+            423
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 162,
+      "type": "SAMLoader",
+      "pos": [
+        630.6737916008396,
+        1741.1401745786673
+      ],
+      "size": [
+        320,
+        82
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAM_MODEL",
+          "type": "SAM_MODEL",
+          "slot_index": 0,
+          "links": [
+            440
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SAMLoader",
+        "cnr_id": "comfyui-impact-pack",
+        "ver": "8.22.2"
+      },
+      "widgets_values": [
+        "sam_vit_b_01ec64.pth",
+        "AUTO"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 169,
+      "type": "PreviewImage",
+      "pos": [
+        1054.2300325467609,
+        1931.8821876813674
+      ],
+      "size": [
+        230,
+        300
+      ],
+      "flags": {},
+      "order": 31,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 430
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "Cropped (refined)",
+      "properties": {
+        "Node name for S&R": "PreviewImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 170,
+      "type": "UltralyticsDetectorProvider",
+      "pos": [
+        633.8908936516209,
+        1614.4395825376498
+      ],
+      "size": [
+        315,
+        78
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "BBOX_DETECTOR",
+          "type": "BBOX_DETECTOR",
+          "slot_index": 0,
+          "links": [
+            439
+          ]
+        },
+        {
+          "name": "SEGM_DETECTOR",
+          "type": "SEGM_DETECTOR",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UltralyticsDetectorProvider",
+        "cnr_id": "comfyui-impact-subpack",
+        "ver": "1.3.5"
+      },
+      "widgets_values": [
+        "bbox/face_yolov9c.pt"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 172,
+      "type": "PreviewImage",
+      "pos": [
+        1053.595642807357,
+        2304.2119430909424
+      ],
+      "size": [
+        230,
+        310
+      ],
+      "flags": {},
+      "order": 32,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 431
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 161,
+      "type": "PreviewImage",
+      "pos": [
+        1056.564361801478,
+        2741.099945779845
+      ],
+      "size": [
+        230,
+        290
+      ],
+      "flags": {},
+      "order": 36,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 426
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "Mask",
+      "properties": {
+        "Node name for S&R": "PreviewImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 203,
+      "type": "PlaySound|pysssss",
+      "pos": [
+        1390.6731363950414,
+        1583.2645207611647
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 35,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "any",
+          "type": "*",
+          "link": 479
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "shape": 6,
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PlaySound|pysssss"
+      },
+      "widgets_values": [
+        "always",
+        0.5,
+        "notify.mp3"
+      ]
+    },
+    {
+      "id": 147,
+      "type": "LoadImage",
+      "pos": [
+        -1228.1678769452933,
+        55.74295128404717
+      ],
+      "size": [
+        270,
+        314
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            424,
+            483
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.60"
+      },
+      "widgets_values": [
+        "tokyohot style (176).jpg",
+        "image"
+      ]
+    },
+    {
+      "id": 177,
+      "type": "Image Comparer (rgthree)",
+      "pos": [
+        1350.3453300914707,
+        1803.5464388169146
+      ],
+      "size": [
+        529.3656911002565,
+        881.9184470516807
+      ],
+      "flags": {},
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "image_a",
+          "type": "IMAGE",
+          "link": 442
+        },
+        {
+          "dir": 3,
+          "name": "image_b",
+          "type": "IMAGE",
+          "link": 448
+        }
+      ],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "images",
+          "shape": 3,
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "圖片對比",
+      "properties": {
+        "comparer_mode": "Slide",
+        "cnr_id": "rgthree-comfy",
+        "ver": "1.0.2509092031"
+      },
+      "widgets_values": [
+        [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_jgzfb_00003_.png&type=temp&subfolder=&rand=0.8365137399221706"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_jgzfb_00004_.png&type=temp&subfolder=&rand=0.7819155846512768"
+          }
+        ]
+      ]
+    },
+    {
+      "id": 98,
+      "type": "UNETLoader",
+      "pos": [
+        -908.26128945793,
+        63.6498069593768
+      ],
+      "size": [
+        430.2682017940185,
+        89.57172697873614
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            311
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\Pornmaster_krea2_Turbo_int8_convrot_v2.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 99,
+      "type": "CLIPLoader",
+      "pos": [
+        -451.33108577794064,
+        58.84526284963136
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            312
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\qwen3vl_4b_fp8_scaled.safetensors",
+        "krea2",
+        "default"
+      ]
+    },
+    {
+      "id": 100,
+      "type": "VAELoader",
+      "pos": [
+        -151.99645048113584,
+        72.50058551524432
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            313,
+            397
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\qwen_image_vae.safetensors"
+      ]
+    },
+    {
+      "id": 173,
+      "type": "UNETLoader",
+      "pos": [
+        -764.8845503576391,
+        1622.938334137081
+      ],
+      "size": [
+        390.50470277293175,
+        82
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            444
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\Pornmaster_krea2_Turbo_int8_convrot_v2.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 165,
+      "type": "CLIPLoader",
+      "pos": [
+        -344.9781502850485,
+        1614.3047417064065
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            435,
+            445
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\qwen3vl_4b_fp8_scaled.safetensors",
+        "krea2",
+        "default"
+      ]
+    },
+    {
+      "id": 164,
+      "type": "VAELoader",
+      "pos": [
+        -64.33523881251547,
+        1625.2288730510443
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            436
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "krea2\\qwen_image_vae.safetensors"
+      ]
+    },
+    {
+      "id": 157,
+      "type": "easy cleanGpuUsed",
+      "pos": [
+        -207.4643108327665,
+        964.8324681557549
+      ],
+      "size": [
+        215.57321673502761,
+        33.300547288673215
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "link": 412
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "*",
+          "links": [
+            414,
+            447,
+            448
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "easy cleanGpuUsed",
+        "cnr_id": "comfyui-easy-use",
+        "ver": "1.3.3"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 205,
+      "type": "CLIPTextEncode",
+      "pos": [
+        -866.674574204435,
+        889.0969673674596
+      ],
+      "size": [
+        571.5963594592068,
+        427.882549891943
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 489
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            488
+          ]
+        }
+      ],
+      "title": "負面提示詞 (negative)",
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.62"
+      },
+      "widgets_values": [
+        "(cum, cum on body. Semen, white liquid,Pubic hair, female pubic hair:1.2),水印，文字."
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 206,
+      "type": "CLIPTextEncode",
+      "pos": [
+        -826.951913694996,
+        2541.2493038201246
+      ],
+      "size": [
+        571.5963594592068,
+        427.882549891943
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 490
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            491
+          ]
+        }
+      ],
+      "title": "負面提示詞 (negative)",
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.62"
+      },
+      "widgets_values": [
+        "(cum, cum on body. Semen, white liquid,水印，文字)."
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 207,
+      "type": "Note",
+      "pos": [
+        -1231.9637091185186,
+        2553.986641827308
+      ],
+      "size": [
+        341.9120545105286,
+        88
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "如果要讓負面提示詞生效，將cfg值設定為:1.5.\n\nTo enable the negative prompt, set the CFG value to 1.5."
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 208,
+      "type": "Note",
+      "pos": [
+        -1237.3661868136285,
+        902.2215658941519
+      ],
+      "size": [
+        341.9120545105286,
+        88
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "如果要讓負面提示詞生效，將cfg值設定為:1.5.\n\nTo enable the negative prompt, set the CFG value to 1.5."
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 159,
+      "type": "Image Comparer (rgthree)",
+      "pos": [
+        75.20392901308048,
+        807.3594400293275
+      ],
+      "size": [
+        448.51765928958343,
+        588.8613207910905
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "image_a",
+          "type": "IMAGE",
+          "link": 423
+        },
+        {
+          "dir": 3,
+          "name": "image_b",
+          "type": "IMAGE",
+          "link": 424
+        }
+      ],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "images",
+          "shape": 3,
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "comparer_mode": "Slide",
+        "cnr_id": "rgthree-comfy",
+        "ver": "1.0.2512112053"
+      },
+      "widgets_values": [
+        [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_rkfme_00003_.png&type=temp&subfolder=&rand=0.437613598527706"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_rkfme_00004_.png&type=temp&subfolder=&rand=0.349570326767645"
+          }
+        ]
+      ]
+    },
+    {
+      "id": 180,
+      "type": "Lora Loader (LoraManager)",
+      "pos": [
+        189.4885565934439,
+        1702.2893231130067
+      ],
+      "size": [
+        414.2801208496094,
+        579.714111328125
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 444
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 445
+        },
+        {
+          "name": "lora_stack",
+          "shape": 7,
+          "type": "LORA_STACK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            485
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            446,
+            490
+          ]
+        },
+        {
+          "name": "trigger_words",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "loaded_loras",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Lora Loader (LoraManager)",
+        "cnr_id": "comfyui-lora-manager",
+        "ver": "392c157cb531805888d4d5054db58dd38ac721ee",
+        "__lm_widget_ids": [
+          "__lm_autocomplete_meta_text",
+          "text",
+          "loras"
+        ]
+      },
+      "widgets_values": [
+        {
+          "version": 1,
+          "textWidgetName": "text"
+        },
+        "",
+        []
+      ]
+    },
+    {
+      "id": 160,
+      "type": "MaskToImage",
+      "pos": [
+        1057.6053522293269,
+        2663.0635952766424
+      ],
+      "size": [
+        176.39999389648438,
+        26
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 425
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            426
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MaskToImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 150,
+      "type": "KSampler",
+      "pos": [
+        -287.42786468187717,
+        209.72118706203503
+      ],
+      "size": [
+        270,
+        262
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 486
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 399
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 488
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 401
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            404
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KSampler",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.60"
+      },
+      "widgets_values": [
+        661859672078917,
+        "randomize",
+        10,
+        1.5,
+        "euler",
+        "simple",
+        0.4
+      ]
+    },
+    {
+      "id": 84,
+      "type": "Lora Loader (LoraManager)",
+      "pos": [
+        197.28526019702772,
+        36.5457415129025
+      ],
+      "size": [
+        473.8908503577695,
+        641.2662033194199
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 311
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 312
+        },
+        {
+          "name": "lora_stack",
+          "shape": 7,
+          "type": "LORA_STACK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            486
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            309,
+            489
+          ]
+        },
+        {
+          "name": "trigger_words",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "loaded_loras",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Lora Loader (LoraManager)",
+        "cnr_id": "comfyui-lora-manager",
+        "ver": "392c157cb531805888d4d5054db58dd38ac721ee",
+        "__lm_widget_ids": [
+          "__lm_autocomplete_meta_text",
+          "text",
+          "loras"
+        ]
+      },
+      "widgets_values": [
+        {
+          "version": 1,
+          "textWidgetName": "text"
+        },
+        "",
+        []
+      ]
+    },
+    {
+      "id": 154,
+      "type": "Note",
+      "pos": [
+        -310.5593530335815,
+        526.4441947534995
+      ],
+      "size": [
+        425.20105127661736,
+        153.24306864825667
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "去雜訊強度越高，改變越大。\n步驟數越多步，生成的背景越詳細。\n使用人物LORA建議\"去雜訊強度\"設定為0.5以上。\n\nThe higher the \"denoise\", the greater the change.\nThe more steps involved, the more detailed the generated background will be.\nWhen using the character Lora, it is recommended to set the \"Noise Reduction Strength\" to 0.5 or higher."
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 163,
+      "type": "Note",
+      "pos": [
+        -33.08449435446153,
+        2562.933161301865
+      ],
+      "size": [
+        642.7072895720837,
+        327.3272866843581
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "guide_size建議在512~1024範圍之間，數字越大速度越慢。如果面部修復功能沒有生效時，需提高guide_size的數字。\n或是重啟comfyui。\n\nFaceDetailer功能本身有bug，有些圖片可能無法讀取到人物面部會導致黑畫面。\n\n調整\"denoise\"可以控制面部重繪的幅度。\n\n\n\nThe guide size is recommended to be between 512 and 1024; the larger the number, the slower the speed.\nIf the facial repair function is ineffective, the guide_size number needs to be increased.\nOr restart comfyui.\n\nThe \"FaceDetailer\" feature itself has a bug; it may fail to read faces in some images, resulting in a black screen.\n\nAdjusting \"denoise\" controls the extent of facial redrawing.\n"
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 181,
+      "type": "CLIPTextEncode",
+      "pos": [
+        -775.9499385917377,
+        1835.3590758394637
+      ],
+      "size": [
+        529.4420776367188,
+        641.1295166015625
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 446
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            437
+          ]
+        }
+      ],
+      "title": "面部相關提示詞-正面 (Facial related prompts - positive)",
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.62"
+      },
+      "widgets_values": [
+        "8k，超高清，專業攝影，膠片顆粒，電影劇照,一個18歲全裸的日本女性躺在床上，她的部分臉可見並且一邊眼睛看著鏡頭，她正在吸允上方男性的陰莖.\n\n日本色情片."
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 175,
+      "type": "FaceDetailer",
+      "pos": [
+        650.2061021222534,
+        1909.2878539121473
+      ],
+      "size": [
+        350,
+        1180
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 447
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 485
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 435
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 436
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 437
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 491
+        },
+        {
+          "name": "bbox_detector",
+          "type": "BBOX_DETECTOR",
+          "link": 439
+        },
+        {
+          "name": "sam_model_opt",
+          "shape": 7,
+          "type": "SAM_MODEL",
+          "link": 440
+        },
+        {
+          "name": "segm_detector_opt",
+          "shape": 7,
+          "type": "SEGM_DETECTOR",
+          "link": null
+        },
+        {
+          "name": "detailer_hook",
+          "shape": 7,
+          "type": "DETAILER_HOOK",
+          "link": null
+        },
+        {
+          "name": "scheduler_func_opt",
+          "shape": 7,
+          "type": "SCHEDULER_FUNC",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            427,
+            442
+          ]
+        },
+        {
+          "name": "cropped_refined",
+          "shape": 6,
+          "type": "IMAGE",
+          "slot_index": 1,
+          "links": [
+            430
+          ]
+        },
+        {
+          "name": "cropped_enhanced_alpha",
+          "shape": 6,
+          "type": "IMAGE",
+          "slot_index": 2,
+          "links": [
+            431
+          ]
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "slot_index": 3,
+          "links": [
+            425
+          ]
+        },
+        {
+          "name": "detailer_pipe",
+          "type": "DETAILER_PIPE",
+          "links": null
+        },
+        {
+          "name": "cnet_images",
+          "shape": 6,
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FaceDetailer",
+        "cnr_id": "comfyui-impact-pack",
+        "ver": "8.22.2"
+      },
+      "widgets_values": [
+        768,
+        true,
+        2048,
+        874263325024496,
+        "randomize",
+        8,
+        1.5,
+        "euler",
+        "simple",
+        0.35,
+        100,
+        true,
+        false,
+        0.5,
+        128,
+        2,
+        "center-1",
+        32,
+        0.5,
+        0,
+        0.7,
+        "False",
+        128,
+        "",
+        1,
+        false,
+        20,
+        false,
+        false
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 90,
+      "type": "CLIPTextEncode",
+      "pos": [
+        -867.6380821130012,
+        223.5982101433913
+      ],
+      "size": [
+        522.5152555783235,
+        592.5551734715918
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 309
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            399
+          ]
+        }
+      ],
+      "title": "正面提示詞 (positive)",
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.62"
+      },
+      "widgets_values": [
+        "8k，超高清，專業攝影，膠片顆粒，電影劇照,一個18歲全裸的日本女性躺在床上，她的中等尺寸乳房和兩邊的乳頭可見. 她的部分臉可見並且一邊眼睛看著鏡頭，她正在吸允上方男性的陰莖.\n\n她的雙腿張開露出陰毛和生殖器,她的一隻手放在脖子周圍,她的頭部上方蹲著一個彎腰的全裸男人將陰莖插入她的嘴.\n她的身體上坐著一個全裸男人，那個男人正用左手摸著她的乳房.\n右邊一個跪著的全裸男人將陰莖插入她的陰道中.\n背景在臥室，在床上做愛，日本色情片."
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 204,
+      "type": "ImageScaleToTotalPixels",
+      "pos": [
+        -1216.131072703099,
+        457.3398974550322
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 483
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            482
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageScaleToTotalPixels",
+        "cnr_id": "comfy-core",
+        "ver": "0.8.2"
+      },
+      "widgets_values": [
+        "nearest-exact",
+        1.5,
+        1
+      ]
+    },
+    {
+      "id": 178,
+      "type": "Note",
+      "pos": [
+        -1233.045609488928,
+        1580.2236700290316
+      ],
+      "size": [
+        434.3290388282712,
+        240.03586254210472
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "此處只寫與臉部描述相關的提示詞，和整體照片品質的提示詞。\n可使用人物lora。\n某些圖片可能會無法辨識臉部，導致\"FaceDetailer\"的功能失效。\n人物臉部在照片整體中佔比太小時也會讀取不到，無法進行修復.\n\nThis section only includes prompts related to facial descriptions and overall photo quality.\nThe character Lora can be used.\nSome images may fail to recognize faces, causing the \"FaceDetailer\" function to malfunction.\n\nIf the face occupies too small a proportion of the overall photo, it may not be detected and cannot be repaired."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 166,
+      "type": "easy cleanGpuUsed",
+      "pos": [
+        1021.4278098981943,
+        1655.6645946817105
+      ],
+      "size": [
+        161.3404296875,
+        26
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "link": 427
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "*",
+          "links": [
+            432,
+            479
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "easy cleanGpuUsed",
+        "cnr_id": "comfyui-easy-use",
+        "ver": "1.3.3"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 174,
+      "type": "SaveImage",
+      "pos": [
+        1906.3235648452223,
+        1798.6920853071076
+      ],
+      "size": [
+        516.83740234375,
+        833.8287963867188
+      ],
+      "flags": {},
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 432
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "面部修復後儲存圖片(Images saved after facial retouching.)",
+      "properties": {
+        "Node name for S&R": "SaveImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.61"
+      },
+      "widgets_values": [
+        "FaceDetailer"
+      ]
+    },
+    {
+      "id": 106,
+      "type": "SaveImage",
+      "pos": [
+        576.9964956200762,
+        739.4573720852475
+      ],
+      "size": [
+        406.92168344011156,
+        653.1413260347271
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 414
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75"
+      },
+      "widgets_values": [
+        "i2i"
+      ]
+    }
+  ],
+  "links": [
+    [
+      309,
+      84,
+      1,
+      90,
+      0,
+      "CLIP"
+    ],
+    [
+      311,
+      98,
+      0,
+      84,
+      0,
+      "MODEL"
+    ],
+    [
+      312,
+      99,
+      0,
+      84,
+      1,
+      "CLIP"
+    ],
+    [
+      313,
+      100,
+      0,
+      30,
+      1,
+      "VAE"
+    ],
+    [
+      397,
+      100,
+      0,
+      149,
+      1,
+      "VAE"
+    ],
+    [
+      399,
+      90,
+      0,
+      150,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      401,
+      149,
+      0,
+      150,
+      3,
+      "LATENT"
+    ],
+    [
+      404,
+      150,
+      0,
+      30,
+      0,
+      "LATENT"
+    ],
+    [
+      412,
+      30,
+      0,
+      157,
+      0,
+      "IMAGE"
+    ],
+    [
+      414,
+      157,
+      0,
+      106,
+      0,
+      "IMAGE"
+    ],
+    [
+      423,
+      30,
+      0,
+      159,
+      0,
+      "IMAGE"
+    ],
+    [
+      424,
+      147,
+      0,
+      159,
+      1,
+      "IMAGE"
+    ],
+    [
+      425,
+      175,
+      3,
+      160,
+      0,
+      "MASK"
+    ],
+    [
+      426,
+      160,
+      0,
+      161,
+      0,
+      "IMAGE"
+    ],
+    [
+      427,
+      175,
+      0,
+      166,
+      0,
+      "IMAGE"
+    ],
+    [
+      430,
+      175,
+      1,
+      169,
+      0,
+      "IMAGE"
+    ],
+    [
+      431,
+      175,
+      2,
+      172,
+      0,
+      "IMAGE"
+    ],
+    [
+      432,
+      166,
+      0,
+      174,
+      0,
+      "IMAGE"
+    ],
+    [
+      435,
+      165,
+      0,
+      175,
+      2,
+      "CLIP"
+    ],
+    [
+      436,
+      164,
+      0,
+      175,
+      3,
+      "VAE"
+    ],
+    [
+      437,
+      181,
+      0,
+      175,
+      4,
+      "CONDITIONING"
+    ],
+    [
+      439,
+      170,
+      0,
+      175,
+      6,
+      "BBOX_DETECTOR"
+    ],
+    [
+      440,
+      162,
+      0,
+      175,
+      7,
+      "SAM_MODEL"
+    ],
+    [
+      442,
+      175,
+      0,
+      177,
+      0,
+      "IMAGE"
+    ],
+    [
+      444,
+      173,
+      0,
+      180,
+      0,
+      "MODEL"
+    ],
+    [
+      445,
+      165,
+      0,
+      180,
+      1,
+      "CLIP"
+    ],
+    [
+      446,
+      180,
+      1,
+      181,
+      0,
+      "CLIP"
+    ],
+    [
+      447,
+      157,
+      0,
+      175,
+      0,
+      "IMAGE"
+    ],
+    [
+      448,
+      157,
+      0,
+      177,
+      1,
+      "IMAGE"
+    ],
+    [
+      479,
+      166,
+      0,
+      203,
+      0,
+      "*"
+    ],
+    [
+      482,
+      204,
+      0,
+      149,
+      0,
+      "IMAGE"
+    ],
+    [
+      483,
+      147,
+      0,
+      204,
+      0,
+      "IMAGE"
+    ],
+    [
+      485,
+      180,
+      0,
+      175,
+      1,
+      "MODEL"
+    ],
+    [
+      486,
+      84,
+      0,
+      150,
+      0,
+      "MODEL"
+    ],
+    [
+      488,
+      205,
+      0,
+      150,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      489,
+      84,
+      1,
+      205,
+      0,
+      "CLIP"
+    ],
+    [
+      490,
+      180,
+      1,
+      206,
+      0,
+      "CLIP"
+    ],
+    [
+      491,
+      206,
+      0,
+      175,
+      5,
+      "CONDITIONING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 11,
+      "title": "基本圖生圖檢查站和lora (i2i and lora)",
+      "bounding": [
+        -1256.5958256135077,
+        -37.43009406053311,
+        2313.9091147017616,
+        1440.565512748058
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 12,
+      "title": "First time FaceDetailer",
+      "bounding": [
+        -1257.3686703517762,
+        1480.4748872331363,
+        3805.582258662018,
+        1699.4985433476731
+      ],
+      "color": "#b58b2a",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6080776351234929,
+      "offset": [
+        254.972794096317,
+        -321.0722609128869
+      ]
+    },
+    "frontendVersion": "1.45.21",
+    "workflowRendererVersion": "LG",
+    "groupNodes": {},
+    "controller_panel": {
+      "controllers": {},
+      "hidden": true,
+      "highlight": true,
+      "version": 2,
+      "default_order": []
+    },
+    "node_versions": {
+      "comfy-core": "0.3.14",
+      "comfyui-impact-subpack": "74db20c95eca152a6d686c914edc0ef4e4762cb8",
+      "comfyui-impact-pack": "1ae7cae2df8cca06027edfa3a24512671239d6c4"
+    },
+    "ue_links": [],
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
