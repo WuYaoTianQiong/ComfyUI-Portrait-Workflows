@@ -25,11 +25,11 @@
   },
   "8": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "white bikini swimsuit, smooth skin exposed, bare arms and shoulders, no clothes, no fabric covering torso" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "9": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "clothes, dress, shirt, pants, jacket, coat, extra fabric, bad anatomy, ugly" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "10": {
     "class_type": "VAEEncode",

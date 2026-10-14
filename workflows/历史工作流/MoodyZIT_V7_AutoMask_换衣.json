@@ -53,11 +53,11 @@
   },
   "8": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "best quality, photorealistic, detailed" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "9": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "nsfw, low quality, worst quality, distortion, blurry" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "10": {
     "class_type": "VAEEncodeForInpaint",

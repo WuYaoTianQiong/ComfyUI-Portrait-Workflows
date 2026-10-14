@@ -69,7 +69,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [5], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "TextEncodeQwenImageEditPlus" },
-      "widgets_values": ["masterpiece, best quality，漫画风格，一个古风少女，黑长直发，粉色玫瑰花发饰，渐变蓝紫汉服，抹胸银饰，薄纱广袖，左手搭白色书桌，右手垂放身侧，全身，站立，粉色少女房，梳妆台，Hello Kitty玩偶，右侧窗户进光，电影感柔光，高细节"]
+      "widgets_values": [""]
     },
     {
       "id": 5,
@@ -87,7 +87,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [6], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["低质量，最差质量，模糊，畸形，水印，文字，多余肢体，丑陋，扭曲"]
+      "widgets_values": [""]
     },
     {
       "id": 6,

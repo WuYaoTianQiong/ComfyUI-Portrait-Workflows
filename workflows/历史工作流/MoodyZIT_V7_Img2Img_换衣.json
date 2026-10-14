@@ -25,7 +25,7 @@
   },
   "prompt": {
     "class_type": "PrimitiveStringMultiline",
-    "inputs": { "value": "穿着红色旗袍，丝绸质感，紧身剪裁，高清摄影" }
+    "inputs": { "value": "" }
   },
   "7": {
     "class_type": "ImageScaleBy",

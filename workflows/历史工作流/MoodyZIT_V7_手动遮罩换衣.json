@@ -29,7 +29,7 @@
   },
   "prompt": {
     "class_type": "PrimitiveStringMultiline",
-    "inputs": { "value": "穿着红色旗袍，丝绸质感，紧身剪裁，精致细节，高清摄影" }
+    "inputs": { "value": "" }
   },
   "8": {
     "class_type": "CLIPTextEncode",
@@ -37,7 +37,7 @@
   },
   "9": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "nsfw, low quality, worst quality, distortion" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "10": {
     "class_type": "VAEEncodeForInpaint",

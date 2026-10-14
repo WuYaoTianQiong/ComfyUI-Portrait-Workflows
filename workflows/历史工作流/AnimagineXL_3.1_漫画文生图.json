@@ -35,7 +35,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [3], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["masterpiece, best quality, amazing quality, very aesthetic, absurdres, 1girl, comic style, manga style, (looking at viewer:1.2), solo, (smile:1.1), long hair, black hair, bangs, (hands on desk:1.1), (office chair:0.8), (white table:0.8), (painting:1.2), (comic illustration:1.3), (clean lineart:1.2), cell shading, depth of field, blurry background, indoors, room, window, daylight, from side, skirt, bare shoulders"]
+      "widgets_values": [""]
     },
     {
       "id": 6,
@@ -53,7 +53,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [6], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, ugly, deformed"]
+      "widgets_values": [""]
     },
     {
       "id": 3,

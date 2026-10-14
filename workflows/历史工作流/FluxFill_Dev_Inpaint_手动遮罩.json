@@ -17,7 +17,7 @@
   },
   "5": {
     "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["2", 0], "text": "bare neck, smooth skin, collarbone visible, no scarf" }
+    "inputs": { "clip": ["2", 0], "text": "" }
   },
   "6": {
     "class_type": "VAEEncodeForInpaint",

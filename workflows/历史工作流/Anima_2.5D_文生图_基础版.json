@@ -63,7 +63,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [3], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["2.5D anime style, a beautiful girl with long hair, detailed eyes, cel shading, clean line art, high quality illustration, best quality, masterpiece"]
+      "widgets_values": [""]
     },
     {
       "id": 5,
@@ -96,7 +96,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [9], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["(low quality, worst quality:1.4), bad anatomy, nsfw, watermark, text, distorted, ugly, blurry"]
+      "widgets_values": [""]
     },
     {
       "id": 6,

@@ -86,7 +86,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [8], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["masterpiece, best quality, newest, absurdres, highres, (1girl, solo, solo focus:1.5), black hair, twintails, medium breasts, serafuku, pleated skirt, upskirt, panty pull, undressing, squatting, bushes in foreground, bottom hidden in bushes, surprised, embarrassed, full-face blush, wavy mouth, open mouth, looking at viewer, face focus, from side, outdoors, forest, tree"]
+      "widgets_values": [""]
     },
     {
       "id": 4,
@@ -104,7 +104,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [9], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["(bad quality, worst quality, worst detail, bad, low quality, bad anatomy:1.2), (polydactyly, extra digits, extra legs, bad hands, bad hand, bad fingers, fused fingers, missing finger, split fingers, fused arms, fused hands:1.5), futanari, text, tongue, pov hand"]
+      "widgets_values": [""]
     },
     {
       "id": 6,

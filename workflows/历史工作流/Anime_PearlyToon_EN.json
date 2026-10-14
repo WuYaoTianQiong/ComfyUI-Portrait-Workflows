@@ -82,7 +82,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [3], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["pearlyperf, masterpiece, best quality, very aesthetic, highres, absurdres, newest, depth of field, cinematic composition, 1girl, solo, blonde hair, cute, sleeping, messy hair, messy bed, laying in bed, fantasy inn, drooling, one leg up, one arm up"]
+      "widgets_values": [""]
     },
     {
       "id": 8,
@@ -100,7 +100,7 @@
         { "name": "CONDITIONING", "type": "CONDITIONING", "links": [6], "shape": 3, "slot_index": 0 }
       ],
       "properties": { "Node name for S&R": "CLIPTextEncode" },
-      "widgets_values": ["worst quality, low quality, blurry, jpeg artifacts, signature, watermark"]
+      "widgets_values": [""]
     },
     {
       "id": 5,
