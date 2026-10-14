@@ -48,6 +48,7 @@ desktop.ini
 # Temporary files
 *.tmp
 *.bak
+*.bak_*
 *.log
 run_*.py
 fix_*.py
@@ -62,6 +63,9 @@ comfyui.log
 workflows/_*.py
 workflows/test_*.py
 workflows/show_*.py
+
+# 第三方原始压缩包（内容与同目录解压后的 json 重复，仅作本地留存）
+workflows/PornMaster_iamddtla/*.zip
 workflows/check_*.py
 workflows/*_test.py
 workflows/auto_pipeline.py
