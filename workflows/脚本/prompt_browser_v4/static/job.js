@@ -98,6 +98,7 @@ window.submitTask = async function(opts) {
   const {
     endpoint, payload, title = "提交任务",
     errorPrefix = "提交失败", requireOnline = true, timeout,
+    track = true, onJob = null,
   } = opts || {};
   if (requireOnline && window.comfyStatus !== "online") {
     window.showToast("ComfyUI 未连接，已取消提交", "error");
@@ -113,8 +114,16 @@ window.submitTask = async function(opts) {
       body: JSON.stringify(payload || {}),
       ...(timeout ? { timeout } : {}),
     });
-    if (data && data.job_id) window.trackJob(data.job_id);
-    else window.hideJobHud();
+    if (data && data.job_id) {
+      // 有自定义生命周期的调用方（试跑）先注册回调，再交给 trackJob
+      if (typeof onJob === "function") {
+        try { onJob(data.job_id); } catch (e) { console.error("onJob", e); }
+      }
+      if (track) window.trackJob(data.job_id);
+      else window.hideJobHud();
+    } else {
+      window.hideJobHud();
+    }
     return data;
   } catch (e) {
     window.hideJobHud();
@@ -207,6 +216,12 @@ window._finalizeJob = function(job) {
       `完成：新增 ${newImages} 张图片`, "success", "查看",
       () => window.switchTabByRoute && window.switchTabByRoute("galleryTab")
     );
+  } else if (job.status === "done") {
+    window.showToast("任务已完成", "success");
+  } else if (job.status === "error") {
+    window.showToast(`任务失败（${job.error_count || 1} 项出错），详情见任务面板`, "error");
+  } else if (job.status === "stopped" || job.status === "cancelled") {
+    window.showToast("任务已取消", "info");
   }
   // 防抖刷新当前选中提示词的生成历史
   clearTimeout(window._refreshHistoryTimer);

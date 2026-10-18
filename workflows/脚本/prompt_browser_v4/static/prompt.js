@@ -1603,37 +1603,40 @@ window.trialRun = async function() {
       source_prompt_id: id ? parseInt(id) : 0,
     }, typeof window.workflowExtraBody === "function" ? window.workflowExtraBody() : {});
 
-    const data = await window.api("/api/run_text", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const data = await window.submitTask({
+      endpoint: "/api/run_text",
+      payload: body,
+      title: "试跑中",
+      errorPrefix: "试跑失败",
+      onJob: (jobId) => {
+        trial.jobId = jobId;
+        trial.status = "running";
+        window.renderTrialLog();
 
-    trial.jobId = data.job_id;
-    trial.status = "running";
-    window.renderTrialLog();
-
-    // 注册完成回调
-    window._trialWatchers.set(data.job_id, (job) => {
-      if (job.status === "done") {
-        trial.status = "done";
-        for (const item of (job.items || [])) {
-          if (item.images && Array.isArray(item.images) && item.images.length > 0) {
-            trial.images = item.images;
-            break;
+        // 注册完成回调（必须早于 trackJob，避免任务瞬间完成时错过事件）
+        window._trialWatchers.set(jobId, (job) => {
+          if (job.status === "done") {
+            trial.status = "done";
+            for (const item of (job.items || [])) {
+              if (item.images && Array.isArray(item.images) && item.images.length > 0) {
+                trial.images = item.images;
+                break;
+              }
+            }
+          } else {
+            trial.status = job.status;
           }
-        }
-      } else {
-        trial.status = job.status;
-      }
-      window.renderTrialLog();
+          window.renderTrialLog();
+        });
+      },
     });
-
-    // 用全局 trackJob 驱动轮询和进度条
-    window.trackJob(data.job_id);
+    if (!data) {
+      trial.status = "error";
+      window.renderTrialLog();
+    }
   } catch (e) {
     trial.status = "error";
     window.renderTrialLog();
-    window.showToast("试跑失败: " + e.message, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = origText;

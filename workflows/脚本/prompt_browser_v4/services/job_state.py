@@ -20,7 +20,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from peewee import SQL
 
@@ -43,6 +43,22 @@ from services.helpers import (
 logger = logging.getLogger("prompt_browser.jobs")
 
 TERMINAL = {"done", "error", "cancelled", "stopped"}
+
+# 提交宽限期：任务创建后，条目的 prompt_id 要等 push 完才写回 DB。
+# 批量 160 张的提交循环可能持续几分钟，这期间不能让写者把"还没有 pid"当成失败。
+_SUBMIT_GRACE_SECONDS = 300
+
+
+def _job_age_seconds(job: dict) -> float:
+    """任务创建至今的秒数。created_at 由 SQLite CURRENT_TIMESTAMP 写成 UTC，
+    必须用 UTC 比较，否则会凭空多出 8 小时（东八区），宽限期直接失效。"""
+    raw = job.get("created_at") or ""
+    try:
+        created = datetime.fromisoformat(str(raw).replace("Z", ""))
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        return max(0.0, (now_utc - created).total_seconds())
+    except (TypeError, ValueError):
+        return 0.0
 
 # 部分唯一索引的冲突条件必须是 SQL 字面量：写成 (is_deleted == False) 会生成
 # 带引号的 "is_deleted" = 0，SQLite 不认，ON CONFLICT 会报"不匹配任何唯一约束"。
@@ -290,11 +306,15 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
             else:
                 error_count += 1
         elif not pid:
-            # 提交阶段就没拿到 prompt_id：这是真错误，可以直接判失败
-            status = "error"
-            item["error"] = item.get("error") or "任务提交到 ComfyUI 失败（无 prompt_id），请检查 ComfyUI 连接"
-            error_count += 1
-            logger.warning("任务 %s 有条目缺少 prompt_id: %s", job["id"], (item.get("prompt_preview") or "")[:60])
+            if _job_age_seconds(job) < _SUBMIT_GRACE_SECONDS:
+                # 还在提交窗口里：create_job 之后、update_job_items 之前，pid 还没写回
+                status = "pending"
+            else:
+                # 超过宽限期仍没有 pid：提交阶段就失败了
+                status = "error"
+                item["error"] = item.get("error") or "任务提交到 ComfyUI 失败（无 prompt_id），请检查 ComfyUI 连接"
+                error_count += 1
+                logger.warning("任务 %s 有条目缺少 prompt_id: %s", job["id"], (item.get("prompt_preview") or "")[:60])
         else:
             # 有 pid 但队列和历史都没命中：ComfyUI 忙/慢，保留原状态，下一轮再查。
             # 这里绝不写 unknown —— 它一旦落库就再没有任何代码会重新选中它。

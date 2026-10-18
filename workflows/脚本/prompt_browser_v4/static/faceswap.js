@@ -596,12 +596,16 @@
       const btn = $("fsSubmitBtn");
       if (btn) { btn.disabled = true; btn.textContent = "提交中…"; }
       try {
-        const data = await window.api("/api/faceswap/batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+        // track=false：换脸有自己的进度面板与 fsPoll，不接入全局任务 HUD
+        const data = await window.submitTask({
+          endpoint: "/api/faceswap/batch",
+          payload: body,
+          title: `批量换脸 (${total} 组)`,
+          errorPrefix: "换脸提交失败",
           timeout: 600000,
+          track: false,
         });
+        if (!data) return;
         if (data.errors && data.errors.length) {
           window.showToast(`${data.errors.length} 个组合提交失败：${data.errors[0].error || ""}`, "error");
         }
@@ -612,7 +616,7 @@
         }
         if (data.job_id) window.fsTrack(data.job_id);
       } catch (e) {
-        window.showToast("提交失败：" + e.message, "error");
+        // submitTask 已经提示过
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = "🚀 开始批量换脸"; }
       }

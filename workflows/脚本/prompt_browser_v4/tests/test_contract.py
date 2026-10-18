@@ -254,6 +254,23 @@ def test_refresh_never_persists_unknown(api):
     assert json.loads(row.items)[0]["status"] in ("pending", "running")
 
 
+def test_refresh_keeps_no_pid_items_pending_during_submission(api):
+    """提交窗口内（create_job 后、update_job_items 前）条目还没有 prompt_id，
+    写者不能把它判成失败——批量 160 张的提交循环可能持续几分钟。"""
+    from models import GenJob
+    from services import job_state
+
+    job = GenJob.create(
+        job_type="batch", status="pending", title="提交中", total=1,
+        items=json.dumps([{"prompt_id": 1}], ensure_ascii=False),
+    )
+
+    snapshot = job_state.refresh_job(job.id)
+    assert snapshot is not None
+    assert snapshot["status"] == "pending"
+    assert snapshot["items"][0]["status"] == "pending"
+
+
 def test_jobs_list_items_are_arrays(api):
     from models import GenJob
 
