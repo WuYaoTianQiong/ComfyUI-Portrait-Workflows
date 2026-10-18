@@ -62,20 +62,8 @@ window._loadHistoryPage = async function() {
   if (window._galleryLoading) return;
   window._galleryLoading = true;
   try {
-    const params = [
-      `page=${window._galleryPage}`,
-      `page_size=${window._galleryPageSize}`,
-    ];
-    if (window._galleryFilter === "favorite") params.push("favorite=1");
-    if (window._gallerySort) params.push(`sort=${window._gallerySort}`);
-    if (window._gallerySearch) params.push(`search=${encodeURIComponent(window._gallerySearch)}`);
-    if (window._galleryCategoryId) params.push(`category_id=${window._galleryCategoryId}`);
-    if (window._galleryTagIds && window._galleryTagIds.length) params.push(`tag_ids=${window._galleryTagIds.join(",")}`);
-    if (window._gallerySource) params.push(`source=${encodeURIComponent(window._gallerySource)}`);
-    if (window._galleryDate) params.push(`date=${encodeURIComponent(window._galleryDate)}`);
-    if (window._galleryModel) params.push(`model=${encodeURIComponent(window._galleryModel)}`);
-    if (window._galleryOrientation) params.push(`orientation=${encodeURIComponent(window._galleryOrientation)}`);
-    const url = "/api/history?" + params.join("&");
+    // 参数拼装统一走 PBQuery（store.js），避免与"全选全部"各拼一套导致筛选丢失
+    const url = window.PBQuery ? window.PBQuery.galleryUrl("/api/history") : "/api/history";
     const data = await window.api(url);
     const items = data.items || [];
     window._galleryTotal = data.total || 0;

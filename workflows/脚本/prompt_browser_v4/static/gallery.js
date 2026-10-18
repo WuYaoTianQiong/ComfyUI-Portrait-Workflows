@@ -202,20 +202,13 @@ window.toggleGalleryItem = function(id, checkEl, index, shift) {
 
 // 全选当前筛选条件下的所有页（跨页），结果来自后端 /api/history/ids
 window.selectAllGalleryPages = async function() {
-  const params = new URLSearchParams();
-  if (window._galleryFilter === 'favorite') params.set('favorite', '1');
-  if (window._gallerySort) params.set('sort', window._gallerySort);
-  if (window._gallerySearch) params.set('search', window._gallerySearch);
-  if (window._galleryOrientation) params.set('orientation', window._galleryOrientation);
-  // 关键：分类/标签/来源/时间/模型必须一起带上，否则"全选全部"会选到筛选条件之外的图，
-  // 紧接着的批量删除就是真删（旧版这里漏了 5 个参数）。
-  if (window._galleryCategoryId) params.set('category_id', window._galleryCategoryId);
-  if (window._galleryTagIds && window._galleryTagIds.length) params.set('tag_ids', window._galleryTagIds.join(','));
-  if (window._gallerySource) params.set('source', window._gallerySource);
-  if (window._galleryDate) params.set('date', window._galleryDate);
-  if (window._galleryModel) params.set('model', window._galleryModel);
+  // 参数拼装统一走 PBQuery（store.js）：分类/标签/来源/时间/模型缺一不可，
+  // 否则"全选全部"会选到筛选条件之外的图，紧接着的批量删除就是真删。
+  const url = window.PBQuery
+    ? window.PBQuery.galleryUrl("/api/history/ids", {}, { paging: false })
+    : "/api/history/ids";
   try {
-    const data = await window.api('/api/history/ids?' + params.toString());
+    const data = await window.api(url);
     const ids = data.ids || [];
     if (!ids.length) { window.showToast('当前筛选下没有可选项', 'info'); return; }
     ids.forEach(id => window._gallerySelectedIds.add(id));
@@ -546,12 +539,10 @@ window.onGalleryFacetClick = function(type, value) {
 
 window.loadGalleryFacets = async function() {
   try {
-    const params = new URLSearchParams();
-    if (window._galleryFilter === "favorite") params.set("favorite", "1");
-    if (window._gallerySearch) params.set("search", window._gallerySearch);
-    if (window._galleryCategoryId) params.set("category_id", window._galleryCategoryId);
-    if (window._galleryTagIds && window._galleryTagIds.length) params.set("tag_ids", window._galleryTagIds.join(","));
-    const data = await window.api("/api/history/facets?" + params.toString());
+    const url = window.PBQuery
+      ? window.PBQuery.galleryUrl("/api/history/facets", {}, { paging: false })
+      : "/api/history/facets";
+    const data = await window.api(url);
     const el = document.getElementById("galleryFacets");
     if (!el) return;
     const src = data.source || {}, dates = data.date || {}, models = data.model || {};

@@ -219,6 +219,7 @@ def main() -> int:
 
             # 静态资源：必须校验内容，否则 404 会被 SPA 回退成 index.html(200) 造成假通过
             for f, needle in (("/gallery.js", b"renderGallery"),
+                              ("/store.js", b"PBQuery"),
                               ("/history.js", b"loadHistory"),
                               ("/faceswap.js", b"window.fsSubmit"),
                               ("/faceswap.css", b".fs-page")):
