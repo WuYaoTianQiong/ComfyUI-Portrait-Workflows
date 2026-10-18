@@ -47,36 +47,13 @@ window._galleryTagIds = (function () {
   const raw = window.UiState.get("galleryTagIds", "");
   return (typeof raw === "string" && raw) ? raw.split(",").filter(Boolean).map(Number) : [];
 })();
-// 同步画廊筛选控件，使 HTMX 初始请求的 hx-vals 能读到已恢复的值
+// 同步画廊筛选控件，使首屏加载能读到已恢复的值
 const _gsEl = document.getElementById("gallerySort");
 if (_gsEl) _gsEl.value = window._gallerySort;
 const _gfEl = document.getElementById("galleryFilter");
 if (_gfEl) _gfEl.value = window._galleryFilter;
 const _gseEl = document.getElementById("gallerySearch");
 if (_gseEl) _gseEl.value = window._gallerySearch;
-// 让提示词列表初始 HTMX 请求也使用已恢复的页码（避免被写死的 page=1 覆盖）
-const _plc = document.getElementById("promptListContainer");
-if (_plc) _plc.setAttribute("hx-get", `/api/prompts/html?search=&sort=default&page=${window._promptPage || 1}`);
-
-// -------------------------------------------------------------------
-// HTMX 模式检测 —— 必须在 DOMContentLoaded 之前执行，否则 HTMX 库的
-// 内部 handler 会抢先处理 hx-trigger="load" → 发出一次 HTML 端请求，
-// 与我们 JS 端 loadHistory 的 JSON 请求形成竞态（HTMX 的 outerHTML swap
-// 会销毁 JS 已渲染好的过滤结果，导致"过滤图闪现后被全部图片覆盖"）。
-// -------------------------------------------------------------------
-{
-  const _urlParams = new URLSearchParams(window.location.search);
-  window._useHtmx = _urlParams.get("htmx") === "1" || localStorage.getItem("htmxMode") === "1";
-  if (window._useHtmx) {
-    document.body.dataset.htmxActive = "1";
-  } else {
-    // 非 HTMX 模式：立即移除所有 hx-* 属性，HTMX 库在 DOMContentLoaded
-    // 时将看不到任何 hx-trigger → 不会发出额外请求
-    document.querySelectorAll('[hx-get]').forEach(el => {
-      ['hx-get', 'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-swap-oob'].forEach(a => el.removeAttribute(a));
-    });
-  }
-}
 
 // -------------------------------------------------------------------
 // 初始化
@@ -84,51 +61,10 @@ if (_plc) _plc.setAttribute("hx-get", `/api/prompts/html?search=&sort=default&pa
 
 document.addEventListener("DOMContentLoaded", () => {
 
-  // HTMX 事件监听：在提示词列表加载完成后触发自定义事件
-  document.body.addEventListener("htmx:afterSwap", (event) => {
-    // 检查是否是提示词列表容器的交换
-    const container = document.getElementById("promptListContainer");
-    if (container && container.contains(event.detail.elt)) {
-      document.body.dispatchEvent(new CustomEvent("promptListLoaded"));
-    }
-    // 画廊 HTMX 交换后恢复选中状态和全选复选框
-    if (event.detail.elt.id === 'galleryGridInner' || event.detail.elt.id === 'galleryContainer' || event.detail.elt.querySelector('#galleryGrid')) {
-      // 恢复每个 gallery-item 的选中状态
-      window._gallerySelectedIds.forEach(id => {
-        const checkEl = document.querySelector(`.gallery-item-check[data-id="${id}"]`);
-        if (checkEl) checkEl.classList.add('checked');
-      });
-      window.updateGalleryActionButtons();
-      window.updateCompareButton();
-      window.updateGallerySelectAllCheck();
-    }
-  });
-
-  // 画廊刷新时同步更新侧栏标签/分类计数；非 HTMX 模式下同时手动触发画廊内容刷新
+  // 画廊刷新时同步更新侧栏标签/分类计数，再重载当前页
   document.body.addEventListener("galleryRefresh", () => {
     window.loadGallerySidebar?.();
-    if (document.body.dataset.htmxActive !== "1") {
-      window.loadHistory?.(false);
-    }
-  });
-
-  // 持久化画廊/提示词的分页与筛选状态（HTMX 模式下翻页/筛选请求都带参数）
-  document.body.addEventListener("htmx:beforeRequest", (event) => {
-    const cfg = event.detail && event.detail.requestConfig;
-    if (!cfg || !cfg.url) return;
-    const u = cfg.url;
-    if (u.indexOf("/api/history/html") !== -1) {
-      const params = new URLSearchParams(u.split("?")[1] || "");
-      const p = params.get("page"); if (p) window._galleryPage = parseInt(p, 10) || 1;
-      const s = params.get("sort"); if (s) window._gallerySort = s;
-      window._galleryFilter = params.get("favorite") === "1" ? "favorite" : "all";
-      window._gallerySearch = params.get("search") || "";
-      window._persistGalleryState();
-    } else if (u.indexOf("/api/prompts/html") !== -1) {
-      const params = new URLSearchParams(u.split("?")[1] || "");
-      const p = params.get("page");
-      if (p) { window._promptPage = parseInt(p, 10) || 1; window.UiState.set("promptPage", window._promptPage); }
-    }
+    window.loadHistory?.(false);
   });
 
   window.loadCustomWorkflow();

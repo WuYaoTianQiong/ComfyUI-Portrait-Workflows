@@ -42,12 +42,6 @@ window._restoreFragmentState = function () {
 // 加载碎片列表
 // -------------------------------------------------------------------
 window.refreshFragmentLibrary = async function () {
-  // Phase 2: HTMX 模式
-  if (document.body.dataset.htmxActive === "1") {
-    document.body.dispatchEvent(new CustomEvent("fragmentListRefresh"));
-    return;
-  }
-
   const search = (document.getElementById("fragSearchInput") || {}).value || "";
   const params = { search, page_size: 500 };
   if (window._fragmentTypeFilter) params.fragment_type = window._fragmentTypeFilter;

@@ -17,7 +17,6 @@
 <link rel="stylesheet" href="/stats.css?v=1">
 <link rel="stylesheet" href="/faceswap.css?v=5">
 <link rel="stylesheet" href="/vendor/viewer.min.css">
-<script src="/vendor/htmx.min.js"></script>
 <script src="/vendor/viewer.min.js"></script>
 </head>
 <body>
@@ -150,12 +149,8 @@
         <div class="batch-items" id="batchItems"></div>
       </div>
 
-      <!-- Phase 2: HTMX 驱动的提示词列表 -->
-      <div id="promptListContainer"
-           hx-get="/api/prompts/html?search=&sort=default&page=1"
-           hx-trigger="load, promptListRefresh from:body"
-           hx-target="this"
-           hx-swap="outerHTML">
+      <!-- 提示词列表（JS 渲染） -->
+      <div id="promptListContainer">
         <div class="prompt-list" id="promptList"></div>
         <div class="pagination" id="promptPagination"></div>
       </div>
@@ -287,24 +282,8 @@
         对比 (<span id="compareCount">0</span>)
       </button>
     </div>
-    <!-- Phase 2: HTMX 驱动的画廊 -->
-    <div id="galleryGridContainer"
-         hx-get="/api/history/html"
-         hx-trigger="load, galleryRefresh from:body"
-         hx-target="#galleryGridInner"
-         hx-swap="outerHTML"
-         hx-vals='js:{
-          page: window._galleryPage || 1,
-           page_size: window._galleryPageSize || 50,
-           sort: document.getElementById("gallerySort")?.value || "newest",
-           favorite: document.getElementById("galleryFilter")?.value === "favorite" ? "1" : "",
-           search: document.getElementById("gallerySearch")?.value || "",
-           category_id: window._galleryCategoryId || "",
-           tag_ids: (window._galleryTagIds && window._galleryTagIds.length) ? window._galleryTagIds.join(",") : "",
-           source: window._gallerySource || "",
-           date: window._galleryDate || "",
-           model: window._galleryModel || ""
-         }'>
+    <!-- 画廊网格（JS 渲染） -->
+    <div id="galleryGridContainer">
       <div id="galleryGridInner">
         <div class="gallery-grid" id="galleryGrid"></div>
         <div class="pagination" id="galleryPagination"></div>
@@ -546,16 +525,8 @@
       </select>
     </div>
     <div class="modal-body" style="flex:1;overflow-y:auto;padding:0 12px 12px">
-      <!-- Phase 2: HTMX 驱动的碎片列表 -->
-      <div id="fragmentListContainer"
-           hx-get="/api/fragments/html"
-           hx-trigger="load, fragmentListRefresh from:body"
-           hx-target="this"
-           hx-swap="outerHTML"
-           hx-vals='js:{
-             search: document.getElementById("fragSearchInput")?.value || "",
-             fragment_type: document.getElementById("fragTypeFilter")?.value || ""
-           }'>
+      <!-- 碎片列表（JS 渲染） -->
+      <div id="fragmentListContainer">
         <div class="frag-panel-list" id="fragmentList">
           <div class="frag-empty">暂无碎片</div>
         </div>

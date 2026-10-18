@@ -56,12 +56,11 @@ def test_prompt_crud_roundtrip(api):
     assert api.get(f"/api/prompts/{pid}").status_code == 404
 
 
-def test_prompt_html_fragment(api, seed_prompt):
+def test_prompt_html_endpoint_removed(api, seed_prompt):
+    """HTMX 分支已删除（B4）：旧的 HTML 片段端点不应再返回页面。
+    路径会落到 /prompts/{prompt_id} 上，所以是 422 而不是 404。"""
     seed_prompt(name="片段可见")
-    r = api.get("/api/prompts/html?page=1&page_size=50&search=&sort=default")
-    assert r.status_code == 200
-    assert "promptListContainer" in r.text
-    assert "片段可见" in r.text
+    assert api.get("/api/prompts/html?page=1&page_size=50").status_code in (404, 422)
 
 
 def test_prompts_export_route(api, seed_prompt):
@@ -100,14 +99,10 @@ def test_history_soft_delete_hides_item(api, seed_history):
     assert GenHistory.get_by_id(item.id).is_deleted is True
 
 
-def test_history_html_fragment(api, seed_history):
+def test_history_html_endpoint_removed(api, seed_history):
     seed_history(filename="h.png")
-    r = api.get(
-        "/api/history/html?page=1&page_size=50&sort=newest"
-        "&favorite=&search=&category_id=&tag_ids=&source=&date=&model="
-    )
-    assert r.status_code == 200
-    assert "gallery-grid" in r.text
+    # 路径可能落到 DELETE /history/{item_id} 上（405），只要不是 200 片段即可
+    assert api.get("/api/history/html?page=1&page_size=50&sort=newest").status_code in (404, 405, 422)
 
 
 def test_history_ids_route(api, seed_history):

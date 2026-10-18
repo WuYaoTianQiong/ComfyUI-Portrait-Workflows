@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from peewee import fn, SQL
 from pydantic import BaseModel
 
@@ -13,7 +13,6 @@ from config import settings
 from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
 from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
 from services.thumbnail import _get_image_path
-from shared import templates
 
 router = APIRouter(tags=["历史"])
 
@@ -759,85 +758,6 @@ def clear_history():
         pass
     return {"success": True}
 
-
-# ====================================================================
-# Phase 2: HTMX 端点 —— 返回历史画廊的 HTML 片段
-# ====================================================================
-
-@router.get("/history/html", response_class=HTMLResponse)
-def history_list_html(
-    request: Request,
-    page: int = Query(1),
-    page_size: int = Query(50),
-    favorite: str = Query(""),
-    sort: str = Query("newest"),
-    search: str = Query(""),
-    category_id: str = Query(""),
-    tag_ids: str = Query(""),
-):
-    q = Gh.select().where(Gh.is_deleted == False)
-    if favorite:
-        q = q.where(Gh.favorite == (favorite == "1"))
-    if search:
-        like = f"%{search}%"
-        condition = ((Gh.filename ** like) | (Gh.subfolder ** like) | (Gh.comfyui_prompt_id ** like))
-        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
-        if prompt_matches:
-            condition = condition | (Gh.prompt_id << prompt_matches)
-        q = q.where(condition)
-    if category_id:
-        q = q.join(ImageCategory).where(ImageCategory.category == category_id)
-    if tag_ids:
-        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
-        if tid_list:
-            # 多标签取交集（图像必须同时拥有所有选中标签）
-            for tid in tid_list:
-                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
-                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
-                q = q.where(direct | via_prompt)
-    total = q.count()
-    rows = list(q.order_by(_captured_at_expr().desc(), Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
-
-    # 不再自动删除记录：图片文件暂不可读（junction 抖动/文件被锁/解码失败）并不代表
-    # 该历史记录应被删除。旧逻辑在此硬删，曾多次误删正常图片（表现为“刷新页面后
-    # 操作历史丢失”）。改为：保留数据库记录，仅以空元数据呈现，绝不在列表/同步路径上
-    # 静默销毁用户数据。真正的清理请走显式删除接口。
-    alive = []
-    for r in rows:
-        alive.append(r)
-
-    items = []
-    for r in alive:
-        meta = get_image_metadata_fast(
-            r.filename, r.subfolder or "", r.img_type or "output",
-            prompt_params=r.prompt_params,
-        )
-        prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
-        prompt_name = ""
-        if r.prompt_id:
-            p = Prompt.get_or_none(Prompt.id == r.prompt_id)
-            if p:
-                prompt_name = p.name or ""
-        items.append({
-            "id": r.id, "job_id": r.job_id, "prompt_id": r.prompt_id,
-            "comfyui_prompt_id": r.comfyui_prompt_id,
-            "filename": r.filename, "subfolder": r.subfolder or "", "img_type": r.img_type or "output",
-            "view_url": r.view_url, "favorite": bool(r.favorite),
-            "prompt_params": prompt_params,
-            "created_at": str(r.created_at) if r.created_at else "",
-            "prompt_name": prompt_name,
-            **meta,
-        })
-    return templates.TemplateResponse("history/list.jinja2", {
-        "request": request, "items": items, "total": total,
-        "page": page, "page_size": page_size, "sort": sort,
-        "favorite": favorite, "search": search,
-    })
-
-
-# ====================================================================
-# 新增：以历史图片为输入，使用指定工作流处理（超分/重绘等）
-# ====================================================================
 
 @router.post("/history/backfill_taxonomy")
 def backfill_taxonomy():

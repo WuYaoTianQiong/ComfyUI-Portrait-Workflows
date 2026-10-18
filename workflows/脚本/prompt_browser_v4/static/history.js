@@ -23,14 +23,6 @@ window._persistGalleryState = function() {
 // -------------------------------------------------------------------
 
 window.loadHistory = async function(sync = false, resetPage = true) {
-  // Phase 2: HTMX 模式 —— 画廊由 HTMX 自动加载
-  if (document.body.dataset.htmxActive === "1") {
-    if (!sync) {
-      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-    }
-    return;
-  }
-
   try {
     if (sync) {
       // 同步并加载第一页
@@ -94,23 +86,15 @@ window.changeGalleryPageSize = function(size) {
   window._galleryPageSize = size;
   window._galleryPage = 1;
   window.UiState.set("galleryPageSize", size);
-  if (document.body.dataset.htmxActive === "1") {
-    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-  } else {
-    window.loadHistory(false);
-  }
+  window.loadHistory(false);
 };
 
-// 跳转到指定页（JS 模式直接加载；HTMX 模式由 hx-vals 统一携带参数，兜底刷新）
+// 跳转到指定页
 window.loadGalleryPage = async function(page) {
   if (!page || page < 1) return;
   window._galleryPage = page;
-  if (document.body.dataset.htmxActive === "1") {
-    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-  } else {
-    await window._loadHistoryPage();
-    window._persistGalleryState();
-  }
+  await window._loadHistoryPage();
+  window._persistGalleryState();
 };
 
 window.renderHistory = function(items) {
@@ -459,32 +443,20 @@ window.onGallerySearch = function() {
   window._gallerySearchTimer = setTimeout(() => {
     window._gallerySearch = document.getElementById('gallerySearch').value;
     window._clearGallerySelection();
-    if (document.body.dataset.htmxActive === "1") {
-      document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-    } else {
-      window.loadHistory(false);
-    }
+    window.loadHistory(false);
   }, 300);
 };
 
 window.onGallerySortChange = function() {
   window._gallerySort = document.getElementById('gallerySort').value;
   window._clearGallerySelection();
-  if (document.body.dataset.htmxActive === "1") {
-    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-  } else {
-    window.loadHistory(false);
-  }
+  window.loadHistory(false);
 };
 
 window.onGalleryFilterChange = function() {
   window._galleryFilter = document.getElementById('galleryFilter').value;
   window._clearGallerySelection();
-  if (document.body.dataset.htmxActive === "1") {
-    document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
-  } else {
-    window.loadHistory(false);
-  }
+  window.loadHistory(false);
 };
 
 window.updateGalleryActionButtons = function() {

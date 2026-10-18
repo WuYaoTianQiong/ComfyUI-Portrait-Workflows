@@ -7,10 +7,10 @@
     python verify_smoke.py            # 默认端口 8765
     PORT=8770 python verify_smoke.py  # 自定义端口
 
-覆盖的端点（含之前漏测的 /api/history/html，即画廊实际渲染的 HTML 片段）：
+覆盖的端点（HTMX 分支已在 B4 删除，旧 /html 端点应返回 404）：
     - /api/history/facets          方向分面计数
     - /api/history?orientation=... 按方向筛选
-    - /api/history/html?...        画廊 HTML 片段（曾因 category_id 缺失 500）
+    - /api/history/html?...        已下线，断言 404
     - /api/workflows               工作流列表（界面格式工作流也应列出）
     - /api/faceswap/nodes          双图工作流的 LoadImage 节点探测
     - /api/faceswap/batch          批量换脸（dry_run，不占显存）
@@ -199,15 +199,10 @@ def main() -> int:
                     total = "PARSE_ERR"
                 checks.append((f"list orientation={label}", code, total))
 
-            # 画廊实际渲染的 HTML 片段（曾因 category_id 缺失而 500）
-            code, body = _get(
-                BASE + "/api/history/html?page=1&page_size=50&sort=newest"
-                "&favorite=&search=&category_id=&tag_ids=&source=&date=&model="
-            )
-            html_ok = (code == 200 and b"Internal Server Error" not in body
-                       and b"Traceback" not in body)
-            checks.append(("history_html(page=1)", code,
-                           f"len={len(body)}" if html_ok else "BODY_ERROR"))
+            # HTMX 分支已在 B4 删除：旧的 HTML 片段端点不应再返回页面
+            code, body = _get(BASE + "/api/history/html?page=1&page_size=50&sort=newest")
+            gone = code in (404, 405, 422)
+            checks.append(("history/html 已下线", 200 if gone else -2, f"HTTP {code}"))
 
             # 历史同步（曾因直接调用 list_history 未传全参数、Query 默认值变 FieldInfo 而 500）
             code, body = _get(BASE + "/api/history_sync?page_size=50")

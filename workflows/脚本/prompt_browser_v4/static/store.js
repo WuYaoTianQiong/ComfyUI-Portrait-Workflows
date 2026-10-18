@@ -3,7 +3,7 @@
 // 背景：画廊的筛选参数原本在三个地方各自拼装
 //   1) history.js 的 _loadHistoryPage
 //   2) gallery.js 的"全选全部"
-//   3) index.html 里 HTMX 的 hx-vals
+//   3) index.html 里 HTMX 的 hx-vals（HTMX 分支已在 B4 删除）
 // 已经因此出现过"全选丢失分类/标签，批量删除误伤范围外图片"的问题。
 // 这里先把参数拼装收成一个入口；后续 store 化时再把状态本身搬进来。
 //

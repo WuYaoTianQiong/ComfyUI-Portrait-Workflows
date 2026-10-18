@@ -226,7 +226,7 @@ window.selectAllGalleryPages = async function() {
   }
 };
 
-// 统一选中交互（事件委托，兼容 HTMX / JS 两种渲染模式；同时修复 HTMX 模式下勾选框无点击绑定的隐藏问题）
+// 统一选中交互（事件委托）
 if (!window._gallerySelectDelegated) {
   document.body.addEventListener('click', (e) => {
     const check = e.target.closest('.gallery-item-check');

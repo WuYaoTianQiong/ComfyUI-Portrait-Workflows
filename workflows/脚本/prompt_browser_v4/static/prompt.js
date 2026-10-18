@@ -12,37 +12,6 @@ window.loadPrompts = async function(page) {
     const search = document.getElementById("searchInput").value;
     const sortParams = window.getSortParams();
 
-    // Phase 2: HTMX mode —— 构建 URL 参数后触发服务端渲染
-    if (document.body.dataset.htmxActive === "1") {
-      const p = { search, ...sortParams, page: window._promptPage || 1, page_size: window._promptPageSize };
-      // 修复：只有 category_id 是有效整数时才传递
-      if (window._currentCategoryId != null && String(window._currentCategoryId).match(/^\d+$/)) {
-        p.category_id = window._currentCategoryId;
-      }
-      if (window._selectedTags && window._selectedTags.size > 0)
-        p.tag_ids = Array.from(window._selectedTags).join(",");
-      const qs = new URLSearchParams(p).toString();
-      const container = document.getElementById("promptListContainer");
-      if (container) container.setAttribute("hx-get", "/api/prompts/html?" + qs);
-      
-      // 返回一个 Promise，等待 HTMX 加载完成
-      return new Promise((resolve) => {
-        const onLoad = () => {
-          document.body.removeEventListener("promptListLoaded", onLoad);
-          window._composerDataStale = true;
-          resolve();
-        };
-        document.body.addEventListener("promptListLoaded", onLoad);
-        document.body.dispatchEvent(new CustomEvent("promptListRefresh"));
-        
-        // 超时保护（5秒）
-        setTimeout(() => {
-          document.body.removeEventListener("promptListLoaded", onLoad);
-          resolve();
-        }, 5000);
-      });
-    }
-
     const params = {
       search: search,
       ...sortParams,

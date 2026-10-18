@@ -2,15 +2,14 @@
 import io
 import json
 import traceback
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag, auto_classify_prompt
 from services.helpers import get_image_metadata
-from shared import templates
 
 router = APIRouter(tags=["提示词"])
 
@@ -240,108 +239,6 @@ def list_prompts(
             # ========================================
         })
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
-
-
-# ====================================================================
-# Phase 2: HTMX 端点 —— 返回提示词列表的 HTML 片段
-# ====================================================================
-
-@router.get("/prompts/html")
-def prompts_list_html(
-    request: Request,
-    search: str = Query(""),
-    tag: str = Query(""),
-    category_id: Optional[str] = Query(None),
-    tag_ids: Optional[str] = Query(None),
-    sort: str = Query("newest"),
-    order: str = Query("desc"),
-    page: int = Query(1),
-    page_size: int = Query(50),
-):
-    """返回提示词列表 HTML 片段（供 HTMX 加载）"""
-    query = Prompt.select()
-    if search:
-        query = query.where(
-            (Prompt.prompt.contains(search))
-            | (Prompt.name.contains(search))
-            | (Prompt.tags.contains(search))
-            | (Prompt.note.contains(search))
-        )
-    if tag:
-        query = query.where(Prompt.tags.contains(tag))
-    # HTMX 可能传 "null" 字符串，转为 None
-    cat_id: Optional[int] = None
-    if category_id and category_id not in ("null", "", "None"):
-        try:
-            cat_id = int(category_id)
-        except (ValueError, TypeError):
-            pass
-    if cat_id is not None:
-        query = query.join(PromptCategory).where(PromptCategory.category == cat_id)
-    if tag_ids and tag_ids not in ("null", "", "None"):
-        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
-        if tid_list:
-            query = query.join(PromptTag).where(PromptTag.tag.in_(tid_list))
-
-    total = query.count()
-
-    # 排序逻辑与 JSON 接口保持一致
-    is_asc = (order == "asc")
-    if sort == "default":
-        order_list = [Prompt.is_pinned.desc(), Prompt.is_favorite.desc(), Prompt.id.desc()]
-    elif sort == "oldest":
-        order_list = [Prompt.is_pinned.desc(), Prompt.id.asc()]
-    elif sort == "updated":
-        order_list = [Prompt.is_pinned.desc(), Prompt.updated_at.desc()]
-    elif sort in ("created", "name", "usage", "rating"):
-        field_map = {
-            "created": Prompt.created_at,
-            "name": Prompt.name,
-            "usage": Prompt.usage_count,
-            "rating": Prompt.rating,
-        }
-        field = field_map[sort]
-        ordered = field.asc() if is_asc else field.desc()
-        order_list = [Prompt.is_pinned.desc(), ordered]
-    else:
-        order_list = [Prompt.is_pinned.desc(), Prompt.id.desc()]
-
-    offset = (page - 1) * page_size
-    rows = query.order_by(*order_list).offset(offset).limit(page_size)
-
-    prompts = []
-    for r in rows:
-        prompts.append({
-            "id": r.id,
-            "prompt_preview": (r.prompt or "")[:60],
-            "tags": r.tags or "",
-            "steps": r.steps,
-            "sampler": r.sampler or "",
-            "model": r.model or "",
-            "name": r.name or "",
-            "created_at": str(r.created_at) if r.created_at else "",
-            "is_favorite": r.is_favorite,
-            "is_pinned": r.is_pinned,
-            "rating": r.rating,
-            "usage_count": r.usage_count,
-        })
-
-    return templates.TemplateResponse(
-        "prompts/list.jinja2",
-        {
-            "request": request,
-            "prompts": prompts,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "search": search,
-            "sort": sort,
-            "category_id": category_id or "",
-            "tag_ids": tag_ids or "",
-            "selected_id": 0,       # 前端 JS 维护选中状态
-            "selected_ids": [],
-        },
-    )
 
 
 @router.get("/prompts/{prompt_id}", response_model=dict)
