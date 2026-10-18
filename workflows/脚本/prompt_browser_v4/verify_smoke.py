@@ -25,6 +25,8 @@ import sys
 import time
 import os
 import json
+import shutil
+import tempfile
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -80,8 +82,11 @@ def _report_log():
         txt = open(LOG_PATH, encoding="utf-8", errors="replace").read()
     except Exception:
         return
+    # ComfyUI 离线时的连接拒绝属于环境状态，不算服务端故障
+    benign = ("ConnectError", "ConnectTimeout", "10061", "目标计算机积极拒绝")
     bad = [l.strip() for l in txt.splitlines()
-           if "Traceback" in l or "ERROR" in l or "Error" in l]
+           if ("Traceback" in l or "ERROR" in l or "Error" in l)
+           and not any(b in l for b in benign)]
     if bad:
         print("SERVER_LOG_ISSUES (请确认是否本次改动引入):")
         for l in bad[:30]:
@@ -100,13 +105,43 @@ def _finish(proc):
     _report_log()
 
 
-def main():
+_TMP_DIR = None
+
+
+def _prepare_isolated_env(env: dict) -> str:
+    """把冒烟跑在数据库副本上：本脚本会打 /api/history_sync，那是一条写库路径。
+
+    返回说明文字，供开头打印。
+    """
+    global _TMP_DIR
+    from config import settings
+
+    _TMP_DIR = tempfile.mkdtemp(prefix="pb_smoke_")
+    db_copy = os.path.join(_TMP_DIR, "smoke.db")
+    shutil.copy2(settings.db_path, db_copy)
+    env["PB_DB_PATH"] = db_copy
+    env["PB_THUMBNAIL_DIR"] = os.path.join(_TMP_DIR, "thumbs")
+    env["PB_NO_BROWSER"] = "1"
+    # 子进程 stdout 重定向到文件时，Windows 默认用 cp936 写中文 → 读方按 utf-8 解会乱码
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return f"DB 副本: {db_copy}"
+
+
+def _cleanup_tmp():
+    if _TMP_DIR and os.path.isdir(_TMP_DIR):
+        shutil.rmtree(_TMP_DIR, ignore_errors=True)
+
+
+def main() -> int:
+    """返回 0 = 全部通过；1 = 有失败。可作为门禁使用。"""
     _kill_port(PORT)
     time.sleep(1)
 
     env = dict(os.environ)
     env["PORT"] = str(PORT)
     env["HOST"] = "127.0.0.1"
+    print(_prepare_isolated_env(env))
 
     with open(LOG_PATH, "w", encoding="utf-8") as logf:
         proc = subprocess.Popen(
@@ -131,9 +166,17 @@ def main():
             if not started:
                 print("RESULT: STARTUP_FAIL（服务启动崩溃，见下方日志）")
                 _report_log()
-                return _finish(proc)
+                return 1
 
             checks = []
+
+            # ComfyUI 是否在线：决定部分用例是 FAIL 还是 SKIP（离线属于环境状态，不是回归）
+            code, body = _get(BASE + "/api/status")
+            try:
+                comfy_online = json.loads(body).get("comfyui") == "online"
+            except Exception:
+                comfy_online = False
+            print(f"ComfyUI: {'在线' if comfy_online else '离线（相关用例记为 SKIP）'}")
             code, body = _get(BASE + "/api/history/facets")
             try:
                 data = json.loads(body)
@@ -222,7 +265,8 @@ def main():
                     picked = i
                     break
             if picked is None:
-                checks.append(("faceswap/batch dry_run", -2, f"没有可用的历史图文件（候选 {len(ids)} 张）"))
+                checks.append(("faceswap/batch dry_run", -3,
+                               f"无可用历史图文件（候选 {len(ids)} 张，环境相关）"))
             else:
                 c, b = _post(BASE + "/api/faceswap/batch",
                              {"main_ids": [picked], "ref_ids": [picked], "workflow_path": wf, "dry_run": True})
@@ -262,7 +306,8 @@ def main():
                     fs_info = f"dirs={len(d.get('dirs', []))} images={len(imgs)}"
                 except Exception as e:
                     fs_info = "PARSE_ERR:" + repr(e)
-                checks.append(("fs/list 列子目录与图片", code if img_path else -2, fs_info))
+                checks.append(("fs/list 列子目录与图片", code if img_path else -3,
+                               fs_info + ("（该目录没有图片）" if not img_path else "")))
 
             if img_path:
                 code, body = _get(BASE + "/api/fs/thumb?path=" + urllib.parse.quote(img_path) + "&size=200")
@@ -329,19 +374,38 @@ def main():
             # 注意：子进程 stdout 重定向到文件时 Windows 用本地编码(cp936)写中文，
             # 用 utf-8 读会变乱码，所以这里只匹配 ASCII 的 "[sync]" 前缀。
             skipped_ok = "[sync]" in log_txt
-            checks.append(("history_sync 跳过缺失文件", code if skipped_ok else -2,
-                           "日志已确认跳过" if skipped_ok else "日志中未见跳过记录（可能库里没有缺失文件）"))
+            if skipped_ok:
+                checks.append(("history_sync 跳过缺失文件", code, "日志已确认跳过"))
+            elif not comfy_online:
+                checks.append(("history_sync 跳过缺失文件", -3, "ComfyUI 离线，无法验证"))
+            else:
+                checks.append(("history_sync 跳过缺失文件", -3, "本次没有「文件已缺失」的历史条目"))
 
             code, body = _get(BASE + "/api/jobs?active=1")
             checks.append(("jobs?active=1", code, ""))
 
             print("RESULT: checks")
+            failed = skipped = 0
             for name, code, val in checks:
-                flag = "OK" if code == 200 else "FAIL"
+                if code == 200:
+                    flag = "OK"
+                elif code == -3:
+                    flag = "SKIP"
+                    skipped += 1
+                else:
+                    flag = "FAIL"
+                    failed += 1
                 print(f"  [{flag}] {name} -> HTTP {code} | {val}")
+
+            if failed:
+                print(f"RESULT: FAIL（{failed} 失败 / {skipped} 跳过 / {len(checks)} 项）")
+            else:
+                print(f"RESULT: PASS（{len(checks) - skipped} 通过 / {skipped} 跳过）")
+            return 1 if failed else 0
         finally:
             _finish(proc)
+            _cleanup_tmp()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

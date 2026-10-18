@@ -133,3 +133,7 @@ workflows/_untracked_list.txt
 # Old data backups
 workflows/脚本/organized_prompts_old.txt
 workflows/脚本/monitor_resources.bat
+
+# 运行日志
+workflows/logs/
+

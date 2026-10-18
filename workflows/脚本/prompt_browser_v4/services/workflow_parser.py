@@ -1,11 +1,13 @@
 """工作流格式转换 —— 将 ComfyUI 内部格式转换为 API 格式"""
 import json
-import traceback
+import logging
 from urllib.parse import quote
 
 import httpx
 
 from config import settings
+
+logger = logging.getLogger("prompt_browser.workflow")
 
 COMFYUI_API = settings.comfyui_api
 
@@ -72,8 +74,10 @@ def _get_widget_order(node_type: str) -> list[tuple[str, int]]:
 
         # 成功才缓存
         _widget_name_cache[node_type] = entries
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        # 拿不到 object_info 时退回启发式排序即可，属于正常降级路径，
+        # 不能每加载一次页面就刷一段 traceback（ComfyUI 离线时尤其吵）。
+        logger.debug("object_info 不可用，退回启发式 widget 顺序：%s (%s)", node_type, type(exc).__name__)
 
     return entries
 

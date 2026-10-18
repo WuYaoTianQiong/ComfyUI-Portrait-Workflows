@@ -1,8 +1,10 @@
 """FastAPI 应用入口"""
 import asyncio
+import logging
 import threading
 import time
 import traceback
+import uuid
 import webbrowser
 from contextlib import asynccontextmanager
 
@@ -15,6 +17,9 @@ from fastapi.responses import FileResponse
 from config import settings
 from models import init_db, db, GenJob
 from services.helpers import _resolve_if_reparse
+from services.logging_setup import setup_logging
+
+logger = logging.getLogger("prompt_browser")
 
 
 # ======== 后台任务监控 ========
@@ -60,6 +65,7 @@ async def job_monitor_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # === 启动 ===
+    setup_logging(settings.project_root / "logs")
     init_db()
     print(f"  DB:       {settings.db_path}")
     print(f"  ComfyUI:  {settings.comfyui_api}")
@@ -72,8 +78,9 @@ async def lifespan(app: FastAPI):
     # 启动后台任务监控
     monitor_task = asyncio.create_task(job_monitor_loop())
 
-    # 自动打开浏览器
-    threading.Thread(target=_open_browser, daemon=True).start()
+    # 自动打开浏览器（PB_NO_BROWSER=1 时跳过，供冒烟/测试使用）
+    if not settings.no_browser:
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     yield
 
@@ -107,6 +114,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RequestLogMiddleware(BaseHTTPMiddleware):
+    """请求 ID + 耗时日志：出问题时能按 rid 串起一次操作的所有请求。"""
+
+    async def dispatch(self, request, call_next):
+        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:8]
+        request.state.request_id = rid
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception("未处理异常 %s %s rid=%s", request.method, request.url.path, rid)
+            raise
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        response.headers["X-Request-ID"] = rid
+        if request.url.path.startswith("/api/"):
+            logger.log(
+                logging.WARNING if response.status_code >= 500 else logging.INFO,
+                "%s %s -> %d %.0fms rid=%s",
+                request.method, request.url.path, response.status_code, elapsed_ms, rid,
+            )
+        elif elapsed_ms > 1500:
+            logger.warning("慢请求 %s %s -> %d %.0fms rid=%s",
+                           request.method, request.url.path, response.status_code, elapsed_ms, rid)
+        return response
+
+
+app.add_middleware(RequestLogMiddleware)
 
 # 注册路由
 from routers.prompts import router as prompts_router

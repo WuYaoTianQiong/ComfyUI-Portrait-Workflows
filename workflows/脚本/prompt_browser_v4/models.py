@@ -369,11 +369,14 @@ def init_db():
     """确保表存在，并迁移新列（兼容 v3 旧库）。"""
     db.connect()
 
-    # 唯一约束迁移必须在 create_tables 之前，否则 peewee 的 safe=True 
-    # 可能新建旧约束；新约束这里手动建好，后续 create_tables 的 IF NOT EXISTS 会跳过
-    _migrate_genhistory_unique_constraint(db)
-
     db.create_tables([Prompt, GenJob, GenHistory], safe=True)
+
+    # 唯一约束迁移放在建表之后：全新库上先建索引会因表不存在而失败，
+    # 之后 create_tables(safe=True) 又会静默跳过，导致新库永久缺少这个部分唯一索引，
+    # 所有 ON CONFLICT 写入（任务出图 / ComfyUI 同步）都会抛
+    # "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint" 并被 except 吞掉。
+    # GenHistory.Meta.indexes 为空，peewee 不会创建任何旧索引，因此挪到建表之后是安全的。
+    _migrate_genhistory_unique_constraint(db)
 
     # 迁移 GenHistory 新列
     _migrate_column(db, "gen_history", "prompt_params",

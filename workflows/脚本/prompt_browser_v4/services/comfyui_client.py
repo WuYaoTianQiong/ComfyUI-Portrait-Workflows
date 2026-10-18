@@ -1,9 +1,12 @@
 """ComfyUI API 客户端 —— 所有与 ComfyUI 的 HTTP 交互"""
 import json
+import logging
 
 import httpx
 
 from config import settings
+
+logger = logging.getLogger("prompt_browser.comfy")
 
 COMFYUI_API = settings.comfyui_api
 
@@ -33,11 +36,8 @@ def post_comfyui(path: str, data: dict | None = None, timeout: int = 5) -> httpx
 def push_prompt(api_workflow: dict) -> dict:
     """将工作流推送到 ComfyUI，返回 {prompt_id, ...}"""
     payload = json.dumps({"prompt": api_workflow}).encode("utf-8")
-    
-    # 调试：输出发送的数据（前500字符）
-    print(f"[DEBUG] 发送到 ComfyUI 的数据: {payload[:500]}...")
-    print(f"[DEBUG] API workflow keys count: {len(api_workflow)}, first 10: {list(api_workflow.keys())[:10]}")
-    
+    logger.debug("提交 ComfyUI：nodes=%d first=%s", len(api_workflow), list(api_workflow.keys())[:10])
+
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
@@ -45,20 +45,24 @@ def push_prompt(api_workflow: dict) -> dict:
                 content=payload,
                 headers={"Content-Type": "application/json"},
             )
-            
-            # 调试：输出响应
-            print(f"[DEBUG] ComfyUI 响应状态码: {resp.status_code}")
             if resp.status_code != 200:
-                print(f"[DEBUG] ComfyUI 响应内容: {resp.text}")
-            
+                logger.error("ComfyUI 拒绝任务：HTTP %s %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
             return resp.json()
     except httpx.HTTPStatusError as e:
-        print(f"[ERROR] ComfyUI 返回错误: {e.response.status_code}")
-        print(f"[ERROR] 响应内容: {e.response.text}")
+        logger.error("ComfyUI 返回错误：%s %s", e.response.status_code, e.response.text[:500])
         raise RuntimeError(f"ComfyUI 连接失败: {e}")
     except httpx.HTTPError as e:
         raise RuntimeError(f"ComfyUI 连接失败: {e}")
+
+
+def is_online(timeout: float = 2.0) -> bool:
+    """真实探活。不要用 get_queue() 判断在线：它在失败时返回 {}，会让状态永远是 online。"""
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            return client.get(f"{COMFYUI_API}/queue").status_code < 500
+    except Exception:
+        return False
 
 
 def get_queue() -> dict:
