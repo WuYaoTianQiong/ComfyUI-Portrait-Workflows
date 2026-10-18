@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from peewee import SQL
 
 from config import settings
 from models import GenJob, GenHistory
@@ -277,10 +278,25 @@ def _insert_history_for_item(job_id, prompt_id, comfy_pid, images, preview="", p
                 prompt_params=prompt_params,
                 source="local",
             ).on_conflict(
-                conflict_target=[GenHistory.comfyui_prompt_id, GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
+                # 冲突目标必须与 v4.2 迁移后的部分唯一索引一致：(filename, subfolder, img_type)
+                # WHERE is_deleted=0。旧的四列目标（多一个 comfyui_prompt_id）对应的索引已被
+                # _migrate_genhistory_unique_constraint 删除，会让每一次「任务出图入库」都抛
+                # sqlite3.OperationalError: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+                # 并被下面的 except 静默吞掉——表现为 job 出图要等 30 秒后的全局同步才进画廊，
+                # 且 subfolder 出图（如批量换脸 output/fsN/）谁都扫不到，等于永久丢失。
+                conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
+                # 索引是部分索引（WHERE is_deleted=0），冲突目标必须带同一个 WHERE 才能被 SQLite 匹配。
+                # 注意：这里必须用 SQL 字面量。写 peewee 表达式 (GenHistory.is_deleted == False) 会生成
+                # WHERE ("is_deleted" = 0)（带引号），SQLite 的表达式比对不认，照样报
+                # "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"。
+                conflict_where=SQL("is_deleted=0"),
                 update={
+                    GenHistory.comfyui_prompt_id: comfy_pid,
                     GenHistory.job_id: job_id,
                     GenHistory.prompt_id: prompt_id,
+                    GenHistory.view_url: build_view_url(
+                        img["filename"], img.get("subfolder", ""), img.get("type", "output")
+                    ),
                     GenHistory.prompt_params: prompt_params,
                     GenHistory.source: "local",
                     GenHistory.is_deleted: False,  # 恢复被软删除的记录

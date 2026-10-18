@@ -18,6 +18,13 @@ WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 # 不论有没有 widget 字段，这些类型的输入在 widgets_values 中都占一个位置
 _WIDGET_INPUT_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "IMAGEUPLOAD"}
 
+# 常见输出节点类型（保存图片/潜空间），供 inject_prompt 与 set_output_prefix 共用
+_SAVE_NODE_TYPES = {
+    "SaveImage", "SaveImageWebedition", "SaveImageExtended",
+    "VHS_SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG",
+    "ImageSave", "SaveLatent", "ETN_SaveImage",
+}
+
 
 def _pytype_matches_comfy(py_val: object, comfy_type: str) -> bool:
     """检查 Python 值类型是否与 ComfyUI 输入类型兼容。"""
@@ -89,7 +96,10 @@ def ensure_api_format(workflow: dict) -> dict:
             continue
 
         nid = str(node.get("id", 0))
-        api[nid] = {"class_type": node_type, "inputs": {}}
+        # 保留节点标题（_meta 是官方 API 导出格式的标准字段，后端会忽略）：
+        # 双图工作流要靠「主图 / 参考图」这类标题给用户展示节点映射
+        api[nid] = {"class_type": node_type, "inputs": {},
+                    "_meta": {"title": node.get("title") or node_type}}
         raw_inputs = node.get("inputs", [])
         wv = node.get("widgets_values", [])
 
@@ -240,8 +250,13 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
 
     # 遍历所有采样器节点：先注种子，再注参数
     for node_id, node in api_workflow.items():
-        if isinstance(node, dict) and node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
-            inputs = node["inputs"]
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        cls = node.get("class_type", "")
+        if cls in ("KSampler", "KSamplerAdvanced"):
             # 种子
             if "noise_seed" in inputs:
                 inputs["noise_seed"] = seed_val
@@ -249,6 +264,11 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
                 inputs["seed"] = seed_val
             # 显式覆盖采样参数（修复 workflow 解析器值错位问题）
             _inject_sampler_params(node, prompt_data)
+        elif "noise_seed" in inputs:
+            # 独立噪声节点（RandomNoise + SamplerCustomAdvanced 这类链路）。
+            # 旧逻辑只按 KSampler 类名匹配，导致这类工作流的种子注入静默失效——
+            # 界面上的 randomize 是前端行为，走 API 后会退化成工作流里的字面量种子。
+            inputs["noise_seed"] = seed_val
 
     # 3. 注入方向（横竖屏）
     orientation = prompt_data.get("orientation", "portrait")
@@ -298,11 +318,6 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     _rand = _random.randint(1000, 9999)
     _unique_prefix = f"prompt_browser_{_ts}_{_rand}"
     # 常见输出节点类型
-    _SAVE_NODE_TYPES = {
-        "SaveImage", "SaveImageWebedition", "SaveImageExtended",
-        "VHS_SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG",
-        "ImageSave", "SaveLatent", "ETN_SaveImage",
-    }
     for node_id, node in api_workflow.items():
         if not isinstance(node, dict):
             continue
@@ -323,18 +338,61 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     return api_workflow
 
 
-def inject_input_image(api_workflow: dict, source_path: str, dest_dir: str) -> str:
+def set_output_prefix(api_workflow: dict, prefix: str) -> int:
+    """把所有保存节点的 filename_prefix 强制设为 prefix，返回改动的节点数。
+
+    批量出图时用它保证文件名可追溯到「哪个组合」：inject_prompt 的唯一后缀是
+    毫秒级时间戳，同一毫秒内连续提交多个组合可能撞车，届时 SaveImage 会自动加
+    序号，配对关系就丢了。
+    """
+    n = 0
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or "filename_prefix" not in inputs:
+            continue
+        cls = node.get("class_type", "")
+        if cls in _SAVE_NODE_TYPES or "Save" in cls or "Export" in cls or "Output" in cls:
+            inputs["filename_prefix"] = prefix
+            n += 1
+    return n
+
+
+def find_loadimage_nodes(api_workflow: dict) -> list[tuple[str, str]]:
+    """返回工作流里的 LoadImage 节点 [(node_id, 标题)]，按节点创建顺序。
+
+    多图工作流（主图 + 参考图）靠这个顺序做默认映射：第一个=主图，第二个=参考图。
+    """
+    out: list[tuple[str, str]] = []
+    for node_id, node in api_workflow.items():
+        if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+            title = (node.get("_meta") or {}).get("title") or "LoadImage"
+            out.append((str(node_id), str(title)))
+    return out
+
+
+def inject_input_image(
+    api_workflow: dict,
+    source_path: str,
+    dest_dir: str,
+    node_id: str | None = None,
+    dest_name: str | None = None,
+) -> str:
     """将源图片复制到 ComfyUI input 目录，并注入 LoadImage 节点。
 
     Args:
         api_workflow: API 格式的工作流
         source_path: 源图片绝对路径（如 ComfyUI output 下的图片）
         dest_dir: ComfyUI input 目录绝对路径
+        node_id: 指定注入哪个 LoadImage 节点；None = 第一个 LoadImage（旧行为）。
+                 双图工作流必须显式指定，否则两张图会互相覆盖。
+        dest_name: 复制后的文件名；None = 带毫秒时间戳的唯一名（旧行为）。
+                   批量时传入稳定名字，同一张源图只拷一份，避免 input 目录被刷爆。
 
     Returns:
         复制后的图片文件名（可用于后续记录的 prompt_params）
     """
-    import os
     import shutil
     import time
     from pathlib import Path
@@ -343,22 +401,32 @@ def inject_input_image(api_workflow: dict, source_path: str, dest_dir: str) -> s
     if not src.exists():
         raise FileNotFoundError(f"源图片不存在: {source_path}")
 
-    # 生成唯一文件名，避免覆盖
-    ts = int(time.time() * 1000)
-    dst_name = f"pb_process_{ts}_{src.name}"
-    dst_path = Path(dest_dir) / dst_name
-    shutil.copy2(str(src), str(dst_path))
+    if dest_name:
+        dst_name = dest_name
+        dst_path = Path(dest_dir) / dst_name
+        if not dst_path.exists():  # 同名已存在则复用，不重复拷贝
+            shutil.copy2(str(src), str(dst_path))
+    else:
+        # 生成唯一文件名，避免覆盖
+        ts = int(time.time() * 1000)
+        dst_name = f"pb_process_{ts}_{src.name}"
+        dst_path = Path(dest_dir) / dst_name
+        shutil.copy2(str(src), str(dst_path))
 
-    # 找到第一个 LoadImage 节点，注入图片
-    injected = False
-    for node_id, node in api_workflow.items():
-        if isinstance(node, dict) and node.get("class_type") == "LoadImage":
-            node["inputs"]["image"] = dst_name
-            injected = True
-            break
+    # 目标节点：显式指定优先，否则退回第一个 LoadImage（保持旧行为）
+    target = api_workflow.get(str(node_id)) if node_id is not None else None
+    if not isinstance(target, dict):
+        target = None
+    if target is None:
+        for node in api_workflow.values():
+            if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+                target = node
+                break
 
-    if not injected:
-        # 没有 LoadImage 节点时尝试在第一个节点新增 image 参数
+    if target is not None:
+        target.setdefault("inputs", {})["image"] = dst_name
+    else:
+        # 没有 LoadImage 节点时尝试在第一个节点新增 image 参数（旧兜底逻辑）
         first_id = next(iter(api_workflow))
         first = api_workflow[first_id]
         if "image" not in first.get("inputs", {}):

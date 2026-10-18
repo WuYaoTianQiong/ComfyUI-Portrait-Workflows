@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" role="img" aria-label="文件缺失">
+  <rect width="300" height="400" fill="#1a1a20"/>
+  <g stroke="#3c3c47" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="86" y="124" width="128" height="104" rx="10"/>
+    <path d="M86 204l34-32 28 25 26-22 40 33"/>
+    <circle cx="120" cy="156" r="11"/>
+    <path d="M72 92l156 216"/>
+  </g>
+  <text x="150" y="284" fill="#7a7a88" font-family="-apple-system,'Segoe UI','Microsoft YaHei',sans-serif"
+        font-size="21" text-anchor="middle">文件缺失</text>
+  <text x="150" y="312" fill="#565663" font-family="-apple-system,'Segoe UI','Microsoft YaHei',sans-serif"
+        font-size="13" text-anchor="middle">已被删除或移动</text>
+</svg>

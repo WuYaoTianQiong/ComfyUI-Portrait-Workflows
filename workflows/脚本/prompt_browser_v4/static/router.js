@@ -65,6 +65,8 @@ window.handleRoute = function(path) {
     window.routePrompt({});
   } else if (path === '/composer') {
     window.routeComposer();
+  } else if (path === '/faceswap') {
+    window.routeFaceswap();
   } else if (path === '/stats') {
     window.routeStats();
   } else {
@@ -102,6 +104,8 @@ window.updateRoute = function(useReplace = false) {
       url = '/prompt';
     } else if (activeTab === 'composerTab') {
       url = '/composer';
+    } else if (activeTab === 'faceswapTab') {
+      url = '/faceswap';
     } else if (activeTab === 'statsTab') {
       url = '/stats';
     }

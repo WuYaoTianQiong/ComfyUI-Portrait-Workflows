@@ -1,0 +1,522 @@
+/* faceswap.css —— 批量换脸工作台（左主图 / 右参考图） */
+
+.fs-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fs-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.fs-count {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fs-count b { color: var(--text); }
+
+.fs-columns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+.fs-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.fs-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.fs-col-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fs-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+.fs-item {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.fs-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.fs-item:hover { border-color: var(--muted); }
+.fs-item.sel {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
+}
+.fs-item-sel {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+.fs-item.sel .fs-item-sel { display: block; }
+.fs-item-zoom {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.fs-item:hover .fs-item-zoom { display: block; }
+.fs-item-fail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 11px;
+}
+.fs-empty {
+  grid-column: 1 / -1;
+  padding: 26px 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.fs-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fs-pager select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+/* ---------- 底部：可折叠的「提示词与参数」 ---------- */
+.fs-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.fs-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+.fs-section-head:hover { background: var(--panel-hover); }
+.fs-section-toggle {
+  width: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.fs-section-title { font-weight: 600; }
+.fs-section-summary {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-section-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.65;
+}
+.fs-footer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.fs-footer.collapsed .fs-footer-body { display: none; }
+.fs-footer.collapsed .fs-section-hint { display: none; }
+
+.fs-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 216px;
+  gap: 10px;
+  align-items: start;
+}
+.fs-prompt-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fs-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fs-prompt-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.fs-prompt-box textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.fs-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 提示词放大时 .fs-prompt-box 变成 position:fixed 会脱离网格流，
+   参数块会被自动排到第一列（跑到左边）。显式钉在第二列，保持位置稳定。
+   只在双列布局下生效，窄屏单列时不能加（否则会撑出隐式列）。 */
+@media (min-width: 1101px) {
+  .fs-knobs { grid-column: 2; }
+}
+.fs-knobs .fs-field input,
+.fs-knobs .fs-field select { width: 100%; }
+.fs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fs-field input,
+.fs-field select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.fs-wf-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.fs-adv {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fs-adv summary { cursor: pointer; }
+.fs-adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.fs-adv-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fs-adv-row select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.fs-adv-tip {
+  font-size: 11px;
+  line-height: 1.7;
+}
+.fs-adv-warn { color: var(--warning); }
+
+/* 进度面板复用 .batch-panel 的样式，这里只做位置微调 */
+#fsPanel { border: 1px solid var(--border); border-radius: var(--radius); max-height: 200px; }
+
+/* ---------- 来源模式切换 ---------- */
+.fs-toolbar-gallery {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+.fs-mode {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.fs-mode-btn {
+  border: 0;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fs-mode-btn + .fs-mode-btn { border-left: 1px solid var(--border); }
+.fs-mode-btn:hover { color: var(--text); }
+.fs-mode-btn.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ---------- 文件夹路径栏 ---------- */
+.fs-dirbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(0, 0, 0, 0.12);
+}
+.fs-path {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.fs-rootsel {
+  max-width: 120px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+/* ---------- 子目录列表 ---------- */
+.fs-dirs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px;
+  max-height: 62px;
+  overflow-y: auto;
+}
+.fs-dirs:not(:empty) { padding-top: 6px; }
+.fs-dir-chip {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-dir-chip:hover { color: var(--text); border-color: var(--primary); }
+
+/* 文件夹模式下给缩略图加文件名，便于区分 */
+.fs-item-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 工具栏右侧的布局预设 ---------- */
+.fs-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* ---------- 两栏可折叠 ---------- */
+.fs-col-toggle {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fs-col-toggle:hover { color: var(--text); border-color: var(--primary); }
+
+.fs-col-strip { display: none; }
+.fs-col.collapsed { border-color: var(--primary); }
+.fs-col.collapsed > *:not(.fs-col-strip) { display: none !important; }
+.fs-col.collapsed .fs-col-strip {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  padding: 10px 4px;
+  border: 0;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fs-col.collapsed .fs-col-strip:hover { color: var(--text); }
+.fs-col-strip-title { writing-mode: vertical-rl; letter-spacing: 3px; }
+.fs-col-strip-count {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+/* 折叠后把省下的宽度让给另一栏 */
+.fs-columns.col-main-collapsed { grid-template-columns: 48px minmax(0, 1fr); }
+.fs-columns.col-ref-collapsed { grid-template-columns: minmax(0, 1fr) 48px; }
+.fs-columns.col-both-collapsed { grid-template-columns: 48px 48px; }
+
+/* ---------- 进度面板折叠 ---------- */
+#fsPanel .batch-panel-toggle { font-size: 10px; }
+#fsPanel.collapsed { max-height: none; }
+
+/* ---------- 提示词放大编辑 ---------- */
+.fs-prompt-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 55;
+}
+.fs-prompt-backdrop.show { display: block; }
+.fs-prompt-box.expanded {
+  position: fixed;
+  inset: 7vh 8vw;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.fs-prompt-box.expanded .fs-prompt-head { font-size: 12px; color: var(--text); }
+.fs-prompt-box.expanded textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 窄屏：参数区落到提示词下方，避免挤压 */
+@media (max-width: 1100px) {
+  .fs-workbench { grid-template-columns: minmax(0, 1fr); }
+}

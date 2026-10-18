@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from config import settings
 from models import Prompt, PromptCategory, Category
-from services.helpers import _resolve_if_reparse
+from services.helpers import _resolve_if_reparse, missing_image_response
 from services.thumbnail import generate_thumbnail
 from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt, get_queue as fetch_queue
@@ -31,9 +31,15 @@ DEPRECATED_DIR = settings.project_root / "废弃工作流"
 def _is_valid_workflow(filepath: Path) -> bool:
     try:
         content = json.loads(filepath.read_text(encoding="utf-8"))
-        return any(
-            isinstance(v, dict) and "class_type" in v
-            for v in content.values()
+        # API 格式：扁平 {节点id: {class_type: ...}}
+        if any(isinstance(v, dict) and "class_type" in v for v in content.values()):
+            return True
+        # 界面格式：{nodes: [...]}。load_workflow/ensure_api_format 能直接转换，
+        # 与 /validate_workflow 的判定保持一致（旧逻辑只认 API 格式，
+        # 导致界面里保存的工作流全部不出现在下拉列表中）。
+        nodes = content.get("nodes")
+        return isinstance(nodes, list) and any(
+            isinstance(n, dict) and n.get("type") for n in nodes
         )
     except Exception:
         return False
@@ -157,17 +163,17 @@ def proxy_image(
     try:
         with httpx.Client(timeout=15, follow_redirects=True) as client:
             resp = client.get(url)
-            if resp.status_code == 404:
-                raise HTTPException(404, "图片文件不存在（可能已被删除）")
+            if resp.status_code in (400, 404):
+                # 本地没有 + ComfyUI 也没有 = 文件真的没了 → 给占位图，不再刷 404
+                return missing_image_response()
             resp.raise_for_status()
             content = resp.content
             media_type = resp.headers.get("Content-Type", "image/png")
     except httpx.ConnectError:
-        raise HTTPException(404, "图片文件不存在（已在磁盘上被删除）")
+        # ComfyUI 没开，本地也没有这个文件 → 同样属于"取不到图"
+        return missing_image_response()
     except httpx.TimeoutException:
         raise HTTPException(504, "获取图片超时（ComfyUI 响应过慢）")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(500, f"获取图片失败: {e}")
 
@@ -238,7 +244,8 @@ def serve_thumbnail(
     # （与 /api/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
     raw = _fetch_remote_image(filename, subfolder, type)
     if raw is None:
-        raise HTTPException(404, "无法生成缩略图（本地与 ComfyUI 均无此图）")
+        # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404
+        return missing_image_response()
     try:
         with Image.open(BytesIO(raw)) as img:
             img.thumbnail((size, size), Image.LANCZOS)
@@ -253,7 +260,7 @@ def serve_thumbnail(
             headers={"Cache-Control": "no-cache"},
         )
     except Exception:
-        raise HTTPException(500, "缩略图生成失败")
+        return missing_image_response()
 
 
 @router.post("/thumbnail/clear")

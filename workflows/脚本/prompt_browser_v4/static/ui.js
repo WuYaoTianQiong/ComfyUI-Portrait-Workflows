@@ -163,8 +163,9 @@ window.switchTab = function(tabId, btn) {
 
   window.UiState.set("activeTab", tabId);
 
-  // 画廊和统计 Tab 隐藏方向/画质/跑图控件，提示词和组合创作 Tab 保持可见
-  const hideControls = (tabId === 'galleryTab' || tabId === 'statsTab');
+  // 画廊和统计 Tab 隐藏方向/画质/跑图控件，提示词和组合创作 Tab 保持可见。
+  // 批量换脸 Tab 也隐藏：它有独立提交按钮，且画质/横竖屏对该类工作流是空转（易误导）。
+  const hideControls = (tabId === 'galleryTab' || tabId === 'statsTab' || tabId === 'faceswapTab');
   ['qualitySelect', 'orientBtn', 'runBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = hideControls ? 'none' : '';
@@ -180,6 +181,10 @@ window.switchTab = function(tabId, btn) {
   if (tabId === 'composerTab') {
     window.initComposer();
     window.refreshComposer();
+  }
+
+  if (tabId === 'faceswapTab') {
+    window.initFaceswap();
   }
 
   if (tabId !== 'galleryTab') {

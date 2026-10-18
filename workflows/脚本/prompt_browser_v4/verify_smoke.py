@@ -11,7 +11,10 @@
     - /api/history/facets          方向分面计数
     - /api/history?orientation=... 按方向筛选
     - /api/history/html?...        画廊 HTML 片段（曾因 category_id 缺失 500）
-    - /static/*.js                 前端静态资源
+    - /api/workflows               工作流列表（界面格式工作流也应列出）
+    - /api/faceswap/nodes          双图工作流的 LoadImage 节点探测
+    - /api/faceswap/batch          批量换脸（dry_run，不占显存）
+    - /*.js / *.css / index.html   前端静态资源（带内容断言）
 
 - 启动前先清理占用该端口的残留实例，避免结果混淆
 - 等待 "Application startup complete" 而非仅看 /docs，确保路由已注册
@@ -48,9 +51,23 @@ def _kill_port(port):
         pass
 
 
-def _get(url, timeout=10):
+def _get(url, timeout=30):
+    # 注意：超时别设太小。ComfyUI 正在跑图时，图片端点的"代理回退"最久要 15 秒，
+    # 客户端 10 秒就放弃会导致假失败（服务端其实正常返回了 200）。
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:
+        return -1, str(e).encode()
+
+
+def _post(url, payload, timeout=30):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
@@ -152,9 +169,171 @@ def main():
                 sync_total = "PARSE_ERR"
             checks.append(("history_sync(page_size=50)", code, sync_total))
 
-            for f in ("/static/gallery.js", "/static/history.js"):
-                code, _ = _get(BASE + f)
-                checks.append((f"serve {f}", code, ""))
+            # 静态资源：必须校验内容，否则 404 会被 SPA 回退成 index.html(200) 造成假通过
+            for f, needle in (("/gallery.js", b"renderGallery"),
+                              ("/history.js", b"loadHistory"),
+                              ("/faceswap.js", b"window.fsSubmit"),
+                              ("/faceswap.css", b".fs-page")):
+                code, body = _get(BASE + f)
+                ok = code == 200 and needle in body
+                checks.append((f"serve {f} (含 {needle.decode()})", code if ok else -2,
+                               f"len={len(body)}" if ok else "内容不符（可能被 SPA 回退成 HTML）"))
+
+            code, body = _get(BASE + "/")
+            has_tab = b'id="faceswapTab"' in body
+            checks.append(("index.html 含 faceswapTab", code if has_tab else -2,
+                           f"len={len(body)}" if has_tab else "缺少 tab 面板"))
+
+            # ---- 批量换脸 ----
+            root = os.path.dirname(os.path.dirname(V4))
+            import glob as _glob
+            cands = _glob.glob(os.path.join(root, "*双图*.json")) or _glob.glob(os.path.join(root, "*.json"))
+            wf = cands[0] if cands else ""
+
+            code, body = _get(BASE + "/api/workflows?sort=mtime")
+            try:
+                names = [w["name"] for w in json.loads(body).get("workflows", [])]
+            except Exception:
+                names = []
+            listed = os.path.basename(wf) in names if wf else False
+            checks.append((f"workflows 列出 {os.path.basename(wf)}", code if listed else -2,
+                           f"共 {len(names)} 个" if listed else "未列出"))
+
+            code, body = _post(BASE + "/api/faceswap/nodes", {"workflow_path": wf})
+            try:
+                nd = json.loads(body)
+                node_desc = f"main={nd.get('main')} ref={nd.get('ref')} loads={len(nd.get('loadimages') or [])}"
+                nodes_ok = bool(nd.get("main")) and bool(nd.get("ref"))
+            except Exception as e:
+                node_desc, nodes_ok = "PARSE_ERR:" + repr(e), False
+            checks.append(("faceswap/nodes 双图节点", code if nodes_ok else -2, node_desc))
+
+            # dry_run 需要真实存在的历史图：逐个候选试，避免依赖固定 id
+            code, body = _get(BASE + "/api/history?page=1&page_size=50")
+            try:
+                ids = [it["id"] for it in json.loads(body).get("items", [])]
+            except Exception:
+                ids = []
+            picked = None
+            for i in ids[:40]:
+                c, b = _post(BASE + "/api/faceswap/batch",
+                             {"main_ids": [i], "ref_ids": [i], "workflow_path": wf, "dry_run": True})
+                if c == 200:
+                    picked = i
+                    break
+            if picked is None:
+                checks.append(("faceswap/batch dry_run", -2, f"没有可用的历史图文件（候选 {len(ids)} 张）"))
+            else:
+                c, b = _post(BASE + "/api/faceswap/batch",
+                             {"main_ids": [picked], "ref_ids": [picked], "workflow_path": wf, "dry_run": True})
+                try:
+                    d = json.loads(b)
+                    ok = c == 200 and d.get("total") == 1 and d.get("plan")
+                    info = f"total={d.get('total')} nodes={d.get('nodes', {}).get('main')}/{d.get('nodes', {}).get('ref')}"
+                    # 出图文件名规则：平铺在 output 根目录（不能带 "/" 子目录，
+                    # 否则磁盘兜底扫描扫不到）
+                    pfx = (d.get("plan") or [{}])[0].get("prefix", "")
+                    ok_pfx = bool(pfx) and "/" not in pfx and pfx.startswith("fs")
+                except Exception as e:
+                    ok, info, ok_pfx, pfx = False, "PARSE_ERR:" + repr(e), False, ""
+                checks.append(("faceswap/batch dry_run", c if ok else -2, info))
+                checks.append(("出图文件名平铺(无子目录)", 200 if ok_pfx else -2, pfx or "缺失"))
+
+            # ---- 文件夹浏览（批量换脸的另一素材来源）----
+            code, body = _get(BASE + "/api/fs/list")
+            try:
+                rootdata = json.loads(body)
+                roots = rootdata.get("roots", [])
+            except Exception:
+                rootdata, roots = {}, []
+            checks.append(("fs/list 起点(盘符+快速跳转)", code if roots else -2,
+                           f"drives={len(rootdata.get('dirs', []))} roots={len(roots)}"))
+
+            input_path = next((r["path"] for r in roots if r["name"] == "ComfyUI/input"), "")
+            img_path = ""
+            img_path2 = ""
+            if input_path:
+                code, body = _get(BASE + "/api/fs/list?path=" + urllib.parse.quote(input_path))
+                try:
+                    d = json.loads(body)
+                    imgs = d.get("images", [])
+                    img_path = imgs[0]["path"] if imgs else ""
+                    img_path2 = imgs[1]["path"] if len(imgs) > 1 else ""
+                    fs_info = f"dirs={len(d.get('dirs', []))} images={len(imgs)}"
+                except Exception as e:
+                    fs_info = "PARSE_ERR:" + repr(e)
+                checks.append(("fs/list 列子目录与图片", code if img_path else -2, fs_info))
+
+            if img_path:
+                code, body = _get(BASE + "/api/fs/thumb?path=" + urllib.parse.quote(img_path) + "&size=200")
+                ok = code == 200 and body[:4] == b"RIFF"      # RIFF = 有效 webp
+                checks.append(("fs/thumb 任意路径缩略图", code if ok else -2,
+                               f"bytes={len(body)}" + "" if ok else "内容不是 webp"))
+
+                code, body = _post(BASE + "/api/faceswap/batch",
+                                   {"main_paths": [img_path], "ref_paths": [img_path],
+                                    "workflow_path": wf, "dry_run": True})
+                try:
+                    d2 = json.loads(body)
+                    plan0 = (d2.get("plan") or [{}])[0]
+                    src_kind = (plan0.get("main_meta") or {}).get("source")
+                    ok2 = code == 200 and d2.get("total") == 1 and src_kind == "file"
+                    info2 = f"total={d2.get('total')} main_meta.source={src_kind}"
+                except Exception as e:
+                    ok2, info2 = False, "PARSE_ERR:" + repr(e)
+                checks.append(("faceswap/batch 用磁盘路径 dry_run", code if ok2 else -2, info2))
+
+                # 1:1 配对：数量相等应只出 N 组，不等应报 400
+                if img_path2:
+                    code, body = _post(BASE + "/api/faceswap/batch",
+                                       {"main_paths": [img_path, img_path2], "ref_paths": [img_path, img_path2],
+                                        "workflow_path": wf, "dry_run": True, "pair_mode": "zip"})
+                    try:
+                        dz = json.loads(body)
+                        okz = code == 200 and dz.get("total") == 2
+                        infoz = f"total={dz.get('total')}（全组合会是4）"
+                    except Exception as e:
+                        okz, infoz = False, "PARSE_ERR:" + repr(e)
+                    checks.append(("faceswap 1:1配对 dry_run", code if okz else -2, infoz))
+
+                    code, body = _post(BASE + "/api/faceswap/batch",
+                                       {"main_paths": [img_path, img_path2], "ref_paths": [img_path],
+                                        "workflow_path": wf, "dry_run": True, "pair_mode": "zip"})
+                    # 打印逻辑以 code==200 为通过标记，所以期望 400 的用例要回填 200
+                    checks.append(("faceswap 1:1配对 数量不等→400", 200 if code == 400 else -2,
+                                   f"HTTP {code}（期望 400）"))
+
+            # ---- 文件缺失时返回占位图（而不是 404 刷屏）----
+            code, body = _get(BASE + "/img-missing.svg")
+            ok = code == 200 and b"<svg" in body and "文件缺失".encode() in body
+            checks.append(("占位图 img-missing.svg", code if ok else -2, f"bytes={len(body)}"))
+
+            miss = "__definitely_missing__.png"
+            for label, url in (
+                ("缩略图(缺失)→占位图", f"/api/thumbnail?filename={miss}&subfolder=&type=output&size=600"),
+                ("原图(缺失)→占位图", f"/api/image?filename={miss}&subfolder=&type=output"),
+                ("fs/thumb(缺失)→占位图", "/api/fs/thumb?path=" + urllib.parse.quote("F:/__nope__/x.png")),
+            ):
+                code, body = _get(BASE + url)
+                ok = code == 200 and b"<svg" in body
+                checks.append((label, code if ok else -2,
+                               f"bytes={len(body)}" if ok else "未返回占位图"))
+
+            # 同步不再为「文件已被删除」的历史条目建记录
+            code, body = _get(BASE + "/api/history_sync?page_size=1")
+            time.sleep(0.5)
+            try:
+                log_txt = open(LOG_PATH, encoding="utf-8", errors="replace").read()
+            except Exception:
+                log_txt = ""
+            # 注意：子进程 stdout 重定向到文件时 Windows 用本地编码(cp936)写中文，
+            # 用 utf-8 读会变乱码，所以这里只匹配 ASCII 的 "[sync]" 前缀。
+            skipped_ok = "[sync]" in log_txt
+            checks.append(("history_sync 跳过缺失文件", code if skipped_ok else -2,
+                           "日志已确认跳过" if skipped_ok else "日志中未见跳过记录（可能库里没有缺失文件）"))
+
+            code, body = _get(BASE + "/api/jobs?active=1")
+            checks.append(("jobs?active=1", code, ""))
 
             print("RESULT: checks")
             for name, code, val in checks:

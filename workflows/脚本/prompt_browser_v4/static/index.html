@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="/composer2.css?v=7">
 <link rel="stylesheet" href="/modal.css?v=2">
 <link rel="stylesheet" href="/stats.css?v=1">
+<link rel="stylesheet" href="/faceswap.css?v=5">
 <link rel="stylesheet" href="/vendor/viewer.min.css">
 <script src="/vendor/htmx.min.js"></script>
 <script src="/vendor/viewer.min.js"></script>
@@ -63,6 +64,9 @@
   </button>
   <button class="tab-btn" data-tab="composerTab" onclick="window.switchTab('composerTab', this)">
     🔧 组合创作
+  </button>
+  <button class="tab-btn" data-tab="faceswapTab" onclick="window.switchTab('faceswapTab', this)">
+    🔀 批量换脸
   </button>
   <button class="tab-btn" data-tab="statsTab" onclick="window.switchTab('statsTab', this);loadStats()">
     📊 统计
@@ -731,6 +735,173 @@
   </div>
 </div>
 
+<!-- Tab: 批量换脸 -->
+<div class="tab-content" id="faceswapTab">
+  <div class="fs-page">
+
+    <div class="fs-toolbar">
+      <div class="fs-toolbar-gallery" id="fsGalleryBar">
+        <input type="text" class="fs-search" id="fsSearch" placeholder="搜索历史图（文件名 / 提示词）…"
+               onkeydown="if(event.key==='Enter')window.fsLoadPage(1)">
+        <button class="btn btn-sm btn-ghost" onclick="window.fsLoadPage(1)">🔍 搜索</button>
+        <button class="btn btn-sm btn-ghost" onclick="window.fsLoadPage(window._fsPage)">↻ 刷新</button>
+      </div>
+      <span class="fs-count">主图 <b id="fsMainCount">0</b> · 参考图 <b id="fsRefCount">0</b> · 组合 <b id="fsComboCount">0</b></span>
+      <div class="fs-toolbar-actions">
+        <button class="btn btn-sm btn-ghost" onclick="window.fsFocusPicking()" title="收起参数区并展开两栏，把空间全给选图">⇱ 聚焦选图</button>
+        <button class="btn btn-sm btn-ghost" onclick="window.fsExpandAll()" title="展开所有折叠区域">⤢ 全部展开</button>
+        <button class="btn btn-sm btn-ghost" onclick="window.fsClearSel()">清空选择</button>
+      </div>
+    </div>
+
+    <div class="fs-columns" id="fsColumns">
+      <section class="fs-col" id="fsMainCol">
+        <header class="fs-col-head">
+          <button class="fs-col-toggle" onclick="window.fsToggleCol('main')" title="收起这一栏（宽度让给另一栏）">◀</button>
+          <span class="fs-col-title">① 主图 —— 要被换脸的那张</span>
+          <span class="fs-mode" id="fsMainMode">
+            <button class="fs-mode-btn active" onclick="window.fsSetMode('main','gallery')">🖼️ 画廊</button>
+            <button class="fs-mode-btn" onclick="window.fsSetMode('main','folder')">📁 文件夹</button>
+          </span>
+          <button class="btn btn-sm btn-ghost" onclick="window.fsSelectPage('main')" title="把当前列出的图全部选中">全选本页</button>
+          <button class="btn btn-sm btn-ghost" onclick="window.fsClearSel('main')">清空</button>
+        </header>
+        <div class="fs-dirbar" id="fsMainDirBar" style="display:none">
+          <button class="btn btn-sm btn-ghost" title="上一级" onclick="window.fsDirUp('main')">↑</button>
+          <input class="fs-path" id="fsMainPath" placeholder="粘贴文件夹路径，回车打开"
+                 onkeydown="if(event.key==='Enter'){window.fsDirOpen('main',this.value)}">
+          <button class="btn btn-sm btn-ghost" onclick="window.fsDirOpen('main',document.getElementById('fsMainPath').value)">打开</button>
+          <select class="fs-rootsel" id="fsMainRoots" onchange="if(this.value){window.fsDirOpen('main',this.value);this.value=''};">
+            <option value="">快速跳转…</option>
+          </select>
+        </div>
+        <div class="fs-dirs" id="fsMainDirs"></div>
+        <div class="fs-grid" id="fsMainGrid"></div>
+        <button class="fs-col-strip" onclick="window.fsToggleCol('main')" title="展开这一栏">
+          <span class="fs-col-strip-title">① 主图</span>
+          <span class="fs-col-strip-count" id="fsMainStripCount">0</span>
+        </button>
+      </section>
+      <section class="fs-col" id="fsRefCol">
+        <header class="fs-col-head">
+          <button class="fs-col-toggle" onclick="window.fsToggleCol('ref')" title="收起这一栏（宽度让给另一栏）">▶</button>
+          <span class="fs-col-title">② 参考图 —— 提供面孔的那张</span>
+          <span class="fs-mode" id="fsRefMode">
+            <button class="fs-mode-btn active" onclick="window.fsSetMode('ref','gallery')">🖼️ 画廊</button>
+            <button class="fs-mode-btn" onclick="window.fsSetMode('ref','folder')">📁 文件夹</button>
+          </span>
+          <button class="btn btn-sm btn-ghost" onclick="window.fsSelectPage('ref')" title="把当前列出的图全部选中">全选本页</button>
+          <button class="btn btn-sm btn-ghost" onclick="window.fsClearSel('ref')">清空</button>
+        </header>
+        <div class="fs-dirbar" id="fsRefDirBar" style="display:none">
+          <button class="btn btn-sm btn-ghost" title="上一级" onclick="window.fsDirUp('ref')">↑</button>
+          <input class="fs-path" id="fsRefPath" placeholder="粘贴文件夹路径，回车打开"
+                 onkeydown="if(event.key==='Enter'){window.fsDirOpen('ref',this.value)}">
+          <button class="btn btn-sm btn-ghost" onclick="window.fsDirOpen('ref',document.getElementById('fsRefPath').value)">打开</button>
+          <select class="fs-rootsel" id="fsRefRoots" onchange="if(this.value){window.fsDirOpen('ref',this.value);this.value=''};">
+            <option value="">快速跳转…</option>
+          </select>
+        </div>
+        <div class="fs-dirs" id="fsRefDirs"></div>
+        <div class="fs-grid" id="fsRefGrid"></div>
+        <button class="fs-col-strip" onclick="window.fsToggleCol('ref')" title="展开这一栏">
+          <span class="fs-col-strip-title">② 参考图</span>
+          <span class="fs-col-strip-count" id="fsRefStripCount">0</span>
+        </button>
+      </section>
+    </div>
+
+    <div class="fs-pager" id="fsPager"></div>
+
+    <div class="fs-footer" id="fsFooter">
+      <div class="fs-section-head" onclick="window.fsToggleFooter()">
+        <span class="fs-section-toggle" id="fsFooterToggle">▾</span>
+        <span class="fs-section-title">提示词与参数</span>
+        <span class="fs-section-summary" id="fsFooterSummary"></span>
+        <span class="fs-section-hint">点这里折叠 / 展开</span>
+      </div>
+
+      <div class="fs-footer-body" id="fsFooterBody">
+        <div class="fs-workbench">
+          <div class="fs-prompt-box" id="fsPromptBox">
+            <div class="fs-prompt-head">
+              <span>提示词（正面 —— 留空则用内置的换脸描述）</span>
+              <span class="fs-prompt-tools">
+                <button class="btn btn-sm btn-ghost" id="fsPromptClearBtn" onclick="window.fsClearPrompt()">清空</button>
+                <button class="btn btn-sm btn-ghost" id="fsPromptExpandBtn" onclick="window.fsTogglePromptExpand()">⤢ 放大编辑</button>
+              </span>
+            </div>
+            <textarea id="fsPrompt" rows="6"
+                      placeholder="例如：保持主图人物的姿势、构图与场景不变，只把面部替换为参考图中人物的脸…"></textarea>
+          </div>
+
+          <div class="fs-knobs">
+            <label class="fs-field">
+              <span>组合方式</span>
+              <select id="fsPairMode" onchange="window.fsUpdateCounts()">
+                <option value="cross">全组合（主图×参考图）</option>
+                <option value="zip">1:1 配对（按选择顺序）</option>
+              </select>
+            </label>
+            <label class="fs-field">
+              <span>种子模式</span>
+              <select id="fsSeedMode" onchange="window.fsSyncSeedDisabled()">
+                <option value="fixed">固定（便于对比）</option>
+                <option value="random">每张随机</option>
+                <option value="increment">递增</option>
+              </select>
+            </label>
+            <label class="fs-field">
+              <span>种子</span>
+              <input type="number" id="fsSeed" value="100000">
+            </label>
+            <label class="fs-field">
+              <span>当前工作流</span>
+              <span class="fs-wf-name" id="fsWfName">未选择</span>
+            </label>
+            <button class="btn btn-primary" id="fsSubmitBtn" onclick="window.fsSubmit()">🚀 开始批量换脸</button>
+          </div>
+        </div>
+
+        <details class="fs-adv">
+          <summary>高级：节点映射</summary>
+          <div class="fs-adv-body">
+            <div class="fs-adv-row">
+              <label>主图 → <select id="fsMainNode"></select></label>
+              <label>参考图 → <select id="fsRefNode"></select></label>
+              <button class="btn btn-sm btn-ghost" onclick="window.fsDetectNodes(true)">重新探测</button>
+            </div>
+            <div class="fs-adv-tip" id="fsNodesTip">正在探测工作流的 LoadImage 节点…</div>
+            <div class="fs-adv-tip">
+              尺寸与画质跟随工作流自身设置（本项目多数换脸工作流用 ImageResizeKJ 保持主图原尺寸，
+              所以顶部的画质/横竖屏控件对本工作流不生效）。不涂遮罩即整图重绘，靠提示词约束要改什么。
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="fs-prompt-backdrop" id="fsPromptBackdrop" onclick="window.fsTogglePromptExpand()"></div>
+
+    <div class="batch-panel" id="fsPanel">
+      <div class="batch-panel-header">
+        <span class="batch-panel-toggle" id="fsPanelToggle" onclick="window.fsTogglePanelCollapse()" title="折叠/展开">▼</span>
+        <span id="fsPanelTitle">批量换脸</span>
+        <div class="batch-panel-header-actions">
+          <button class="btn btn-sm btn-danger" id="fsStopBtn" onclick="window.fsStop()" style="display:none">停止</button>
+          <button class="btn btn-sm btn-ghost" onclick="window.fsHidePanel()" title="隐藏面板">✕</button>
+        </div>
+      </div>
+      <div class="batch-panel-progress">
+        <div class="batch-bar-wrap"><div class="batch-bar-fill" id="fsBarFill"></div></div>
+        <span class="batch-progress-text" id="fsProgressText">0/0</span>
+      </div>
+      <div class="batch-items" id="fsItems"></div>
+    </div>
+
+  </div>
+</div>
+
 <!-- 按依赖顺序加载模块 -->
 <script src="/utils.js?v=3"></script>
 <script src="/ui.js?v=8"></script>
@@ -751,5 +922,6 @@
 <script src="/composer-templates.js?v=4"></script>
 <script src="/composer-fragments.js?v=5"></script>
 <script src="/fragments.js?v=1"></script>
+<script src="/faceswap.js?v=4"></script>
 </body>
 </html>

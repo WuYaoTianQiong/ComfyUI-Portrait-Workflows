@@ -129,7 +129,11 @@ def _sync_comfyui_history() -> int:
     if not hist:
         return 0
 
+    # 用于判断"文件是否还在磁盘上"（ComfyUI 的 /history 会长期保留已删除图片的条目）
+    from services.thumbnail import _get_image_path
+
     added = 0
+    skipped = 0
     for pid, data in hist.items():
         outputs = data.get("outputs", {})
         # 尝试从 ComfyUI history 的 extra_data 提取 prompt_id
@@ -146,6 +150,14 @@ def _sync_comfyui_history() -> int:
                 try:
                     subfolder = img.get("subfolder", "")
                     img_type = img.get("type", "output")
+                    # ComfyUI 的 /history 会长期保留「文件已被手动删除」的条目。照单建记录
+                    # 会让画廊堆满坏图：缩略图一律 404、控制台刷屏、点进去也看不到东西。
+                    # 所以先确认文件真的在磁盘上，不在就跳过。
+                    # （旧代码这里因为 upsert 报错被 except 吞掉，恰好掩盖了这个问题；
+                    #   修好写入之后才暴露出来。）
+                    if _get_image_path(filename, subfolder, img_type) is None:
+                        skipped += 1
+                        continue
                     pp = _build_prompt_params_from_comfy(data, filename, subfolder, img_type)
                     Gh.insert(
                         job_id=None,
@@ -159,14 +171,27 @@ def _sync_comfyui_history() -> int:
                         prompt_params=pp,
                         favorite=False,
                         source="comfyui_sync",
-                    ).on_conflict_do_update(
+                    ).on_conflict(
+                        # peewee 4.x 的正确写法是 on_conflict(conflict_target=..., update=...)；
+                        # 原来的 on_conflict_do_update(..., set_=...) 是 3.x API，在本项目装的
+                        # peewee 4.1 上必然抛 AttributeError，又被下面的 except Exception: pass 吞掉，
+                        # 导致这条同步兜底路径其实从未写入过任何一条记录。
                         conflict_target=[Gh.filename, Gh.subfolder, Gh.img_type],
-                        set_={
+                        # 必须带 WHERE 才能匹配部分索引，且必须用 SQL 字面量（peewee 表达式会生成
+                        # 带引号的 "is_deleted" = 0，SQLite 不认）
+                        conflict_where=SQL("is_deleted=0"),
+                        # 已被任务（job）写过参数的行不再被同步覆盖：job 写进去的是
+                        # source=faceswap/composer 这类富参数（含组合来源、节点映射、种子），
+                        # 同步只能从 ComfyUI history 反推出较弱的参数，覆盖即丢信息。
+                        # job_id 为空的行（同步/磁盘扫描创建的）照旧会被更新，保持原有补全能力。
+                        where=Gh.job_id.is_null(),
+                        update={
                             Gh.comfyui_prompt_id: pid,
                             Gh.prompt_id: prompt_id,
                             Gh.view_url: build_view_url(filename, subfolder, img_type),
                             Gh.prompt_params: pp,
-                            Gh.created_at: SQL("CURRENT_TIMESTAMP"),
+                            # 刻意不再把 created_at 刷成 CURRENT_TIMESTAMP：同步每 30 秒跑一次，
+                            # 那会让所有已存在的图每半分钟被"刷新"成最新，画廊"最新"排序彻底失效。
                         },
                     ).execute()
                     added += 1
@@ -183,6 +208,9 @@ def _sync_comfyui_history() -> int:
                         pass
                 except Exception:
                     pass
+
+    if skipped:
+        print(f"[sync] 跳过 {skipped} 条「文件已不存在」的 ComfyUI 历史记录（避免画廊出现坏图）")
     return added
 
 

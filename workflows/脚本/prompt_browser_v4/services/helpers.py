@@ -34,6 +34,30 @@ def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
     )
 
 
+# 图片文件确实找不到时给前端看的占位图（static 目录下，随静态目录一起发布）
+MISSING_IMAGE_PATH = settings.static_dir / "img-missing.svg"
+
+
+def missing_image_response():
+    """返回「文件缺失」占位图（HTTP 200），而不是 404。
+
+    历史库里只要有一批记录对应的文件被手动删掉，`<img>` 就会每张刷一条
+    404，控制台噪音很大；而 404 在前端也只能显示裂图，信息量还不如占位图上
+    写着的"文件缺失/已被删除"。用 no-store，保证文件恢复后立刻能取到真图。
+    """
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    if not MISSING_IMAGE_PATH.is_file():
+        # 占位图本身丢了：退回普通的 404，别让所有图片请求变成 500
+        raise HTTPException(404, "图片文件不存在")
+    return FileResponse(
+        str(MISSING_IMAGE_PATH),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 def get_image_metadata(filename: str, subfolder: str, img_type: str) -> dict:
     """读取图片文件的分辨率和大小（始终从磁盘读取）"""
     if not filename:
