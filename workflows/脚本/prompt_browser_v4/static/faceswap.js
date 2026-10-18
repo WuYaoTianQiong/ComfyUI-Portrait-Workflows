@@ -109,9 +109,42 @@
     window.fsSyncLayout();
     window.fsPopulatePageSize();
     window.fsRefreshWfName();
+    window.fsLoadFilterOptions();
     window.fsLoadPage(1);
     window.fsDetectNodes(false);
     window.fsResumeActive();
+  };
+
+  // 分类/标签筛选下拉：复用同一套 taxonomy（图片口径）
+  window.fsLoadFilterOptions = async function () {
+    if (window._fsFiltersLoaded) return;
+    try {
+      const [catData, tagData] = await Promise.all([
+        window.api("/api/categories?tree=true&count_scope=image"),
+        window.api("/api/tags?count_scope=image"),
+      ]);
+      const catSel = $("fsCategory");
+      if (catSel) {
+        const opts = [];
+        const walk = (nodes, depth) => (nodes || []).forEach((n) => {
+          opts.push(
+            `<option value="${n.id}">${"　".repeat(depth)}${window.escHtml(n.name)}</option>`
+          );
+          if (n.children && n.children.length) walk(n.children, depth + 1);
+        });
+        walk(catData.categories || [], 0);
+        catSel.innerHTML = '<option value="">全部分类</option>' + opts.join("");
+      }
+      const tagSel = $("fsTag");
+      if (tagSel) {
+        const opts = (tagData.tags || []).map((t) =>
+          `<option value="${t.id}">${window.escHtml(t.name)}</option>`);
+        tagSel.innerHTML = '<option value="">全部标签</option>' + opts.join("");
+      }
+      window._fsFiltersLoaded = true;
+    } catch (e) {
+      console.warn("[faceswap] 加载筛选选项失败", e);
+    }
   };
 
   window.routeFaceswap = function () {
@@ -459,12 +492,21 @@
   window.fsLoadPage = async function (page) {
     const p = Math.max(1, parseInt(page, 10) || 1);
     const kw = ($("fsSearch")?.value || "").trim();
+    const cat = $("fsCategory")?.value || "";
+    const tag = $("fsTag")?.value || "";
     const loading = '<div class="fs-empty">加载中…</div>';
     if (window._fsMode.main === "gallery" && $("fsMainGrid")) $("fsMainGrid").innerHTML = loading;
     if (window._fsMode.ref === "gallery" && $("fsRefGrid")) $("fsRefGrid").innerHTML = loading;
     try {
-      const data = await window.api(
-        `/api/history?page=${p}&page_size=${window._fsPageSize}&search=${enc(kw)}`);
+      // 画廊模式支持按分类/标签筛选（后端 /api/history 早已支持，之前只传了搜索词）
+      const qs = new URLSearchParams({
+        page: String(p),
+        page_size: String(window._fsPageSize),
+        search: kw,
+      });
+      if (cat) qs.set("category_id", cat);
+      if (tag) qs.set("tag_ids", tag);
+      const data = await window.api(`/api/history?${qs.toString()}`);
       window._fsPage = data.page || p;
       window._fsTotal = data.total || 0;
       window._fsPageItems = data.items || [];

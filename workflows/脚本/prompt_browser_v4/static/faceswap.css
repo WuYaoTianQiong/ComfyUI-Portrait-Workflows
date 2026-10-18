@@ -28,6 +28,18 @@
   font-size: 12px;
   font-family: inherit;
 }
+
+/* 画廊模式的分类/标签筛选（与搜索框同高） */
+.fs-select {
+  max-width: 150px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
 .fs-count {
   color: var(--muted);
   font-size: 12px;
