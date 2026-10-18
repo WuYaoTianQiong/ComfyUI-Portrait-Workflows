@@ -507,19 +507,27 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
 
 @router.delete("/prompts/{prompt_id}")
 def delete_prompt(prompt_id: int):
-    """删除提示词（同时清理关联的分类、标签、生成历史）"""
+    """删除提示词（清理关联的分类/标签，但保留生成历史）。
+
+    以前这里会 `GenHistory.delete()`：删一条提示词，它名下所有出图记录一起消失，
+    而磁盘文件还在 —— 下次同步又把图扫回来，表现为"删不干净 + 记录反复重建"。
+    现在改为只解除关联（prompt_id 置空），图片仍留在画廊。
+    """
     try:
         r = Prompt.get_or_none(Prompt.id == prompt_id)
         if r is None:
             raise HTTPException(404, "提示词不存在")
-        # 先删除关联表中的记录，避免外键约束错误；四步必须同一事务，
-        # 否则中途失败会留下"提示词没了、历史也没了、关联表还在"的半截状态
+        # 关联表清理 + 解除历史关联 + 删主行必须同一事务
         with db.atomic():
             pc = PromptCategory.delete().where(PromptCategory.prompt == prompt_id).execute()
             pt = PromptTag.delete().where(PromptTag.prompt == prompt_id).execute()
-            gh = GenHistory.delete().where(GenHistory.prompt_id == prompt_id).execute()
+            gh = GenHistory.update(prompt_id=None).where(GenHistory.prompt_id == prompt_id).execute()
             r.delete_instance()
-        return {"success": True, "deleted": {"prompt_categories": pc, "prompt_tags": pt, "gen_history": gh}}
+        return {
+            "success": True,
+            "deleted": {"prompt_categories": pc, "prompt_tags": pt, "gen_history": 0},
+            "gen_history_detached": gh,
+        }
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, f"删除失败: {type(e).__name__}: {e}")

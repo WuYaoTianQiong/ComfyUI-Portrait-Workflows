@@ -351,3 +351,52 @@ def test_template_batch_import_keeps_all_fragments(api, seed_prompt):
     detail = api.get(f"/api/templates/{tid}").json()["template"]
     assert detail["fragment_count"] == 2
     assert detail["fragments"][0]["content"] == "face"
+
+
+# ---------------------------------------------------------------------------
+# B4 前置：删除提示词不删图；画廊读取不再写库
+# ---------------------------------------------------------------------------
+
+def test_delete_prompt_keeps_history_but_detaches(api, seed_prompt):
+    """删提示词只解除关联，不再删掉它的出图记录（文件还在磁盘，删了会反复重建）。"""
+    from models import GenHistory
+
+    p = seed_prompt(name="要删的")
+    photo = GenHistory.create(
+        filename="keep_me.png", subfolder="", img_type="output",
+        prompt_id=p.id, source="local",
+    )
+
+    r = api.delete(f"/api/prompts/{p.id}")
+    assert r.status_code == 200
+    assert r.json()["gen_history_detached"] == 1
+
+    assert api.get(f"/api/prompts/{p.id}").status_code == 404
+    kept = GenHistory.get_or_none(GenHistory.id == photo.id)
+    assert kept is not None, "出图记录不应被删除"
+    assert kept.prompt_id is None, "应只解除与提示词的关联"
+
+
+def test_gallery_read_does_not_backfill_into_db(api):
+    """列表读取时从任务 items 取回缺失参数只用于展示，不得写库。"""
+    from models import GenHistory, GenJob
+
+    params = json.dumps({"prompt": "【人物面部】x", "seed": 7}, ensure_ascii=False)
+    job = GenJob.create(
+        job_type="single", status="done", title="历史", total=1,
+        items=json.dumps([{
+            "prompt_id": 0, "comfyui_prompt_id": "pid-1",
+            "prompt_params": params, "status": "done",
+        }], ensure_ascii=False),
+    )
+    photo = GenHistory.create(
+        filename="noparams.png", subfolder="", img_type="output",
+        job_id=job.id, comfyui_prompt_id="pid-1", prompt_params=None, source="local",
+    )
+
+    body = api.get("/api/history?page=1&page_size=50").json()
+    item = next(i for i in body["items"] if i["id"] == photo.id)
+    assert item["prompt_params"] and item["prompt_params"]["seed"] == 7
+
+    row = GenHistory.get_by_id(photo.id)
+    assert row.prompt_params is None, "读取接口不允许回写 prompt_params"

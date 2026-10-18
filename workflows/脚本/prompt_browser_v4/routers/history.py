@@ -49,7 +49,10 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
     prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
     prompt_id = r.prompt_id  # 可能为 None（竞态条件导致）
 
-    # 补写逻辑：如果 prompt_params / prompt_id 为空且有 job_id，尝试从 job items 里找回
+    # 只读补全：prompt_params / prompt_id 缺失时，从关联任务的 items 里**临时**取出来给前端显示。
+    # B3 之前这里会顺手 Gh.update(...) 并继承分类 —— 也就是"读一次画廊就写一次库"，
+    # 和 GET /api/jobs 的副作用是同一类问题。真正的补写现在只发生在入库路径
+    # （job_state._insert_history_for_item / 同步 / 磁盘扫描）。
     if (prompt_params is None or prompt_id is None) and r.job_id:
         try:
             from models import GenJob
@@ -58,19 +61,11 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
                 items = json.loads(job.items) if isinstance(job.items, str) else job.items
                 for it in items:
                     if it.get("comfyui_prompt_id") == r.comfyui_prompt_id:
-                        # 补写 prompt_params
                         if prompt_params is None and it.get("prompt_params"):
-                            Gh.update(prompt_params=it["prompt_params"]).where(Gh.id == r.id).execute()
-                            prompt_params = json.loads(it["prompt_params"]) if isinstance(it["prompt_params"], str) else it["prompt_params"]
-                        # 补写 prompt_id
+                            raw = it["prompt_params"]
+                            prompt_params = json.loads(raw) if isinstance(raw, str) else raw
                         if prompt_id is None and it.get("prompt_id"):
-                            Gh.update(prompt_id=it["prompt_id"]).where(Gh.id == r.id).execute()
                             prompt_id = it["prompt_id"]
-                            # 补回 prompt_id 后，继承来源提示词的分类/标签
-                            try:
-                                inherit_prompt_taxonomy(r.id, force=True)
-                            except Exception:
-                                pass
                         break
         except Exception:
             pass
