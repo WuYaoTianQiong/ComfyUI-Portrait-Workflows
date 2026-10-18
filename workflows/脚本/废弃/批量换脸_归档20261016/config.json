@@ -1,0 +1,36 @@
+{
+  "_说明": [
+    "① 图片命名约定：姿势图放 input/batch/pose/ ，模特图放 input/batch/model/ ，文件名随意（脚本按文件名自然序排序，p2 会排在 p10 前面）。",
+    "② 最常见的改动只有 poses / models 两行：支持通配符（batch/pose/*.png），也支持一个个写全（batch/pose/站姿-白裙.png）。",
+    "③ 顺序：--dry-run 看计划 → --check 让服务器全链路校验一次（队列忙时才生效，不出图）→ --limit 1 跑一个组合确认效果 → 正式跑。输出在 ComfyUI/output/batch/ 下，配对关系记录在同目录 _已完成.jsonl。",
+    "④ seed：整数=所有组合共用同一噪声（便于横向对比）；\"random\"=每个组合随机；\"increment\"=seed_base+序号。",
+    "⑤ prompt 就是工作流里「正面提示词」节点的内容（脚本会覆盖它），想每个组合不同就先跑通再改脚本的 build()。",
+    "⑥ nodes 是工作流里的节点 id，改了工作流结构（删/加节点）后如果 id 变了，这里要同步改。",
+    "⑦ overrides 是万能逃生口：直接覆盖任意节点的任意输入，比如 {\"21\": {\"steps\": 8}} 把步数改成 8。"
+  ],
+  "comfy_url": "http://127.0.0.1:8188",
+  "workflow": "d:/Entertainment/ComfyUI-aki-v2/ComfyUI-aki-v3/ComfyUI/user/default/workflows/PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json",
+  "input_dir": "d:/Entertainment/ComfyUI-aki-v2/ComfyUI-aki-v3/ComfyUI/input",
+
+  "poses": ["batch/pose/*.png", "batch/pose/*.jpg"],
+  "models": ["batch/model/*.png", "batch/model/*.jpg"],
+
+  "prompt": "保持主图人物的姿势、构图、服装、背景、光线完全不变，只把人物的面部替换成参考图中人物的脸，脸型与五官保持一致，自然真实，写实人像摄影，高清细节",
+
+  "seed": 100000,
+  "seed_base": 100000,
+
+  "filename_prefix": "batch/{pose}_{model}",
+
+  "nodes": {
+    "main_image": "4",
+    "ref_image": "9",
+    "prompt": "12",
+    "seed": "20",
+    "save": "26"
+  },
+
+  "mute_play_sound": true,
+  "max_wait_seconds": 1800,
+  "overrides": {}
+}
