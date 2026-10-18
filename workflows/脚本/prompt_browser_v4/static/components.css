@@ -70,7 +70,7 @@
   border-radius: 10px;
   box-shadow: var(--shadow);
   display: none;
-  z-index: 1500;
+  z-index: var(--z-hud);
 }
 .job-hud.show { display: block; }
 .job-hud-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -159,7 +159,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 1000;
+  z-index: var(--z-dropdown);
   flex-direction: column;
   overflow-y: auto;
   transform: translateZ(0); /* 触发硬件加速，避免渲染问题 */
@@ -393,7 +393,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 1000;
+  z-index: var(--z-dropdown);
   overflow-y: auto;
 }
 

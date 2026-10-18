@@ -48,15 +48,8 @@
 
 /* 画廊处理/提示词按钮的样式由 gallery.css 统一提供（幽灵按钮 + 彩色 hover）。
    stats.css 里曾有一份紫/蓝实心徽章版本，靠加载顺序覆盖 gallery.css，
-   导致同一个按钮在两层设计之间摇摆；这里删除重复定义，只保留单一来源。 */
-
-.modal-footer {
-  display: flex;
-  gap: 8px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--border);
-  justify-content: flex-end;
-}
+   导致同一个按钮在两层设计之间摇摆；这里删除重复定义，只保留单一来源。
+   .modal-footer 同理：composer.css 已定义且规则完全一致，这里不再重复。 */
 
 /* ======== 自定义碎片按钮 ======== */
 .composer-custom-btn {

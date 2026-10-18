@@ -261,7 +261,7 @@
   transform: translateX(140%);
   opacity: 0;
   transition: 0.25s;
-  z-index: 200000;
+  z-index: var(--z-toast);
   max-width: 420px;
   line-height: 1.5;
 }
@@ -271,7 +271,7 @@
 #toast.info { border-color: var(--primary); }
 
 /* Modals */
-.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; align-items: center; justify-content: center; }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: var(--z-modal); align-items: center; justify-content: center; }
 .modal-overlay.active { display: flex; }
 .modal {
   background: var(--panel);

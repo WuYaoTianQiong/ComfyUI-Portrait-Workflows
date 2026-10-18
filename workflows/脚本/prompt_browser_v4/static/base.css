@@ -25,11 +25,54 @@
   --muted-dark: #6c6c78;
   --text-secondary: var(--muted);
   --chip-bg: rgba(255, 255, 255, 0.06);
+
+  /* ===== 尺度令牌（B5）：新代码一律用这些，不再裸写 px ===== */
+  --s-1: 4px;
+  --s-2: 6px;
+  --s-3: 8px;
+  --s-4: 12px;
+  --s-5: 16px;
+  --s-6: 24px;
+
+  --fs-1: 10px;
+  --fs-2: 11px;
+  --fs-3: 12px;
+  --fs-4: 13px;
+  --fs-5: 15px;
+  --fs-6: 22px;
+  --lh-tight: 1.35;
+  --lh-body: 1.5;
+
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-pill: 999px;
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --sh-2: var(--shadow);
+  --sh-3: 0 12px 40px rgba(0, 0, 0, 0.50);
+
+  --h-1: 24px;
+  --h-2: 28px;
+  --h-3: 32px;
+
+  --dur-1: 0.12s;
+  --dur-2: 0.18s;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* 层级：下拉必须低于弹窗；toast 永远在最上；灯箱/对比窗在弹窗之上 */
+  --z-dropdown: 1000;
+  --z-hud: 1500;
+  --z-modal: 2000;
+  --z-lightbox: 100000;
+  --z-toast: 200000;
+
+  --focus-ring: 0 0 0 2px rgba(99, 102, 241, 0.35);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 *, *:focus { outline: none; }
-*:focus-visible { box-shadow: 0 0 0 2px rgba(99,102,241,0.35); border-radius: 4px; }
+*:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 html, body { height: 100%; overflow: hidden; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
