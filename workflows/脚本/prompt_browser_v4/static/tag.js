@@ -1,7 +1,11 @@
 /* ======== Phase 2: 标签管理功能 ======== */
 
-// 当前选中的标签（多选）
-let _selectedTags = new Set();
+// 当前选中的标签（多选）。
+// 必须挂到 window 上：prompt.js 与 composer-core.js 都通过 window._selectedTags 读取。
+// 之前用 `let _selectedTags` 声明（脚本级词法绑定，不是 window 属性），
+// 于是 window._selectedTags 永远是 undefined —— 标签筛选实际上从未生效过。
+window._selectedTags = new Set();
+const _selectedTags = window._selectedTags;  // 本文件内沿用短名
 
 // 加载标签（重写，支持多选）
 async function loadTags() {

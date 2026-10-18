@@ -53,6 +53,8 @@ window.loadActiveJobs = async function() {
 window.pollJob = async function(jobId) {
   try {
     const job = await window.api(`/api/jobs/${jobId}`);
+    // 任意 Tab 都能看到的常驻进度（B4 会用任务抽屉替换它）
+    if (typeof window.updateJobHud === "function") window.updateJobHud(job);
     if (job.job_type === "batch") window.renderBatchJob(job);
     else window.renderSingleJob(job);
     if (["done", "error", "stopped"].includes(job.status)) {
@@ -63,6 +65,16 @@ window.pollJob = async function(jobId) {
       if (typeof window.updateRunBtn === "function") window.updateRunBtn();
       if (typeof window.loadHistory === "function") {
         window.loadHistory(false);
+      }
+      // 完成反馈：给出"查看"入口，而不是 3.5 秒后无痕消失
+      const newImages = (job.items || []).reduce(
+        (n, it) => n + (Array.isArray(it.images) ? it.images.length : 0), 0
+      );
+      if (job.status === "done" && newImages > 0) {
+        window.showToast(
+          `完成：新增 ${newImages} 张图片`, "success", "查看",
+          () => window.switchTabByRoute && window.switchTabByRoute("galleryTab")
+        );
       }
       // 防抖刷新当前选中提示词的生成历史
       clearTimeout(window._refreshHistoryTimer);
@@ -83,6 +95,55 @@ window.pollJob = async function(jobId) {
     // 超时是预期行为（后端正在处理），不打印错误
     if (e.message && e.message.includes("请求超时")) return;
     console.error("pollJob", e);
+  }
+};
+
+// -------------------------------------------------------------------
+// 全局任务 HUD —— 组合/批量提交后，无论当前在哪个 Tab 都能看到进度
+// -------------------------------------------------------------------
+window._ensureJobHud = function() {
+  let hud = document.getElementById("jobHud");
+  if (hud) return hud;
+  hud = document.createElement("div");
+  hud.id = "jobHud";
+  hud.className = "job-hud";
+  hud.innerHTML =
+    '<div class="job-hud-head">' +
+      '<span class="job-hud-title" id="jobHudTitle">生成中</span>' +
+      '<button class="job-hud-close" id="jobHudClose" title="收起（任务继续在后台跑）">×</button>' +
+    '</div>' +
+    '<div class="job-hud-bar"><div class="job-hud-fill" id="jobHudFill"></div></div>' +
+    '<div class="job-hud-info"><span id="jobHudInfo">排队中…</span>' +
+      '<button class="btn btn-xs btn-danger-ghost" id="jobHudStop">停止</button></div>';
+  document.body.appendChild(hud);
+  hud.querySelector("#jobHudClose").onclick = () => {
+    hud.classList.remove("show");
+    // 记住"这一单被用户收起了"，否则 1 秒后的下一次轮询又把它弹出来
+    window._jobHudDismissedFor = window._jobHudCurrentId || null;
+  };
+  hud.querySelector("#jobHudStop").onclick = () => window.batchStop();
+  return hud;
+};
+
+window.updateJobHud = function(job) {
+  const hud = window._ensureJobHud();
+  if (job.id) window._jobHudCurrentId = job.id;
+  if (job.id && window._jobHudDismissedFor === job.id) return;
+
+  const total = job.total || 0;
+  const pct = total ? Math.round((job.done_count || 0) / total * 100) : (job.status === "running" ? 30 : 0);
+  hud.querySelector("#jobHudTitle").textContent = job.title || "生成中";
+  hud.querySelector("#jobHudFill").style.width = pct + "%";
+  const info = total
+    ? `${job.done_count || 0}/${total}（${job.error_count || 0} 失败）`
+    : (job.status === "running" ? "生成中…" : "排队中…");
+  hud.querySelector("#jobHudInfo").textContent = info;
+  const active = ["pending", "running"].includes(job.status);
+  hud.querySelector("#jobHudStop").style.display = active ? "" : "none";
+  hud.classList.add("show");
+  if (!active) {
+    clearTimeout(window._jobHudHide);
+    window._jobHudHide = setTimeout(() => hud.classList.remove("show"), 6000);
   }
 };
 
@@ -259,8 +320,11 @@ window.toggleBatchPanel = function() {
 window.closeOutput = function() {
   document.getElementById("outputArea").classList.remove("show");
   document.getElementById("batchPanel").classList.remove("show");
-  if (window.jobPollTimer) { clearInterval(window.jobPollTimer); window.jobPollTimer = null; }
-  window.activeJobId = null;
+  const hud = document.getElementById("jobHud");
+  if (hud) hud.classList.remove("show");
+  // 只隐藏界面，不动 jobPollTimer / activeJobs：
+  // 旧代码在这里清掉轮询，任务就再也收不到终态，activeJobs 永远非空，
+  // 头部"跑图"按钮从此一直显示"⏳ 生成中..."并禁用（任务其实早已结束）。
   window.UiState.set("batchPanelDismissed", true);
 };
 

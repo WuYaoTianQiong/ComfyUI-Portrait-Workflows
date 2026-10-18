@@ -125,15 +125,28 @@ window.escAttr = function(s) {
 };
 
 // -------------------------------------------------------------------
-// Toast 提示
+// Toast 提示（可选一个操作按钮，例如"查看刚生成的图"）
 // -------------------------------------------------------------------
-window.showToast = function(msg, type = "info") {
+window.showToast = function(msg, type = "info", actionLabel = "", actionFn = null) {
   const t = document.getElementById("toast");
   if (!t) return;
-  t.textContent = msg;
+  t.innerHTML = "";
+  const span = document.createElement("span");
+  span.textContent = msg;
+  t.appendChild(span);
+  if (actionLabel && typeof actionFn === "function") {
+    const btn = document.createElement("button");
+    btn.className = "toast-action";
+    btn.textContent = actionLabel;
+    btn.onclick = () => {
+      t.className = "";
+      try { actionFn(); } catch (e) { console.error(e); }
+    };
+    t.appendChild(btn);
+  }
   t.className = "show " + (type || "info");
   clearTimeout(t._hide);
-  t._hide = setTimeout(() => t.className = "", 3500);
+  t._hide = setTimeout(() => t.className = "", actionLabel ? 8000 : 3500);
 };
 
 // -------------------------------------------------------------------

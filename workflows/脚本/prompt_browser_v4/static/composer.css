@@ -529,7 +529,7 @@
 
 @media (max-width: 900px) {
   .sidebar { width: 280px; min-width: 220px; }
-  .app-header { gap: 8px; padding: 0 10px; }
+  .app-header { gap: 8px; padding: 6px 10px; }
   .wf-selector { flex: 1 1 200px; min-width: 140px; max-width: 100%; }
   .wf-popover { min-width: 100%; max-width: 100vw; }
   .header-right .btn { padding: 5px 8px; }

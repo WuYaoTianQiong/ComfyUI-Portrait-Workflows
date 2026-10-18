@@ -14,6 +14,17 @@
   --danger: #ef4444;
   --radius: 8px;
   --shadow: 0 4px 16px rgba(0,0,0,0.35);
+
+  /* 兼容别名：历史样式里有 6 个变量被 var() 引用但从未定义，
+     缺少兜底时整条声明会失效（搜索框、分页按钮的底色因此一直是透明的）。
+     这里只补别名，不改任何既有取值。 */
+  --input-bg: var(--bg);
+  --card: var(--panel-2);
+  --hover: var(--panel-hover);
+  --panel-1: var(--panel);
+  --muted-dark: #6c6c78;
+  --text-secondary: var(--muted);
+  --chip-bg: rgba(255, 255, 255, 0.06);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

@@ -207,6 +207,13 @@ window.selectAllGalleryPages = async function() {
   if (window._gallerySort) params.set('sort', window._gallerySort);
   if (window._gallerySearch) params.set('search', window._gallerySearch);
   if (window._galleryOrientation) params.set('orientation', window._galleryOrientation);
+  // 关键：分类/标签/来源/时间/模型必须一起带上，否则"全选全部"会选到筛选条件之外的图，
+  // 紧接着的批量删除就是真删（旧版这里漏了 5 个参数）。
+  if (window._galleryCategoryId) params.set('category_id', window._galleryCategoryId);
+  if (window._galleryTagIds && window._galleryTagIds.length) params.set('tag_ids', window._galleryTagIds.join(','));
+  if (window._gallerySource) params.set('source', window._gallerySource);
+  if (window._galleryDate) params.set('date', window._galleryDate);
+  if (window._galleryModel) params.set('model', window._galleryModel);
   try {
     const data = await window.api('/api/history/ids?' + params.toString());
     const ids = data.ids || [];
@@ -220,7 +227,7 @@ window.selectAllGalleryPages = async function() {
     window.updateGalleryActionButtons();
     window.updateGallerySelectAllCheck();
   window.updateGalleryBulkPanel();
-    window.showToast(`已全选全部 ${ids.length} 项`, 'success');
+    window.showToast(`已全选全部 ${ids.length} 项（仅当前筛选范围）`, 'success');
   } catch (e) {
     window.showToast('全选失败: ' + e.message, 'error');
   }
@@ -345,11 +352,16 @@ window.updateGalleryBadge = function() {
 
 window.processHistoryWithWorkflow = async function(historyId) {
   try {
-    const wfPath = window._currentWorkflow || "";
+    // 旧代码读 window._currentWorkflow，但全仓没有任何地方给它赋值 → 这个入口永远不可用
+    const wfPath = window.currentWorkflowPath ? window.currentWorkflowPath() : "";
     if (!wfPath) { window.showToast("请先选择工作流", "warn"); return; }
     const r = await window.api(`/api/history/${historyId}/process`, {
       method: "POST",
-      body: JSON.stringify({ workflow_path: wfPath }),
+      body: JSON.stringify({
+        workflow_path: wfPath,
+        orientation: window.currentOrientation || "portrait",
+        quality: window.getQuality ? window.getQuality() : "4K",
+      }),
       headers: { "Content-Type": "application/json" },
     });
     if (r.success) {
@@ -490,6 +502,8 @@ window._renderGalleryCatTree = function(cats, level) {
 
 window.onGalleryCategoryClick = function(catId) {
   window._galleryCategoryId = (catId === "" || catId === null) ? "" : parseInt(catId);
+  // 分类变化后旧的选中项已不在当前结果集里，必须清空，否则会被批量删除带上
+  window._clearGallerySelection?.();
   document.querySelectorAll("#galleryCatTree .gallery-cat-item").forEach(el => {
     el.classList.toggle("active", String(el.dataset.cat) === String(catId));
   });
@@ -506,6 +520,7 @@ window.onGalleryTagClick = function(tagId) {
   const i = window._galleryTagIds.indexOf(tagId);
   if (i >= 0) window._galleryTagIds.splice(i, 1);
   else window._galleryTagIds.push(tagId);
+  window._clearGallerySelection?.();
   // 仅局部更新标签高亮 + 筛选汇总，不再整块重建侧栏（避免闪烁与重复请求）
   document.querySelectorAll("#galleryTagCloud .gallery-tag").forEach(el => {
     el.classList.toggle("active", window._galleryTagIds.indexOf(parseInt(el.dataset.tag)) >= 0);
@@ -522,6 +537,7 @@ window.onGalleryTagClick = function(tagId) {
 window.onGalleryFacetClick = function(type, value) {
   const key = "_gallery" + type[0].toUpperCase() + type.slice(1);
   window[key] = (window[key] === value) ? "" : value;
+  window._clearGallerySelection?.();
   if (window._persistGalleryState) window._persistGalleryState();
   document.querySelectorAll("#galleryFacets .facet-chip").forEach(el => {
     const cur = window["_gallery" + el.dataset.ftype[0].toUpperCase() + el.dataset.ftype.slice(1)];

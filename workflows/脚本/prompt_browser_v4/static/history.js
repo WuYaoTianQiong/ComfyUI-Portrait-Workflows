@@ -358,27 +358,35 @@ window.batchDeleteHistory = async function() {
 window.batchProcessHistory = async function() {
   const ids = Array.from(window._gallerySelectedIds);
   if (!ids.length) return;
-  const wfPath = window._currentWorkflow || "";
+  // 之前读的是 window._currentWorkflow：全仓只读不写，这个入口永远提示"请先选择工作流"
+  const wfPath = window.currentWorkflowPath ? window.currentWorkflowPath() : "";
   if (!wfPath) { window.showToast("请先选择工作流", "warn"); return; }
   const btn = document.getElementById('galleryBatchProcess');
   if (btn) window.showButtonFeedback(btn, '✨ 提交中...', 3000);
   let submitted = 0;
+  let lastJobId = null;
   for (const id of ids) {
     try {
       const r = await window.api(`/api/history/${id}/process`, {
         method: "POST",
-        body: JSON.stringify({ workflow_path: wfPath }),
+        body: JSON.stringify({
+          workflow_path: wfPath,
+          orientation: window.currentOrientation || "portrait",
+          quality: window.getQuality ? window.getQuality() : "4K",
+        }),
         headers: { "Content-Type": "application/json" },
       });
       if (r.success) {
         submitted++;
-        window.trackJob(r.job_id);
+        lastJobId = r.job_id;
       }
     } catch (e) {
       console.error(`批量跑图 #${id} 失败:`, e);
     }
   }
-  window.showToast(`已提交 ${submitted} 个处理任务`, 'info');
+  // 只在最后跟踪一个任务：job.js 的轮询是单例，循环里逐个 trackJob 会互相清掉定时器
+  if (lastJobId) window.trackJob(lastJobId);
+  window.showToast(`已提交 ${submitted} 个处理任务`, submitted ? "success" : "error");
 };
 
 window.downloadHistoryItem = function(id) {
@@ -451,6 +459,8 @@ window._clearGallerySelection = function() {
   document.querySelectorAll('.gallery-item-check').forEach(el => el.classList.remove('checked'));
   window.updateGalleryActionButtons();
   window.updateCompareButton();
+  window.updateGalleryBulkPanel?.();
+  window.updateGallerySelectAllCheck?.();
   const allCheck = document.getElementById('gallerySelectAll');
   if (allCheck) { allCheck.checked = false; allCheck.indeterminate = false; }
 };

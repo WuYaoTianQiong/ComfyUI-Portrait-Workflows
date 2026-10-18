@@ -15,11 +15,20 @@ window._runBtnState = function(btn, loadingText) {
 // 占位进度：在 trackJob 第一次轮询返回前，立即显示"排队中..."避免空窗期
 window._showPendingProgress = function(title) {
   const area = document.getElementById("outputArea");
-  if (!area) return;
-  area.classList.add("show");
-  document.getElementById("outputTitle").textContent = title || "生成中";
-  document.getElementById("progressFill").style.width = "0%";
-  document.getElementById("progressInfo").textContent = "排队中...";
+  if (area) {
+    area.classList.add("show");
+    document.getElementById("outputTitle").textContent = title || "生成中";
+    document.getElementById("progressFill").style.width = "0%";
+    document.getElementById("progressInfo").textContent = "排队中...";
+  }
+  // 关键：组合创作 / 批量换脸等页面本身没有 #outputArea，必须在全局 HUD 里也显示，
+  // 否则用户点了提交只看到一条 3.5 秒的 toast，之后完全不知道任务在哪。
+  if (typeof window.updateJobHud === "function") {
+    window.updateJobHud({
+      title: title || "生成中", status: "pending",
+      total: 0, done_count: 0, error_count: 0,
+    });
+  }
 };
 
 // -------------------------------------------------------------------

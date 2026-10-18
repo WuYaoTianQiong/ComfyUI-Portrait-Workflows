@@ -43,6 +43,54 @@
 .btn-ghost { background: transparent; border-color: var(--border-soft); color: var(--muted); }
 .btn-ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
+.btn-xs { padding: 2px 6px; font-size: 10px; border-radius: 4px; }
+
+/* Toast 里的操作按钮（例如"查看刚生成的图"） */
+.toast-action {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.toast-action:hover { background: rgba(255, 255, 255, 0.24); }
+
+/* 全局任务 HUD：任何 Tab 都能看到当前任务（B4 由任务抽屉取代） */
+.job-hud {
+  position: fixed;
+  right: 16px;
+  bottom: 76px;   /* 给右下角的 toast 留出位置，避免两者叠在一起 */
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: none;
+  z-index: 1500;
+}
+.job-hud.show { display: block; }
+.job-hud-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.job-hud-title {
+  font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.job-hud-close {
+  background: none; border: none; color: var(--muted);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.job-hud-bar {
+  height: 4px; margin: 8px 0 6px;
+  background: var(--panel-2); border-radius: 2px; overflow: hidden;
+}
+.job-hud-fill { height: 100%; width: 0; background: var(--primary); transition: width 0.3s; }
+.job-hud-info {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; color: var(--muted);
+}
 
 .header-select {
   background: var(--panel-2);
