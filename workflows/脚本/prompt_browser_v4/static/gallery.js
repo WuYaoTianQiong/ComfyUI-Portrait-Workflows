@@ -355,21 +355,18 @@ window.processHistoryWithWorkflow = async function(historyId) {
     // 旧代码读 window._currentWorkflow，但全仓没有任何地方给它赋值 → 这个入口永远不可用
     const wfPath = window.currentWorkflowPath ? window.currentWorkflowPath() : "";
     if (!wfPath) { window.showToast("请先选择工作流", "warn"); return; }
-    const r = await window.api(`/api/history/${historyId}/process`, {
-      method: "POST",
-      body: JSON.stringify({
+    const r = await window.submitTask({
+      endpoint: `/api/history/${historyId}/process`,
+      payload: {
         workflow_path: wfPath,
         orientation: window.currentOrientation || "portrait",
         quality: window.getQuality ? window.getQuality() : "4K",
-      }),
-      headers: { "Content-Type": "application/json" },
+      },
+      title: "处理图片", errorPrefix: "处理失败",
     });
-    if (r.success) {
-      window.showToast("已提交处理任务", "info");
-      window.trackJob(r.job_id);
-    }
+    if (r && r.success) window.showToast("已提交处理任务", "info");
   } catch (e) {
-    window.showToast("处理失败: " + e.message, "error");
+    // submitTask 已经弹过错误提示，这里不再重复
   }
 };
 

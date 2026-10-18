@@ -101,14 +101,13 @@ window.composerBatchRandomRun = async function () {
         negative_prompt: "",
         fixed_fragments: fixedFragments,
       }, window.workflowExtraBody());
-      const data = await window.api("/api/composer/batch_random_run", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const data = await window.submitTask({
+        endpoint: "/api/composer/batch_random_run", payload: body,
+        title: `批量随机组合 (${count} 组)`, errorPrefix: "批量随机跑图失败",
       });
+      if (!data) return;
       const fixedN = Object.keys(fixedFragments).length;
       window.showToast(`批量随机组合已推送 (job ${data.job_id})${fixedN ? `（固定 ${fixedN} 个）` : ""}`, "success");
-      window._showPendingProgress(`批量随机组合 (${count} 组)`);
-      window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("批量随机跑图失败: " + e.message, "error");
     } finally {

@@ -7,17 +7,135 @@ window.activeJobs = new Set();
 window._trialWatchers = new Map();  // trial run callbacks: jobId → callback(job)
 
 // -------------------------------------------------------------------
-// 任务追踪
+// 任务跟踪：优先 SSE，不可用时自动降级为 1s 轮询
 // -------------------------------------------------------------------
+// 关闭方式：localStorage.pbSse = "0"，或 URL 加 ?sse=0
+window.PB_SSE = localStorage.getItem("pbSse") !== "0";
+window._jobSource = null;
+window._sseReady = false;
+window._sseDisabled = false;
+window._sseRestartTimer = null;
+window._sseFallbackTimer = null;
 
 window.trackJob = function(jobId) {
   window.activeJobId = jobId;
   window.activeJobs.add(jobId);
+  // 新任务开始时重置面板关闭状态，确保新任务能正常展示
+  window.UiState.set("batchPanelDismissed", false);
+  window._ensureJobTracking();
+};
+
+window._ensureJobTracking = function() {
+  if (window._sseDisabled || !window.PB_SSE || typeof EventSource === "undefined") {
+    if (window.activeJobId) window._startPolling(window.activeJobId);
+    return;
+  }
+  // 多个任务在短时间内连续注册时，只重连一次
+  clearTimeout(window._sseRestartTimer);
+  window._sseRestartTimer = setTimeout(window._connectJobEvents, 120);
+};
+
+window._connectJobEvents = function() {
+  if (!window.activeJobs.size) return;
+  if (window._jobSource) {
+    try { window._jobSource.close(); } catch (_) {}
+    window._jobSource = null;
+  }
+  const ids = Array.from(window.activeJobs);
+  const es = new EventSource("/api/jobs/events?ids=" + ids.join(","));
+  window._jobSource = es;
+  window._sseReady = false;
+
+  const onEvent = (ev) => {
+    window._sseReady = true;
+    let job;
+    try { job = JSON.parse(ev.data); } catch (_) { return; }
+    window._onJobEvent(job);
+  };
+  es.addEventListener("snapshot", onEvent);
+  es.addEventListener("job", onEvent);
+  es.onerror = () => {
+    // EventSource 自带重连；真正的降级交给下面的 3 秒看门狗
+  };
+
+  clearTimeout(window._sseFallbackTimer);
+  window._sseFallbackTimer = setTimeout(() => {
+    if (window._sseReady) return;
+    console.warn("[SSE] 3 秒内未收到事件，降级为轮询");
+    window._sseDisabled = true;   // 本会话不再尝试 SSE
+    try { es.close(); } catch (_) {}
+    window._jobSource = null;
+    if (window.activeJobId) window._startPolling(window.activeJobId);
+  }, 3000);
+};
+
+window._stopJobEvents = function() {
+  if (window._jobSource) {
+    try { window._jobSource.close(); } catch (_) {}
+    window._jobSource = null;
+  }
+  clearTimeout(window._sseFallbackTimer);
+  window._sseReady = false;
+};
+
+window._startPolling = function(jobId) {
+  if (!jobId) return;
   if (window.jobPollTimer) clearInterval(window.jobPollTimer);
   window.jobPollTimer = setInterval(() => window.pollJob(jobId), 1000);
   window.pollJob(jobId);
-  // 新任务开始时重置面板关闭状态，确保新任务能正常展示
-  window.UiState.set("batchPanelDismissed", false);
+};
+
+window._isTerminalJob = function(job) {
+  return ["done", "error", "stopped", "cancelled"].includes(job.status);
+};
+
+/**
+ * 统一提交入口：离线拦截 → 占位进度 → 提交 → trackJob。
+ * 各页面只负责构造 payload 与自己的成功提示，不再各自拼 "POST + trackJob"。
+ * 返回后端响应；被离线拦截时返回 null。
+ */
+window.submitTask = async function(opts) {
+  const {
+    endpoint, payload, title = "提交任务",
+    errorPrefix = "提交失败", requireOnline = true, timeout,
+  } = opts || {};
+  if (requireOnline && window.comfyStatus !== "online") {
+    window.showToast("ComfyUI 未连接，已取消提交", "error");
+    return null;
+  }
+  if (typeof window._showPendingProgress === "function") {
+    window._showPendingProgress(title);
+  }
+  try {
+    const data = await window.api(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+      ...(timeout ? { timeout } : {}),
+    });
+    if (data && data.job_id) window.trackJob(data.job_id);
+    else window.hideJobHud();
+    return data;
+  } catch (e) {
+    window.hideJobHud();
+    window.showToast(errorPrefix + ": " + e.message, "error");
+    throw e;
+  }
+};
+
+/** 收起任务 HUD（提交失败或没有产生任务时用，避免一直停在"排队中"） */
+window.hideJobHud = function() {
+  const hud = document.getElementById("jobHud");
+  if (hud) hud.classList.remove("show");
+};
+
+window._onJobEvent = function(job) {
+  if (!job || !job.id) return;
+  if (window._isTerminalJob(job) && !window.activeJobs.has(job.id)) return;
+  if (typeof window.updateJobHud === "function") window.updateJobHud(job);
+  if (job.job_type === "batch") window.renderBatchJob(job);
+  else window.renderSingleJob(job);
+  if (window._isTerminalJob(job)) window._finalizeJob(job);
 };
 
 window.loadActiveJobs = async function() {
@@ -36,17 +154,16 @@ window.loadActiveJobs = async function() {
       );
     }
 
-    // 过滤掉状态异常的 unknown 任务
-    jobs = jobs.filter(j => j.status !== "unknown");
-
     // 如果用户之前关闭了批量面板，不再重新展示已完成的任务
     if (window.UiState.get("batchPanelDismissed", false)) {
       jobs = jobs.filter(j => !["done", "error", "stopped"].includes(j.status));
     }
 
-    jobs.forEach(job => {
-      if (!window.activeJobs.has(job.id)) window.trackJob(job.id);
-    });
+    if (jobs.length) {
+      jobs.forEach(job => window.activeJobs.add(job.id));
+      window.activeJobId = jobs[jobs.length - 1].id;
+      window._ensureJobTracking();
+    }
   } catch (_) {}
 };
 
@@ -57,45 +174,56 @@ window.pollJob = async function(jobId) {
     if (typeof window.updateJobHud === "function") window.updateJobHud(job);
     if (job.job_type === "batch") window.renderBatchJob(job);
     else window.renderSingleJob(job);
-    if (["done", "error", "stopped"].includes(job.status)) {
-      clearInterval(window.jobPollTimer);
-      window.jobPollTimer = null;
-      window.activeJobs.delete(jobId);
-      // 恢复跑图按钮
-      if (typeof window.updateRunBtn === "function") window.updateRunBtn();
-      if (typeof window.loadHistory === "function") {
-        window.loadHistory(false);
-      }
-      // 完成反馈：给出"查看"入口，而不是 3.5 秒后无痕消失
-      const newImages = (job.items || []).reduce(
-        (n, it) => n + (Array.isArray(it.images) ? it.images.length : 0), 0
-      );
-      if (job.status === "done" && newImages > 0) {
-        window.showToast(
-          `完成：新增 ${newImages} 张图片`, "success", "查看",
-          () => window.switchTabByRoute && window.switchTabByRoute("galleryTab")
-        );
-      }
-      // 防抖刷新当前选中提示词的生成历史
-      clearTimeout(window._refreshHistoryTimer);
-      window._refreshHistoryTimer = setTimeout(() => {
-        if (typeof window.selectedId === "number" && window.selectedId > 0
-            && typeof window.loadPromptHistory === "function") {
-          window.loadPromptHistory(window.selectedId);
-        }
-      }, 300);
-      // 试跑任务完成回调：通知编辑弹窗更新试跑记录
-      if (window._trialWatchers && window._trialWatchers.has(jobId)) {
-        const cb = window._trialWatchers.get(jobId);
-        try { cb(job); } catch (_) {}
-        window._trialWatchers.delete(jobId);
-      }
-    }
+    if (window._isTerminalJob(job)) window._finalizeJob(job);
   } catch (e) {
     // 超时是预期行为（后端正在处理），不打印错误
     if (e.message && e.message.includes("请求超时")) return;
     console.error("pollJob", e);
   }
+};
+
+// 终态处理：SSE 与轮询共用，确保两条路径行为完全一致
+window._finalizeJob = function(job) {
+  const jobId = job.id;
+  if (window.activeJobs.has(jobId)) window.activeJobs.delete(jobId);
+  if (window.activeJobId === jobId) window.activeJobId = null;
+  if (window.jobPollTimer) {
+    clearInterval(window.jobPollTimer);
+    window.jobPollTimer = null;
+  }
+  if (window.activeJobs.size === 0) window._stopJobEvents();
+
+  // 恢复跑图按钮
+  if (typeof window.updateRunBtn === "function") window.updateRunBtn();
+  if (typeof window.loadHistory === "function") {
+    window.loadHistory(false);
+  }
+  // 完成反馈：给出"查看"入口，而不是 3.5 秒后无痕消失
+  const newImages = (job.items || []).reduce(
+    (n, it) => n + (Array.isArray(it.images) ? it.images.length : 0), 0
+  );
+  if (job.status === "done" && newImages > 0) {
+    window.showToast(
+      `完成：新增 ${newImages} 张图片`, "success", "查看",
+      () => window.switchTabByRoute && window.switchTabByRoute("galleryTab")
+    );
+  }
+  // 防抖刷新当前选中提示词的生成历史
+  clearTimeout(window._refreshHistoryTimer);
+  window._refreshHistoryTimer = setTimeout(() => {
+    if (typeof window.selectedId === "number" && window.selectedId > 0
+        && typeof window.loadPromptHistory === "function") {
+      window.loadPromptHistory(window.selectedId);
+    }
+  }, 300);
+  // 试跑任务完成回调：通知编辑弹窗更新试跑记录
+  if (window._trialWatchers && window._trialWatchers.has(jobId)) {
+    const cb = window._trialWatchers.get(jobId);
+    try { cb(job); } catch (_) {}
+    window._trialWatchers.delete(jobId);
+  }
+  // 还有别的任务在跑：继续订阅
+  if (window.activeJobs.size > 0) window._ensureJobTracking();
 };
 
 // -------------------------------------------------------------------

@@ -361,6 +361,7 @@ window.batchProcessHistory = async function() {
   // 之前读的是 window._currentWorkflow：全仓只读不写，这个入口永远提示"请先选择工作流"
   const wfPath = window.currentWorkflowPath ? window.currentWorkflowPath() : "";
   if (!wfPath) { window.showToast("请先选择工作流", "warn"); return; }
+  if (window.comfyStatus !== "online") { window.showToast("ComfyUI 未连接，已取消提交", "error"); return; }
   const btn = document.getElementById('galleryBatchProcess');
   if (btn) window.showButtonFeedback(btn, '✨ 提交中...', 3000);
   let submitted = 0;

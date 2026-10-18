@@ -49,14 +49,13 @@ window.runPrompt = async function(id) {
         orientation: window.currentOrientation,
         quality: window.getQuality(),
       }, window.workflowExtraBody());
-      const data = await window.api("/api/run", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const data = await window.submitTask({
+        endpoint: "/api/run", payload: body,
+        title: "生成中", errorPrefix: "跑图失败",
       });
+      if (!data) return;
       window.showToast(`已推送 ${data.dimensions || ""} (job ${data.job_id})`, "success");
       await window.markPromptUsed(id);
-      window._showPendingProgress("生成中");
-      window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("跑图失败: " + e.message, "error");
     } finally {
@@ -82,14 +81,13 @@ window.batchRun = async function() {
         quality: window.getQuality(),
         title: `批量跑图 (${ids.length} 张)`,
       }, window.workflowExtraBody());
-      const data = await window.api("/api/batch_generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const data = await window.submitTask({
+        endpoint: "/api/batch_generate", payload: body,
+        title: `批量生成 (${ids.length} 张)`, errorPrefix: "批量提交失败",
       });
+      if (!data) return;
       if (data.errors?.length) window.showToast(`${data.errors.length} 个任务提交失败`, "error");
       for (const id of ids) await window.markPromptUsed(id);
-      window._showPendingProgress(`批量生成 (${ids.length} 张)`);
-      window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("批量提交失败: " + e.message, "error");
     } finally {
@@ -188,15 +186,15 @@ window._submitMissing = async function(ids, workflowPath) {
       quality: window.getQuality(),
       prompt_ids: ids,
     }, window.workflowExtraBody());
-    const data = await window.api("/api/generate_missing", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body), timeout: 300000,
+    const data = await window.submitTask({
+      endpoint: "/api/generate_missing", payload: body,
+      title: "补全缺图 (" + ids.length + " 条)", errorPrefix: "补全缺图失败",
+      timeout: 300000,
     });
+    if (!data) return;
     if (!data.count) { window.showToast("没有缺图的提示词，全部已生成 ✅", "success"); return; }
     if (data.errors && data.errors.length) window.showToast(ids.length + " 条待补全，" + data.errors.length + " 个提交失败", "error");
     else window.showToast("已提交 " + ids.length + " 条缺图提示词", "success");
-    window._showPendingProgress("补全缺图 (" + ids.length + " 条)");
-    window.trackJob(data.job_id);
   } catch (e) {
     window.showToast("补全缺图失败: " + e.message, "error");
   } finally {
@@ -231,12 +229,11 @@ window.startVariationRun = async function() {
         quality: window.getQuality(),
         title: `变体生成 (${count} 张)`,
       }, window.workflowExtraBody());
-      const data = await window.api("/api/batch_generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const data = await window.submitTask({
+        endpoint: "/api/batch_generate", payload: body,
+        title: `变体生成 (${count} 张)`, errorPrefix: "变体生成失败",
       });
-      window._showPendingProgress(`变体生成 (${count} 张)`);
-      window.trackJob(data.job_id);
+      if (!data) return;
       await window.markPromptUsed(window.selectedId);
     } catch (e) {
       window.showToast("变体生成失败: " + e.message, "error");

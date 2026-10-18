@@ -15,13 +15,12 @@ window.composerRun = async function () {
         orientation: window.currentOrientation,
         quality: window.getQuality(),
       }, window.workflowExtraBody());
-      const data = await window.api("/api/composer/run", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const data = await window.submitTask({
+        endpoint: "/api/composer/run", payload: body,
+        title: "组合创作生成中", errorPrefix: "跑图失败",
       });
+      if (!data) return;
       window.showToast(`组合提示词已推送 (job ${data.job_id})`, "success");
-      window._showPendingProgress("组合创作生成中");
-      window.trackJob(data.job_id);
     } catch (e) {
       window.showToast("跑图失败: " + e.message, "error");
     } finally {
