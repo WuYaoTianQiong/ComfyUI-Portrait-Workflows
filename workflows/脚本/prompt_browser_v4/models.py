@@ -8,7 +8,13 @@ from config import settings
 
 db = SqliteDatabase(
     str(settings.db_path),
-    pragmas={"journal_mode": "delete", "foreign_keys": 1},
+    pragmas={
+        # WAL：允许读与写并行，避免"轮询写整行 items"把读请求卡成 database is locked
+        "journal_mode": "wal",
+        "synchronous": "normal",
+        "busy_timeout": 5000,
+        "foreign_keys": 1,
+    },
 )
 print(f"[models] Using database: {settings.db_path} (exists: {settings.db_path.exists()})")
 

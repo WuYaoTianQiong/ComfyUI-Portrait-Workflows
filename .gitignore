@@ -137,3 +137,8 @@ workflows/脚本/monitor_resources.bat
 # 运行日志
 workflows/logs/
 
+
+# SQLite WAL
+*.db-wal
+*.db-shm
+

@@ -88,6 +88,18 @@ def interrupt():
     post_comfyui("/interrupt", timeout=3)
 
 
+def delete_queue_items(prompt_ids: list[str]) -> bool:
+    """从 ComfyUI 队列里定向删除指定 prompt。
+
+    取消单个任务时用它代替 clear_queue()：后者会把别的任务一起清掉。
+    ComfyUI 的 /queue 接口接受 {"delete": [prompt_id, ...]}。
+    """
+    if not prompt_ids:
+        return True
+    resp = post_comfyui("/queue", data={"delete": prompt_ids}, timeout=5)
+    return bool(resp and resp.status_code < 400)
+
+
 def clear_queue():
     """清空队列"""
     post_comfyui("/queue", data={"clear": True}, timeout=3)

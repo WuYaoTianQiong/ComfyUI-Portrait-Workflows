@@ -4,6 +4,8 @@
 软删除、入库去重）。重构时这些用例变红，就说明行为被破坏了。
 """
 
+import json
+
 import pytest
 
 
@@ -174,7 +176,7 @@ def test_job_detail_404(api):
 
 
 def test_job_snapshot_survives_offline_comfyui(api):
-    """ComfyUI 不可达时，任务快照必须返回 200 而不是 500。"""
+    """ComfyUI 不可达时，任务详情必须返回 200 而不是 500。"""
     from models import GenJob
 
     job = GenJob.create(
@@ -184,3 +186,83 @@ def test_job_snapshot_survives_offline_comfyui(api):
     r = api.get(f"/api/jobs/{job.id}")
     assert r.status_code == 200
     assert r.json()["id"] == job.id
+
+
+# ---------------------------------------------------------------------------
+# B2：任务状态只读化 / 取消归属 / unknown 不落库
+# ---------------------------------------------------------------------------
+
+def test_job_get_is_read_only(api):
+    """GET /api/jobs/{id} 不允许再写库（旧实现每次轮询都反推并落库）。"""
+    from models import GenJob
+
+    job = GenJob.create(
+        job_type="single", status="pending", title="只读", total=1,
+        items=json.dumps([{"prompt_id": 1, "status": "pending"}], ensure_ascii=False),
+    )
+    before = GenJob.get_by_id(job.id)
+
+    r = api.get(f"/api/jobs/{job.id}")
+    assert r.status_code == 200
+    assert r.json()["items"][0]["status"] == "pending"
+
+    after = GenJob.get_by_id(job.id)
+    assert after.status == before.status == "pending"
+    assert after.updated_at == before.updated_at, "GET 不应修改任务行"
+
+
+def test_job_cancel_marks_stopped_and_items_cancelled(api):
+    from models import GenJob
+
+    items = [
+        {"prompt_id": 1, "status": "done", "comfyui_prompt_id": "p1"},
+        {"prompt_id": 2, "status": "running", "comfyui_prompt_id": "p2"},
+    ]
+    job = GenJob.create(
+        job_type="batch", status="running", title="取消", total=2,
+        done_count=1, items=json.dumps(items, ensure_ascii=False),
+    )
+
+    r = api.post(f"/api/jobs/{job.id}/cancel")
+    assert r.status_code == 200
+
+    row = GenJob.get_by_id(job.id)
+    assert row.status == "stopped"
+    saved = json.loads(row.items)
+    assert saved[0]["status"] == "done"          # 已完成的不动
+    assert saved[1]["status"] == "cancelled"     # 未完成的标取消
+
+
+def test_refresh_never_persists_unknown(api):
+    """pid 在队列和历史里都查不到时，保留原状态而不是写 unknown。
+    unknown 一旦落库就再没有代码会重新选中它（旧库里因此卡了 56 个 item）。"""
+    from models import GenJob
+    from services import job_state
+
+    job = GenJob.create(
+        job_type="single", status="pending", title="待判定", total=1,
+        items=json.dumps([{"prompt_id": 1, "status": "pending",
+                           "comfyui_prompt_id": "not-in-comfyui"}], ensure_ascii=False),
+    )
+
+    snapshot = job_state.refresh_job(job.id)
+    assert snapshot is not None
+    assert snapshot["status"] in ("pending", "running")
+
+    row = GenJob.get_by_id(job.id)
+    assert row.status != "unknown"
+    assert json.loads(row.items)[0]["status"] in ("pending", "running")
+
+
+def test_jobs_list_items_are_arrays(api):
+    from models import GenJob
+
+    GenJob.create(
+        job_type="batch", status="running", title="列表", total=1,
+        items=json.dumps([{"prompt_id": 1, "status": "pending"}], ensure_ascii=False),
+    )
+    body = api.get("/api/jobs").json()
+    assert isinstance(body["jobs"][0]["items"], list)
+
+    active = api.get("/api/jobs?active=1").json()
+    assert len(active["jobs"]) == 1

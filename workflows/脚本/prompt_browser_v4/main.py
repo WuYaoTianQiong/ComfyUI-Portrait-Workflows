@@ -1,9 +1,7 @@
 """FastAPI 应用入口"""
-import asyncio
 import logging
 import threading
 import time
-import traceback
 import uuid
 import webbrowser
 from contextlib import asynccontextmanager
@@ -15,49 +13,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse
 
 from config import settings
-from models import init_db, db, GenJob
+from models import init_db, db
 from services.helpers import _resolve_if_reparse
 from services.logging_setup import setup_logging
 
 logger = logging.getLogger("prompt_browser")
-
-
-# ======== 后台任务监控 ========
-
-_last_history_sync = 0.0
-
-
-async def job_monitor_loop():
-    """异步后台任务：每 5 秒同步活跃任务状态，每 30 秒同步一次 ComfyUI 全局历史"""
-    global _last_history_sync
-    while True:
-        await asyncio.sleep(5)
-        try:
-            from routers.jobs import get_job_status_snapshot, _row_to_dict
-
-            jobs = (
-                GenJob.select()
-                .where(GenJob.status.in_(["pending", "running"]))
-                .order_by(GenJob.id.desc())
-                .limit(20)
-            )
-            for job in jobs:
-                try:
-                    get_job_status_snapshot(_row_to_dict(job))
-                except Exception:
-                    traceback.print_exc()
-
-            # 每 30 秒同步一次 ComfyUI 全局历史
-            now = time.monotonic()
-            if now - _last_history_sync >= 30:
-                _last_history_sync = now
-                try:
-                    from routers.history import _sync_comfyui_history
-                    _sync_comfyui_history()
-                except Exception:
-                    traceback.print_exc()
-        except Exception:
-            traceback.print_exc()
 
 
 # ======== 应用生命周期 ========
@@ -75,8 +35,15 @@ async def lifespan(app: FastAPI):
     print("  按 Ctrl+C 停止服务")
     print()
 
-    # 启动后台任务监控
-    monitor_task = asyncio.create_task(job_monitor_loop())
+    # 任务写者：普通守护线程，不是 async task。
+    # 旧实现把同步 HTTP/DB 塞进事件循环，ComfyUI 一慢，所有请求一起卡住。
+    from services.job_state import writer_loop
+
+    stop_event = threading.Event()
+    writer = threading.Thread(
+        target=writer_loop, args=(stop_event,), daemon=True, name="job-writer"
+    )
+    writer.start()
 
     # 自动打开浏览器（PB_NO_BROWSER=1 时跳过，供冒烟/测试使用）
     if not settings.no_browser:
@@ -85,11 +52,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # === 关闭 ===
-    monitor_task.cancel()
-    try:
-        await monitor_task
-    except asyncio.CancelledError:
-        pass
+    stop_event.set()
+    writer.join(timeout=5)
     db.close()
 
 

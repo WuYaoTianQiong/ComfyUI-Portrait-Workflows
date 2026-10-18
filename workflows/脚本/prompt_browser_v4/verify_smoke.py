@@ -119,6 +119,11 @@ def _prepare_isolated_env(env: dict) -> str:
     _TMP_DIR = tempfile.mkdtemp(prefix="pb_smoke_")
     db_copy = os.path.join(_TMP_DIR, "smoke.db")
     shutil.copy2(settings.db_path, db_copy)
+    # WAL 模式下未 checkpoint 的数据在 -wal 里，必须一起复制，否则副本会缺最新写入
+    for suffix in ("-wal", "-shm"):
+        src = str(settings.db_path) + suffix
+        if os.path.exists(src):
+            shutil.copy2(src, db_copy + suffix)
     env["PB_DB_PATH"] = db_copy
     env["PB_THUMBNAIL_DIR"] = os.path.join(_TMP_DIR, "thumbs")
     env["PB_NO_BROWSER"] = "1"
@@ -383,6 +388,17 @@ def main() -> int:
 
             code, body = _get(BASE + "/api/jobs?active=1")
             checks.append(("jobs?active=1", code, ""))
+
+            # SSE 首帧：连上后应立刻收到 ": connected" 心跳（不订阅任何任务）
+            try:
+                req = urllib.request.Request(BASE + "/api/jobs/events?ids=999999")
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    head = resp.read(13)
+                sse_ok = b"connected" in head
+                checks.append(("jobs/events SSE 首帧", 200 if sse_ok else -2,
+                               head.decode("utf-8", "replace").strip() or "空响应"))
+            except Exception as e:
+                checks.append(("jobs/events SSE 首帧", -2, repr(e)))
 
             print("RESULT: checks")
             failed = skipped = 0
