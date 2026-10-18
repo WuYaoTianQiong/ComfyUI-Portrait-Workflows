@@ -583,8 +583,10 @@ def import_prompts(data: BatchImportRequest):
             d = item.model_dump()
             for k in non_columns:
                 d.pop(k, None)
-            r = Prompt.create(**d)
-            auto_classify_prompt(r.id)  # 与单条创建保持一致，自动归入 组合/单项/零散
+            with db.atomic():
+                r = Prompt.create(**d)
+                # 与单条创建保持一致，自动归入 组合/单项/零散
+                auto_classify_prompt(r.id)
             imported += 1
         except Exception as e:
             errors.append({"index": i, "error": str(e)})
@@ -604,10 +606,11 @@ def batch_delete_prompts(data: BatchIdsRequest):
     ids = data.ids
     if not ids:
         raise HTTPException(400, "ids 不能为空")
-    PromptCategory.delete().where(PromptCategory.prompt.in_(ids)).execute()
-    PromptTag.delete().where(PromptTag.prompt.in_(ids)).execute()
-    GenHistory.delete().where(GenHistory.prompt_id.in_(ids)).execute()
-    deleted = Prompt.delete().where(Prompt.id.in_(ids)).execute()
+    with db.atomic():
+        PromptCategory.delete().where(PromptCategory.prompt.in_(ids)).execute()
+        PromptTag.delete().where(PromptTag.prompt.in_(ids)).execute()
+        GenHistory.delete().where(GenHistory.prompt_id.in_(ids)).execute()
+        deleted = Prompt.delete().where(Prompt.id.in_(ids)).execute()
     return {"success": True, "deleted": deleted}
 
 
