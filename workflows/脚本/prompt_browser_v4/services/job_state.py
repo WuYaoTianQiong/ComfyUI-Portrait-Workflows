@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from peewee import SQL
 
 from config import settings
-from models import GenHistory, GenJob, inherit_prompt_taxonomy
+from models import GenHistory, GenJob, db, inherit_prompt_taxonomy
 from services.comfyui_client import (
     delete_queue_items,
     get_history,
@@ -35,6 +35,7 @@ from services.comfyui_client import (
 )
 from services.helpers import (
     build_view_url,
+    captured_at_for_image,
     compute_orientation,
     extract_model_name,
     get_image_metadata,
@@ -385,35 +386,44 @@ def _insert_history_for_item(
     prompt_params_json = json.dumps(pp, ensure_ascii=False)
     for img in images:
         try:
-            GenHistory.insert(
-                job_id=job_id, prompt_id=prompt_id,
-                comfyui_prompt_id=comfy_pid,
-                filename=img["filename"],
-                subfolder=img.get("subfolder", ""),
-                img_type=img.get("type", "output"),
-                view_url=build_view_url(
+            captured = captured_at_for_image(
+                img["filename"], img.get("subfolder", ""), img.get("type", "output")
+            )
+            update_fields = {
+                GenHistory.comfyui_prompt_id: comfy_pid,
+                GenHistory.job_id: job_id,
+                GenHistory.prompt_id: prompt_id,
+                GenHistory.view_url: build_view_url(
                     img["filename"], img.get("subfolder", ""), img.get("type", "output")
                 ),
-                preview=preview,
-                prompt_params=prompt_params_json,
-                source="local",
-            ).on_conflict(
-                # 必须与 v4.2 迁移后的部分唯一索引一致：(filename, subfolder, img_type) WHERE is_deleted=0
-                conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
-                conflict_where=_IS_DELETED_ZERO,
-                update={
-                    GenHistory.comfyui_prompt_id: comfy_pid,
-                    GenHistory.job_id: job_id,
-                    GenHistory.prompt_id: prompt_id,
-                    GenHistory.view_url: build_view_url(
+                GenHistory.prompt_params: prompt_params_json,
+                GenHistory.source: "local",
+                GenHistory.is_deleted: False,
+            }
+            if captured is not None:
+                update_fields[GenHistory.captured_at] = captured
+
+            with db.atomic():
+                GenHistory.insert(
+                    job_id=job_id, prompt_id=prompt_id,
+                    comfyui_prompt_id=comfy_pid,
+                    filename=img["filename"],
+                    subfolder=img.get("subfolder", ""),
+                    img_type=img.get("type", "output"),
+                    view_url=build_view_url(
                         img["filename"], img.get("subfolder", ""), img.get("type", "output")
                     ),
-                    GenHistory.prompt_params: prompt_params_json,
-                    GenHistory.source: "local",
-                    GenHistory.is_deleted: False,
-                },
-            ).execute()
-            try:
+                    preview=preview,
+                    prompt_params=prompt_params_json,
+                    captured_at=captured,
+                    source="local",
+                ).on_conflict(
+                    # 必须与 v4.2 迁移后的部分唯一索引一致：(filename, subfolder, img_type) WHERE is_deleted=0
+                    conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
+                    conflict_where=_IS_DELETED_ZERO,
+                    update=update_fields,
+                ).execute()
+
                 nh = GenHistory.get_or_none(
                     (GenHistory.comfyui_prompt_id == comfy_pid)
                     & (GenHistory.filename == img["filename"])
@@ -421,9 +431,8 @@ def _insert_history_for_item(
                     & (GenHistory.img_type == img.get("type", "output"))
                 )
                 if nh:
+                    # 入库 + 继承分类同一事务：避免"图进了库、分类没继承"的半截状态
                     inherit_prompt_taxonomy(nh.id)
-            except Exception:
-                logger.exception("继承分类失败: %s", img.get("filename"))
         except Exception:
             logger.exception("写入历史失败: %s", img.get("filename"))
 

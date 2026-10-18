@@ -38,6 +38,11 @@ def _image_exists(filename: str, subfolder: str, img_type: str) -> bool:
     return bool(meta)
 
 
+def _captured_at_expr():
+    """真实出图时间；老数据没有 captured_at 时回退到入库时间。"""
+    return fn.COALESCE(Gh.captured_at, Gh.created_at)
+
+
 def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) -> dict:
     if meta is None:
         meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
@@ -83,6 +88,7 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
         "favorite": bool(r.favorite),
         "prompt_params": prompt_params,
         "created_at": str(r.created_at) if r.created_at else "",
+        "captured_at": str(r.captured_at) if r.captured_at else "",
         "source": r.source,
         "prompt_name": "",  # 默认空字符串
         **meta,
@@ -155,9 +161,16 @@ def _sync_comfyui_history() -> int:
                     # 所以先确认文件真的在磁盘上，不在就跳过。
                     # （旧代码这里因为 upsert 报错被 except 吞掉，恰好掩盖了这个问题；
                     #   修好写入之后才暴露出来。）
-                    if _get_image_path(filename, subfolder, img_type) is None:
+                    img_path = _get_image_path(filename, subfolder, img_type)
+                    if img_path is None:
                         skipped += 1
                         continue
+                    try:
+                        from datetime import datetime
+
+                        captured = datetime.fromtimestamp(img_path.stat().st_mtime)
+                    except OSError:
+                        captured = None
                     pp = _build_prompt_params_from_comfy(data, filename, subfolder, img_type)
                     Gh.insert(
                         job_id=None,
@@ -170,6 +183,7 @@ def _sync_comfyui_history() -> int:
                         preview="",
                         prompt_params=pp,
                         favorite=False,
+                        captured_at=captured,
                         source="comfyui_sync",
                     ).on_conflict(
                         # peewee 4.x 的正确写法是 on_conflict(conflict_target=..., update=...)；
@@ -296,6 +310,12 @@ def _sync_disk_orphans() -> int:
                 if prompt_text:
                     pp_fields["prompt"] = prompt_text
                 pp = json.dumps(pp_fields)
+                try:
+                    from datetime import datetime
+
+                    captured = datetime.fromtimestamp(fpath.stat().st_mtime)
+                except OSError:
+                    captured = None
 
                 Gh.insert(
                     job_id=job_id,
@@ -308,6 +328,7 @@ def _sync_disk_orphans() -> int:
                     preview="",
                     prompt_params=pp,
                     favorite=False,
+                    captured_at=captured,
                     source="disk_scan",
                 ).execute()
                 added += 1
@@ -423,7 +444,7 @@ def list_history(
     if source:
         q = q.where(Gh.source == source)
     if date:
-        q = q.where(fn.strftime("%Y-%m", Gh.created_at) == date)
+        q = q.where(fn.strftime("%Y-%m", _captured_at_expr()) == date)
     if model:
         mq = fn.json_extract(Gh.prompt_params, "$.model")
         if model == "未记录":
@@ -441,10 +462,9 @@ def list_history(
     total = q.count()
 
     offset = (page - 1) * page_size
-    # 按 created_at DESC 排序，确保最新生成的图片始终排最前。
-    # 之前用 id DESC 的问题：prompt_browser_ 图片由 job poller 入库时
-    # 可能晚于 sync 写入的普通图，导致 id 顺序 ≠ 实际生成时间顺序。
-    q = q.order_by(Gh.created_at.desc(), Gh.id.desc()).offset(offset).limit(page_size)
+    # 按"真实出图时间"排序：captured_at 优先，老数据回退 created_at。
+    # 只按 created_at 排会变成按"导入批次"排（同步/扫描进来的图全部落在同一天）。
+    q = q.order_by(_captured_at_expr().desc(), Gh.id.desc()).offset(offset).limit(page_size)
     rows = list(q)
     ids = [r.id for r in rows]
 
@@ -477,7 +497,7 @@ def list_history(
               f"已保留记录未删除")
 
     if sort == "oldest":
-        alive.sort(key=lambda r: r.id)
+        alive.sort(key=lambda r: (r.captured_at or r.created_at, r.id))
     elif sort == "size_asc":
         alive.sort(key=lambda r: meta_cache[r.id].get("file_size", 0) or 0)
     elif sort == "size_desc":
@@ -547,8 +567,8 @@ def history_facets(
     src_rows = q0.select(Gh.source, fn.COUNT(Gh.id).alias("c")).group_by(Gh.source)
     sources = {r.source: r.c for r in src_rows}
     d_rows = q0.select(
-        fn.strftime("%Y-%m", Gh.created_at).alias("d"), fn.COUNT(Gh.id).alias("c")
-    ).group_by(fn.strftime("%Y-%m", Gh.created_at))
+        fn.strftime("%Y-%m", _captured_at_expr()).alias("d"), fn.COUNT(Gh.id).alias("c")
+    ).group_by(fn.strftime("%Y-%m", _captured_at_expr()))
     dates = {r.d: r.c for r in d_rows}
     m_expr = fn.json_extract(Gh.prompt_params, "$.model")
     m_rows = q0.select(m_expr.alias("m"), fn.COUNT(Gh.id).alias("c")).group_by(m_expr)
@@ -592,7 +612,7 @@ def history_ids(
     if source:
         q = q.where(Gh.source == source)
     if date:
-        q = q.where(fn.strftime("%Y-%m", Gh.created_at) == date)
+        q = q.where(fn.strftime("%Y-%m", _captured_at_expr()) == date)
     if model:
         mq = fn.json_extract(Gh.prompt_params, "$.model")
         if model == "未记录":
@@ -781,7 +801,7 @@ def history_list_html(
                 via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
                 q = q.where(direct | via_prompt)
     total = q.count()
-    rows = list(q.order_by(Gh.created_at.desc(), Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
+    rows = list(q.order_by(_captured_at_expr().desc(), Gh.id.desc()).offset((page - 1) * page_size).limit(page_size))
 
     # 不再自动删除记录：图片文件暂不可读（junction 抖动/文件被锁/解码失败）并不代表
     # 该历史记录应被删除。旧逻辑在此硬删，曾多次误删正常图片（表现为“刷新页面后

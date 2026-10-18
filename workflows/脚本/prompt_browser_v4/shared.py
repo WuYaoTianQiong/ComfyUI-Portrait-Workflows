@@ -1,14 +1,15 @@
 """跨模块共享常量和工具函数 —— 消除 router/services 间的重复定义"""
 
-import re
 from pathlib import Path
+
 from fastapi.templating import Jinja2Templates
 
-# 碎片类型（在 composer / templates / fragments 等模块中共享）
-FRAGMENT_TYPES = [
-    "人物面部", "人物身材", "人物服饰", "姿态动作",
-    "拍摄视角", "场景环境", "光影色调", "画风技术",
-]
+# 结构化提示词的解析统一在 services.composition，这里只做兼容导出
+from services.composition import (  # noqa: F401
+    FRAGMENT_TYPES,
+    extract,
+    parse,
+)
 
 # 支持的画像级别
 QUALITY_MAP = {
@@ -24,26 +25,13 @@ _TEMPLATES_DIR = Path(__file__).absolute().parent / "static" / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
-# ========== 碎片解析工具（composer / templates 共享）==========
+# ========== 兼容旧函数名（调用方不需要改）==========
 
 def parse_prompt_fragments(prompt_text: str) -> list[dict]:
-    """解析 【类型】... 格式的提示词为碎片列表（找出所有类型和内容）"""
-    if not prompt_text:
-        return []
-    fragments = []
-    pattern = r'【([^】]+)】\s*(.*?)(?=\n【|$)'
-    for m in re.finditer(pattern, prompt_text, re.DOTALL):
-        name = m.group(1).strip()
-        content = m.group(2).strip()
-        if content:
-            fragments.append({"type": name, "content": content})
-    return fragments
+    """解析 【类型】... 格式的提示词为碎片列表。见 services.composition.parse。"""
+    return parse(prompt_text)
 
 
 def extract_fragment(prompt_text: str, fragment_type: str) -> str:
-    """从 prompt 文本中提取指定类型的碎片内容"""
-    if not prompt_text:
-        return ""
-    pattern = r'【' + re.escape(fragment_type) + r'】\s*(.*?)(?=\n【|$)'
-    m = re.search(pattern, prompt_text, re.DOTALL)
-    return m.group(1).strip() if m else ""
+    """从 prompt 文本中提取指定类型的碎片内容。见 services.composition.extract。"""
+    return extract(prompt_text, fragment_type)

@@ -115,6 +115,9 @@ class GenHistory(BaseModel):
     prompt_params = TextField(null=True)  # JSON: 出图参数（steps, cfg, sampler, seed, model, width, height 等）
     favorite = BooleanField(default=False)
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+    # 真实出图时间（文件 mtime）。created_at 是"入库时间"，同步/扫描进来的图
+    # 会全部落在导入那一天，导致画廊"最新"排序不可信。
+    captured_at = DateTimeField(null=True)
     source = TextField(default="local")
     is_deleted = BooleanField(default=False)  # 软删除标记
 
@@ -252,21 +255,49 @@ class Fragment(BaseModel):
 # ================================
 
 
-def _migrate_column(db, table, col, col_def):
-    """如果列不存在则 ALTER TABLE 添加（兼容旧库）。"""
+def _migrate_column(db, table, col, col_def) -> bool:
+    """如果列不存在则 ALTER TABLE 添加（兼容旧库）。返回是否新增了列。"""
     try:
         cursor = db.execute_sql(f"SELECT {col} FROM {table} LIMIT 0")
         cursor.close()
+        return False
     except Exception:
         try:
             db.execute_sql(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+            return True
         except Exception:
-            pass
+            return False
+
+
+def _backfill_captured_at() -> int:
+    """为老数据补 captured_at：用文件 mtime 作为真实出图时间。
+
+    只在 captured_at 列刚创建时跑一次；文件已不在磁盘上的行保持 NULL，
+    排序时回退到 created_at（COALESCE）。
+    """
+    from datetime import datetime
+
+    from services.thumbnail import _get_image_path
+
+    rows = list(
+        GenHistory.select(GenHistory.id, GenHistory.filename, GenHistory.subfolder, GenHistory.img_type)
+        .where(GenHistory.captured_at.is_null(True))
+    )
+    updated = 0
+    for row in rows:
+        path = _get_image_path(row.filename, row.subfolder or "", row.img_type or "output")
+        if path is None:
+            continue
+        try:
+            captured = datetime.fromtimestamp(path.stat().st_mtime)
+        except OSError:
+            continue
+        GenHistory.update(captured_at=captured).where(GenHistory.id == row.id).execute()
+        updated += 1
+    return updated
 
 
 # ======== 自动分类工具函数 ========
-import re
-
 AUTO_CATEGORIES = {
     "composite": {"name": "组合提示词", "color": "#6366f1"},
     "single":    {"name": "单项提示词", "color": "#f59e0b"},
@@ -290,21 +321,14 @@ def _clear_auto_type_categories(prompt_id: int):
 
 
 def classify_prompt_text(prompt_text: str) -> str | None:
-    """根据提示词文本检测类型：
+    """根据提示词文本检测类型（解析逻辑见 services.composition.classify）：
     'composite'  ≥4种碎片
     'single'     1-3种碎片
     'scattered'  无【】标记
     """
-    if not prompt_text:
-        return None
-    frags = re.findall(r"【([^】]+)】", prompt_text)
-    n_types = len(set(frags))
-    if n_types == 0:
-        return "scattered"
-    elif n_types >= 4:
-        return "composite"
-    else:
-        return "single"
+    from services.composition import classify
+
+    return classify(prompt_text)
 
 
 def auto_classify_prompt(prompt_id: int):
@@ -389,6 +413,15 @@ def init_db():
                      "prompt_params TEXT")
     _migrate_column(db, "gen_history", "favorite",
                      "favorite BOOLEAN NOT NULL DEFAULT 0")
+    captured_added = _migrate_column(db, "gen_history", "captured_at",
+                                      "captured_at DATETIME")
+    if captured_added:
+        # 只在列刚创建时回填一次；文件缺失的行保持 NULL，排序时回退 created_at
+        try:
+            filled = _backfill_captured_at()
+            print(f"[migrate] 已为 {filled} 张图片补写 captured_at（文件 mtime）")
+        except Exception as exc:
+            print(f"[migrate] 回填 captured_at 失败: {exc}")
 
     # ======== Phase 1: 迁移新字段 ========
     _migrate_column(db, "prompts", "is_favorite",

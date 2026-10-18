@@ -465,19 +465,21 @@ def create_prompt(data: PromptCreate):
     if "usage_count" not in data_dict:
         data_dict["usage_count"] = 0
     # ==========================================
-    r = Prompt.create(**data_dict)
-    # 自动类型分类
-    auto_classify_prompt(r.id)
-    
-    # 自动分类到"组合创作"
-    if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
-        # 查找或创建"组合创作"分类
-        cat = Category.get_or_none(Category.name == "组合创作")
-        if not cat:
-            cat = Category.create(name="组合创作", color="#6366f1", parent_id=None)
-        # 关联提示词到分类
-        PromptCategory.get_or_create(prompt=r.id, category=cat.id)
-    
+    r = None
+    with db.atomic():
+        r = Prompt.create(**data_dict)
+        # 自动类型分类
+        auto_classify_prompt(r.id)
+
+        # 自动分类到"组合创作"
+        if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
+            # 查找或创建"组合创作"分类
+            cat = Category.get_or_none(Category.name == "组合创作")
+            if not cat:
+                cat = Category.create(name="组合创作", color="#6366f1", parent_id=None)
+            # 关联提示词到分类
+            PromptCategory.get_or_create(prompt=r.id, category=cat.id)
+
     return {"success": True, "id": r.id}
 
 
@@ -493,11 +495,12 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
         raise HTTPException(400, "没有需要更新的字段")
 
     updates["updated_at"] = datetime.now()
-    Prompt.update(**updates).where(Prompt.id == prompt_id).execute()
+    with db.atomic():
+        Prompt.update(**updates).where(Prompt.id == prompt_id).execute()
 
-    # 如果更新了 prompt 内容，重新自动分类
-    if "prompt" in updates:
-        auto_classify_prompt(prompt_id)
+        # 如果更新了 prompt 内容，重新自动分类
+        if "prompt" in updates:
+            auto_classify_prompt(prompt_id)
 
     return {"success": True}
 
@@ -509,11 +512,13 @@ def delete_prompt(prompt_id: int):
         r = Prompt.get_or_none(Prompt.id == prompt_id)
         if r is None:
             raise HTTPException(404, "提示词不存在")
-        # 先删除关联表中的记录，避免外键约束错误
-        pc = PromptCategory.delete().where(PromptCategory.prompt == prompt_id).execute()
-        pt = PromptTag.delete().where(PromptTag.prompt == prompt_id).execute()
-        gh = GenHistory.delete().where(GenHistory.prompt_id == prompt_id).execute()
-        r.delete_instance()
+        # 先删除关联表中的记录，避免外键约束错误；四步必须同一事务，
+        # 否则中途失败会留下"提示词没了、历史也没了、关联表还在"的半截状态
+        with db.atomic():
+            pc = PromptCategory.delete().where(PromptCategory.prompt == prompt_id).execute()
+            pt = PromptTag.delete().where(PromptTag.prompt == prompt_id).execute()
+            gh = GenHistory.delete().where(GenHistory.prompt_id == prompt_id).execute()
+            r.delete_instance()
         return {"success": True, "deleted": {"prompt_categories": pc, "prompt_tags": pt, "gen_history": gh}}
     except Exception as e:
         traceback.print_exc()

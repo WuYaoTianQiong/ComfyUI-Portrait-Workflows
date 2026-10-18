@@ -2,7 +2,6 @@
 import json
 import mimetypes
 import os
-import re
 import traceback
 from pathlib import Path
 from urllib.parse import quote
@@ -17,6 +16,7 @@ from pydantic import BaseModel
 from config import settings
 from models import Prompt, PromptCategory, Category
 from services.helpers import _resolve_if_reparse, missing_image_response
+from services.composition import strip_headers
 from services.thumbnail import generate_thumbnail
 from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
@@ -361,7 +361,7 @@ def run_prompt(req: RunRequest):
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
         # 注入提示词：传 ComfyUI 时去掉【】碎片标题
-        clean_prompt = re.sub(r'【[^】]+】\s*', '', p.prompt or "")
+        clean_prompt = strip_headers(p.prompt)
         prompt_data = {
             "prompt": clean_prompt,
             "negative_prompt": p.negative_prompt or "",
@@ -425,7 +425,7 @@ def run_text_prompt(req: RunTextRequest):
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
         prompt_data = {
-            "prompt": re.sub(r'【[^】]+】\s*', '', req.prompt or ""),
+            "prompt": strip_headers(req.prompt),
             "negative_prompt": req.negative_prompt or "",
             "seed": req.seed or 0,
             "orientation": req.orientation,
@@ -513,7 +513,7 @@ def batch_generate(req: BatchRequest):
         try:
             api_wf = load_workflow(workflow_path, req.workflow_content)
             prompt_data = {
-                "prompt": re.sub(r'【[^】]+】\s*', '', p.prompt or ""),
+                "prompt": strip_headers(p.prompt),
                 "negative_prompt": p.negative_prompt or "",
                 "seed": p.seed or 0,
                 "seed_override": item.seed,

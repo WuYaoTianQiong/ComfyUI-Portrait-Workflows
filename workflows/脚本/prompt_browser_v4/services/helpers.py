@@ -38,6 +38,25 @@ def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
 MISSING_IMAGE_PATH = settings.static_dir / "img-missing.svg"
 
 
+def captured_at_for_image(filename: str, subfolder: str, img_type: str):
+    """图片的真实生成时间（文件 mtime）；取不到返回 None。
+
+    入库时写进 gen_history.captured_at。created_at 是"入库时间"，同步/扫描进来的
+    图片会全部落在导入那一刻，画廊按 created_at 排序等于按导入批次排序。
+    """
+    from datetime import datetime
+
+    from services.thumbnail import _get_image_path
+
+    path = _get_image_path(filename, subfolder or "", img_type or "output")
+    if path is None:
+        return None
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return None
+
+
 def missing_image_response():
     """返回「文件缺失」占位图（HTTP 200），而不是 404。
 

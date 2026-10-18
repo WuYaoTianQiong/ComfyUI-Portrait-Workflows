@@ -156,24 +156,25 @@ def resolve_template(template_id: int):
 def create_template(data: TemplateCreate):
     """创建模板（自动保存碎片缓存快照）"""
     try:
-        t = Template.create(
-            name=data.name,
-            category=data.category_id if data.category_id else None,
-        )
-        for i, fr in enumerate(data.fragments):
-            # 提取缓存快照
-            cached = ""
-            if fr.prompt_id:
-                p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
-                if p:
-                    cached = extract_fragment(p.prompt, fr.fragment_type)
-            TemplateFragment.create(
-                template=t.id,
-                prompt=fr.prompt_id if fr.prompt_id else None,
-                fragment_type=fr.fragment_type,
-                cached_content=cached,
-                sort_order=i,
+        with db.atomic():
+            t = Template.create(
+                name=data.name,
+                category=data.category_id if data.category_id else None,
             )
+            for i, fr in enumerate(data.fragments):
+                # 提取缓存快照
+                cached = ""
+                if fr.prompt_id:
+                    p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
+                    if p:
+                        cached = extract_fragment(p.prompt, fr.fragment_type)
+                TemplateFragment.create(
+                    template=t.id,
+                    prompt=fr.prompt_id if fr.prompt_id else None,
+                    fragment_type=fr.fragment_type,
+                    cached_content=cached,
+                    sort_order=i,
+                )
         return {"success": True, "id": t.id}
     except Exception as e:
         raise HTTPException(400, f"创建失败: {e}")
@@ -186,30 +187,34 @@ def update_template(template_id: int, data: TemplateUpdate):
     if t is None:
         raise HTTPException(404, "模板不存在")
 
-    if data.name is not None:
-        t.name = data.name
-    if data.category_id is not None:
-        t.category = data.category_id
-    t.updated_at = datetime.now()
-    t.save()
+    try:
+        with db.atomic():
+            if data.name is not None:
+                t.name = data.name
+            if data.category_id is not None:
+                t.category = data.category_id
+            t.updated_at = datetime.now()
+            t.save()
 
-    if data.fragments is not None:
-        # 删除旧碎片
-        TemplateFragment.delete().where(TemplateFragment.template == template_id).execute()
-        # 插入新碎片
-        for i, fr in enumerate(data.fragments):
-            cached = ""
-            if fr.prompt_id:
-                p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
-                if p:
-                    cached = extract_fragment(p.prompt, fr.fragment_type)
-            TemplateFragment.create(
-                template=template_id,
-                prompt=fr.prompt_id if fr.prompt_id else None,
-                fragment_type=fr.fragment_type,
-                cached_content=cached,
-                sort_order=i,
-            )
+            if data.fragments is not None:
+                # 删除旧碎片 + 插入新碎片必须在同一事务里：
+                # 中途失败会留下一个"没有碎片"的模板
+                TemplateFragment.delete().where(TemplateFragment.template == template_id).execute()
+                for i, fr in enumerate(data.fragments):
+                    cached = ""
+                    if fr.prompt_id:
+                        p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
+                        if p:
+                            cached = extract_fragment(p.prompt, fr.fragment_type)
+                    TemplateFragment.create(
+                        template=template_id,
+                        prompt=fr.prompt_id if fr.prompt_id else None,
+                        fragment_type=fr.fragment_type,
+                        cached_content=cached,
+                        sort_order=i,
+                    )
+    except Exception as e:
+        raise HTTPException(400, f"更新失败: {e}")
     return {"success": True}
 
 
@@ -219,9 +224,10 @@ def delete_template(template_id: int):
     t = Template.get_or_none(Template.id == template_id)
     if t is None:
         raise HTTPException(404, "模板不存在")
-    # 级联删除碎片
-    TemplateFragment.delete().where(TemplateFragment.template == template_id).execute()
-    t.delete_instance()
+    with db.atomic():
+        # 级联删除碎片
+        TemplateFragment.delete().where(TemplateFragment.template == template_id).execute()
+        t.delete_instance()
     return {"success": True}
 
 
@@ -245,25 +251,27 @@ class BatchImportRequest(BaseModel):
 
 @router.post("/templates/batch_import")
 def batch_import_templates(data: BatchImportRequest):
-    """批量从 localStorage 导入旧模板"""
+    """批量从 localStorage 导入旧模板（每个模板一个事务）。"""
     imported = 0
     for item in data.items:
         try:
-            t = Template.create(name=item.name)
-            for i, fr in enumerate(item.fragments):
-                cached = ""
-                if fr.prompt_id:
-                    p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
-                if p:
-                    cached = extract_fragment(p.prompt, fr.fragment_type)
-            TemplateFragment.create(
-                template=t.id,
-                prompt=fr.prompt_id if fr.prompt_id else None,
-                fragment_type=fr.fragment_type,
-                cached_content=cached,
-                sort_order=i,
-            )
+            with db.atomic():
+                t = Template.create(name=item.name)
+                for i, fr in enumerate(item.fragments):
+                    cached = ""
+                    if fr.prompt_id:
+                        p = Prompt.get_or_none(Prompt.id == fr.prompt_id)
+                        if p:
+                            cached = extract_fragment(p.prompt, fr.fragment_type)
+                    TemplateFragment.create(
+                        template=t.id,
+                        prompt=fr.prompt_id if fr.prompt_id else None,
+                        fragment_type=fr.fragment_type,
+                        cached_content=cached,
+                        sort_order=i,
+                    )
             imported += 1
         except Exception:
-            pass
+            # 单个模板失败不影响其余模板
+            continue
     return {"success": True, "imported": imported}

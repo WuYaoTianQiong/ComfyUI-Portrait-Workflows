@@ -283,3 +283,71 @@ def test_jobs_list_items_are_arrays(api):
 
     active = api.get("/api/jobs?active=1").json()
     assert len(active["jobs"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# B3：captured_at（真实出图时间）与模板导入
+# ---------------------------------------------------------------------------
+
+def test_gallery_sorts_by_captured_at_not_import_time(api, seed_history):
+    from datetime import datetime
+
+    old_photo = seed_history(filename="old.png", captured_at=datetime(2020, 1, 1, 12, 0, 0))
+    new_photo = seed_history(filename="new.png", captured_at=datetime(2024, 6, 1, 12, 0, 0))
+
+    body = api.get("/api/history?page=1&page_size=50").json()
+    assert [item["filename"] for item in body["items"]][:2] == ["new.png", "old.png"]
+    assert body["items"][0]["captured_at"].startswith("2024-06-01")
+
+
+def test_history_date_facet_uses_captured_at(api, seed_history):
+    from datetime import datetime
+
+    seed_history(filename="a.png", captured_at=datetime(2020, 1, 1))
+    seed_history(filename="b.png", captured_at=datetime(2024, 6, 1))
+
+    facets = api.get("/api/history/facets").json()
+    assert facets["date"].get("2024-06") == 1
+    assert facets["date"].get("2020-01") == 1
+
+    filtered = api.get("/api/history?page=1&page_size=50&date=2024-06").json()
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["filename"] == "b.png"
+
+
+def test_history_date_falls_back_to_created_at(api, seed_history):
+    """老数据没有 captured_at 时，日期筛选仍要能命中（COALESCE 回退）。"""
+    from datetime import datetime
+
+    from models import GenHistory
+
+    item = seed_history(filename="legacy.png")
+    GenHistory.update(captured_at=None, created_at=datetime(2022, 3, 15, 8, 0, 0)) \
+        .where(GenHistory.id == item.id).execute()
+
+    filtered = api.get("/api/history?page=1&page_size=50&date=2022-03").json()
+    assert filtered["total"] == 1
+
+
+def test_template_batch_import_keeps_all_fragments(api, seed_prompt):
+    """旧实现把 TemplateFragment.create 放在 for 循环外，导入的模板只剩 1 个碎片。"""
+    p = seed_prompt(name="来源", prompt="【人物面部】face\n\n【场景环境】street")
+
+    r = api.post("/api/templates/batch_import", json={
+        "items": [{
+            "name": "导入的模板",
+            "fragments": [
+                {"prompt_id": p.id, "fragment_type": "人物面部"},
+                {"prompt_id": p.id, "fragment_type": "场景环境"},
+            ],
+        }]
+    })
+    assert r.status_code == 200
+    assert r.json()["imported"] == 1
+
+    templates = api.get("/api/templates").json()["templates"]
+    assert len(templates) == 1
+    tid = templates[0]["id"]
+    detail = api.get(f"/api/templates/{tid}").json()["template"]
+    assert detail["fragment_count"] == 2
+    assert detail["fragments"][0]["content"] == "face"
