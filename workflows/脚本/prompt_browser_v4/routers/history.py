@@ -10,7 +10,7 @@ from peewee import fn, SQL
 from pydantic import BaseModel
 
 from config import settings
-from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
 from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
 from services.thumbnail import _get_image_path
 from shared import templates
@@ -495,8 +495,17 @@ def list_history(
     return {"items": result, "total": total, "page": page, "page_size": page_size}
 
 
-@router.get("/history/ids", response_model=dict)
-def _facet_base(favorite, search, category_id, tag_ids):
+def _filtered_history_query(
+    favorite: bool | None = None,
+    search: str = "",
+    category_id: int | None = None,
+    tag_ids: str = "",
+):
+    """历史画廊的统一筛选构造器（favorite/search/分类/标签）。
+
+    `/history`、`/history/ids`、`/history/facets` 必须共用这一份，
+    否则会出现"列表按分类筛了、全选却选到类外"的错位。
+    """
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
         q = q.where(Gh.favorite == favorite)
@@ -533,7 +542,7 @@ def history_facets(
 ):
     """分面计数：基于 favorite/search/category/tag 当前筛选（不含分面维度自身），
     返回 source / date(年-月) / model 各取值的数量。"""
-    sub = _facet_base(favorite, search, category_id, tag_ids).select(Gh.id).distinct()
+    sub = _filtered_history_query(favorite, search, category_id, tag_ids).select(Gh.id).distinct()
     q0 = Gh.select().where(Gh.id.in_(sub))
     src_rows = q0.select(Gh.source, fn.COUNT(Gh.id).alias("c")).group_by(Gh.source)
     sources = {r.source: r.c for r in src_rows}
@@ -561,6 +570,7 @@ def history_facets(
 
 
 
+@router.get("/history/ids", response_model=dict)
 def history_ids(
     favorite: str = Query(""),
     sort: str = Query("newest"),
@@ -573,20 +583,12 @@ def history_ids(
     orientation: str = Query(""),
 ):
     """返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。"""
-    q = Gh.select(Gh.id).where(Gh.is_deleted == False)
-    if favorite == "1":
-        q = q.where(Gh.favorite == True)
-    if search:
-        like = f"%{search}%"
-        condition = (
-            (Gh.filename ** like)
-            | (Gh.subfolder ** like)
-            | (Gh.comfyui_prompt_id ** like)
-        )
-        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
-        if prompt_matches:
-            condition = condition | (Gh.prompt_id << prompt_matches)
-        q = q.where(condition)
+    q = _filtered_history_query(
+        favorite=True if favorite == "1" else (False if favorite == "0" else None),
+        search=search,
+        category_id=category_id,
+        tag_ids=tag_ids,
+    )
     if source:
         q = q.where(Gh.source == source)
     if date:
@@ -603,7 +605,7 @@ def history_ids(
             q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
         else:
             q = q.where(oq == orientation)
-    ids = [r.id for r in q]
+    ids = [r.id for r in q.select(Gh.id).distinct()]
     return {"ids": ids, "total": len(ids)}
 
 

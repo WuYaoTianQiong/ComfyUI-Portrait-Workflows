@@ -19,7 +19,7 @@ from models import Prompt, PromptCategory, Category
 from services.helpers import _resolve_if_reparse, missing_image_response
 from services.thumbnail import generate_thumbnail
 from services.workflow_parser import load_workflow, inject_prompt
-from services.comfyui_client import push_prompt, get_queue as fetch_queue
+from services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
 from routers.jobs import create_job, update_job_items
 from state import batch_stop_flag
 
@@ -113,15 +113,16 @@ class GenerateMissingRequest(BaseModel):
 
 @router.get("/status")
 def check_status():
-    try:
-        queue = fetch_queue()
-        return {
-            "comfyui": "online",
-            "queue_running": len(queue.get("queue_running", [])),
-            "queue_pending": len(queue.get("queue_pending", [])),
-        }
-    except Exception:
+    # 不能靠 get_queue() 判断在线：它在任何异常下都返回 {}，于是状态永远是 online，
+    # 前端就会允许在 ComfyUI 离线时提交任务（历史 109 个任务里 27 个因此失败）。
+    if not is_online():
         return {"comfyui": "offline", "queue_running": 0, "queue_pending": 0}
+    queue = fetch_queue()
+    return {
+        "comfyui": "online",
+        "queue_running": len(queue.get("queue_running", [])),
+        "queue_pending": len(queue.get("queue_pending", [])),
+    }
 
 
 # ---------- 图片代理 ----------

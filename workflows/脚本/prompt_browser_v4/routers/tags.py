@@ -105,7 +105,10 @@ def delete_tag(tag_id: int):
 
 
 @router.get("/tags/popular")
-def get_popular_tags(limit: int = Query(20, ge=1, le=100)):
+def get_popular_tags(
+    limit: int = Query(20, ge=1, le=100),
+    count_scope: str = Query("prompt", description="计数维度: prompt=提示词数, image=图片数"),
+):
     tags = (
         Tag.select()
         .order_by(Tag.usage_count.desc(), Tag.name.asc())

@@ -2,9 +2,6 @@
 
 原则：锁"行为"不锁"实现"。每条用例对应一个用户可见的承诺（端点存在、键名、筛选语义、
 软删除、入库去重）。重构时这些用例变红，就说明行为被破坏了。
-
-标记 `xfail(strict=True)` 的是"当前已知破损"：B1 修复后会自动转绿，
-若修复前意外通过也会报错（strict），防止悄悄改变预期。
 """
 
 import pytest
@@ -19,6 +16,13 @@ def test_status_ok(api):
     assert r.status_code == 200
     body = r.json()
     assert "comfyui" in body
+
+
+def test_status_reports_offline_when_comfyui_unreachable(api):
+    """状态必须是真实探活：曾因 get_queue() 吞异常返回 {}，状态永远是 online，
+    导致 ComfyUI 离线时仍允许提交任务（历史 109 个任务里 27 个因此失败）。"""
+    body = api.get("/api/status").json()
+    assert body["comfyui"] == "offline"
 
 
 def test_prompts_list_envelope(api, seed_prompt):
@@ -58,7 +62,6 @@ def test_prompt_html_fragment(api, seed_prompt):
     assert "片段可见" in r.text
 
 
-@pytest.mark.xfail(strict=True, reason="B1：export 被 /prompts/{prompt_id} 先注册而遮蔽")
 def test_prompts_export_route(api, seed_prompt):
     seed_prompt(name="导出用")
     r = api.get("/api/prompts/export")
@@ -105,7 +108,6 @@ def test_history_html_fragment(api, seed_history):
     assert "gallery-grid" in r.text
 
 
-@pytest.mark.xfail(strict=True, reason="B1：/history/ids 的装饰器挂在 _facet_base 上，恒 422")
 def test_history_ids_route(api, seed_history):
     seed_history(filename="i1.png")
     seed_history(filename="i2.png")
@@ -115,7 +117,6 @@ def test_history_ids_route(api, seed_history):
     assert len(r.json()["ids"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="B1：/history/ids 未应用 category_id / tag_ids 筛选")
 def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
     from models import ImageCategory, ImageTag
 
@@ -132,7 +133,6 @@ def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
     assert body["ids"] == [keep.id]
 
 
-@pytest.mark.xfail(strict=True, reason="B1：history.py 未 import Category，加分类 500")
 def test_history_add_category_endpoint(api, seed_history, seed_taxonomy):
     item = seed_history(filename="cat.png")
     cat, _ = seed_taxonomy()
@@ -142,7 +142,6 @@ def test_history_add_category_endpoint(api, seed_history, seed_taxonomy):
     assert r.json()["created"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="B1：history.py 未 import Tag，打标签 500")
 def test_history_add_tag_endpoint(api, seed_history, seed_taxonomy):
     item = seed_history(filename="tag.png")
     _, tag = seed_taxonomy()
@@ -156,7 +155,6 @@ def test_history_add_tag_endpoint(api, seed_history, seed_taxonomy):
 # 分类 / 标签 / 任务
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="B1：tags/popular 引用了未定义的 count_scope，500")
 def test_tags_popular_endpoint(api, seed_taxonomy):
     seed_taxonomy()
     r = api.get("/api/tags/popular")

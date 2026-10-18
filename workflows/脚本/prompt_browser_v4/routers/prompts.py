@@ -15,6 +15,36 @@ from shared import templates
 router = APIRouter(tags=["提示词"])
 
 
+# ====================================================================
+# 导出：必须注册在 /prompts/{prompt_id} 之前，否则 "export" 会被当成 prompt_id
+# 由动态路由先匹配，永远返回 422。FastAPI 按注册顺序匹配，改路径不如改顺序。
+# ====================================================================
+
+@router.get("/prompts/export")
+def export_prompts():
+    """导出所有提示词为 JSON 文件"""
+    rows = Prompt.select().order_by(Prompt.id)
+    data = []
+    for r in rows:
+        data.append({
+            "name": r.name or "",
+            "prompt": r.prompt or "",
+            "negative_prompt": r.negative_prompt or "",
+            "steps": r.steps, "cfg_scale": r.cfg_scale,
+            "sampler": r.sampler or "", "seed": r.seed,
+            "model": r.model or "", "width": r.width, "height": r.height,
+            "tags": r.tags or "", "note": r.note or "",
+            "is_favorite": r.is_favorite, "is_pinned": r.is_pinned,
+            "rating": r.rating,
+        })
+    json_str = json.dumps({"prompts": data}, ensure_ascii=False, indent=2)
+    return StreamingResponse(
+        io.BytesIO(json_str.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=prompts_export.json"},
+    )
+
+
 # ---------- Pydantic schemas ----------
 
 class PromptCreate(BaseModel):
@@ -525,33 +555,8 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
 
 
 # ====================================================================
-# 新增：提示词导入/导出 + 批量操作
+# 新增：提示词导入 + 批量操作
 # ====================================================================
-
-@router.get("/prompts/export")
-def export_prompts():
-    """导出所有提示词为 JSON 文件"""
-    rows = Prompt.select().order_by(Prompt.id)
-    data = []
-    for r in rows:
-        data.append({
-            "name": r.name or "",
-            "prompt": r.prompt or "",
-            "negative_prompt": r.negative_prompt or "",
-            "steps": r.steps, "cfg_scale": r.cfg_scale,
-            "sampler": r.sampler or "", "seed": r.seed,
-            "model": r.model or "", "width": r.width, "height": r.height,
-            "tags": r.tags or "", "note": r.note or "",
-            "is_favorite": r.is_favorite, "is_pinned": r.is_pinned,
-            "rating": r.rating,
-        })
-    json_str = json.dumps({"prompts": data}, ensure_ascii=False, indent=2)
-    return StreamingResponse(
-        io.BytesIO(json_str.encode("utf-8")),
-        media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=prompts_export.json"},
-    )
-
 
 class BatchImportRequest(BaseModel):
     prompts: list[PromptCreate]
