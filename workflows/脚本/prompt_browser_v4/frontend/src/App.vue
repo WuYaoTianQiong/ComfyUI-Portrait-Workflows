@@ -48,6 +48,14 @@ const online = computed(() => status.value?.comfyui === 'online')
 type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap' | 'jobs' | 'manage' | 'stats' | 'design'
 
 const activeTab = ref<TabKey>('gallery')
+
+/** 从画廊「跳到提示词」：记住目标 id 并切页，PromptView 监听它来选中。 */
+const pendingPromptId = ref<number | null>(null)
+
+function jumpToPrompt(promptId: number) {
+  pendingPromptId.value = promptId
+  activeTab.value = 'prompt'
+}
 </script>
 
 <template>
@@ -131,14 +139,14 @@ const activeTab = ref<TabKey>('gallery')
     </header>
 
     <main class="content">
-      <GalleryView v-if="activeTab === 'gallery'" />
+      <GalleryView v-if="activeTab === 'gallery'" @jump-to-prompt="jumpToPrompt" />
       <ComposerView v-else-if="activeTab === 'composer'" />
       <FaceswapView v-else-if="activeTab === 'faceswap'" />
       <JobCenterView v-else-if="activeTab === 'jobs'" />
       <StatsView v-else-if="activeTab === 'stats'" />
       <DesignView v-else-if="activeTab === 'design'" />
       <ManageView v-else-if="activeTab === 'manage'" />
-      <PromptView v-else />
+      <PromptView v-else :select-id="pendingPromptId" />
     </main>
 
     <ToastHost />

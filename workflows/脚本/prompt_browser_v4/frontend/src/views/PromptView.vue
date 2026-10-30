@@ -9,6 +9,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
+import { useToast } from '../composables/useToast'
 import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
 import { statusLabel } from '../utils/format'
 import RunTextPanel from '../components/RunTextPanel.vue'
@@ -76,6 +77,7 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 })
 
 const { workflows } = useWorkflows()
+const toast = useToast()
 const textPanelOpen = ref(false)
 const { data: wfValidation } = useWorkflowValidation(workflowPath)
 
@@ -215,6 +217,58 @@ const autoClassifyMutation = useMutation({
 function autoClassifyOne() {
   if (selectedId.value === null) return
   autoClassifyMutation.mutate(selectedId.value)
+}
+/** 外部要求选中的提示词（画廊「跳到提示词」用）。 */
+const props = defineProps<{ selectId?: number | null }>()
+// 外部（画廊）要求定位到某条提示词时切过去
+watch(
+  () => props.selectId,
+  (id) => {
+    if (id) selectedId.value = id
+  },
+)
+/** 复制正向提示词到剪贴板（旧版提示词页的「复制」）。 */
+async function copyPromptText() {
+  const text = draft.value?.prompt ?? ''
+  if (!text.trim()) {
+    toast.error('没有可复制的提示词')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success('已复制提示词')
+  } catch {
+    toast.error('复制失败（浏览器拒绝了剪贴板访问）')
+  }
+}
+
+/**
+ * 这条提示词已经出过哪些图。
+ *
+ * 走 `/api/prompts/{id}/history` —— 从图片跳到提示词之后，最自然的下一步就是
+ * 想看看"它到底长什么样"。
+ */
+interface PromptShot {
+  id: number
+  filename: string
+  subfolder: string
+  img_type: string
+  width?: number | null
+  height?: number | null
+}
+
+const { data: shotHistory } = useQuery<{ items: PromptShot[] }>({
+  queryKey: computed(() => ['prompt-history', selectedId.value]),
+  queryFn: () => apiGet(`/api/prompts/${selectedId.value}/history`, { limit: 24 }),
+  enabled: computed(() => selectedId.value !== null),
+})
+
+function shotThumb(item: PromptShot): string {
+  return `/api/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=200`
+}
+
+function shotFull(item: PromptShot): string {
+  return `/api/image?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}`
 }
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
@@ -540,6 +594,7 @@ function clearFilters() {
           <span v-else-if="activeJob" class="job-state" :class="activeJob?.status">
             {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
           </span>
+          <button class="btn btn-sm" title="复制正向提示词" @click="copyPromptText">复制</button>
           <button
             class="btn btn-sm"
             title="临时改一下提示词直接出图，不写回提示词库"
@@ -591,6 +646,22 @@ function clearFilters() {
             v-model="draftTagList"
             :suggestions="tagData?.tags ?? []"
           />
+        </div>
+        <div class="field">
+          <span>出图历史（{{ shotHistory?.items?.length ?? 0 }} 张）</span>
+          <div v-if="shotHistory?.items?.length" class="shot-grid">
+            <a
+              v-for="shot in shotHistory.items"
+              :key="shot.id"
+              class="shot"
+              :href="shotFull(shot)"
+              target="_blank"
+              :title="shot.filename"
+            >
+              <img :src="shotThumb(shot)" :alt="shot.filename" loading="lazy" />
+            </a>
+          </div>
+          <span v-else class="muted">这条提示词还没有出图</span>
         </div>
 
         <div class="field">
@@ -1068,6 +1139,31 @@ function clearFilters() {
   gap: var(--gap-sm);
 }
 
+
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 4px;
+}
+
+.shot {
+  display: block;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.shot:hover {
+  border-color: var(--primary);
+}
 .cat-chips {
   display: flex;
   flex-wrap: wrap;

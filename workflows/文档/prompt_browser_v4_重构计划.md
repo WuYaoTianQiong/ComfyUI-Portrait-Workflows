@@ -596,3 +596,70 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 工作流下拉 11 项；选 3 张 → 对比弹层 3 格 → 切分屏 → 缩放 120%；组合器行视图三块纵排
 （filters 0–509 / pool 561–1108 / canvas 1108–1794，宽度均 1500）；0 个 JS 错误。
 CI 全绿（117 pytest + 16 冒烟 + 77 vitest + 类型检查 0 错 + 构建 + 13 E2E）。
+
+---
+
+## 5.8 旧前端功能全量审计（2026-10-30 深夜）
+
+**背景**：用户连续两次反馈"画廊功能少了很多"。前两次我都是**按点补**（补了用户提到的那几个），
+没有系统性核对 —— 于是又漏。这次改成**先出清单再动手**。
+
+**审计方法**：从 `git tag legacy-frontend` 取出旧前端 21 个 js 文件，
+提取全部 **366 个 `window.xxx = function`**（旧前端所有交互的入口），
+再按语义逐项对照新前端。自动匹配不可用（命名风格完全不同：新前端是 Vue 组件内的函数，
+不是 `window.*`），所以是**人工归类**。
+
+### 已补回（本轮，8 项 P0）
+
+| 能力 | 位置 | 说明 |
+|---|---|---|
+| 复制提示词 | 提示词详情页出图条 | 剪贴板复制正向提示词 |
+| 重新出图 | 灯箱 🔄 | **两条路**：有 `prompt_id` 走 `/api/run`；没有则用 `prompt_params` 里存的文本走 `/api/run_text`（同步进来的图没有提示词关联，但参数全在） |
+| 跳到提示词 | 灯箱 ↗ | 跨页：GalleryView emit → App.vue 切页 → PromptView 监听 `select-id` 选中 |
+| 出图历史 | 提示词详情页 | `/api/prompts/{id}/history`，缩略图网格，点击开原图 |
+| 批量打标签/分类 | 画廊批量条 | 弹层选标签或分类 → 逐张 POST `/api/history/{id}/tags\|categories/{x}` |
+| 排序 | 画廊工具栏 | 6 种：最新/最旧/分辨率大小/体积大小（后端 `sort` 参数本来就支持） |
+| 每页条数 | 画廊工具栏 | 30 / 60 / 120 |
+| 批量对比 / 投喂工作流 / 缩放 / 旋转 | 见 5.7 | 上一轮已补 |
+
+### 仍缺失（诚实清单，按影响排序）
+
+**P1 — 日常会用到的**
+
+| 能力 | 旧版位置 | 说明 |
+|---|---|---|
+| 组合器「自定义片段」 | `composer-fragments.js` `_addCustomFragment` / `_saveCustomFragmentToLibrary` | 用户自己写碎片并存进碎片库 |
+| 组合器「复制」 | `composer-workbench.js` `copyComposerFragment` / `copyComposedPrompt` / `composer-random.js` `copyRandomPrompt` | 复制片段 / 组合结果 / 随机结果 |
+| 组合器「存为提示词」 | `composer-templates.js` `composerSaveAsPrompt` | 组合结果存成提示词记录 |
+| 提示词页「试跑」 | `prompt.js` `trialRun` / `renderTrialLog` / `saveTrialAsNew` / `undoFillFromTrial` | 组合器能试跑，但提示词页的试跑 + 日志 + 存为新提示词没有 |
+| 「智能分段」 | `prompt.js` `smartSegment` / `smartSegmentText` | 长提示词自动拆成片段 |
+| 批量「继承参数」 | `gallery.js` `bulkInherit` | 把一张图的参数套给另一张 |
+| 批量「投喂工作流」 | `history.js` `batchProcessHistory` | 选中多张图一起处理 |
+| 「变体生成」 | `generator.js` `openVariationDialog` / `startVariationRun` | 同一提示词换参数出多张 |
+| 草稿自动保存 | `prompt.js` `_saveDraft` / `_restoreDraft` | 编辑到一半刷新不丢 |
+| 自定义工作流上传 | `workflow.js` `pickWorkflowFile` / `loadCustomWorkflow` | 上传自己的 JSON 工作流 |
+| 工作流隐藏 / 排序 | `workflow.js` `hideWorkflow` / `toggleWorkflowSort` | 把不用的工作流藏起来 |
+
+**P2 — 锦上添花**
+
+| 能力 | 旧版位置 |
+|---|---|
+| URL 路由（`#/gallery` 深链） | `router.js` 8 个函数 |
+| 清空历史 | `history.js` `clearHistory` |
+| 提示词导入预览 | `prompt.js` `renderImportPreview` / `parseImportText` |
+| 侧栏折叠 / 宽度拖拽 | `gallery.js` `toggleGallerySidebar` / `initGalleryResize` |
+| 组合器状态持久化 | `composer-core.js` `_saveComposerState` / `_restoreComposerState` |
+| 碎片库独立面板 / 冲突检测 | `composer-fragments.js` `toggleFragmentLibrary` / `_detectConflicts` |
+| 复制文件名 | `utils.js` `copyFilename` |
+
+### 教训（写进流程，不是写进文档就算）
+
+1. **端点差集 ≠ 功能覆盖**。它只证明"后端能力有没有被用"，证明不了"前端交互有没有丢"。
+2. **审计要基于旧版的真实实现，不能基于自己的理解**。上一轮我把「同步/分屏」当成布局模式，
+   实际旧版是网格排布 + 缩放联动开关 —— 查了 CSS 类名仍然理解错，必须把那段逻辑读懂。
+3. **核对要一次做完**。分批按用户反馈补，每批都留一堆没查的地方。
+
+### 护栏
+
+`vitest` 79 条（CompareModal 7 条 / Lightbox 8 条 / 其余页面与工具），
+CI 五道关全绿（117 pytest + 16 冒烟 + 79 vitest + 类型检查 0 错 + 构建 + 13 E2E）。

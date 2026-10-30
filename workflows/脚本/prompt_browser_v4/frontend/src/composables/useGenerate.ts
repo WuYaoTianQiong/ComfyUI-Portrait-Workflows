@@ -117,5 +117,43 @@ export function useGenerate() {
     }
   }
 
-  return { busy, job, error, run, runBatch, track: subscribe, closeStream }
+
+  /**
+   * 用一段文本直接出图（不绑定提示词记录）。
+   *
+   * 用途：从**已有图片**重新出一张 —— 图片记录里存了当次的提示词文本与参数
+   * （`prompt_params`），拿它重跑即可，不必先有提示词记录。
+   */
+  async function runText(
+    options: {
+      prompt: string
+      negative_prompt?: string
+      seed?: number
+      workflowPath: string
+      quality: string
+      orientation: string
+    },
+  ) {
+    error.value = ''
+    if (!options.workflowPath) {
+      error.value = '请先选择工作流'
+      return
+    }
+    try {
+      busy.value = true
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/run_text', {
+        prompt: options.prompt,
+        negative_prompt: options.negative_prompt ?? '',
+        workflow_path: options.workflowPath,
+        orientation: options.orientation,
+        quality: options.quality,
+        seed: options.seed ?? 0,
+      })
+      subscribe(result.job_id)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      busy.value = false
+    }
+  }
+  return { busy, job, error, run, runBatch, runText, track: subscribe, closeStream }
 }

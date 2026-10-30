@@ -31,11 +31,23 @@ const emit = defineEmits<{
   (e: 'update:index', value: number): void
   /** 收藏 / 删除等写操作后通知父组件刷新列表。 */
   (e: 'changed'): void
+  /** 用这张图的记录重新出图（旧版 🔄）。 */
+  (e: 'regenerate', item: HistoryItem): void
+  /** 跳到这条图片对应的提示词（旧版「跳到提示词」）。 */
+  (e: 'jump-to-prompt', promptId: number): void
 }>()
 
 const toast = useToast()
 
 const item = computed<HistoryItem | undefined>(() => props.items[props.index])
+
+/**
+ * 能不能重新出图：prompt_id 存在时走提示词出图；prompt_params.prompt 存在时
+ * 用记录下来的文本重跑（同步进来的图没有提示词关联，但参数还在）。
+ */
+const canRegenerate = computed(
+  () => !!(item.value?.prompt_id || (item.value?.prompt_params as Record<string, unknown> | null)?.prompt),
+)
 const hasPrev = computed(() => props.index > 0)
 const hasNext = computed(() => props.index < props.items.length - 1)
 
@@ -266,6 +278,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         ⚡
       </button>
       <button class="tool" title="下载原图" @click="download">⬇</button>
+      <button
+        v-if="canRegenerate"
+        class="tool"
+        title="用这张图的记录重新出图"
+        @click="emit('regenerate', item)"
+      >
+        🔄
+      </button>
+      <button
+        v-if="item.prompt_id"
+        class="tool"
+        title="跳到这条提示词"
+        @click="emit('jump-to-prompt', item.prompt_id!)"
+      >
+        ↗
+      </button>
       <button class="tool" :title="item.favorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
         {{ item.favorite ? '★' : '☆' }}
       </button>

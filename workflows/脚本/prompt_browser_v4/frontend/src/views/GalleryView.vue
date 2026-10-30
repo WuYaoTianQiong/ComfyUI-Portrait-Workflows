@@ -4,15 +4,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import Lightbox from '../components/Lightbox.vue'
 import CompareModal from '../components/CompareModal.vue'
+import Modal from '../components/Modal.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
-import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
+import { useGenerate } from '../composables/useGenerate'
+import { useSettings } from '../composables/useSettings'
+import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 
-const pageSize = 60
+const pageSize = ref(60)
+const sortBy = ref('newest')
 const page = ref(1)
 const search = ref('')
 const selectedTags = ref<number[]>([])
@@ -52,7 +56,8 @@ const historyKey = computed(() => [
 function historyFilterParams() {
   return {
     page: page.value,
-    page_size: pageSize,
+    page_size: pageSize.value,
+  sort: sortBy.value,
     tag_ids: selectedTags.value.join(','),
     tag_match: tagMatch.value,
     missing: onlyMissing.value ? 1 : undefined,
@@ -105,7 +110,7 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
 const total = computed(() => history.value?.total ?? 0)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 // ---------------- 选择与批量操作 ----------------
 
@@ -203,6 +208,122 @@ function openCompare() {
     return
   }
   compareOpen.value = true
+}
+
+/**
+ * 用这张图的提示词重新出图（旧版灯箱里的 🔄）。
+ *
+ * 走统一的出图入口 useGenerate.run —— 同样的工作流/画质/画幅设置，
+ * 进度照旧用 SSE 跟踪。
+ */
+const { workflowPath, quality, orientation: outOrientation } = useSettings()
+const { run, runText } = useGenerate()
+
+/**
+ * 用这张图的记录重新出图。
+ *
+ * 两条路：
+ * - 有 `prompt_id` → `/api/run`，出图关联回那条提示词
+ * - 没有 `prompt_id`（同步进来的图）→ 用 `prompt_params` 里存的文本与参数走
+ *   `/api/run_text`。记录里参数是全的（prompt / seed / model / 宽高），所以
+ *   「拿这张图再出一版」不需要先有提示词记录。
+ */
+function regenerate(target: HistoryItem) {
+  const params = (target.prompt_params ?? {}) as Record<string, unknown>
+  if (target.prompt_id) {
+    run(target.prompt_id, {
+      workflowPath: workflowPath.value,
+      quality: quality.value,
+      orientation: outOrientation.value,
+    })
+  } else if (typeof params.prompt === 'string' && params.prompt.trim()) {
+    runText({
+      prompt: params.prompt,
+      negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
+      seed: Number(params.seed ?? 0) || 0,
+      workflowPath: workflowPath.value,
+      quality: quality.value,
+      orientation: outOrientation.value,
+    })
+  } else {
+    toast.error('这张图没有可复用的出图参数')
+    return
+  }
+  lightboxIndex.value = null
+}
+/** 画廊向上层抛的事件：跨页跳转（跳到提示词）。 */
+const emit = defineEmits<{
+  (e: 'jump-to-prompt', promptId: number): void
+}>()
+
+/**
+ * 批量给选中的图片打标签 / 分类（旧版 bulkAddTag / bulkAddCategory）。
+ *
+ * 后端只有单张的关联端点（`/api/history/{id}/tags/{tag_id}`），批量就是循环调用；
+ * 逐张独立处理，某张失败不影响其它。
+ */
+const bulkOpen = ref(false)
+const bulkTagId = ref<number | null>(null)
+const bulkCatId = ref<number | null>(null)
+const bulkBusy = ref(false)
+
+const { data: bulkTags } = useQuery<{ tags: TagRow[] }>({
+  queryKey: ['tags', 'bulk'],
+  queryFn: () => apiGet('/api/tags', { count_scope: 'image' }),
+  enabled: computed(() => bulkOpen.value),
+})
+
+const { data: bulkCats } = useQuery<{ categories: CategoryNode[] }>({
+  queryKey: ['categories', 'bulk'],
+  queryFn: () => apiGet('/api/categories', { tree: true }),
+  enabled: computed(() => bulkOpen.value),
+})
+
+const bulkCatList = computed(() => {
+  const out: CategoryNode[] = []
+  const walk = (nodes: CategoryNode[]) => {
+    for (const n of nodes) {
+      out.push(n)
+      if (n.children?.length) walk(n.children)
+    }
+  }
+  walk(bulkCats.value?.categories ?? [])
+  return out
+})
+
+async function applyBulkTag() {
+  if (!bulkTagId.value) return
+  await applyBulk(`/api/history/{id}/tags/${bulkTagId.value}`, '标签')
+}
+
+async function applyBulkCat() {
+  if (!bulkCatId.value) return
+  await applyBulk(`/api/history/{id}/categories/${bulkCatId.value}`, '分类')
+}
+
+async function applyBulk(pathTemplate: string, label: string) {
+  bulkBusy.value = true
+  const ids = Array.from(selected.value)
+  let ok = 0
+  let failed = 0
+  for (const id of ids) {
+    try {
+      await apiPost(pathTemplate.replace('{id}', String(id)))
+      ok++
+    } catch {
+      failed++
+    }
+  }
+  bulkBusy.value = false
+  bulkOpen.value = false
+  bulkTagId.value = null
+  bulkCatId.value = null
+  if (failed) {
+    toast.error(`已给 ${ok} 张图片打上${label}，${failed} 张失败`)
+  } else {
+    toast.success(`已给 ${ok} 张图片打上${label}`)
+  }
+  queryClient.invalidateQueries({ queryKey: ['history'] })
 }
 const lightboxIndex = ref<number | null>(null)
 
@@ -423,6 +544,19 @@ function clearFilters() {
           <span v-if="isFetching" class="fetching">加载中…</span>
         </span>
         <span class="spacer" />
+        <select v-model="sortBy" class="mini-select" title="排序">
+          <option value="newest">最新优先</option>
+          <option value="oldest">最旧优先</option>
+          <option value="res_desc">分辨率 大→小</option>
+          <option value="res_asc">分辨率 小→大</option>
+          <option value="size_desc">体积 大→小</option>
+          <option value="size_asc">体积 小→大</option>
+        </select>
+        <select v-model.number="pageSize" class="mini-select" title="每页条数">
+          <option :value="30">30 / 页</option>
+          <option :value="60">60 / 页</option>
+          <option :value="120">120 / 页</option>
+        </select>
         <button
           class="btn btn-sm"
           :disabled="selectingAll"
@@ -454,6 +588,7 @@ function clearFilters() {
         <button class="btn btn-sm" @click="clearSelection">取消选择</button>
         <span class="spacer" />
         <button class="btn btn-sm" @click="openCompare">对比</button>
+        <button class="btn btn-sm" @click="bulkOpen = true">打标签/分类</button>
         <button class="btn btn-sm" @click="batchDownload">下载选中</button>
         <button class="btn btn-sm danger" :disabled="deleteMutation.isPending.value" @click="batchDelete">
           {{ deleteMutation.isPending.value ? '删除中…' : '删除选中' }}
@@ -511,6 +646,8 @@ function clearFilters() {
       :workflows="workflows"
       @update:index="lightboxIndex = $event"
       @close="lightboxIndex = null"
+      @regenerate="regenerate"
+      @jump-to-prompt="(id) => { lightboxIndex = null; emit('jump-to-prompt', id) }"
       @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
     />
 
@@ -519,6 +656,35 @@ function clearFilters() {
       :items="compareItems"
       @close="compareOpen = false"
     />
+
+    <Modal :open="bulkOpen" title="批量打标签 / 分类" @close="bulkOpen = false">
+      <div class="bulk-body">
+        <div class="bulk-row">
+          <span class="bulk-label">标签</span>
+          <select v-model="bulkTagId" class="bulk-select">
+            <option :value="null">选择标签…</option>
+            <option v-for="t in bulkTags?.tags ?? []" :key="t.id" :value="t.id">
+              {{ t.name }}
+            </option>
+          </select>
+          <button class="btn btn-sm" :disabled="bulkBusy || !bulkTagId" @click="applyBulkTag">
+            应用到选中的 {{ selectedCount }} 张
+          </button>
+        </div>
+        <div class="bulk-row">
+          <span class="bulk-label">分类</span>
+          <select v-model="bulkCatId" class="bulk-select">
+            <option :value="null">选择分类…</option>
+            <option v-for="cat in bulkCatList" :key="cat.id" :value="cat.id">
+              {{ cat.name }}
+            </option>
+          </select>
+          <button class="btn btn-sm" :disabled="bulkBusy || !bulkCatId" @click="applyBulkCat">
+            应用到选中的 {{ selectedCount }} 张
+          </button>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -561,6 +727,37 @@ function clearFilters() {
   gap: 4px;
 }
 
+.mini-select {
+  width: auto;
+  padding: 2px 6px;
+  font-size: var(--fs-xs);
+}
+
+
+.bulk-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap-lg);
+}
+
+.bulk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.bulk-label {
+  width: 40px;
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.bulk-select {
+  flex: 1;
+  min-width: 0;
+}
 .chip {
   font-size: var(--fs-xs);
   padding: 2px 8px;
