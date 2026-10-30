@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import { useToast } from '../composables/useToast'
 import type { JobSnapshot } from '../api/types'
 import { statusLabel } from '../utils/format'
 
@@ -28,6 +29,24 @@ watch(
   { immediate: true },
 )
 
+/** 停止所有进行中的任务（后端是定向取消，不会清空整个 ComfyUI 队列）。 */
+const toast = useToast()
+const queryClient = useQueryClient()
+const stopAll = useMutation({
+  mutationFn: () => apiPost<{ success: boolean; stopped: number }>('/api/batch_stop'),
+  onSuccess: (result) => {
+    toast.success(`已停止 ${result.stopped} 个任务`)
+    queryClient.invalidateQueries({ queryKey: ['jobs'] })
+  },
+  onError: (e) => {
+    toast.error(`停止失败：${e instanceof Error ? e.message : String(e)}`)
+  },
+})
+
+function stopAllRunning() {
+  if (!confirm('停止所有进行中的任务？已排队但还没开始的也会被取消。')) return
+  stopAll.mutate()
+}
 const onlyActive = ref(false)
 const expanded = ref<Set<number>>(new Set())
 
@@ -131,6 +150,14 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
       <span v-if="activeCount" class="badge">{{ activeCount }} 个进行中</span>
       <span v-if="isFetching" class="muted">加载中…</span>
       <span class="spacer" />
+      <button
+        class="btn btn-sm danger"
+        :disabled="!activeCount || stopAll.isPending.value"
+        title="停止所有进行中的任务"
+        @click="stopAllRunning"
+      >
+        {{ stopAll.isPending.value ? '停止中…' : '停止全部' }}
+      </button>
       <label class="check">
         <input v-model="onlyActive" type="checkbox" />
         <span>只看进行中</span>

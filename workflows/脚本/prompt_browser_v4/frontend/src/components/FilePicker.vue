@@ -65,6 +65,9 @@ watch(
 )
 const picked = ref<string[]>([...props.modelValue])
 
+/** 双击看原图：缩略图看不清细节（换脸要确认脸和姿势）。 */
+const previewPath = ref('')
+
 watch(
   () => props.open,
   (open) => {
@@ -90,6 +93,10 @@ function toggle(path: string) {
 function confirm() {
   emit('update:modelValue', picked.value)
   emit('close')
+}
+
+function imageUrl(path: string): string {
+  return `/api/fs/image?path=` + encodeURIComponent(path)
 }
 
 function thumbUrl(path: string): string {
@@ -145,6 +152,7 @@ function thumbUrl(path: string): string {
             :class="{ on: picked.includes(img.path) }"
             :title="img.name"
             @click="toggle(img.path)"
+            @dblclick="previewPath = img.path"
           >
             <img :src="thumbUrl(img.path)" :alt="img.name" loading="lazy" />
             <span class="name">{{ img.name }}</span>
@@ -161,6 +169,17 @@ function thumbUrl(path: string): string {
         </span>
     </template>
   </Modal>
+
+    <Modal
+      :open="!!previewPath"
+      title="预览"
+      width="min(880px, 94vw)"
+      @close="previewPath = ''"
+    >
+      <div class="preview-wrap">
+        <img :src="imageUrl(previewPath)" alt="预览" />
+      </div>
+    </Modal>
 </template>
 
 <style scoped>
@@ -277,6 +296,18 @@ function thumbUrl(path: string): string {
 .hint {
   font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.preview-wrap {
+  padding: var(--gap);
+  display: grid;
+  place-items: center;
+}
+
+.preview-wrap img {
+  max-width: 100%;
+  max-height: 74vh;
+  object-fit: contain;
 }
 
 .muted {

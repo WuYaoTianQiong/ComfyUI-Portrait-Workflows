@@ -9,6 +9,7 @@ import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
 import { FRAGMENT_TYPES } from '../constants'
+import { useToast } from '../composables/useToast'
 import type { CategoryNode, TagRow } from '../api/types'
 
 interface FragmentItem {
@@ -25,6 +26,7 @@ interface FragmentItem {
 const { workflowPath, quality, orientation } = useSettings()
 const { busy: generating, job: activeJob, error: generateError, track } = useGenerate()
 const { workflows } = useWorkflows()
+const toast = useToast()
 
 // ---------------- 碎片池 ----------------
 
@@ -246,6 +248,47 @@ async function saveTemplate() {
   }
 }
 
+
+/**
+ * 从旧前端的 localStorage 导入组合模板。
+ *
+ * 旧前端把模板存在 `composerTemplates_v4`（同源同端口，所以新前端读得到），
+ * 结构是 `{name, fragments: {类型: {prompt_id, content}}}`。
+ * 后端 `batch_import` 要的是 `{name, fragments: [{prompt_id, fragment_type}]}`，
+ * 这里做一次转换 —— 没有 prompt_id 的碎片建立不了引用，跳过。
+ */
+async function importLegacyTemplates() {
+  let legacy: Array<{ name?: string; fragments?: Record<string, { prompt_id?: number }> }> = []
+  try {
+    legacy = JSON.parse(localStorage.getItem('composerTemplates_v4') || '[]')
+  } catch {
+    legacy = []
+  }
+  if (!Array.isArray(legacy) || !legacy.length) {
+    toast.info('没有找到旧版模板数据（localStorage 里没有 composerTemplates_v4）')
+    return
+  }
+  const items = legacy
+    .map((tpl) => ({
+      name: tpl.name ?? '(未命名)',
+      fragments: Object.entries(tpl.fragments ?? {})
+        .filter(([, frag]) => frag && frag.prompt_id)
+        .map(([type, frag]) => ({ prompt_id: frag.prompt_id, fragment_type: type })),
+    }))
+    .filter((tpl) => tpl.fragments.length)
+  if (!items.length) {
+    toast.info('旧模板里没有可导入的碎片引用（都需要 prompt_id）')
+    return
+  }
+  try {
+    const result = await apiPost<{ imported: number }>('/api/templates/batch_import', { items })
+    localStorage.removeItem('composerTemplates_v4')
+    toast.success(`已迁移 ${result.imported} 个旧模板`)
+    queryClient.invalidateQueries({ queryKey: ['templates'] })
+  } catch (e) {
+    toast.error(`导入失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 async function deleteTemplate() {
   const id = selectedTemplateId.value
   if (!id) return
@@ -476,6 +519,13 @@ function toggleTag(id: number) {
         <div class="template-row">
           <button class="btn btn-sm" :disabled="!selectedTemplateId" @click="applyTemplate">套用</button>
           <button class="btn btn-sm" @click="saveTemplate">另存为</button>
+          <button
+            class="btn btn-sm"
+            title="把旧前端存在 localStorage 里的模板导入到数据库"
+            @click="importLegacyTemplates"
+          >
+            导入旧模板
+          </button>
           <button
             class="btn btn-sm danger"
             :disabled="!selectedTemplateId"

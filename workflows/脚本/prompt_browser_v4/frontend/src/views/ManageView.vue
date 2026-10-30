@@ -160,6 +160,17 @@ const newFragType = ref<string>('人物面部')
 const newFragName = ref('')
 const newFragContent = ref('')
 
+
+/** 清理缩略图缓存（缩略图按 路径+mtime+尺寸 做键，下次访问自动重建）。 */
+const clearThumbs = useMutation({
+  mutationFn: () => apiPost<{ success: boolean; deleted: number }>('/api/thumbnail/clear'),
+  onSuccess: (result) => {
+    toast.success(`已清理 ${result.deleted} 个缩略图缓存文件`)
+  },
+  onError: (e) => {
+    toast.error(`清理失败：${e instanceof Error ? e.message : String(e)}`)
+  },
+})
 async function createFragment() {
   if (!newFragContent.value.trim()) {
     toast.error('碎片内容不能为空')
@@ -243,6 +254,15 @@ async function removeItem(kind: Panel, id: number, name: string) {
       </button>
       <button class="btn btn-sm" :class="{ active: panel === 'fragment' }" @click="panel = 'fragment'">
         碎片库
+      </button>
+      <span class="spacer" />
+      <button
+        class="btn btn-sm"
+        :disabled="clearThumbs.isPending.value"
+        title="删除所有缩略图缓存文件，下次访问时自动重建"
+        @click="clearThumbs.mutate()"
+      >
+        {{ clearThumbs.isPending.value ? '清理中…' : '清理缩略图缓存' }}
       </button>
     </div>
 

@@ -1,4 +1,5 @@
 import { computed, watch } from 'vue'
+import type { Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet } from '../api/client'
@@ -35,4 +36,26 @@ export function useWorkflows() {
   return {
     workflows: computed<WorkflowRow[]>(() => data.value?.workflows ?? []),
   }
+}
+
+export interface WorkflowValidation {
+  valid: boolean
+  error?: string
+  name?: string
+}
+
+/**
+ * 校验当前选中的工作流文件。
+ *
+ * 后端只检查格式（API 格式或 UI 格式），不做节点类型检查 —— 换脸页另有
+ * 专门的节点映射探测。这里提前拦的是"文件损坏/格式不对"这类低级错误，
+ * 免得提交后才报错。
+ */
+export function useWorkflowValidation(path: Ref<string>) {
+  return useQuery<WorkflowValidation>({
+    queryKey: computed(() => ['validate-workflow', path.value]),
+    queryFn: () => apiGet('/api/validate_workflow', { path: path.value }),
+    enabled: computed(() => !!path.value),
+    staleTime: 30_000,
+  })
 }

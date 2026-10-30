@@ -9,8 +9,9 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
-import { useWorkflows } from '../composables/useWorkflows'
+import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
 import { statusLabel } from '../utils/format'
+import RunTextPanel from '../components/RunTextPanel.vue'
 import type { CategoryNode, PromptDetail, PromptListPage, TagRow } from '../api/types'
 
 const { workflowPath, quality, orientation } = useSettings()
@@ -75,6 +76,8 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 })
 
 const { workflows } = useWorkflows()
+const textPanelOpen = ref(false)
+const { data: wfValidation } = useWorkflowValidation(workflowPath)
 
 function toggleOrientation() {
   orientation.value = orientation.value === 'portrait' ? 'landscape' : 'portrait'
@@ -530,10 +533,20 @@ function clearFilters() {
             {{ orientation === 'portrait' ? '📱 竖' : '🖥️ 横' }}
           </button>
           <span class="spacer" />
-          <span v-if="generateError" class="gen-error">{{ generateError }}</span>
-          <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
-            {{ statusLabel(activeJob.status) }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
+            <span v-if="wfValidation && !wfValidation.valid" class="gen-error">
+              工作流不可用：{{ wfValidation.error }}
+            </span>
+            <span v-else-if="generateError" class="gen-error">{{ generateError }}</span>
+          <span v-else-if="activeJob" class="job-state" :class="activeJob?.status">
+            {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
           </span>
+          <button
+            class="btn btn-sm"
+            title="临时改一下提示词直接出图，不写回提示词库"
+            @click="textPanelOpen = true"
+          >
+            ✎ 改文本跑
+          </button>
           <button class="btn btn-sm primary" :disabled="generating || !workflowPath" @click="generate">
             {{ generating ? '生成中…' : '🚀 出图' }}
           </button>
@@ -634,6 +647,13 @@ function clearFilters() {
       </div>
     </section>
     <MissingRunPanel :open="missingOpen" @close="missingOpen = false" />
+    <RunTextPanel
+      :open="textPanelOpen"
+      :prompt="draft?.prompt ?? ''"
+      :negative-prompt="draft?.negative_prompt ?? ''"
+      :prompt-id="draft?.id ?? null"
+      @close="textPanelOpen = false"
+    />
   </div>
 </template>
 
