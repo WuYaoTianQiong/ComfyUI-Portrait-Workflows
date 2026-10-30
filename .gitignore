@@ -149,3 +149,10 @@ workflows/脚本/prompt_browser_v4/logs/
 workflows/脚本/prompt_browser_v4/_pb_*.log
 workflows/.arts/
 
+# 实验/验证产物：构图公式验证图（单张 2~3MB）、IDE 索引与截图目录
+workflows/验证图/
+workflows/.merkle-snapshot.json
+workflows/.codeartsdoer/
+.screenshots/
+
+

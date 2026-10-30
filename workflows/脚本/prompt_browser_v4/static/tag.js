@@ -28,7 +28,17 @@ function renderTagSelector(tags) {
   const list = document.getElementById("tagSelectorList");
   if (!list) return;
 
-  list.innerHTML = tags.map(t => {
+  // 只展示"确实挂在提示词上"的标签：库里有 83 个历史孤儿标签，
+  // 全列出来会让下拉变成一屏无用项。已选中的保留，否则取消不掉。
+  const visible = tags.filter(
+    t => (t.prompt_count || 0) > 0 || _selectedTags.has(t.id)
+  );
+  if (!visible.length) {
+    list.innerHTML = '<div class="dropdown-empty">暂无带提示词的标签</div>';
+    return;
+  }
+
+  list.innerHTML = visible.map(t => {
     const id = t.id;
     const name = window.escHtml(t.name);
     const color = t.color || '#888';

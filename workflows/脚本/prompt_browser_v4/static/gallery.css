@@ -949,6 +949,11 @@
   color: #ffffff;
   border-color: var(--c, #5b8fb9);
 }
+.gallery-tag-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
 
 /* 批量操作 */
 .gallery-bulk {

@@ -427,6 +427,13 @@
   pointer-events: none;
 }
 
+/* 下拉列表为空时的占位（如标签全部未使用） */
+.dropdown-empty {
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .dropdown-item:hover {
   background: var(--panel-hover);
 }

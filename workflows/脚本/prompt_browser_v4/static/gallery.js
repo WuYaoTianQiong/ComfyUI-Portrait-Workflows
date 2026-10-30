@@ -453,11 +453,19 @@ window.loadGallerySidebar = async function() {
     window._galleryTags = (td && td.tags) || [];
     const cloud = document.getElementById("galleryTagCloud");
     if (cloud) {
-      cloud.innerHTML = window._galleryTags.map(t => {
-        // 背景用标签色（钢蓝/自定义色），文字为白色
-        const tagColor = t.color || "#5b8fb9";
-        return '<span class="gallery-tag' + (window._galleryTagIds.indexOf(t.id) >= 0 ? " active" : "") + '" data-tag="' + t.id + '" style="--c:' + tagColor + '" onclick="window.onGalleryTagClick(' + t.id + ')">' + window.escHtml(t.name) + ' <i>' + (t.prompt_count || 0) + '</i></span>';
-      }).join("");
+      // 标签云只展示"确实有图"的标签：库里 178 个标签有 83 个是历史遗留下来、
+      // 一张图都没挂的孤儿，全铺出来只会把有用的标签淹掉。
+      // 已选中的标签即使计数为 0 也要留着，否则用户取消不掉。
+      const visible = window._galleryTags.filter(
+        t => (t.prompt_count || 0) > 0 || window._galleryTagIds.indexOf(t.id) >= 0
+      );
+      cloud.innerHTML = visible.length
+        ? visible.map(t => {
+            // 背景用标签色（钢蓝/自定义色），文字为白色
+            const tagColor = t.color || "#5b8fb9";
+            return '<span class="gallery-tag' + (window._galleryTagIds.indexOf(t.id) >= 0 ? " active" : "") + '" data-tag="' + t.id + '" style="--c:' + tagColor + '" onclick="window.onGalleryTagClick(' + t.id + ')">' + window.escHtml(t.name) + ' <i>' + (t.prompt_count || 0) + '</i></span>';
+          }).join("")
+        : '<div class="gallery-tag-empty">暂无带图片的标签</div>';
     }
     const bc = document.getElementById("galleryBulkCat");
     if (bc) {
