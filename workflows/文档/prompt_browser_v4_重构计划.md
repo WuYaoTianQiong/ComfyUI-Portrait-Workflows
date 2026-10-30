@@ -154,6 +154,12 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 - **做法**：`models.py` 里的 `init_db` 手写 `_migrate_column` 序列 → 改为 `playhouse.migrate` + `schema_version` 表 + 有序迁移列表 `MIGRATIONS = [(1, fn1), (2, fn2), ...]`
 - **验收**：全新空库能一次建到位（`conftest._assert_schema_ready` 通过）；老库从 v0 顺序升级到最新；重复启动幂等
 - **回滚**：保留旧 `init_db` 作为 `legacy_init_db()` 一版
+- **状态**：✅ 2026-10-30 完成（采用自研轻量框架，未引入 `playhouse.migrate` —— 它只解决"加/删列"语法糖，事务与版本记录仍要自己写，而现有迁移全是手写 SQL，包一层反而多一个依赖面）
+  - `services/migrations.py`：`schema_version` 表 + `apply_migrations()`，每个迁移在事务内执行，成功才写版本；失败整体回滚、下次启动重试
+  - `models.py`：`init_db` 拆成 `_ensure_tables()`（幂等建表，不进迁移）+ `MIGRATIONS`（有序列表）。v4.x 时期散落的列/索引迁移整体固化为 **v1**，行为逐行等价
+  - 防"版本号新、结构旧"：v1 末尾 `_assert_columns()` 显式校验 11 个关键列，缺列则抛错回滚、不记录版本
+  - 测试：新增 `tests/test_migrations.py` 4 条（版本记录 / 幂等 / 部分唯一索引存在 / 失败回滚且不记版本），pytest **51 passed**
+  - 实测：生产库启动日志 `应用迁移 v1`，`schema_version=[(1, '2026-10-30 08:42:44', ...)]`，272 行 / 存活 10 / 部分唯一索引完好；二次启动不再重复应用
 
 ### S1-2 标签收敛为单表 + 多态关联
 - **做法**
@@ -246,7 +252,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S0-7 gitignore / DB 停止跟踪
 
 ### 阶段 1
-- [ ] S1-1 迁移框架化
+- [x] S1-1 迁移框架化
 - [ ] S1-2 标签收敛
 - [ ] S1-3 三态可见性
 - [ ] S1-4 service 层 + Pydantic

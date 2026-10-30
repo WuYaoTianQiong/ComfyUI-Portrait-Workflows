@@ -398,26 +398,58 @@ def _migrate_genhistory_unique_constraint(database):
         print(f"[migrate] 创建部分唯一索引（可能已存在）: {e}")
 
 
-def init_db():
-    """确保表存在，并迁移新列（兼容 v3 旧库）。"""
-    db.connect()
+def _ensure_tables():
+    """建表（幂等，每次启动都执行）。
 
+    建表不进迁移：新增模型表不需要写一条新迁移，`safe=True` 会静默跳过已存在的表。
+    顺序按外键依赖：Prompt/Category 必须先于各自的关联表。
+    """
     db.create_tables([Prompt, GenJob, GenHistory], safe=True)
+    db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
+    db.create_tables([ImageCategory, ImageTag], safe=True)
+    db.create_tables([Template, TemplateFragment], safe=True)
+    db.create_tables([Fragment], safe=True)
 
+
+# v1 迁移完成后必须存在的列：迁移里所有 `_migrate_column` 都靠"ALTER 报错就算已存在"
+# 来判断，失败和已存在无法区分。这里做一次显式校验，缺列就让迁移整体回滚、不记录
+# 版本号，下次启动重试，而不是留下一个"版本号是新的、结构是旧的"的库。
+_V1_REQUIRED_COLUMNS = {
+    "gen_history": {"prompt_params", "favorite", "captured_at", "is_deleted", "missing_since"},
+    "prompts": {"is_favorite", "is_pinned", "usage_count", "last_used_at", "rating"},
+    "fragments": {"name", "tags", "updated_at"},
+}
+
+
+def _assert_columns(database) -> None:
+    missing = {}
+    for table, expected in _V1_REQUIRED_COLUMNS.items():
+        actual = {row[1] for row in database.execute_sql(f"PRAGMA table_info({table})")}
+        lack = expected - actual
+        if lack:
+            missing[table] = sorted(lack)
+    if missing:
+        raise RuntimeError(f"迁移后仍缺少列，已回滚：{missing}")
+
+
+def _migrate_v1_baseline(database):
+    """v1：把 v4.x 时期散落在 init_db 里的列/索引迁移固化成一个版本。
+
+    内容与重构前逐行等价，只是从"每次启动都跑"改成"只跑一次"。
+    """
     # 唯一约束迁移放在建表之后：全新库上先建索引会因表不存在而失败，
     # 之后 create_tables(safe=True) 又会静默跳过，导致新库永久缺少这个部分唯一索引，
     # 所有 ON CONFLICT 写入（任务出图 / ComfyUI 同步）都会抛
     # "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint" 并被 except 吞掉。
     # GenHistory.Meta.indexes 为空，peewee 不会创建任何旧索引，因此挪到建表之后是安全的。
-    _migrate_genhistory_unique_constraint(db)
+    _migrate_genhistory_unique_constraint(database)
 
     # 迁移 GenHistory 新列
-    _migrate_column(db, "gen_history", "prompt_params",
-                     "prompt_params TEXT")
-    _migrate_column(db, "gen_history", "favorite",
-                     "favorite BOOLEAN NOT NULL DEFAULT 0")
-    captured_added = _migrate_column(db, "gen_history", "captured_at",
-                                      "captured_at DATETIME")
+    _migrate_column(database, "gen_history", "prompt_params", "prompt_params TEXT")
+    _migrate_column(database, "gen_history", "favorite",
+                    "favorite BOOLEAN NOT NULL DEFAULT 0")
+    captured_added = _migrate_column(database, "gen_history", "captured_at",
+                                     "captured_at DATETIME")
     if captured_added:
         # 只在列刚创建时回填一次；文件缺失的行保持 NULL，排序时回退 created_at
         try:
@@ -426,42 +458,41 @@ def init_db():
         except Exception as exc:
             print(f"[migrate] 回填 captured_at 失败: {exc}")
 
-    # ======== Phase 1: 迁移新字段 ========
-    _migrate_column(db, "prompts", "is_favorite",
-                     "is_favorite BOOLEAN NOT NULL DEFAULT 0")
-    _migrate_column(db, "prompts", "is_pinned",
-                     "is_pinned BOOLEAN NOT NULL DEFAULT 0")
-    _migrate_column(db, "prompts", "usage_count",
-                     "usage_count INTEGER NOT NULL DEFAULT 0")
-    _migrate_column(db, "prompts", "last_used_at",
-                     "last_used_at DATETIME")
-    _migrate_column(db, "prompts", "rating",
-                     "rating INTEGER")
-    # ==========================================
+    # Phase 1 字段
+    _migrate_column(database, "prompts", "is_favorite",
+                    "is_favorite BOOLEAN NOT NULL DEFAULT 0")
+    _migrate_column(database, "prompts", "is_pinned",
+                    "is_pinned BOOLEAN NOT NULL DEFAULT 0")
+    _migrate_column(database, "prompts", "usage_count",
+                    "usage_count INTEGER NOT NULL DEFAULT 0")
+    _migrate_column(database, "prompts", "last_used_at", "last_used_at DATETIME")
+    _migrate_column(database, "prompts", "rating", "rating INTEGER")
 
-    # ======== Phase 2: 创建新表 ========
-    db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
-    # ======== Phase 5: 图片分类/标签表 ========
-    db.create_tables([ImageCategory, ImageTag], safe=True)
-    # ==========================================
-
-    # 迁移：软删除字段
-    _migrate_column(db, "gen_history", "is_deleted",
+    # 软删除与缺失派生列
+    _migrate_column(database, "gen_history", "is_deleted",
                     "is_deleted BOOLEAN NOT NULL DEFAULT 0")
-    # 迁移：文件缺失派生列（可自愈，不参与唯一索引，也不影响 is_deleted 语义）
-    _migrate_column(db, "gen_history", "missing_since", "missing_since DATETIME")
+    _migrate_column(database, "gen_history", "missing_since", "missing_since DATETIME")
 
-    # ======== Phase 3: 模板表 ========
-    db.create_tables([Template, TemplateFragment], safe=True)
-    # ==========================================
+    # 碎片库新列（兼容旧表）
+    _migrate_column(database, "fragments", "name", "name TEXT NOT NULL DEFAULT ''")
+    _migrate_column(database, "fragments", "tags", "tags TEXT NOT NULL DEFAULT ''")
+    _migrate_column(database, "fragments", "updated_at", "updated_at DATETIME")
 
-    # ======== Phase 4: 碎片库 ========
-    db.create_tables([Fragment], safe=True)
-    # 迁移碎片库新列（兼容旧表）
-    _migrate_column(db, "fragments", "name", "name TEXT NOT NULL DEFAULT ''")
-    _migrate_column(db, "fragments", "tags", "tags TEXT NOT NULL DEFAULT ''")
-    _migrate_column(db, "fragments", "updated_at",
-                     "updated_at DATETIME")
-    # ==========================================
+    _assert_columns(database)
 
+
+# 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
+MIGRATIONS = [
+    (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
+        "is_deleted/missing_since 等列", _migrate_v1_baseline),
+]
+
+
+def init_db():
+    """确保表存在，并按版本号执行未应用的迁移。"""
+    from services.migrations import apply_migrations
+
+    db.connect()
+    _ensure_tables()
+    apply_migrations(db, MIGRATIONS)
     db.close()
