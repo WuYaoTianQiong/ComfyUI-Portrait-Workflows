@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { apiGet, thumbnailUrl } from '../api/client'
+import Lightbox from '../components/Lightbox.vue'
+import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
+import { formatSize, resolution } from '../utils/format'
 
 const pageSize = 60
 const page = ref(1)
@@ -11,6 +13,8 @@ const search = ref('')
 const selectedTags = ref<number[]>([])
 const tagMatch = ref<'all' | 'any'>('all')
 const onlyMissing = ref(false)
+
+const queryClient = useQueryClient()
 
 /**
  * 列表状态全部收敛成"一个缓存键"。
@@ -65,6 +69,70 @@ const visibleTags = computed<TagRow[]>(() =>
   ),
 )
 
+// ---------------- 选择与批量操作 ----------------
+
+const selected = ref<Set<number>>(new Set())
+const selectedCount = computed(() => selected.value.size)
+const allOnPageSelected = computed(
+  () => items.value.length > 0 && items.value.every((it) => selected.value.has(it.id)),
+)
+
+function toggleSelect(id: number) {
+  if (selected.value.has(id)) selected.value.delete(id)
+  else selected.value.add(id)
+  // 触发响应式：Set 的增删不会自动让 size 计算属性更新
+  selected.value = new Set(selected.value)
+}
+
+function selectAllOnPage() {
+  selected.value = new Set(items.value.map((it) => it.id))
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+const deleteMutation = useMutation({
+  mutationFn: (ids: number[]) =>
+    apiPost<{ success: boolean; deleted: number }>('/api/history/batch_delete', { ids }),
+  onSuccess: () => {
+    clearSelection()
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  },
+})
+
+const favoriteMutation = useMutation({
+  mutationFn: (id: number) => apiPost<{ success: boolean; favorite: boolean }>(`/api/history/${id}/favorite`),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['history'] }),
+})
+
+function batchDelete() {
+  const ids = Array.from(selected.value)
+  if (!ids.length) return
+  if (!confirm(`确定删除选中的 ${ids.length} 张图片记录吗？（只标记删除，不动磁盘文件）`)) return
+  deleteMutation.mutate(ids)
+}
+
+function batchDownload() {
+  const targets = items.value.filter((it) => selected.value.has(it.id))
+  if (!targets.length) return
+  // 浏览器对并发下载有限制，逐个触发并留间隔
+  targets.forEach((item, i) => {
+    setTimeout(() => window.open(`/api/history/${item.id}/download`, '_blank'), i * 400)
+  })
+}
+
+// ---------------- 灯箱 ----------------
+
+const lightboxIndex = ref<number | null>(null)
+const lightboxOpen = computed(() => lightboxIndex.value !== null)
+
+function openLightbox(index: number) {
+  lightboxIndex.value = index
+}
+
+// ---------------- 筛选 ----------------
+
 function toggleTag(id: number) {
   const idx = selectedTags.value.indexOf(id)
   if (idx >= 0) selectedTags.value.splice(idx, 1)
@@ -89,17 +157,6 @@ function clearFilters() {
   onlyMissing.value = false
   search.value = ''
   page.value = 1
-}
-
-function formatSize(bytes?: number): string {
-  if (!bytes) return ''
-  return bytes >= 1024 * 1024
-    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
-    : `${Math.round(bytes / 1024)} KB`
-}
-
-function resolution(item: HistoryItem): string {
-  return item.width && item.height ? `${item.width}×${item.height}` : ''
 }
 </script>
 
@@ -185,19 +242,50 @@ function resolution(item: HistoryItem): string {
         </div>
       </div>
 
+      <div v-if="selectedCount" class="bulk">
+        <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 张</span>
+        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
+        <button class="btn btn-sm" @click="clearSelection">取消选择</button>
+        <span class="spacer" />
+        <button class="btn btn-sm" @click="batchDownload">下载选中</button>
+        <button class="btn btn-sm danger" :disabled="deleteMutation.isPending.value" @click="batchDelete">
+          {{ deleteMutation.isPending.value ? '删除中…' : '删除选中' }}
+        </button>
+      </div>
+
       <div v-if="isError" class="error">加载失败：{{ error?.message }}</div>
 
       <div v-else class="grid">
         <article
-          v-for="item in items"
+          v-for="(item, idx) in items"
           :key="item.id"
           class="card"
-          :class="{ missing: item.missing }"
+          :class="{ missing: item.missing, picked: selected.has(item.id) }"
           :title="item.missing ? '磁盘上找不到这个文件（勾选「只看文件缺失」可批量清理记录）' : item.filename"
+          @click="openLightbox(idx)"
         >
           <img :src="thumbnailUrl(item)" :alt="item.filename" loading="lazy" />
+
+          <button
+            class="pick"
+            :class="{ on: selected.has(item.id) }"
+            :title="selected.has(item.id) ? '取消选择' : '选择'"
+            @click.stop="toggleSelect(item.id)"
+          >
+            ✓
+          </button>
+
+          <button
+            class="fav"
+            :class="{ on: item.favorite }"
+            title="收藏"
+            @click.stop="favoriteMutation.mutate(item.id)"
+          >
+            {{ item.favorite ? '★' : '☆' }}
+          </button>
+
           <span v-if="item.missing" class="badge-missing">🚫 文件缺失</span>
-          <span v-if="item.favorite" class="badge-fav">★</span>
+
           <div class="meta">
             <span>{{ resolution(item) }}</span>
             <span>{{ formatSize(item.file_size) }}</span>
@@ -208,6 +296,14 @@ function resolution(item: HistoryItem): string {
         <div v-if="!items.length && !isFetching" class="empty big">没有符合条件的图片</div>
       </div>
     </section>
+
+    <Lightbox
+      v-if="lightboxOpen"
+      :items="items"
+      :index="lightboxIndex!"
+      @update:index="lightboxIndex = $event"
+      @close="lightboxIndex = null"
+    />
   </div>
 </template>
 
@@ -351,6 +447,29 @@ function resolution(item: HistoryItem): string {
   text-align: center;
 }
 
+.bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-lg);
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.bulk-count b {
+  color: var(--primary);
+}
+
+.btn.danger {
+  border-color: var(--danger);
+  color: #fecaca;
+}
+
+.btn.danger:hover {
+  background: var(--danger-soft);
+}
+
 .grid {
   flex: 1;
   overflow-y: auto;
@@ -377,6 +496,11 @@ function resolution(item: HistoryItem): string {
   border-color: var(--border-strong);
 }
 
+.card.picked {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
 .card img {
   display: block;
   width: 100%;
@@ -391,6 +515,57 @@ function resolution(item: HistoryItem): string {
   filter: grayscale(1);
 }
 
+.pick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: rgba(22, 27, 34, 0.8);
+  color: transparent;
+  font-size: var(--fs-xs);
+  opacity: 0;
+  transition: 0.12s;
+}
+
+.card:hover .pick,
+.pick.on {
+  opacity: 1;
+}
+
+.pick.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.fav {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  opacity: 0;
+  transition: 0.12s;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.card:hover .fav,
+.fav.on {
+  opacity: 1;
+}
+
+.fav.on {
+  color: #fbbf24;
+}
+
 .badge-missing {
   position: absolute;
   top: 8px;
@@ -403,15 +578,6 @@ function resolution(item: HistoryItem): string {
   font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
-}
-
-.badge-fav {
-  position: absolute;
-  top: 6px;
-  left: 8px;
-  color: #fbbf24;
-  font-size: var(--fs-lg);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 .meta {
