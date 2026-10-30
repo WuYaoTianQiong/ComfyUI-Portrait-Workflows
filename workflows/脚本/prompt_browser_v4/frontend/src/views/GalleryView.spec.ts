@@ -8,6 +8,9 @@ import { useToast } from '../composables/useToast'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
+    if (path.includes('/api/history/ids')) {
+      return { ids: [1, 2, 3], total: 3 }
+    }
     if (path.includes('/api/history/facets')) {
       return {
         source: { local: 2, comfyui_sync: 0 },
@@ -128,5 +131,19 @@ describe('GalleryView 清理失效', () => {
       .mock.calls.filter((c) => String(c[0]).includes('/api/history') && !String(c[0]).includes('facets'))
     const last = historyCalls[historyCalls.length - 1]
     expect((last[1] as Record<string, unknown>)?.source).toBe('')
+  })
+  it('「全选全部」跨页拉取当前筛选下的所有 id', async () => {
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('全选全部'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    const idsCalls = vi
+      .mocked(apiGet)
+      .mock.calls.filter((c) => String(c[0]).includes('/api/history/ids'))
+    expect(idsCalls.length).toBe(1)
   })
 })

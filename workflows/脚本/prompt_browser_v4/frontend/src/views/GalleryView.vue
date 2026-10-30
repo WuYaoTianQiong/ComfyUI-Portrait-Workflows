@@ -45,6 +45,21 @@ const historyKey = computed(() => [
   orientation.value,
 ])
 
+/** 列表与「全选全部」共用的筛选参数（后者不需要分页参数）。 */
+function historyFilterParams() {
+  return {
+    page: page.value,
+    page_size: pageSize,
+    tag_ids: selectedTags.value.join(','),
+    tag_match: tagMatch.value,
+    missing: onlyMissing.value ? 1 : undefined,
+    search: search.value.trim(),
+    source: source.value,
+    date: dateFacet.value,
+    model: model.value,
+    orientation: orientation.value,
+  }
+}
 /** 列表与分面共用的筛选参数（不含分面维度自身 —— 后端就是按这个口径算的）。 */
 const facetScope = computed(() => ({
   search: search.value.trim(),
@@ -60,19 +75,7 @@ const {
   error,
 } = useQuery<HistoryPage>({
   queryKey: historyKey,
-  queryFn: () =>
-    apiGet<HistoryPage>('/api/history', {
-      page: page.value,
-      page_size: pageSize,
-      tag_ids: selectedTags.value.join(','),
-      tag_match: tagMatch.value,
-      missing: onlyMissing.value ? 1 : undefined,
-      search: search.value.trim(),
-      source: source.value,
-      date: dateFacet.value,
-      model: model.value,
-      orientation: orientation.value,
-    }),
+  queryFn: () => apiGet<HistoryPage>('/api/history', historyFilterParams()),
   // 翻页时保留上一页内容，避免整页闪烁
   placeholderData: (prev) => prev,
 })
@@ -104,6 +107,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 // ---------------- 选择与批量操作 ----------------
 
 const selected = ref<Set<number>>(new Set())
+const selectingAll = ref(false)
 const selectedCount = computed(() => selected.value.size)
 
 function toggleSelect(id: number) {
@@ -113,6 +117,27 @@ function toggleSelect(id: number) {
   selected.value = new Set(selected.value)
 }
 
+/**
+ * 全选全部：跨页把当前筛选下的所有记录都选上。
+ *
+ * 后端 `/api/history/ids` 不分页，返回当前筛选下的全部 id —— 旧前端的"全选全部"
+ * 就是这个语义，新前端之前只支持"全选本页"，批量删除时得翻页累加。
+ */
+async function selectAllMatching() {
+  selectingAll.value = true
+  try {
+    const data = await apiGet<{ ids: number[]; total: number }>(
+      '/api/history/ids',
+      historyFilterParams(),
+    )
+    selected.value = new Set(data.ids)
+    if (!data.ids.length) toast.info('当前筛选下没有可选的图片')
+  } catch (e) {
+    toast.error(`全选失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    selectingAll.value = false
+  }
+}
 function selectAllOnPage() {
   selected.value = new Set(items.value.map((it) => it.id))
 }
@@ -369,6 +394,14 @@ function clearFilters() {
           <span v-if="isFetching" class="fetching">加载中…</span>
         </span>
         <span class="spacer" />
+        <button
+          class="btn btn-sm"
+          :disabled="selectingAll"
+          title="选中当前筛选下的全部图片（跨页）"
+          @click="selectAllMatching"
+        >
+          全选全部 {{ total }} 张
+        </button>
         <button
           class="btn btn-sm"
           :disabled="cleaning"
