@@ -49,6 +49,7 @@ _TABLES = [
     # 顺序 = 先删子表再删父表，否则外键约束会拦住（template_fragments → prompts/templates）
     "prompt_categories",
     "prompt_tags",
+    "entity_tags",
     "image_categories",
     "image_tags",
     "template_fragments",

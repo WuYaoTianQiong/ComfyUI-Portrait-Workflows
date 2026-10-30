@@ -182,6 +182,25 @@ class ImageTag(BaseModel):
         )
 
 
+class EntityTag(BaseModel):
+    """多态标签关联：`entity_type ∈ {prompt, image}`，`entity_id` 指向对应表主键。
+
+    取代 prompt_tags / image_tags 两张结构完全相同的平行表 —— 它们让每个
+    "按标签取实体"的查询都要写两遍 UNION，也让计数、去重、迁移各维护一套。
+    旧表暂时保留（只读兼容），数据以 entity_tags 为准。
+    """
+    id = AutoField()
+    entity_type = TextField()
+    entity_id = IntegerField()
+    tag = ForeignKeyField(Tag, backref="entity_tags")
+
+    class Meta:
+        table_name = "entity_tags"
+        indexes = (
+            (("entity_type", "entity_id", "tag"), True),
+        )
+
+
 def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
     """将来源提示词【当前】的分类/标签【快照拷贝】到图片。
     仅新增、绝不删除（尊重用户后续手动调整）。
@@ -190,8 +209,12 @@ def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
     if gh is None or not gh.prompt_id:
         return 0
     if not force:
-        existing = (ImageCategory.select().where(ImageCategory.image == history_id).count()
-                    + ImageTag.select().where(ImageTag.image == history_id).count())
+        existing = (
+            ImageCategory.select().where(ImageCategory.image == history_id).count()
+            + EntityTag.select()
+            .where((EntityTag.entity_type == "image") & (EntityTag.entity_id == history_id))
+            .count()
+        )
         if existing > 0:
             return 0
     added = 0
@@ -199,8 +222,12 @@ def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
         _, created = ImageCategory.get_or_create(image=history_id, category=pc.category)
         if created:
             added += 1
-    for pt in PromptTag.select().where(PromptTag.prompt == gh.prompt_id):
-        _, created = ImageTag.get_or_create(image=history_id, tag=pt.tag)
+    for et in EntityTag.select().where(
+        (EntityTag.entity_type == "prompt") & (EntityTag.entity_id == gh.prompt_id)
+    ):
+        _, created = EntityTag.get_or_create(
+            entity_type="image", entity_id=history_id, tag=et.tag
+        )
         if created:
             added += 1
     return added
@@ -406,7 +433,7 @@ def _ensure_tables():
     """
     db.create_tables([Prompt, GenJob, GenHistory], safe=True)
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
-    db.create_tables([ImageCategory, ImageTag], safe=True)
+    db.create_tables([ImageCategory, ImageTag, EntityTag], safe=True)
     db.create_tables([Template, TemplateFragment], safe=True)
     db.create_tables([Fragment], safe=True)
 
@@ -481,10 +508,47 @@ def _migrate_v1_baseline(database):
     _assert_columns(database)
 
 
+def _migrate_v2_entity_tags(database):
+    """v2：标签体系收敛到 entity_tags。
+
+    1) 把 prompt_tags / image_tags 的存量导入（线上当前为 0，老库可能有）；
+    2) 把 `prompts.tags` 的逗号文本解析成标签并写入关联 —— 线上 315 条提示词
+       有标签文本、关联表却是 0 条，这一步才是让标签筛选/计数恢复可用的关键；
+    3) 按 entity_tags 重算 usage_count。
+
+    只写 entity_tags，不动旧表与 prompts.tags 文本，随时可以整体回退。
+    """
+    from services.taxonomy import recalc_usage_counts, sync_prompt_tags
+
+    database.execute_sql(
+        "INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id) "
+        "SELECT 'prompt', pt.prompt_id, pt.tag_id FROM prompt_tags pt "
+        "WHERE EXISTS (SELECT 1 FROM prompts p WHERE p.id = pt.prompt_id)"
+    )
+    database.execute_sql(
+        "INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id) "
+        "SELECT 'image', it.image_id, it.tag_id FROM image_tags it "
+        "WHERE EXISTS (SELECT 1 FROM gen_history g WHERE g.id = it.image_id)"
+    )
+
+    rows = list(
+        Prompt.select(Prompt.id, Prompt.tags).where(
+            (Prompt.tags.is_null(False)) & (Prompt.tags != "")
+        )
+    )
+    for row in rows:
+        sync_prompt_tags(row.id, row.tags)
+
+    recalc_usage_counts()
+    print(f"[migrate] v2 已从 {len(rows)} 条提示词的标签文本重建 entity_tags")
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
         "is_deleted/missing_since 等列", _migrate_v1_baseline),
+    (2, "标签收敛：把 prompt_tags/image_tags 与 prompts.tags 文本统一进 entity_tags",
+        lambda database: _migrate_v2_entity_tags(database)),
 ]
 
 

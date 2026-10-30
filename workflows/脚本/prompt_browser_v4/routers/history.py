@@ -10,7 +10,7 @@ from peewee import fn, SQL
 from pydantic import BaseModel
 
 from config import settings
-from models import GenHistory as Gh, GenJob, Prompt, PromptTag, ImageCategory, ImageTag, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from models import GenHistory as Gh, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
 from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
 from services.thumbnail import _get_image_path
 
@@ -103,7 +103,11 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
     if categories is None:
         categories = list(ImageCategory.select().where(ImageCategory.image == r.id))
     if tags is None:
-        tags = list(ImageTag.select().where(ImageTag.image == r.id))
+        tags = list(
+            EntityTag.select().where(
+                (EntityTag.entity_type == "image") & (EntityTag.entity_id == r.id)
+            )
+        )
     item["categories"] = [
         {"id": c.category.id, "name": c.category.name, "color": c.category.color}
         for c in categories
@@ -447,8 +451,10 @@ def list_history(
 
     # 批量预取 tags / categories，避免逐图 N+1 子查询
     tags_map = {}
-    for t in ImageTag.select().where(ImageTag.image.in_(ids)):
-        tags_map.setdefault(t.image_id, []).append(t)
+    for t in EntityTag.select().where(
+        (EntityTag.entity_type == "image") & (EntityTag.entity_id.in_(ids))
+    ):
+        tags_map.setdefault(t.entity_id, []).append(t)
     cats_map = {}
     for c in ImageCategory.select().where(ImageCategory.image.in_(ids)):
         cats_map.setdefault(c.image_id, []).append(c)
@@ -526,9 +532,14 @@ def _filtered_history_query(
         tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
         if tid_list:
             # 多标签取交集（图像必须同时拥有所有选中标签）
+            # 单个标签的命中范围 = 直接打在图片上 ∪ 经来源提示词继承，统一查 entity_tags
             for tid in tid_list:
-                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
-                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
+                direct = Gh.id << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "image") & (EntityTag.tag == tid)
+                )
+                via_prompt = Gh.prompt_id << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "prompt") & (EntityTag.tag == tid)
+                )
                 q = q.where(direct | via_prompt)
     return q
 
@@ -961,7 +972,9 @@ def add_image_tag(item_id: int, tag_id: int):
     t = Tag.get_or_none(Tag.id == tag_id)
     if t is None:
         raise HTTPException(404, "标签不存在")
-    _, created = ImageTag.get_or_create(image=item_id, tag=tag_id)
+    _, created = EntityTag.get_or_create(
+        entity_type="image", entity_id=item_id, tag=tag_id
+    )
     if created:
         Tag.update(usage_count=Tag.usage_count + 1).where(Tag.id == tag_id).execute()
     return {"success": True, "created": created}
@@ -969,7 +982,11 @@ def add_image_tag(item_id: int, tag_id: int):
 
 @router.delete("/history/{item_id}/tags/{tag_id}")
 def remove_image_tag(item_id: int, tag_id: int):
-    it = ImageTag.get_or_none((ImageTag.image == item_id) & (ImageTag.tag == tag_id))
+    it = EntityTag.get_or_none(
+        (EntityTag.entity_type == "image")
+        & (EntityTag.entity_id == item_id)
+        & (EntityTag.tag == tag_id)
+    )
     if it is None:
         raise HTTPException(404, "关联关系不存在")
     it.delete_instance()

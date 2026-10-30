@@ -1,9 +1,15 @@
-"""标签管理 API"""
+"""标签管理 API（读写都走 entity_tags，由 services.taxonomy 统一维护）"""
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from models import Tag, PromptTag, Prompt, ImageTag, GenHistory, db
+from models import EntityTag, Tag, Prompt
+from services.taxonomy import (
+    add_prompt_tag_by_name,
+    remove_prompt_tag_by_name,
+    tag_image_counts,
+    tag_prompt_counts,
+)
 
 router = APIRouter(tags=["标签"])
 
@@ -20,38 +26,17 @@ class TagUpdate(BaseModel):
 
 
 # ---------- 工具函数 ----------
-def _batch_image_counts() -> dict:
-    """一次性算出每个标签的去重图片数（直接 image_tags OR 经 prompt 继承）。
-
-    避免逐标签各跑一次 COUNT（136 个标签 = 136 次聚合）。用一条带 UNION 的
-    SQL 同时覆盖「直接打标签」与「经来源提示词继承」两条路径并去重，仅 1 次查询。
-    """
-    cur = db.execute_sql(
-        """
-        SELECT tag_id, COUNT(DISTINCT gh_id) FROM (
-            SELECT it.tag_id AS tag_id, gh.id AS gh_id
-            FROM gen_history gh
-            JOIN image_tags it ON it.image_id = gh.id
-            UNION
-            SELECT pt.tag_id AS tag_id, gh.id AS gh_id
-            FROM gen_history gh
-            JOIN prompt_tags pt ON pt.prompt_id = gh.prompt_id
-        ) GROUP BY tag_id
-        """
-    )
-    return {row[0]: row[1] for row in cur.fetchall()}
-
-
 def _tag_to_dict(t, count_scope: str = "prompt", counts_map: dict = None) -> dict:
-    if count_scope == "image":
-        # 图片数来自一次性批量统计（直接 image_tags OR 经 prompt 继承，已去重）
-        img_count = (counts_map or {}).get(t.id, 0)
-    else:
-        img_count = PromptTag.select().where(PromptTag.tag_id == t.id).count()
+    """count_scope=prompt 返回挂了这个标签的提示词数，image 返回去重图片数。
+
+    两种计数都由 services.taxonomy 一次性批量算出（136 个标签不做 136 次聚合）。
+    """
     return {
-        "id": t.id, "name": t.name, "color": t.color,
+        "id": t.id,
+        "name": t.name,
+        "color": t.color,
         "usage_count": t.usage_count,
-        "prompt_count": img_count,
+        "prompt_count": (counts_map or {}).get(t.id, 0),
     }
 
 
@@ -69,7 +54,7 @@ def list_tags(
         query = query.order_by(Tag.usage_count.desc(), Tag.name.asc())
     else:
         query = query.order_by(Tag.name.asc())
-    counts_map = _batch_image_counts() if count_scope == "image" else None
+    counts_map = tag_image_counts() if count_scope == "image" else tag_prompt_counts()
     return {"tags": [_tag_to_dict(t, count_scope, counts_map) for t in query]}
 
 
@@ -90,7 +75,10 @@ def update_tag(tag_id: int, data: TagUpdate):
     updates = data.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(400, "没有需要更新的字段")
-    Tag.update(**updates).where(Tag.id == tag_id).execute()
+    try:
+        Tag.update(**updates).where(Tag.id == tag_id).execute()
+    except Exception as e:
+        raise HTTPException(400, f"更新失败: {e}")
     return {"success": True}
 
 
@@ -99,7 +87,9 @@ def delete_tag(tag_id: int):
     t = Tag.get_or_none(Tag.id == tag_id)
     if t is None:
         raise HTTPException(404, "标签不存在")
-    PromptTag.delete().where(PromptTag.tag == tag_id).execute()
+    # 关联关系一起清掉，避免留下悬空 entity_tags（旧实现只删 prompt_tags，
+    # image_tags 与 entity_tags 里的关联会变成孤儿）
+    EntityTag.delete().where(EntityTag.tag == tag_id).execute()
     t.delete_instance(recursive=False)
     return {"success": True}
 
@@ -114,7 +104,7 @@ def get_popular_tags(
         .order_by(Tag.usage_count.desc(), Tag.name.asc())
         .limit(limit)
     )
-    counts_map = _batch_image_counts() if count_scope == "image" else None
+    counts_map = tag_image_counts() if count_scope == "image" else tag_prompt_counts()
     return {"tags": [_tag_to_dict(t, count_scope, counts_map) for t in tags]}
 
 
@@ -126,23 +116,16 @@ def add_prompt_to_tag(tag_id: int, prompt_id: int):
     p = Prompt.get_or_none(Prompt.id == prompt_id)
     if p is None:
         raise HTTPException(404, "提示词不存在")
-    exists = PromptTag.get_or_none(
-        (PromptTag.prompt == prompt_id) & (PromptTag.tag == tag_id)
-    )
-    if exists:
+    if not add_prompt_tag_by_name(prompt_id, t.name):
         return {"success": True, "message": "已关联"}
-    PromptTag.create(prompt=prompt_id, tag=tag_id)
-    Tag.update(usage_count=Tag.usage_count + 1).where(Tag.id == tag_id).execute()
     return {"success": True}
 
 
 @router.delete("/tags/{tag_id}/prompts/{prompt_id}")
 def remove_prompt_from_tag(tag_id: int, prompt_id: int):
-    pt = PromptTag.get_or_none(
-        (PromptTag.prompt == prompt_id) & (PromptTag.tag == tag_id)
-    )
-    if pt is None:
+    t = Tag.get_or_none(Tag.id == tag_id)
+    if t is None:
+        raise HTTPException(404, "标签不存在")
+    if not remove_prompt_tag_by_name(prompt_id, t.name):
         raise HTTPException(404, "关联关系不存在")
-    pt.delete_instance()
-    Tag.update(usage_count=Tag.usage_count - 1).where(Tag.id == tag_id).execute()
     return {"success": True}

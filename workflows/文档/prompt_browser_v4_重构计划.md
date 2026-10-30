@@ -168,6 +168,14 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
   3. 读路径全部切到 `entity_tags`；`prompts.tags` 废弃为只读兼容字段，UI 不再写它
   4. `tags` 表的 `usage_count` 改为实时聚合（或删除该冗余列）
 - **验收**：同一个标签在提示词侧栏计数、图片侧栏计数、画廊筛选结果三者数字一致；补契约测试锁死
+- **状态**：✅ 2026-10-30 完成（作为迁移 **v2**，一次性执行、约 1 秒）
+  - `models.EntityTag(entity_type, entity_id, tag_id)` + 唯一索引；`services/taxonomy.py` 是唯一写入口（`sync_prompt_tags` / `sync_image_tags` / `add_prompt_tag_by_name` / 计数函数）
+  - 拆分规则实测确定：只按 `,` `，` `;` `；` 拆，**不拆空格**（线上存在 `Moody Photography` 这类标签；`f/1.8` 是标签本身而不是分隔）
+  - 双写策略：UI 仍编辑 `prompts.tags` 文本，后端写完文本立刻 `sync_prompt_tags()` 全量重算关联，前端零改动；等 S2 换成标签选择器后再让关联表成为唯一入口
+  - 读路径全部切到 `entity_tags`：`/api/prompts`（tag_ids 子查询，顺带修掉 join 导致的重复行计数）、`/api/tags`（两种 scope 的批量计数）、`/api/history`（图片直接标签 ∪ 经提示词继承）、`/api/composer`（片段筛选）、图片继承逻辑
+  - 实测：标签 136 → **178**（从文本自动补建 42 个），`entity_tags` 已按 315 条提示词的文本重建；`女性` 标签命中提示词 175 条、图片 3 条（经继承）；`/api/tags` 两种 scope 计数均非零
+  - 顺带修复：`batch_delete_prompts` 原本 `GenHistory.delete()` 会把画廊图片记录一起抹掉，已改为与单条删除一致的「只解除关联」；`delete_tag` 现在会清理 `entity_tags`（旧实现只删 `prompt_tags`，会留悬空关联）
+  - 测试：新增 `tests/test_tags.py` 6 条，pytest **57 passed**
 
 ### S1-3 二态软删除 → 三态可见性
 - **做法**：`is_deleted`（0/1）+ `missing_since` → `visibility TEXT ('live'|'hidden'|'missing')` + `hidden_at/missing_since`；同步写入的 `ON CONFLICT` 目标从部分索引改为普通唯一索引，摆脱 `conflict_where=SQL("is_deleted=0")` 的手写字面量
@@ -253,7 +261,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 
 ### 阶段 1
 - [x] S1-1 迁移框架化
-- [ ] S1-2 标签收敛
+- [x] S1-2 标签收敛
 - [ ] S1-3 三态可见性
 - [ ] S1-4 service 层 + Pydantic
 - [ ] S1-5 派生列 + 索引

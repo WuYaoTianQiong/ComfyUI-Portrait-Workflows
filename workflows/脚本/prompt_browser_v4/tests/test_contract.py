@@ -115,13 +115,13 @@ def test_history_ids_route(api, seed_history):
 
 
 def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
-    from models import ImageCategory, ImageTag
+    from models import EntityTag, ImageCategory
 
     keep = seed_history(filename="keep.png")
     drop = seed_history(filename="drop.png")
     cat, tag = seed_taxonomy()
     ImageCategory.create(image=keep.id, category=cat.id)
-    ImageTag.create(image=keep.id, tag=tag.id)
+    EntityTag.create(entity_type="image", entity_id=keep.id, tag=tag.id)
 
     body = api.get(f"/api/history/ids?category_id={cat.id}").json()
     assert body["ids"] == [keep.id]
@@ -218,13 +218,13 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
     这三处曾经各写一遍过滤逻辑，已经出现过"列表筛了、全选却选到范围外"，
     紧接着的批量删除就是真删。
     """
-    from models import ImageCategory, ImageTag
+    from models import EntityTag, ImageCategory
 
     hit = seed_history(filename="aaa.png", favorite=True)
     seed_history(filename="bbb.png", favorite=False)
     cat, tag = seed_taxonomy()
     ImageCategory.create(image=hit.id, category=cat.id)
-    ImageTag.create(image=hit.id, tag=tag.id)
+    EntityTag.create(entity_type="image", entity_id=hit.id, tag=tag.id)
 
     for qs in ("favorite=1", f"category_id={cat.id}", f"tag_ids={tag.id}", "search=aaa"):
         listed = {

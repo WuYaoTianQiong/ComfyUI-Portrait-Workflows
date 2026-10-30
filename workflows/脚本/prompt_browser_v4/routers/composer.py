@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from models import Prompt, Fragment, Category, Tag, PromptCategory, PromptTag, db
+from models import Prompt, Fragment, Category, Tag, PromptCategory, EntityTag, db
 from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt
 from routers.jobs import create_job, update_job_items
@@ -37,7 +37,14 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
     if tag_ids:
         tag_id_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
         if tag_id_list:
-            query = query.join(PromptTag).where(PromptTag.tag.in_(tag_id_list))
+            # 标签统一查 entity_tags（join 会因多标签产生重复行，用子查询去重）
+            query = query.where(
+                Prompt.id
+                << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "prompt")
+                    & (EntityTag.tag.in_(tag_id_list))
+                )
+            )
 
     rows = list(query.order_by(Prompt.id.desc()))
 

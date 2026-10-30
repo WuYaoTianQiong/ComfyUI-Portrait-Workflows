@@ -8,8 +8,12 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
-from models import Prompt, GenHistory, db, Category, Tag, PromptCategory, PromptTag, auto_classify_prompt
+from models import (
+    Prompt, GenHistory, db, Category, Tag, EntityTag,
+    PromptCategory, PromptTag, auto_classify_prompt,
+)
 from services.helpers import get_image_metadata
+from services.taxonomy import sync_prompt_tags
 
 router = APIRouter(tags=["提示词"])
 
@@ -150,11 +154,18 @@ def _build_prompt_query(search, tag, category_id, tag_ids, sort, order):
     if category_id is not None:
         query = query.join(PromptCategory).where(PromptCategory.category == category_id)
 
-    # 按标签筛选（多选）
+    # 按标签筛选（多选，取交集之外的语义保持原样：命中任意一个即选中）
     if tag_ids:
         tag_id_list = [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
         if tag_id_list:
-            query = query.join(PromptTag).where(PromptTag.tag.in_(tag_id_list))
+            # 用子查询而非 join：join 会让一个提示词因多个标签出现多行，total 被放大
+            query = query.where(
+                Prompt.id
+                << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "prompt")
+                    & (EntityTag.tag.in_(tag_id_list))
+                )
+            )
     # ================================================
 
     # ======== 排序逻辑 ========
@@ -260,16 +271,13 @@ def get_prompt(prompt_id: int):
                 "color": cat.color
             })
 
-    # 获取关联的标签
-    tags = []
-    for pt in PromptTag.select().where(PromptTag.prompt == prompt_id):
-        tag = Tag.get_or_none(Tag.id == pt.tag)
-        if tag:
-            tags.append({
-                "id": tag.id,
-                "name": tag.name,
-                "color": tag.color
-            })
+    # 获取关联的标签（以 entity_tags 为准）
+    tags = [
+        {"id": row.id, "name": row.name, "color": row.color}
+        for row in Tag.select(Tag.id, Tag.name, Tag.color)
+        .join(EntityTag, on=(EntityTag.tag == Tag.id))
+        .where((EntityTag.entity_type == "prompt") & (EntityTag.entity_id == prompt_id))
+    ]
     # ================================================
 
     return {
@@ -367,6 +375,8 @@ def create_prompt(data: PromptCreate):
         r = Prompt.create(**data_dict)
         # 自动类型分类
         auto_classify_prompt(r.id)
+        # 标签文本 → entity_tags（文本是唯一事实来源，写文本就要同步关联表）
+        sync_prompt_tags(r.id, data_dict.get("tags"))
 
         # 自动分类到"组合创作"
         if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
@@ -398,6 +408,9 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
         # 如果更新了 prompt 内容，重新自动分类
         if "prompt" in updates:
             auto_classify_prompt(prompt_id)
+        # 标签文本变了就重算关联表，否则标签筛选会与界面显示脱节
+        if "tags" in updates:
+            sync_prompt_tags(prompt_id, updates.get("tags"))
 
     return {"success": True}
 
@@ -418,6 +431,10 @@ def delete_prompt(prompt_id: int):
         with db.atomic():
             pc = PromptCategory.delete().where(PromptCategory.prompt == prompt_id).execute()
             pt = PromptTag.delete().where(PromptTag.prompt == prompt_id).execute()
+            # entity_tags 是当前唯一的读路径，必须一起清，否则留下悬空关联
+            EntityTag.delete().where(
+                (EntityTag.entity_type == "prompt") & (EntityTag.entity_id == prompt_id)
+            ).execute()
             gh = GenHistory.update(prompt_id=None).where(GenHistory.prompt_id == prompt_id).execute()
             r.delete_instance()
         return {
@@ -514,7 +531,12 @@ def batch_delete_prompts(data: BatchIdsRequest):
     with db.atomic():
         PromptCategory.delete().where(PromptCategory.prompt.in_(ids)).execute()
         PromptTag.delete().where(PromptTag.prompt.in_(ids)).execute()
-        GenHistory.delete().where(GenHistory.prompt_id.in_(ids)).execute()
+        EntityTag.delete().where(
+            (EntityTag.entity_type == "prompt") & (EntityTag.entity_id.in_(ids))
+        ).execute()
+        # 与单条删除保持一致：只解除关联，不删出图记录（旧实现这里 GenHistory.delete()，
+        # 批量删提示词会把画廊里对应的图片记录一起抹掉）
+        GenHistory.update(prompt_id=None).where(GenHistory.prompt_id.in_(ids)).execute()
         deleted = Prompt.delete().where(Prompt.id.in_(ids)).execute()
     return {"success": True, "deleted": deleted}
 
