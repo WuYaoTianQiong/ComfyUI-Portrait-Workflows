@@ -194,6 +194,22 @@ const draftTagList = computed<string[]>({
     if (draft.value) draft.value.tags = list.join(',')
   },
 })
+/** 单条自动归类：按提示词正文里的【类型】数量归入 组合/单项/零散。 */
+const autoClassifyMutation = useMutation({
+  mutationFn: (id: number) => apiPost(`/api/categories/auto-classify/${id}`),
+  onSuccess: () => {
+    if (selectedId.value !== null) {
+      queryClient.invalidateQueries({ queryKey: ['prompt', selectedId.value] })
+    }
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
+  },
+})
+
+function autoClassifyOne() {
+  if (selectedId.value === null) return
+  autoClassifyMutation.mutate(selectedId.value)
+}
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
     apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
@@ -555,7 +571,17 @@ function clearFilters() {
         </div>
 
         <div class="field">
-          <span>分类（点一下关联 / 取消）</span>
+          <span class="field-head">
+            分类（点一下关联 / 取消）
+            <button
+              class="btn btn-sm"
+              :disabled="autoClassifyMutation.isPending.value"
+              title="按提示词正文里的【类型】数量自动归入 组合 / 单项 / 零散"
+              @click="autoClassifyOne"
+            >
+              {{ autoClassifyMutation.isPending.value ? '归类中…' : '自动归类' }}
+            </button>
+          </span>
           <div class="cat-chips">
             <button
               v-for="cat in flatCats"
@@ -1002,6 +1028,13 @@ function clearFilters() {
 .field.grow {
   flex: 1;
   min-height: 0;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
 }
 
 .cat-chips {

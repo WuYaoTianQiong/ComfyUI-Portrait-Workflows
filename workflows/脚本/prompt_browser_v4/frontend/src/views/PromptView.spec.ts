@@ -81,6 +81,7 @@ describe('PromptView 分类关联', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
     vi.mocked(apiDelete).mockClear()
+    vi.mocked(apiPost).mockClear()
   })
 
   it('详情页列出所有分类', async () => {
@@ -121,5 +122,18 @@ describe('PromptView 分类关联', () => {
 
     expect(apiDelete).toHaveBeenCalledTimes(1)
     expect(vi.mocked(apiDelete).mock.calls[0][0]).toBe('/api/categories/1/prompts/1')
+  })
+  it('「自动归类」调用单条自动分类端点', async () => {
+    const wrapper = await mountView()
+    await wrapper.find('.row').trigger('click')
+    await flushPromises()
+
+    const btn = wrapper.findAll('.btn').find((b) => b.text().includes('自动归类'))!
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(apiPost).mock.calls[0][0]).toBe('/api/categories/auto-classify/1')
   })
 })

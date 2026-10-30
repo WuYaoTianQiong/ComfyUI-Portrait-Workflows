@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { useToast } from '../composables/useToast'
@@ -105,6 +105,25 @@ async function saveEdit() {
   }
 }
 
+/**
+ * 一键自动分类：把每条提示词按【类型】数量重新归入 组合/单项/零散。
+ *
+ * 后端是全量重算（331 条），单条端点在提示词详情页用。
+ * 成功后分类计数会变，所以要同时失效分类与提示词两个缓存。
+ */
+const autoClassifyMutation = useMutation({
+  mutationFn: () =>
+    apiPost<{ success: boolean; reclassified: number }>('/api/categories/auto-classify'),
+  onSuccess: (result) => {
+    refetchCats()
+    toast.success(`已重新分类，${result.reclassified} 条提示词的分类发生变化`)
+  },
+})
+
+function autoClassifyAll() {
+  if (!confirm('将对所有提示词重新计算类型分类（组合 / 单项 / 零散），继续？')) return
+  autoClassifyMutation.mutate()
+}
 async function removeItem(kind: Panel, id: number, name: string) {
   const extra = kind === 'category' ? '，并会解除它与所有提示词的关联' : ''
   if (!confirm(`确定删除「${name}」吗${extra}？`)) return
@@ -152,6 +171,16 @@ async function removeItem(kind: Panel, id: number, name: string) {
         />
       </div>
       <button class="btn btn-sm primary" :disabled="!newName.trim()" @click="createItem">添加</button>
+      <span class="spacer" />
+      <button
+        v-if="panel === 'category'"
+        class="btn btn-sm"
+        :disabled="autoClassifyMutation.isPending.value"
+        title="按提示词正文里的【类型】数量重新归入 组合 / 单项 / 零散"
+        @click="autoClassifyAll"
+      >
+        {{ autoClassifyMutation.isPending.value ? '重新分类中…' : '一键自动分类' }}
+      </button>
       <label v-if="panel === 'tag'" class="only-unused">
         <input v-model="onlyUnused" type="checkbox" />
         <span>只看未使用</span>
@@ -231,6 +260,10 @@ async function removeItem(kind: Panel, id: number, name: string) {
   font-size: var(--fs-xs);
   color: var(--muted);
   cursor: pointer;
+}
+
+.spacer {
+  flex: 1;
 }
 
 .swatches {

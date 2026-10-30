@@ -40,6 +40,8 @@ async function mountView() {
 describe('ManageView 分类/标签管理', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
+    // 组件里用了 confirm 二次确认，测试环境默认没有
+    vi.stubGlobal('confirm', () => true)
   })
 
   it('默认展示分类列表', async () => {
@@ -79,5 +81,15 @@ describe('ManageView 分类/标签管理', () => {
     expect(wrapper.findAll('.row').length).toBe(1)
     expect(wrapper.text()).toContain('没用')
     expect(wrapper.text()).not.toContain('有用')
+  })
+  it('「一键自动分类」调用全量自动分类端点', async () => {
+    const wrapper = await mountView()
+    const btn = wrapper.findAll('.btn').find((b) => b.text().includes('一键自动分类'))!
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(apiPost).mock.calls[0][0]).toBe('/api/categories/auto-classify')
   })
 })
