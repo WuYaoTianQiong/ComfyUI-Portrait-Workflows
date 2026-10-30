@@ -7,6 +7,7 @@ import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
 import FaceswapView from './views/FaceswapView.vue'
 import JobCenterView from './views/JobCenterView.vue'
+import ManageView from './views/ManageView.vue'
 import ToastHost from './components/ToastHost.vue'
 import { apiGet } from './api/client'
 import type { JobSnapshot } from './api/types'
@@ -42,7 +43,7 @@ const online = computed(() => status.value?.comfyui === 'online')
  * imageViewer.js）。提示词页/组合器在 S2-3、S2-4 按同样方式接入，
  * 旧页面在此期间保持可用（新前端只跑在 5173）。
  */
-type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap' | 'jobs'
+type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap' | 'jobs' | 'manage'
 
 const activeTab = ref<TabKey>('gallery')
 </script>
@@ -84,7 +85,14 @@ const activeTab = ref<TabKey>('gallery')
           @click="activeTab = 'faceswap'"
         >
           批量换脸
+        </button>        <button
+          class="btn btn-sm"
+          :class="{ active: activeTab === 'manage' }"
+          @click="activeTab = 'manage'"
+        >
+          管理
         </button>
+
         <button
           class="btn btn-sm"
           :class="{ active: activeTab === 'jobs' }"
@@ -110,6 +118,7 @@ const activeTab = ref<TabKey>('gallery')
       <ComposerView v-else-if="activeTab === 'composer'" />
       <FaceswapView v-else-if="activeTab === 'faceswap'" />
       <JobCenterView v-else-if="activeTab === 'jobs'" />
+      <ManageView v-else-if="activeTab === 'manage'" />
       <PromptView v-else />
     </main>
 
