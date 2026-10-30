@@ -22,10 +22,9 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from peewee import SQL
-
 from config import settings
 from models import GenHistory, GenJob, db, inherit_prompt_taxonomy
+from services.history_store import upsert_history
 from services.comfyui_client import (
     delete_queue_items,
     get_history,
@@ -60,10 +59,6 @@ def _job_age_seconds(job: dict) -> float:
         return max(0.0, (now_utc - created).total_seconds())
     except (TypeError, ValueError):
         return 0.0
-
-# 部分唯一索引的冲突条件必须是 SQL 字面量：写成 (is_deleted == False) 会生成
-# 带引号的 "is_deleted" = 0，SQLite 不认，ON CONFLICT 会报"不匹配任何唯一约束"。
-_IS_DELETED_ZERO = SQL("is_deleted=0")
 
 # 所有 gen_jobs / gen_history 的任务相关写入都在这把锁内完成
 _lock = threading.RLock()
@@ -457,25 +452,24 @@ def _insert_history_for_item(
                 update_fields[GenHistory.captured_at] = captured
 
             with db.atomic():
-                GenHistory.insert(
-                    job_id=job_id, prompt_id=prompt_id,
-                    comfyui_prompt_id=comfy_pid,
-                    filename=img["filename"],
-                    subfolder=img.get("subfolder", ""),
-                    img_type=img.get("type", "output"),
-                    view_url=build_view_url(
-                        img["filename"], img.get("subfolder", ""), img.get("type", "output")
-                    ),
-                    preview=preview,
-                    prompt_params=prompt_params_json,
-                    captured_at=captured,
-                    source="local",
-                ).on_conflict(
-                    # 必须与 v4.2 迁移后的部分唯一索引一致：(filename, subfolder, img_type) WHERE is_deleted=0
-                    conflict_target=[GenHistory.filename, GenHistory.subfolder, GenHistory.img_type],
-                    conflict_where=_IS_DELETED_ZERO,
-                    update=update_fields,
-                ).execute()
+                upsert_history(
+                    {
+                        "job_id": job_id,
+                        "prompt_id": prompt_id,
+                        "comfyui_prompt_id": comfy_pid,
+                        "filename": img["filename"],
+                        "subfolder": img.get("subfolder", ""),
+                        "img_type": img.get("type", "output"),
+                        "view_url": build_view_url(
+                            img["filename"], img.get("subfolder", ""), img.get("type", "output")
+                        ),
+                        "preview": preview,
+                        "prompt_params": prompt_params_json,
+                        "captured_at": captured,
+                        "source": "local",
+                    },
+                    update_fields,
+                )
 
                 nh = GenHistory.get_or_none(
                     (GenHistory.comfyui_prompt_id == comfy_pid)

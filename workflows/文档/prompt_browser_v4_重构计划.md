@@ -177,9 +177,19 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
   - 顺带修复：`batch_delete_prompts` 原本 `GenHistory.delete()` 会把画廊图片记录一起抹掉，已改为与单条删除一致的「只解除关联」；`delete_tag` 现在会清理 `entity_tags`（旧实现只删 `prompt_tags`，会留悬空关联）
   - 测试：新增 `tests/test_tags.py` 6 条，pytest **57 passed**
 
-### S1-3 二态软删除 → 三态可见性
-- **做法**：`is_deleted`（0/1）+ `missing_since` → `visibility TEXT ('live'|'hidden'|'missing')` + `hidden_at/missing_since`；同步写入的 `ON CONFLICT` 目标从部分索引改为普通唯一索引，摆脱 `conflict_where=SQL("is_deleted=0")` 的手写字面量
-- **验收**：`job_state.py` 里 `_IS_DELETED_ZERO` 字面量可以删掉；出图 upsert 不再需要特殊方言处理
+### S1-3 写入路径收敛（原计划「三态可见性」，已调整）
+- **原计划**：`is_deleted` + `missing_since` → `visibility TEXT ('live'|'hidden'|'missing')`，把部分唯一索引改成普通索引以摆脱 `conflict_where=SQL("is_deleted=0")`
+- **调整原因**（执行前重新评估后改方案）：
+  1. 唯一性必须**排除已隐藏行**，所以索引注定还是部分索引，`conflict_where` 字面量无法消除；
+  2. `visibility` 与现有 `is_deleted` / `missing_since` 语义重叠，换列的收益只是"命名更好"，却要牵动全部读写路径与索引迁移，风险与收益不成比例；
+  3. 真正反复踩的坑是**这段方言细节散落在多处**、写错就被 `except: pass` 吞掉（历史上出现过"同步永远写不进库"两次）。
+- **新做法**：把 upsert 收敛成唯一入口 `services/history_store.py::upsert_history()`
+- **验收**：`_IS_DELETED_ZERO` 字面量消失、调用方不再手写 `conflict_target/conflict_where`；补测试锁死三条语义
+- **状态**：✅ 2026-10-30 完成
+  - `upsert_history(insert_values, update_values, only_when_job_null=False)`，`LIVE_ONLY_FILTER` / `CONFLICT_TARGET` 集中定义
+  - `job_state._insert_history_for_item` 与 `history._sync_comfyui_history` 两处手写 upsert 全部改为调用
+  - 测试 `tests/test_history_store.py` 3 条：同名 upsert 只留一行且字段更新 / 软删过的同名文件插入新行而非复活墓碑 / `only_when_job_null` 不覆盖任务写入的富参数
+  - pytest **60 passed**；verify_smoke 25 通过；重启后 history total=10、有图标签 12
 
 ### S1-4 抽 service 层 + Pydantic 出入参
 - **做法**：`routers/*` 只做参数校验与响应组装；业务逻辑迁到 `services/history_service.py`、`services/job_service.py` 等；所有响应定义 Pydantic 模型（`response_model=`）
@@ -262,7 +272,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 ### 阶段 1
 - [x] S1-1 迁移框架化
 - [x] S1-2 标签收敛
-- [ ] S1-3 三态可见性
+- [x] S1-3 写入路径收敛（原三态可见性方案已调整）
 - [ ] S1-4 service 层 + Pydantic
 - [ ] S1-5 派生列 + 索引
 - [ ] S1-6 契约测试铺满 + CI

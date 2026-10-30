@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from peewee import fn, SQL
+from peewee import fn
 from pydantic import BaseModel
 
 from config import settings
@@ -171,34 +171,22 @@ def _sync_comfyui_history() -> int:
                     except OSError:
                         captured = None
                     pp = _build_prompt_params_from_comfy(data, filename, subfolder, img_type)
-                    Gh.insert(
-                        job_id=None,
-                        prompt_id=prompt_id,
-                        comfyui_prompt_id=pid,
-                        filename=filename,
-                        subfolder=subfolder,
-                        img_type=img_type,
-                        view_url=build_view_url(filename, subfolder, img_type),
-                        preview="",
-                        prompt_params=pp,
-                        favorite=False,
-                        captured_at=captured,
-                        source="comfyui_sync",
-                    ).on_conflict(
-                        # peewee 4.x 的正确写法是 on_conflict(conflict_target=..., update=...)；
-                        # 原来的 on_conflict_do_update(..., set_=...) 是 3.x API，在本项目装的
-                        # peewee 4.1 上必然抛 AttributeError，又被下面的 except Exception: pass 吞掉，
-                        # 导致这条同步兜底路径其实从未写入过任何一条记录。
-                        conflict_target=[Gh.filename, Gh.subfolder, Gh.img_type],
-                        # 必须带 WHERE 才能匹配部分索引，且必须用 SQL 字面量（peewee 表达式会生成
-                        # 带引号的 "is_deleted" = 0，SQLite 不认）
-                        conflict_where=SQL("is_deleted=0"),
-                        # 已被任务（job）写过参数的行不再被同步覆盖：job 写进去的是
-                        # source=faceswap/composer 这类富参数（含组合来源、节点映射、种子），
-                        # 同步只能从 ComfyUI history 反推出较弱的参数，覆盖即丢信息。
-                        # job_id 为空的行（同步/磁盘扫描创建的）照旧会被更新，保持原有补全能力。
-                        where=Gh.job_id.is_null(),
-                        update={
+                    upsert_history(
+                        {
+                            "job_id": None,
+                            "prompt_id": prompt_id,
+                            "comfyui_prompt_id": pid,
+                            "filename": filename,
+                            "subfolder": subfolder,
+                            "img_type": img_type,
+                            "view_url": build_view_url(filename, subfolder, img_type),
+                            "preview": "",
+                            "prompt_params": pp,
+                            "favorite": False,
+                            "captured_at": captured,
+                            "source": "comfyui_sync",
+                        },
+                        {
                             Gh.comfyui_prompt_id: pid,
                             Gh.prompt_id: prompt_id,
                             Gh.view_url: build_view_url(filename, subfolder, img_type),
@@ -206,7 +194,8 @@ def _sync_comfyui_history() -> int:
                             # 刻意不再把 created_at 刷成 CURRENT_TIMESTAMP：同步每 30 秒跑一次，
                             # 那会让所有已存在的图每半分钟被"刷新"成最新，画廊"最新"排序彻底失效。
                         },
-                    ).execute()
+                        only_when_job_null=True,
+                    )
                     added += 1
                     try:
                         nr = Gh.get_or_none(
