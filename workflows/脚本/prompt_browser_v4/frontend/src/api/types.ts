@@ -30,9 +30,10 @@ export interface HistoryItem {
   favorite: boolean
   /** 文件缺失（派生状态，可自愈）：只影响展示与筛选，不代表记录被删除 */
   missing: boolean
-  width?: number
-  height?: number
-  file_size?: number
+  /** 后端可能给 null（没记录宽高），类型要如实反映，否则调用方要到处判空 */
+  width?: number | null
+  height?: number | null
+  file_size?: number | null
   created_at: string
   captured_at: string
   source: string

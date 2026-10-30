@@ -334,6 +334,39 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 ### S2-7 收尾（可选）
 - 删除 `static/*.js` 手写模块与 `?v=N` 版本号机制，静态目录只留构建产物与 vendor
 
+### S2-8 前端测试 + 类型检查 + CI 扩展
+- **状态**：✅ 2026-10-30 完成
+  - **vitest + @vue/test-utils + happy-dom**，36 条用例（`format` / `buildQuery` / `TagCloud` / `Lightbox` / `ImagePicker`）。挑的都是**最容易回归的判断**：标签云隐藏零计数但保留已选项、灯箱键盘翻页不越界、ImagePicker 保留选择顺序（1:1 配对依赖它）、`buildQuery` 必须保留 `0` 与 `false`
+  - **vue-tsc --noEmit 进 CI** —— TS strict 之前只在编辑器里生效，命令行从没跑过；第一次跑就抓出 6 个类型错误，其中一个是真实功能失效：`ComposerView` 里 `canvas[type] === item.content` 拿 `CanvasSlot` 和 `string` 比，**"该碎片已在画布里"的高亮一直是坏的**
+  - **`tests/e2e/run_e2e.py`**：数据库副本 + 临时端口 8766 + Playwright，跑五个页签共 13 项断言（渲染、筛选联动、详情加载、碎片填入画布、预览格式、无 JS 错误）。跑在副本上，不碰线上数据、不占 8656
+  - **`tools/ci.ps1` 扩到五道关**：pytest → verify_smoke → vue-tsc → vitest → vite build（附加 E2E）。前端依赖缺失时自动跳过前端三关并说明原因
+  - 之前每次改前端都是"写完 → playwright 手验 → 脚本删掉"，没有回归保护；现在有了
+
+---
+
+## 5.5 尚未覆盖的功能（端点覆盖核对结果）
+
+后端 88 个端点里，新前端**没有入口**的有 37 个。按性质分两类：
+
+**A. 功能回退（旧版有、新版没有，用户会察觉）**
+
+| 功能 | 端点 | 优先级 |
+|---|---|---|
+| 🧹 清理失效 | `history/cleanup_missing` | 高（S0-1 刚重构好的功能，新前端没有按钮） |
+| 画廊分面筛选（来源/日期/模型/方向） | `history/facets` | 高 |
+| 全选全部（跨页） | `history/ids` | 中 |
+| 分类管理（增删改 + 关联提示词） | `categories/*` | 中 |
+| 标签管理（增删改 + 关联提示词） | `tags/*` | 中 |
+| 碎片库管理 | `fragments` CRUD | 中 |
+| 自动分类 | `categories/auto-classify` | 中 |
+| 批量补跑（给没图的提示词出图） | `generate_missing/*` | 中 |
+| 文件浏览器（换脸从磁盘选图） | `fs/list` `fs/image` `fs/thumb` | 中 |
+| 统计 | `stats` | 低 |
+
+**B. 新功能欠账**：裸文本跑图（`run_text`）、模板批量导入（`templates/batch_import`）、组合器第三轮
+
+**C. 工程债**：`S1-4` Pydantic 出入参（88 个端点响应仍是裸 dict）、`S2-7` 删旧前端 8.2k 行死代码、设计系统的基础组件（`tokens.css` 已有，组件未抽）
+
 ---
 
 ## 6. 风险登记表
@@ -377,3 +410,4 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S2-5 任务中心
 - [x] S2-6 切换根路径（新前端接管 8656，回退=改名 static_next 目录）
 - [ ] S2-7 删除旧前端 static/*.js（确认不再需要后）
+- [x] S2-8 前端测试 + 类型检查 + CI 扩展

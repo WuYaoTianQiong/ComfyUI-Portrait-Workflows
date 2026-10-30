@@ -28,8 +28,9 @@ function write(key: string, value: string) {
 }
 
 /** 这些页面共用同一份设置，模块级单例避免各页面各存一份。 */
-const workflowPath = ref(read('workflowPath', ''))
-const quality = ref(read('quality', '4K'))
+// 显式标注类型：ref(read(...)) 会被推断成字面量类型（Ref<''>），后面赋别的字符串就报错
+const workflowPath = ref<string>(read('workflowPath', ''))
+const quality = ref<string>(read('quality', '4K'))
 const orientation = ref<Orientation>(read('orientation', 'portrait') as Orientation)
 
 watch(workflowPath, (v) => write('workflowPath', v))

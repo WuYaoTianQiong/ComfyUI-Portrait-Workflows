@@ -67,9 +67,6 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 
 const selected = ref<Set<number>>(new Set())
 const selectedCount = computed(() => selected.value.size)
-const allOnPageSelected = computed(
-  () => items.value.length > 0 && items.value.every((it) => selected.value.has(it.id)),
-)
 
 function toggleSelect(id: number) {
   if (selected.value.has(id)) selected.value.delete(id)

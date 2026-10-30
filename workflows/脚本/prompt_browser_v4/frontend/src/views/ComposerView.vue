@@ -387,7 +387,7 @@ function toggleTag(id: number) {
               v-for="(item, idx) in visibleFrags(type)"
               :key="`${type}-${item.fragment_id ?? item.prompt_id}-${idx}`"
               class="frag"
-              :class="{ used: canvas[type] === item.content }"
+              :class="{ used: canvas[type]?.content === item.content }"
               :title="item.content"
               @click="pick(item)"
             >

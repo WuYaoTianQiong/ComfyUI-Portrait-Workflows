@@ -1,13 +1,16 @@
 import type { HistoryItem } from '../api/types'
 
-export function formatSize(bytes?: number): string {
+export function formatSize(bytes?: number | null): string {
   if (!bytes) return ''
   return bytes >= 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : `${Math.round(bytes / 1024)} KB`
 }
 
-export function resolution(item: Pick<HistoryItem, 'width' | 'height'>): string {
+export function resolution(item: {
+  width?: number | null
+  height?: number | null
+}): string {
   return item.width && item.height ? `${item.width}×${item.height}` : ''
 }
 
