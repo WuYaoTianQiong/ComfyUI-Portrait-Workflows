@@ -543,12 +543,31 @@ def _migrate_v2_entity_tags(database):
     print(f"[migrate] v2 已从 {len(rows)} 条提示词的标签文本重建 entity_tags")
 
 
+def _migrate_v3_indexes(database):
+    """v3：补齐每次翻页都会走到的筛选/排序索引。
+
+    放在 v3 而不是 v1 里，是因为前两个版本已经在生产库落地；索引本身用
+    `IF NOT EXISTS`，重复执行也安全。`entity_tags` 的 (entity_type, entity_id, tag)
+    唯一索引已覆盖"按实体取标签"，缺的是"按标签取实体"这一侧。
+    """
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS idx_gen_history_prompt ON gen_history(prompt_id)",
+        "CREATE INDEX IF NOT EXISTS idx_gen_history_missing ON gen_history(missing_since)",
+        "CREATE INDEX IF NOT EXISTS idx_gen_history_source ON gen_history(source)",
+        "CREATE INDEX IF NOT EXISTS idx_gen_history_captured ON gen_history(captured_at)",
+        "CREATE INDEX IF NOT EXISTS idx_entity_tags_tag ON entity_tags(tag_id, entity_type)",
+        "CREATE INDEX IF NOT EXISTS idx_prompts_updated ON prompts(updated_at)",
+    ):
+        database.execute_sql(sql)
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
         "is_deleted/missing_since 等列", _migrate_v1_baseline),
     (2, "标签收敛：把 prompt_tags/image_tags 与 prompts.tags 文本统一进 entity_tags",
         lambda database: _migrate_v2_entity_tags(database)),
+    (3, "补齐高频筛选/排序索引", lambda database: _migrate_v3_indexes(database)),
 ]
 
 

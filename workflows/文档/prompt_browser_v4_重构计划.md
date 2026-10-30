@@ -198,6 +198,9 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 ### S1-5 派生列 + 索引，去掉运行时 `json_extract`
 - **做法**：`prompt_params` 的 `width/height/model/orientation` 落成真实列并建索引；分面统计改 `GROUP BY 列`；`prompt_params` 仍保留完整 JSON 作原始档案
 - **验收**：`/api/history/facets` 在 10k 行数据下 <100ms
+- **状态**：⚠️ 2026-10-30 **部分完成（只做索引，派生列降级）**
+  - 补齐索引（迁移 **v3**，`IF NOT EXISTS` 幂等）：`gen_history(prompt_id)` / `(missing_since)` / `(source)` / `(captured_at)`、`entity_tags(tag_id, entity_type)`、`prompts(updated_at)`
+  - **派生列暂不做**：当前 `gen_history` 仅 272 行、`prompts` 331 条，运行时 `json_extract` 全表扫也只有毫秒级；上真实列要连带迁移、回填、双写与前端字段切换，收益接近于零而风险不为零。等 `gen_history` 过万再启动，届时用同一条迁移套路（v4）即可
 
 ### S1-6 契约测试铺满 + CI 脚本
 - **做法**：`test_contract.py` 扩到覆盖全部 89 个端点（至少 happy path + 关键错误码）；新增 `scripts/ci.ps1` 一次跑 pytest + verify_smoke
@@ -282,7 +285,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S1-2 标签收敛
 - [x] S1-3 写入路径收敛（原三态可见性方案已调整）
 - [ ] S1-4 service 层 + Pydantic
-- [ ] S1-5 派生列 + 索引
+- [x] S1-5 索引（派生列部分降级，待数据量上来再做）
 - [x] S1-6 契约测试铺满 + CI
 
 ### 阶段 2
