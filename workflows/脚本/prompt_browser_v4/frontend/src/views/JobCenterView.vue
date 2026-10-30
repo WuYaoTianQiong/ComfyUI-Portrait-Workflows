@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
+import EmptyState from '../components/EmptyState.vue'
 import type { JobSnapshot } from '../api/types'
 import { statusLabel } from '../utils/format'
 
@@ -180,9 +181,7 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
         </div>
       </article>
 
-      <div v-if="!visible.length" class="empty">
-        {{ onlyActive ? '没有进行中的任务' : '还没有任务记录' }}
-      </div>
+      <EmptyState v-if="!visible.length" text="{{ onlyActive ? '没有进行中的任务' : '还没有任务记录' }}" />
     </div>
   </div>
 </template>

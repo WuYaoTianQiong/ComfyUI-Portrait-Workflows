@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { TagRow } from '../api/types'
+import EmptyState from './EmptyState.vue'
 
 /**
  * 标签云 + 交集/并集切换（画廊与提示词页共用）。
@@ -58,7 +59,7 @@ const visible = computed(() =>
       >
         {{ tag.name }}<i>{{ tag.prompt_count }}</i>
       </button>
-      <div v-if="!visible.length" class="empty">{{ emptyText ?? '暂无可用标签' }}</div>
+      <EmptyState v-if="!visible.length" :text="emptyText ?? '暂无可用标签'" />
     </div>
   </div>
 </template>

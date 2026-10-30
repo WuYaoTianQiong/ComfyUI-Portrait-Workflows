@@ -29,7 +29,11 @@ vi.mock('../api/client', () => ({
 async function mountPicker(selected: string[] = []) {
   const wrapper = mount(FilePicker, {
     props: { open: true, title: '从磁盘选主图', modelValue: selected },
-    global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // Modal 用 Teleport 渲染到 body，测试里要 stub 掉才能在 wrapper 内查到
+      stubs: { teleport: true },
+    },
   })
   await flushPromises()
   return wrapper

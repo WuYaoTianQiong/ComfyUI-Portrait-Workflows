@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet } from '../api/client'
+import Modal from './Modal.vue'
 
 /**
  * 磁盘选图：在任意文件夹里挑图，交给换脸这类需要"主图 / 参考图"的场景。
@@ -96,15 +97,19 @@ function thumbUrl(path: string): string {
 }
 </script>
 <template>
-  <div v-if="open" class="overlay" @click.self="emit('close')">
-    <div class="panel">
-      <header class="panel-head">
-        <span class="title">{{ title }}</span>
+  <Modal
+    :open="open"
+    :title="title"
+    width="min(900px, 94vw)"
+    height="min(680px, 88vh)"
+    @close="emit('close')"
+  >
+    <template #head>
         <span class="count">已选 {{ picked.length }} 张</span>
-        <span class="spacer" />
-        <button class="btn btn-sm" @click="emit('close')">取消</button>
-        <button class="btn btn-sm primary" @click="confirm">确定</button>
-      </header>
+    </template>
+    <template #actions>
+      <button class="btn btn-sm primary" @click="confirm">确定</button>
+    </template>
 
       <div class="nav">
         <button class="btn btn-sm" :disabled="!data?.parent" title="上一级" @click="goUp">⬆ 上级</button>
@@ -150,48 +155,18 @@ function thumbUrl(path: string): string {
         </div>
       </div>
 
-      <footer class="panel-foot">
+    <template #footer>
         <span class="hint">
           选中的图片会按绝对路径提交，ComfyUI 会把它们拷进 input 目录。
         </span>
-      </footer>
-    </div>
-  </div>
+    </template>
+  </Modal>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
-  background: rgba(0, 0, 0, 0.55);
-  display: grid;
-  place-items: center;
-}
 
-.panel {
-  width: min(900px, 94vw);
-  height: min(680px, 88vh);
-  display: flex;
-  flex-direction: column;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap) var(--gap-lg);
-  border-bottom: 1px solid var(--border);
-}
 
-.title {
-  font-weight: 600;
-}
 
 .count {
   font-size: var(--fs-xs);
@@ -298,10 +273,6 @@ function thumbUrl(path: string): string {
   white-space: nowrap;
 }
 
-.panel-foot {
-  padding: var(--gap-sm) var(--gap-lg);
-  border-top: 1px solid var(--border);
-}
 
 .hint {
   font-size: var(--fs-xs);

@@ -497,3 +497,16 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S2-6 切换根路径（新前端接管 8656，回退=改名 static_next 目录）
 - [ ] S2-7 删除旧前端 static/*.js（确认不再需要后）
 - [x] S2-8 前端测试 + 类型检查 + CI 扩展
+
+
+### 工程债 A：设计系统基础组件抽取
+- **状态**：✅ 2026-10-30 完成
+  - **不抽 Button/Select**：Vue 里 `<button class="btn">` 更灵活，抽成组件反而要透传 slot 与 class，收益低于成本
+  - **抽 `components/Modal.vue`**：此前 `MissingRunPanel` 与 `FilePicker` 各写了一份 overlay + panel + head + foot（结构几乎一样、样式各写一遍）。统一后：遮罩/圆角/阴影/ESC 关闭只有一处实现；`Teleport to body` 避免被父容器 overflow/transform 裁掉；支持 `width`/`height` 与 `head`/`actions`/`footer` 三个 slot
+  - **抽 `components/EmptyState.vue`**：散落各页面的 **15 处** `.empty` div，样式各写一遍、文案格式也不统一。统一后支持 `text`/`icon`/`hint`/`size`(sm|big)/`compact`（行内提示用）
+  - `useToast` + `ToastHost`（S2-8 已做）构成第三块：全局轻提示
+  - 替换清单：ImagePicker / TagCloud / ComposerView / GalleryView / JobCenterView / ManageView / PromptView / MissingRunPanel / FilePicker
+  - **踩到两个 Vue 3 的坑**（都由 `vue-tsc` 抓到）：
+    1. `text="{{ expr }}"` 属性内插值在 Vue 3 已被移除，必须写 `:text="expr"`（TagCloud 的空状态文案一开始渲染成了字面量）
+    2. `Teleport` 的内容不在 wrapper DOM 里，组件测试必须加 `stubs: { teleport: true }`，否则 `findAll` 一条都查不到（MissingRunPanel / FilePicker 的测试因此全灭）
+  - 验证：CI 五道关全绿；playwright 实测磁盘弹层与补跑弹层渲染正常、Teleport 挂在 body 下、**Esc 可关闭**（Modal 新增能力）、326 条补跑列表完整、0 个 JS 错误

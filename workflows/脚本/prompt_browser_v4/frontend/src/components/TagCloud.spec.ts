@@ -63,6 +63,6 @@ describe('TagCloud', () => {
     const wrapper = mount(TagCloud, {
       props: { tags: [], selected: [], match: 'all', emptyText: '暂无带图片的标签' },
     })
-    expect(wrapper.find('.empty').text()).toBe('暂无带图片的标签')
+    expect(wrapper.find('.empty-state').text()).toBe('暂无带图片的标签')
   })
 })

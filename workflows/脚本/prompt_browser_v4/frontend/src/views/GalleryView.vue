@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Lightbox from '../components/Lightbox.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
+import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
@@ -367,7 +368,7 @@ function clearFilters() {
           >
             {{ facetLabel(String(name)) }}<i>{{ count }}</i>
           </button>
-          <div v-if="!Object.keys(facets?.[dim.key] ?? {}).length" class="empty">无</div>
+          <EmptyState v-if="!Object.keys(facets?.[dim.key] ?? {}).length" text="无" />
         </div>
       </section>
       <section class="group">
@@ -470,7 +471,7 @@ function clearFilters() {
           <div class="filename">{{ item.filename }}</div>
         </article>
 
-        <div v-if="!items.length && !isFetching" class="empty big">没有符合条件的图片</div>
+        <EmptyState v-if="!items.length && !isFetching" size="big" text="没有符合条件的图片" />
       </div>
     </section>
 

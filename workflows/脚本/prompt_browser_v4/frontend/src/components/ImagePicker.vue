@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, thumbnailUrl } from '../api/client'
+import EmptyState from './EmptyState.vue'
 import type { HistoryItem, HistoryPage } from '../api/types'
 
 /**
@@ -76,7 +77,7 @@ function clear() {
         <img :src="thumbnailUrl(item, 240)" :alt="item.filename" loading="lazy" />
         <span v-if="orderOf(item.id)" class="order">{{ orderOf(item.id) }}</span>
       </button>
-      <div v-if="!items.length && !isFetching" class="empty">没有可选图片</div>
+      <EmptyState v-if="!items.length && !isFetching" text="没有可选图片" />
     </div>
   </section>
 </template>

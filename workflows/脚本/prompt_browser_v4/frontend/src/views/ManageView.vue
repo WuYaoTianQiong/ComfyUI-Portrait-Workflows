@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { FRAGMENT_TYPES } from '../constants'
 import type { CategoryNode, TagRow } from '../api/types'
@@ -316,7 +317,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
           <span class="count">{{ cat.prompt_count }}</span>
           <button class="icon danger" title="删除" @click="removeItem('category', cat.id, cat.name)">✕</button>
         </div>
-        <div v-if="!flatCats.length" class="empty">还没有分类</div>
+        <EmptyState v-if="!flatCats.length" text="还没有分类" />
       </template>
 
       <template v-else-if="panel === 'tag'">
@@ -334,7 +335,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
           <span class="count">{{ tag.prompt_count }}</span>
           <button class="icon danger" title="删除" @click="removeItem('tag', tag.id, tag.name)">✕</button>
         </div>
-        <div v-if="!visibleTags.length" class="empty">没有符合条件的标签</div>
+        <EmptyState v-if="!visibleTags.length" text="没有符合条件的标签" />
       </template>
 
       <template v-else>
@@ -356,7 +357,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
             <button class="icon danger" title="删除" @click="removeFragment(f.id, f.name || f.content.slice(0, 10))">✕</button>
           </template>
         </div>
-        <div v-if="!fragments.length" class="empty">还没有碎片</div>
+        <EmptyState v-if="!fragments.length" text="还没有碎片" />
       </template>    </div>
 
     <p class="hint">

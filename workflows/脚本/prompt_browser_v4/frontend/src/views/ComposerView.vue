@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
 import { apiDelete, apiGet, apiPost } from '../api/client'
+import EmptyState from '../components/EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -390,7 +391,7 @@ function toggleTag(id: number) {
             >
               展开全部 {{ (grouped[type] ?? []).length }} 个
             </button>
-            <div v-if="!(grouped[type] ?? []).length" class="empty">该类型暂无碎片</div>
+            <EmptyState v-if="!(grouped[type] ?? []).length" text="该类型暂无碎片" />
           </div>
         </div>
       </div>

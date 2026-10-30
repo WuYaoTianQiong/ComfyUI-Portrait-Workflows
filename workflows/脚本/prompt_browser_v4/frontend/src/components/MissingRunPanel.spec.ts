@@ -28,7 +28,11 @@ vi.mock('../api/client', () => ({
 async function mountPanel() {
   const wrapper = mount(MissingRunPanel, {
     props: { open: true },
-    global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // Modal 用 Teleport 渲染到 body，测试里要 stub 掉才能在 wrapper 内查到
+      stubs: { teleport: true },
+    },
   })
   await flushPromises()
   return wrapper

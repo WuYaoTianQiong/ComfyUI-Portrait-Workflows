@@ -6,6 +6,7 @@ import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
 import MissingRunPanel from '../components/MissingRunPanel.vue'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import EmptyState from '../components/EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -399,7 +400,7 @@ function clearFilters() {
             <span class="cat-name">{{ cat.name }}</span>
             <i>{{ cat.prompt_count }}</i>
           </button>
-          <div v-if="!flatCats.length" class="empty">暂无分类</div>
+          <EmptyState v-if="!flatCats.length" text="暂无分类" />
         </div>
       </section>
 
@@ -501,7 +502,7 @@ function clearFilters() {
           </div>
         </div>
 
-        <div v-if="!list.length && !isFetching" class="empty big">没有符合条件的提示词</div>
+        <EmptyState v-if="!list.length && !isFetching" size="big" text="没有符合条件的提示词" />
       </div>
 
       <div class="pager">
@@ -512,7 +513,7 @@ function clearFilters() {
     </section>
 
     <section class="detail-pane">
-      <div v-if="!draft" class="empty big">选择左侧任意一条提示词</div>
+      <EmptyState v-if="!draft" size="big" text="选择左侧任意一条提示词" />
 
       <div v-else class="detail">
         <div class="generate-bar">
@@ -603,7 +604,7 @@ function clearFilters() {
             >
               {{ cat.name }}
             </button>
-            <span v-if="!flatCats.length" class="empty">暂无分类</span>
+            <EmptyState v-if="!flatCats.length" text="暂无分类" compact />
           </div>
         </div>
         <label class="field grow">

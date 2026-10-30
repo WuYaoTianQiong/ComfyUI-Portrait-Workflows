@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
+import Modal from './Modal.vue'
+import EmptyState from './EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -110,16 +112,12 @@ async function submit() {
 }
 </script>
 <template>
-  <div v-if="open" class="overlay" @click.self="emit('close')">
-    <div class="panel">
-      <header class="panel-head">
-        <span class="title">批量补跑缺图</span>
+  <Modal :open="open" title="批量补跑缺图" @close="emit('close')">
+      <template #head>
         <span class="count">
           {{ items.length }} 条缺图<template v-if="isFetching"> · 加载中</template>
         </span>
-        <span class="spacer" />
-        <button class="btn btn-sm" @click="emit('close')">关闭</button>
-      </header>
+      </template>
 
       <div class="toolbar">
         <label class="check">
@@ -154,12 +152,13 @@ async function submit() {
             <template v-if="item.sampler"> · {{ item.sampler }}</template>
           </span>
         </label>
-        <div v-if="!items.length && !isFetching" class="empty">
-          没有缺图的提示词 —— 全部都已经出过图了
-        </div>
+        <EmptyState
+          v-if="!items.length && !isFetching"
+          text="没有缺图的提示词 —— 全部都已经出过图了"
+        />
       </div>
 
-      <footer class="panel-foot">
+      <template #footer>
         <span class="hint">每条提示词用它自己保存的参数出图；这里只决定工作流与画幅。</span>
         <span class="spacer" />
         <button
@@ -169,44 +168,14 @@ async function submit() {
         >
           {{ submitting ? '提交中…' : `补跑 ${selected.size} 条` }}
         </button>
-      </footer>
-    </div>
-  </div>
+      </template>
+  </Modal>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
-  background: rgba(0, 0, 0, 0.55);
-  display: grid;
-  place-items: center;
-}
 
-.panel {
-  width: min(760px, 92vw);
-  max-height: 82vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap) var(--gap-lg);
-  border-bottom: 1px solid var(--border);
-}
 
-.title {
-  font-weight: 600;
-}
 
 .count {
   font-size: var(--fs-xs);
@@ -295,13 +264,6 @@ async function submit() {
   font-size: var(--fs-sm);
 }
 
-.panel-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap-lg);
-  border-top: 1px solid var(--border);
-}
 
 .hint {
   font-size: var(--fs-xs);
