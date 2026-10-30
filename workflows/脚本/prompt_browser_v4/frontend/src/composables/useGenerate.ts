@@ -126,5 +126,5 @@ export function useGenerate() {
     }
   }
 
-  return { busy, job, error, run, runBatch, closeStream }
+  return { busy, job, error, run, runBatch, track: subscribe, closeStream }
 }

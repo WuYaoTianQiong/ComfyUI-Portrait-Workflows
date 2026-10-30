@@ -6,6 +6,7 @@ import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, apiPut } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
+import { useWorkflows } from '../composables/useWorkflows'
 import type { CategoryNode, PromptDetail, PromptListPage, TagRow } from '../api/types'
 
 const { workflowPath, quality, orientation } = useSettings()
@@ -68,22 +69,7 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
   queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'prompt' }),
 })
 
-const { data: workflowData } = useQuery<{
-  workflows: Array<{ path: string; name: string }>
-  default: string
-}>({
-  queryKey: ['workflows'],
-  queryFn: () => apiGet('/api/workflows'),
-})
-
-/** 首次进入时用后端给的默认工作流填充，之后以用户选择为准（localStorage）。 */
-watch(
-  () => workflowData.value?.default,
-  (fallback) => {
-    if (!workflowPath.value && fallback) workflowPath.value = fallback
-  },
-  { immediate: true },
-)
+const { workflows } = useWorkflows()
 
 function toggleOrientation() {
   orientation.value = orientation.value === 'portrait' ? 'landscape' : 'portrait'
@@ -469,7 +455,7 @@ function clearFilters() {
         <div class="generate-bar">
           <select v-model="workflowPath" class="wf-select" title="工作流">
             <option value="">选择工作流…</option>
-            <option v-for="wf in workflowData?.workflows ?? []" :key="wf.path" :value="wf.path">
+            <option v-for="wf in workflows" :key="wf.path" :value="wf.path">
               {{ wf.name }}
             </option>
           </select>
