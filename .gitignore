@@ -142,3 +142,10 @@ workflows/logs/
 *.db-wal
 *.db-shm
 
+# prompt_browser_v4 运行期产物（数据库本体不再纳入版本控制，改由 文档/backups/ 快照保全）
+workflows/文档/*.db
+workflows/文档/backups/
+workflows/脚本/prompt_browser_v4/logs/
+workflows/脚本/prompt_browser_v4/_pb_*.log
+workflows/.arts/
+

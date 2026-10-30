@@ -27,6 +27,11 @@ async def lifespan(app: FastAPI):
     # === 启动 ===
     setup_logging(settings.project_root / "logs")
     init_db()
+    # 启动维护：在线备份 → 备份归档/轮转 → 回收超过保留期的墓碑。
+    # 必须在写者线程启动前跑完，避免和同步/巡检抢写锁。
+    from services.maintenance import run_startup_maintenance
+
+    run_startup_maintenance()
     print(f"  DB:       {settings.db_path}")
     print(f"  ComfyUI:  {settings.comfyui_api}")
     print(f"  API 文档:  http://{settings.host}:{settings.port}/docs")
