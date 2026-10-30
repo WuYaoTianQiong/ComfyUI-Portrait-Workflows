@@ -7,6 +7,7 @@ import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
 import FaceswapView from './views/FaceswapView.vue'
 import JobCenterView from './views/JobCenterView.vue'
+import ToastHost from './components/ToastHost.vue'
 import { apiGet } from './api/client'
 import type { JobSnapshot } from './api/types'
 
@@ -111,6 +112,8 @@ const activeTab = ref<TabKey>('gallery')
       <JobCenterView v-else-if="activeTab === 'jobs'" />
       <PromptView v-else />
     </main>
+
+    <ToastHost />
   </div>
 </template>
 

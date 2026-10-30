@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Lightbox from '../components/Lightbox.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
+import { useToast } from '../composables/useToast'
 import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 
@@ -142,6 +143,95 @@ function toggleMissing() {
   page.value = 1
 }
 
+// ---------------- 清理失效 ----------------
+
+const toast = useToast()
+const cleaning = ref(false)
+
+interface CleanupPreview {
+  success: boolean
+  dry_run: boolean
+  total: number
+  will_clean: number
+  samples: Array<{ id: number; filename: string; subfolder: string; img_type: string }>
+  guarded: boolean
+  message: string
+}
+
+/**
+ * 清理范围 = 当前筛选，但**刻意不传 missing**。
+ *
+ * 「只看文件缺失」是"看待清理的清单"，不是"清理范围"；带上它预览恒为 0，
+ * 用户会以为功能坏了。
+ */
+function cleanupScope() {
+  return {
+    search: search.value.trim(),
+    tag_ids: selectedTags.value.join(','),
+    tag_match: tagMatch.value,
+  }
+}
+
+/**
+ * 两段式：先预览再执行。
+ *
+ * 后端默认 dry_run，只返回"将清理多少条 + 样本"，不写库；执行要显式带
+ * dry_run=false&confirm=true。缺失占比过半时后端会熔断拒绝（路径解析异常时
+ * 一键清空整库是历史事故的根源）。
+ */
+async function cleanupMissing() {
+  if (cleaning.value) return
+  cleaning.value = true
+  try {
+    const preview = await apiPost<CleanupPreview>(
+      '/api/history/cleanup_missing',
+      undefined,
+      { ...cleanupScope(), dry_run: true },
+    )
+
+    if (preview.guarded) {
+      toast.error(preview.message || '疑似路径异常，已阻止清理')
+      return
+    }
+    if (!preview.will_clean) {
+      toast.info(`扫描 ${preview.total} 条记录，文件均存在，无需清理`)
+      return
+    }
+
+    const samples = preview.samples
+      .map((s) => `  · ${s.subfolder ? s.subfolder + '/' : ''}${s.filename}`)
+      .join('\n')
+    const more = preview.will_clean > 10 ? `\n  … 另有 ${preview.will_clean - 10} 条` : ''
+    const allMissing = preview.total > 0 && preview.will_clean === preview.total
+    const warn = allMissing
+      ? '\n\n⚠ 当前筛选下的记录会【全部】失效，请先确认 ComfyUI output 目录可正常访问。'
+      : ''
+
+    const ok = confirm(
+      `扫描 ${preview.total} 条记录，其中 ${preview.will_clean} 条的文件已不存在：\n\n` +
+        `${samples}${more}${warn}` +
+        '\n\n这一步只把记录标记为已删除，不动磁盘文件。确认继续？',
+    )
+    if (!ok) return
+
+    const data = await apiPost<CleanupPreview & { cleaned: number }>(
+      '/api/history/cleanup_missing',
+      undefined,
+      { ...cleanupScope(), dry_run: false, confirm: true },
+    )
+    if (!data.success) {
+      toast.error(data.message || '清理未执行')
+      return
+    }
+    toast.success(`已清理 ${data.cleaned} 条失效记录（共扫描 ${data.total} 条）`)
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  } catch (e) {
+    toast.error(`清理失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    cleaning.value = false
+  }
+}
+
 function clearFilters() {
   selectedTags.value = []
   tagMatch.value = 'all'
@@ -200,6 +290,14 @@ function clearFilters() {
           <span v-if="isFetching" class="fetching">加载中…</span>
         </span>
         <span class="spacer" />
+        <button
+          class="btn btn-sm"
+          :disabled="cleaning"
+          title="扫描当前筛选下的记录，先预览再确认；只标记不动磁盘文件"
+          @click="cleanupMissing"
+        >
+          🧹 清理失效
+        </button>
         <div class="pager">
           <button class="btn btn-sm" :disabled="page <= 1" @click="page--">上一页</button>
           <span class="page-num">{{ page }} / {{ totalPages }}</span>
