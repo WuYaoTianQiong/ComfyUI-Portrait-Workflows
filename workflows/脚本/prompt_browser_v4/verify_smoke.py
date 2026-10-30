@@ -36,6 +36,10 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = f"http://127.0.0.1:{PORT}"
 LOG_PATH = os.path.join(V4, "_smoke_server.log")
 
+# 当前生效的是哪套前端：static_next/ 存在就是新前端，否则是旧前端。
+# 与 main.py 的判定完全一致（同一个目录开关）。
+NEW_FRONTEND = os.path.exists(os.path.join(V4, "static_next", "index.html"))
+
 
 def _kill_port(port):
     """Windows: netstat 找到 LISTENING 的 PID 并 taskkill，清理上次残留实例。"""
@@ -212,21 +216,41 @@ def main() -> int:
                 sync_total = "PARSE_ERR"
             checks.append(("history_sync(page_size=50)", code, sync_total))
 
-            # 静态资源：必须校验内容，否则 404 会被 SPA 回退成 index.html(200) 造成假通过
-            for f, needle in (("/gallery.js", b"renderGallery"),
-                              ("/store.js", b"PBQuery"),
-                              ("/history.js", b"loadHistory"),
-                              ("/faceswap.js", b"window.fsSubmit"),
-                              ("/faceswap.css", b".fs-page")):
-                code, body = _get(BASE + f)
-                ok = code == 200 and needle in body
-                checks.append((f"serve {f} (含 {needle.decode()})", code if ok else -2,
-                               f"len={len(body)}" if ok else "内容不符（可能被 SPA 回退成 HTML）"))
+            # 静态资源：必须校验内容，否则 404 会被 SPA 回退成 index.html(200) 造成假通过。
+            # 断言跟着"实际生效的前端"走：
+            #   新前端（static_next/）—— 资源在 /assets 下，文件名带 hash，要从 index.html 里解析；
+            #   旧前端（static/）    —— 根目录下的手写 js/css。
+            # 两种模式互斥，因为回退方式是改名目录，不是切换开关。
+            if NEW_FRONTEND:
+                code, body = _get(BASE + "/")
+                has_app = b'id="app"' in body and b"/assets/" in body
+                checks.append(("根路径返回新前端 index.html", code if has_app else -2,
+                               f"len={len(body)}" if has_app else "缺少 #app 挂载点或 /assets 引用"))
 
-            code, body = _get(BASE + "/")
-            has_tab = b'id="faceswapTab"' in body
-            checks.append(("index.html 含 faceswapTab", code if has_tab else -2,
-                           f"len={len(body)}" if has_tab else "缺少 tab 面板"))
+                import re as _re
+                assets = _re.findall(rb'(?:src|href)="(/assets/[^"]+)"', body)
+                if not assets:
+                    checks.append(("新前端引用了构建资源", -2, "index.html 里没有 /assets 引用"))
+                for asset in assets:
+                    asset = asset.decode()
+                    code2, b2 = _get(BASE + asset)
+                    ok2 = code2 == 200 and len(b2) > 1000
+                    checks.append((f"serve {asset}", code2 if ok2 else -2, f"bytes={len(b2)}"))
+            else:
+                for f, needle in (("/gallery.js", b"renderGallery"),
+                                  ("/store.js", b"PBQuery"),
+                                  ("/history.js", b"loadHistory"),
+                                  ("/faceswap.js", b"window.fsSubmit"),
+                                  ("/faceswap.css", b".fs-page")):
+                    code, body = _get(BASE + f)
+                    ok = code == 200 and needle in body
+                    checks.append((f"serve {f} (含 {needle.decode()})", code if ok else -2,
+                                   f"len={len(body)}" if ok else "内容不符（可能被 SPA 回退成 HTML）"))
+
+                code, body = _get(BASE + "/")
+                has_tab = b'id="faceswapTab"' in body
+                checks.append(("index.html 含 faceswapTab", code if has_tab else -2,
+                               f"len={len(body)}" if has_tab else "缺少 tab 面板"))
 
             # ---- 批量换脸 ----
             root = os.path.dirname(os.path.dirname(V4))
@@ -350,9 +374,12 @@ def main() -> int:
                                    f"HTTP {code}（期望 400）"))
 
             # ---- 文件缺失时返回占位图（而不是 404 刷屏）----
-            code, body = _get(BASE + "/img-missing.svg")
-            ok = code == 200 and b"<svg" in body and "文件缺失".encode() in body
-            checks.append(("占位图 img-missing.svg", code if ok else -2, f"bytes={len(body)}"))
+            if not NEW_FRONTEND:
+                # 旧前端下占位图是静态文件；新前端下 static/ 不再挂载，
+                # 但"后端返回的占位图内容"由下面几条缩略图/原图(缺失)→占位图断言覆盖。
+                code, body = _get(BASE + "/img-missing.svg")
+                ok = code == 200 and b"<svg" in body and "文件缺失".encode() in body
+                checks.append(("占位图 img-missing.svg", code if ok else -2, f"bytes={len(body)}"))
 
             miss = "__definitely_missing__.png"
             for label, url in (
