@@ -4,7 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, apiPut } from '../api/client'
+import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
+import { useGenerate } from '../composables/useGenerate'
 import type { CategoryNode, PromptDetail, PromptListPage, TagRow } from '../api/types'
+
+const { workflowPath, quality, orientation } = useSettings()
+const { busy: generating, job: activeJob, error: generateError, run } = useGenerate()
 
 const pageSize = 50
 const page = ref(1)
@@ -56,6 +61,49 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
   queryKey: ['tags', 'prompt'],
   queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'prompt' }),
 })
+
+const { data: workflowData } = useQuery<{
+  workflows: Array<{ path: string; name: string }>
+  default: string
+}>({
+  queryKey: ['workflows'],
+  queryFn: () => apiGet('/api/workflows'),
+})
+
+/** 首次进入时用后端给的默认工作流填充，之后以用户选择为准（localStorage）。 */
+watch(
+  () => workflowData.value?.default,
+  (fallback) => {
+    if (!workflowPath.value && fallback) workflowPath.value = fallback
+  },
+  { immediate: true },
+)
+
+function toggleOrientation() {
+  orientation.value = orientation.value === 'portrait' ? 'landscape' : 'portrait'
+}
+
+function generate() {
+  if (!draft.value) return
+  run(draft.value.id, {
+    workflowPath: workflowPath.value,
+    quality: quality.value,
+    orientation: orientation.value,
+  })
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: '排队中',
+  running: '生成中',
+  done: '完成',
+  error: '失败',
+  cancelled: '已取消',
+  stopped: '已停止',
+}
+
+function statusLabel(status?: string) {
+  return STATUS_LABEL[status ?? ''] ?? status ?? ''
+}
 
 /** 树拍平成一维，带 depth 做缩进 —— 分类层级只有两级，递归组件是过度设计。 */
 const flatCats = computed(() => {
@@ -269,6 +317,29 @@ function clearFilters() {
       <div v-if="!draft" class="empty big">选择左侧任意一条提示词</div>
 
       <div v-else class="detail">
+        <div class="generate-bar">
+          <select v-model="workflowPath" class="wf-select" title="工作流">
+            <option value="">选择工作流…</option>
+            <option v-for="wf in workflowData?.workflows ?? []" :key="wf.path" :value="wf.path">
+              {{ wf.name }}
+            </option>
+          </select>
+          <select v-model="quality" title="画质">
+            <option v-for="q in QUALITY_OPTIONS" :key="q" :value="q">{{ q }}</option>
+          </select>
+          <button class="btn btn-sm" title="横竖屏" @click="toggleOrientation">
+            {{ orientation === 'portrait' ? '📱 竖' : '🖥️ 横' }}
+          </button>
+          <span class="spacer" />
+          <span v-if="generateError" class="gen-error">{{ generateError }}</span>
+          <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
+            {{ statusLabel(activeJob.status) }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
+          </span>
+          <button class="btn btn-sm primary" :disabled="generating || !workflowPath" @click="generate">
+            {{ generating ? '生成中…' : '🚀 出图' }}
+          </button>
+        </div>
+
         <header class="detail-head">
           <input v-model="draft.name" class="name-input" placeholder="未命名" />
           <button
@@ -539,6 +610,45 @@ function clearFilters() {
   gap: var(--gap);
   padding: var(--gap-lg);
   height: 100%;
+}
+
+.generate-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.wf-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 340px;
+}
+
+.gen-error {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+
+.job-state {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.job-state.running,
+.job-state.pending {
+  color: var(--primary);
+}
+
+.job-state.done {
+  color: var(--success);
+}
+
+.job-state.error {
+  color: var(--danger);
 }
 
 .detail-head {
