@@ -7,6 +7,7 @@ import { apiGet, apiPost, apiPut } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
+import { statusLabel } from '../utils/format'
 import type { CategoryNode, PromptDetail, PromptListPage, TagRow } from '../api/types'
 
 const { workflowPath, quality, orientation } = useSettings()
@@ -84,18 +85,7 @@ function generate() {
   })
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  running: '生成中',
-  done: '完成',
-  error: '失败',
-  cancelled: '已取消',
-  stopped: '已停止',
-}
 
-function statusLabel(status?: string) {
-  return STATUS_LABEL[status ?? ''] ?? status ?? ''
-}
 
 /** 树拍平成一维，带 depth 做缩进 —— 分类层级只有两级，递归组件是过度设计。 */
 const flatCats = computed(() => {

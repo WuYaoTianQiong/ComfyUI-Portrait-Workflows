@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
+import FaceswapView from './views/FaceswapView.vue'
 import { apiGet } from './api/client'
 
 /** ComfyUI 在线状态：离线时不该让用户以为能出图（历史上因此白跑 27 个任务）。 */
@@ -23,7 +24,7 @@ const online = computed(() => status.value?.comfyui === 'online')
  * imageViewer.js）。提示词页/组合器在 S2-3、S2-4 按同样方式接入，
  * 旧页面在此期间保持可用（新前端只跑在 5173）。
  */
-type TabKey = 'gallery' | 'prompt' | 'composer'
+type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap'
 
 const activeTab = ref<TabKey>('gallery')
 </script>
@@ -59,6 +60,13 @@ const activeTab = ref<TabKey>('gallery')
         >
           组合器
         </button>
+        <button
+          class="btn btn-sm"
+          :class="{ active: activeTab === 'faceswap' }"
+          @click="activeTab = 'faceswap'"
+        >
+          批量换脸
+        </button>
       </nav>
 
       <div class="status" :class="{ online }">
@@ -74,6 +82,7 @@ const activeTab = ref<TabKey>('gallery')
     <main class="content">
       <GalleryView v-if="activeTab === 'gallery'" />
       <ComposerView v-else-if="activeTab === 'composer'" />
+      <FaceswapView v-else-if="activeTab === 'faceswap'" />
       <PromptView v-else />
     </main>
   </div>
