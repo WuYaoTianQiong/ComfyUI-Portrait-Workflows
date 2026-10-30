@@ -159,6 +159,7 @@ workflows/.codeartsdoer/
 workflows/脚本/prompt_browser_v4/frontend/node_modules/
 workflows/脚本/prompt_browser_v4/frontend/_dev*.log
 workflows/脚本/prompt_browser_v4/static/v2/
+workflows/脚本/prompt_browser_v4/static_next/
 
 
 

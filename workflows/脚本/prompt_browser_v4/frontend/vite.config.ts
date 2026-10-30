@@ -18,8 +18,10 @@ export default defineConfig({
     },
   },
   build: {
-    // 构建产物落到后端的静态目录下，S2-5 再把它设为默认首页
-    outDir: '../static/v2',
+    // 构建产物落到 static_next/（与旧的 static/ 并存）。
+    // 后端把 / 指向它、把旧前端挂在 /legacy，两个版本同时可访问，随时能回退。
+    // 构建产物不入库（见仓库 .gitignore）。
+    outDir: '../static_next',
     emptyOutDir: true,
     sourcemap: true,
   },

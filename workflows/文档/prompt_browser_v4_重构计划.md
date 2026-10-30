@@ -63,9 +63,12 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 ### 2.5 前端工程（S2 起）
 ```powershell
 cd F:\ComfyUI_Migration\ComfyUI-Portrait-Workflows\workflows\脚本\prompt_browser_v4\frontend
-npm run dev      # http://127.0.0.1:5173 ，/api、/output 已代理到 8656
-npm run build    # 产物到 static/v2/（S2-5 才切换为默认首页）
+npm run dev      # http://127.0.0.1:5173 ，/api、/output 已代理到 8656（开发用，改完即生效）
+npm run build    # 产物到 static_next/（1.8s）；构建产物不入库，部署时需重新 build
 ```
+**回退到旧前端**：把 `static_next` 目录改名（如 `static_next.off`）再重启服务即可，
+根路径会自动回到旧版（`static/`），不需要改任何代码或配置。
+
 迁移期间旧前端 `static/` 保持可用，随时可退回；新前端只跑在 5173，互不干扰。
 
 ### 2.4 每个任务的最小验证闭环（缺一不可）
@@ -316,7 +319,19 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
   - 耗时格式化到天级（历史任务动辄几百分钟，"485m01s" 读不出来）
   - 实测（playwright）：60 个任务卡片、状态中文化、展开明细内容正确、只看进行中过滤正确、0 个 JS 错误
 
-### S2-6 下线旧前端
+### S2-6 切换根路径（新前端接管 8656）
+- **状态**：✅ 2026-10-30 完成
+  - 构建产物输出到 `static_next/`（`npm run build`，1.8s；产物 191KB / gzip 62KB，对比旧前端 8.2k 行 JS + 3.8k 行 CSS）
+  - `main.py` 按**目录是否存在**决定用哪套前端，不靠开关也不靠环境变量：
+    - `static_next/index.html` 存在 → 根路径走新前端（`/assets` 挂构建资源，404 回落到新 index.html）
+    - 不存在 → 根路径走旧前端（`static/`，原逻辑原样保留）
+  - **回退方式**：把 `static_next` 改名（如 `static_next.off`）再重启服务即可，零代码改动、零配置残留
+  - **没有把旧前端挂到 `/legacy`**：它内部用绝对路径引用资源（`/base.css`、`/favicon.svg`），挪到子路径后这些引用会打到新前端上直接白屏；"目录开关"方案让旧前端始终待在根路径，兼容性最好
+  - 旧前端文件（`static/`）**保留在磁盘与 git 里**，作为回退保障；确认不再需要时再删
+  - 新前端补了内联 SVG favicon（避免控制台 404），标题从「Prompt Browser · 新前端」改为正式名
+  - 实测：根路径返回新 index.html、`/assets/*.js` 200（163KB）、`/assets/*.css` 200；playwright 打开 8656 → 标题 `Prompt Browser`、画廊 11 张卡片、16 个标签、5 个页签全部可切换、**0 个 JS 错误**
+
+### S2-7 收尾（可选）
 - 删除 `static/*.js` 手写模块与 `?v=N` 版本号机制，静态目录只留构建产物与 vendor
 
 ---
@@ -360,4 +375,5 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S2-4 出图闭环（SSE 进度 + 工作流/画质/方向 + 状态灯）
 - [x] S2-4c 批量换脸
 - [x] S2-5 任务中心
-- [ ] S2-6 下线旧前端（切根路径）
+- [x] S2-6 切换根路径（新前端接管 8656，回退=改名 static_next 目录）
+- [ ] S2-7 删除旧前端 static/*.js（确认不再需要后）

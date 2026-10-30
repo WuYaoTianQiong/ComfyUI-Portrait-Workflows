@@ -143,6 +143,11 @@ app.include_router(fsbrowse_router, prefix="/api")
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):
     """在静态文件挂载返回 404 后，返回 index.html 以支持前端路由"""
+
+    def __init__(self, app, index_file=None):
+        super().__init__(app)
+        self._index_file = index_file
+
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         # 静态资源的响应不缓存（html/js/css），方便开发调试
@@ -153,7 +158,7 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/api/") and "cache-control" not in {k.lower() for k in response.headers.keys()}:
             response.headers["Cache-Control"] = "no-store"
         if response.status_code == 404 and not request.url.path.startswith("/api/"):
-            index_file = settings.static_dir / "index.html"
+            index_file = self._index_file or (settings.static_dir / "index.html")
             if index_file.exists():
                 resp = FileResponse(index_file)
                 resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -177,9 +182,26 @@ if _temp_dir.exists():
     print(f"  [mount] /temp -> {_temp_dir}")
 
 # 静态文件挂载 + SPA Fallback 中间件
-if settings.static_dir.exists():
+#
+# 新旧前端的切换方式：**目录是否存在**，不靠开关、不靠环境变量。
+#   static_next/index.html 存在 → 根路径走新前端（Vue 构建产物）
+#   不存在                        → 根路径走旧前端（static/ 手写页面）
+# 回退只需把 static_next 改名（比如 static_next.off），零代码改动、零重启风险。
+#
+# 为什么不给旧前端挂 /legacy：它内部用绝对路径引用资源（/base.css、/favicon.svg），
+# 挪到子路径后这些引用会指向新前端，直接白屏。
+_new_index = settings.static_dir.parent / "static_next" / "index.html"
+_new_assets = settings.static_dir.parent / "static_next" / "assets"
+
+if _new_index.exists():
+    if _new_assets.exists():
+        app.mount("/assets", StaticFiles(directory=str(_new_assets)), name="assets")
+    app.add_middleware(SPAFallbackMiddleware, index_file=_new_index)
+    print(f"  前端:     新版（static_next/）")
+elif settings.static_dir.exists():
     app.mount("/", StaticFiles(directory=str(settings.static_dir), html=True), name="static")
     app.add_middleware(SPAFallbackMiddleware)
+    print(f"  前端:     旧版（static/）")
 
 
 # ======== 直接运行入口 ========
