@@ -291,6 +291,48 @@ const bulkCatList = computed(() => {
   return out
 })
 
+
+/** 批量投喂工作流用：要套哪个工作流。 */
+const bulkWf = ref('')
+
+/**
+ * 批量把选中的图片投喂给工作流处理（超分 / 重绘等）。
+ *
+ * 与灯箱里的单张投喂同一个端点 `/api/history/{id}/process`，只是循环调用。
+ */
+async function applyProcess() {
+  if (!bulkWf.value) {
+    toast.error('请先选择工作流')
+    return
+  }
+  await applyBulk('/api/history/{id}/process', '处理', { workflow_path: bulkWf.value })
+}
+
+/**
+ * 批量继承来源分类：把图片对应提示词上的标签/分类继承过来。
+ *
+ * 同步进来的图片常常没有分类/标签（prompt_id 是空的），继承不了 ——
+ * 这种图点了会返回 0，正常。
+ */
+async function applyInherit() {
+  await applyBulk('/api/history/{id}/inherit', '继承分类')
+}
+
+/** 一次性给全库缺分类/标签的图片补齐。 */
+async function backfillTaxonomy() {
+  if (!confirm('为所有缺少分类/标签的图片补齐（一次性全库操作，可能要跑一会儿）。继续？')) return
+  try {
+    const result = await apiPost<{ success: boolean; backfilled: number }>(
+      '/api/history/backfill_taxonomy',
+    )
+    toast.success(`已补齐 ${result.backfilled} 张图片的分类/标签`)
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+    queryClient.invalidateQueries({ queryKey: ['tags'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
+  } catch (e) {
+    toast.error(`补齐失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 async function applyBulkTag() {
   if (!bulkTagId.value) return
   await applyBulk(`/api/history/{id}/tags/${bulkTagId.value}`, '标签')
@@ -301,14 +343,14 @@ async function applyBulkCat() {
   await applyBulk(`/api/history/{id}/categories/${bulkCatId.value}`, '分类')
 }
 
-async function applyBulk(pathTemplate: string, label: string) {
+async function applyBulk(pathTemplate: string, label: string, body?: Record<string, unknown>) {
   bulkBusy.value = true
   const ids = Array.from(selected.value)
   let ok = 0
   let failed = 0
   for (const id of ids) {
     try {
-      await apiPost(pathTemplate.replace('{id}', String(id)))
+      await apiPost(pathTemplate.replace('{id}', String(id)), body)
       ok++
     } catch {
       failed++
@@ -589,6 +631,9 @@ function clearFilters() {
         <span class="spacer" />
         <button class="btn btn-sm" @click="openCompare">对比</button>
         <button class="btn btn-sm" @click="bulkOpen = true">打标签/分类</button>
+        <button class="btn btn-sm" title="为全库缺少分类/标签的图片补齐" @click="backfillTaxonomy">
+          补齐全库分类
+        </button>
         <button class="btn btn-sm" @click="batchDownload">下载选中</button>
         <button class="btn btn-sm danger" :disabled="deleteMutation.isPending.value" @click="batchDelete">
           {{ deleteMutation.isPending.value ? '删除中…' : '删除选中' }}
@@ -672,6 +717,25 @@ function clearFilters() {
           </button>
         </div>
         <div class="bulk-row">
+          <span class="bulk-label">继承</span>
+          <span class="bulk-hint">把来源提示词的分类/标签继承到选中的图片上</span>
+          <button class="btn btn-sm" :disabled="bulkBusy" @click="applyInherit">
+            继承分类
+          </button>
+        </div>
+        <div class="bulk-row">
+          <span class="bulk-label">处理</span>
+          <select v-model="bulkWf" class="bulk-select">
+            <option value="">选择工作流…</option>
+            <option v-for="wf in workflows ?? []" :key="wf.path" :value="wf.path">
+              {{ wf.name }}
+            </option>
+          </select>
+          <button class="btn btn-sm" :disabled="bulkBusy || !bulkWf" @click="applyProcess">
+            投喂处理
+          </button>
+        </div>
+        <div class="bulk-row">
           <span class="bulk-label">分类</span>
           <select v-model="bulkCatId" class="bulk-select">
             <option :value="null">选择分类…</option>
@@ -751,6 +815,12 @@ function clearFilters() {
   width: 40px;
   flex: none;
   font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.bulk-hint {
+  flex: 1;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 

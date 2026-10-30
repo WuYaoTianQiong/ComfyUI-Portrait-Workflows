@@ -19,6 +19,9 @@ vi.mock('../api/client', () => ({
         orientation: { '竖图': 2 },
       }
     }
+    if (path.includes('/api/workflows')) {
+      return { workflows: [{ path: '/wf/a.json', name: '工作流A' }], default: '/wf/a.json' }
+    }
     if (path.includes('/api/tags')) {
       return { tags: [{ id: 1, name: '标签', color: '#5b8fb9', usage_count: 0, prompt_count: 3 }] }
     }
@@ -61,7 +64,11 @@ describe('GalleryView 清理失效', () => {
 
   async function mountView() {
     const wrapper = mount(GalleryView, {
-      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+      global: {
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // Modal 用 Teleport 渲染到 body，测试里要 stub 掉才能在 wrapper 内查到
+      stubs: { teleport: true },
+    },
     })
     await flushPromises()
     return wrapper
@@ -145,5 +152,37 @@ describe('GalleryView 清理失效', () => {
       .mocked(apiGet)
       .mock.calls.filter((c) => String(c[0]).includes('/api/history/ids'))
     expect(idsCalls.length).toBe(1)
+  })
+  it('批量弹层提供「继承分类」与「投喂处理」', async () => {
+    const wrapper = await mountView()
+    const picks = wrapper.findAll('.card .pick')
+    await picks[0].trigger('click')
+    await picks[1].trigger('click')
+    await flushPromises()
+
+    const btn = wrapper.findAll('.btn').find((b) => b.text().includes('打标签'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('继承分类')
+    expect(wrapper.text()).toContain('投喂处理')
+  })
+
+  it('「继承分类」按张调用 /api/history/{id}/inherit', async () => {
+    const wrapper = await mountView()
+    const picks = wrapper.findAll('.card .pick')
+    await picks[0].trigger('click')
+    await picks[1].trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('.btn').find((b) => b.text().includes('打标签'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.btn').find((b) => b.text().includes('继承分类'))!.trigger('click')
+    await flushPromises()
+
+    const paths = vi.mocked(apiPost).mock.calls.map((c) => c[0])
+    expect(paths).toContain('/api/history/1/inherit')
+    expect(paths).toContain('/api/history/2/inherit')
   })
 })
