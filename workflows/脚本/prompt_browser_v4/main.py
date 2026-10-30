@@ -190,18 +190,18 @@ if _temp_dir.exists():
 #
 # 为什么不给旧前端挂 /legacy：它内部用绝对路径引用资源（/base.css、/favicon.svg），
 # 挪到子路径后这些引用会指向新前端，直接白屏。
-_new_index = settings.static_dir.parent / "static_next" / "index.html"
-_new_assets = settings.static_dir.parent / "static_next" / "assets"
+# 前端只有一套：Vue 构建产物（static_next/）。
+# 旧前端（static/）已在 S2-7 删除，需要回退见 git tag `legacy-frontend`。
+_front_dir = settings.static_dir.parent / "static_next"
+_front_index = _front_dir / "index.html"
 
-if _new_index.exists():
-    if _new_assets.exists():
-        app.mount("/assets", StaticFiles(directory=str(_new_assets)), name="assets")
-    app.add_middleware(SPAFallbackMiddleware, index_file=_new_index)
-    print(f"  前端:     新版（static_next/）")
-elif settings.static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(settings.static_dir), html=True), name="static")
-    app.add_middleware(SPAFallbackMiddleware)
-    print(f"  前端:     旧版（static/）")
+if _front_index.exists():
+    if (_front_dir / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(_front_dir / "assets")), name="assets")
+    app.add_middleware(SPAFallbackMiddleware, index_file=_front_index)
+    print("  前端:     static_next/（npm run build 产物）")
+else:
+    print("  前端:     ⚠ 缺少 static_next/index.html —— 请在 frontend/ 执行 npm run build")
 
 
 # ======== 直接运行入口 ========

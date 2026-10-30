@@ -38,12 +38,6 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Step '2' '5' 'verify_smoke'
-& $PY verify_smoke.py
-if ($LASTEXITCODE -ne 0) {
-    Write-Host 'FAILED: verify_smoke' -ForegroundColor Red
-    exit 1
-}
 
 $frontend = Join-Path $root 'frontend'
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
@@ -51,7 +45,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
 } else {
     Push-Location $frontend
 
-    Step '3' '5' 'vue-tsc --noEmit'
+    Step '2' '5' 'vue-tsc --noEmit'
     & npx vue-tsc --noEmit
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vue-tsc' -ForegroundColor Red
@@ -59,7 +53,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
         exit 1
     }
 
-    Step '4' '5' 'vitest'
+    Step '3' '5' 'vitest'
     & npx vitest run --reporter=basic
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vitest' -ForegroundColor Red
@@ -67,7 +61,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
         exit 1
     }
 
-    Step '5' '5' 'vite build'
+    Step '4' '5' 'vite build'
     & npx vite build
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vite build' -ForegroundColor Red
@@ -76,6 +70,14 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     }
 
     Pop-Location
+
+    Step '5' '5' 'verify_smoke'
+    & $PY verify_smoke.py
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'FAILED: verify_smoke' -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
 
     Write-Host '=== 附加：前端 E2E（Playwright）===' -ForegroundColor Cyan
     & $PY tests\e2e\run_e2e.py

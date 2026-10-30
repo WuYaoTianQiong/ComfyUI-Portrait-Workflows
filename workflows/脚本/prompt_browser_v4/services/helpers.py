@@ -35,7 +35,20 @@ def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
 
 
 # 图片文件确实找不到时给前端看的占位图（static 目录下，随静态目录一起发布）
-MISSING_IMAGE_PATH = settings.static_dir / "img-missing.svg"
+# 「文件缺失」占位图。
+#
+# 原来是一个静态文件（static/img-missing.svg），S2-7 删除旧前端目录时被一起删掉，
+# 结果缺失图片的请求直接 500。改成内联 SVG：不再依赖任何外部文件，
+# 删目录、换部署方式都不会再影响它。
+MISSING_IMAGE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+<rect width="300" height="300" fill="#23232e"/>
+<g fill="none" stroke="#5b5b70" stroke-width="3">
+<rect x="96" y="104" width="108" height="84" rx="6"/>
+<path d="M96 168l30-28 26 24 20-18 32 30"/>
+</g>
+<text x="150" y="222" text-anchor="middle" fill="#8b8b9e" font-size="15" font-family="sans-serif">文件缺失</text>
+<text x="150" y="242" text-anchor="middle" fill="#63637a" font-size="12" font-family="sans-serif">已被删除或移动</text>
+</svg>"""
 
 
 def captured_at_for_image(filename: str, subfolder: str, img_type: str):
@@ -64,14 +77,10 @@ def missing_image_response():
     404，控制台噪音很大；而 404 在前端也只能显示裂图，信息量还不如占位图上
     写着的"文件缺失/已被删除"。用 no-store，保证文件恢复后立刻能取到真图。
     """
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi.responses import Response
 
-    if not MISSING_IMAGE_PATH.is_file():
-        # 占位图本身丢了：退回普通的 404，别让所有图片请求变成 500
-        raise HTTPException(404, "图片文件不存在")
-    return FileResponse(
-        str(MISSING_IMAGE_PATH),
+    return Response(
+        content=MISSING_IMAGE_SVG,
         media_type="image/svg+xml",
         headers={"Cache-Control": "no-store"},
     )
