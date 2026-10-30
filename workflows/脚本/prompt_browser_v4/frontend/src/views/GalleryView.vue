@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import Lightbox from '../components/Lightbox.vue'
+import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
@@ -61,13 +62,6 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
 const total = computed(() => history.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
-
-/** 只展示"确实有图"的标签；已选中的即使计数为 0 也保留，否则取消不掉。 */
-const visibleTags = computed<TagRow[]>(() =>
-  (tagData.value?.tags ?? []).filter(
-    (t) => t.prompt_count > 0 || selectedTags.value.includes(t.id),
-  ),
-)
 
 // ---------------- 选择与批量操作 ----------------
 
@@ -175,38 +169,14 @@ function clearFilters() {
           </button>
         </div>
 
-        <div class="mode-switch">
-          <button
-            class="btn btn-sm"
-            :class="{ active: tagMatch === 'all' }"
-            title="选中的标签必须同时满足"
-            @click="setTagMatch('all')"
-          >
-            全部满足
-          </button>
-          <button
-            class="btn btn-sm"
-            :class="{ active: tagMatch === 'any' }"
-            title="满足任意一个标签即可"
-            @click="setTagMatch('any')"
-          >
-            任一满足
-          </button>
-        </div>
-
-        <div class="tag-cloud">
-          <button
-            v-for="tag in visibleTags"
-            :key="tag.id"
-            class="tag"
-            :class="{ active: selectedTags.includes(tag.id) }"
-            :style="{ '--c': tag.color }"
-            @click="toggleTag(tag.id)"
-          >
-            {{ tag.name }}<i>{{ tag.prompt_count }}</i>
-          </button>
-          <div v-if="!visibleTags.length" class="empty">暂无带图片的标签</div>
-        </div>
+        <TagCloud
+          :tags="tagData?.tags ?? []"
+          :selected="selectedTags"
+          :match="tagMatch"
+          empty-text="暂无带图片的标签"
+          @toggle="toggleTag"
+          @update:match="setTagMatch"
+        />
       </section>
 
       <section class="group">
@@ -338,50 +308,6 @@ function clearFilters() {
 .clear {
   font-size: var(--fs-xs);
   padding: 1px 6px;
-}
-
-.mode-switch {
-  display: flex;
-  gap: var(--gap-xs);
-  margin-bottom: var(--gap-sm);
-}
-
-.mode-switch .btn {
-  flex: 1;
-  font-size: var(--fs-xs);
-}
-
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tag {
-  font-size: var(--fs-sm);
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--c, var(--border));
-  background: transparent;
-  color: var(--text);
-  transition: 0.12s;
-}
-
-.tag:hover {
-  background: color-mix(in srgb, var(--c) 18%, transparent);
-}
-
-.tag.active {
-  background: var(--c);
-  border-color: var(--c);
-  color: #fff;
-}
-
-.tag i {
-  font-style: normal;
-  font-size: var(--fs-xs);
-  opacity: 0.8;
-  margin-left: 4px;
 }
 
 .check {

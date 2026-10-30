@@ -63,3 +63,54 @@ export interface CategoryNode extends CategoryRef {
   prompt_count: number
   children: CategoryNode[]
 }
+
+// ---------------------------------------------------------------------------
+// 提示词
+// ---------------------------------------------------------------------------
+
+export interface PromptListItem {
+  id: number
+  prompt_preview: string
+  tags: string
+  steps: number | null
+  sampler: string
+  model: string
+  name: string
+  created_at: string
+  is_favorite: boolean
+  is_pinned: boolean
+  rating: number | null
+  usage_count: number
+}
+
+export interface PromptListPage {
+  prompts: PromptListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface PromptDetail {
+  id: number
+  name: string
+  prompt: string
+  negative_prompt: string
+  steps: number | null
+  cfg_scale: number | null
+  sampler: string
+  seed: number | null
+  model: string
+  width: number | null
+  height: number | null
+  tags: string
+  note: string
+  created_at: string
+  updated_at: string
+  is_favorite: boolean
+  is_pinned: boolean
+  usage_count: number
+  last_used_at: string
+  rating: number | null
+  categories: CategoryRef[]
+  tags_detail: TagRef[]
+}

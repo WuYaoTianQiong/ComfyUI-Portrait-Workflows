@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import GalleryView from './views/GalleryView.vue'
+import PromptView from './views/PromptView.vue'
 
 /**
  * 壳层：一个极简页签。
@@ -47,9 +48,7 @@ const activeTab = ref<TabKey>('gallery')
 
     <main class="content">
       <GalleryView v-if="activeTab === 'gallery'" />
-      <div v-else class="placeholder">
-        提示词页将在 S2-3 迁入，旧版本仍可使用。
-      </div>
+      <PromptView v-else />
     </main>
   </div>
 </template>
@@ -122,11 +121,5 @@ const activeTab = ref<TabKey>('gallery')
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.placeholder {
-  padding: 60px;
-  text-align: center;
-  color: var(--muted);
 }
 </style>

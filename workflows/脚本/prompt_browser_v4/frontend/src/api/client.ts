@@ -40,6 +40,18 @@ export function apiPost<T>(path: string, body?: unknown, params: QueryParams = {
   })
 }
 
+export function apiPut<T>(path: string, body?: unknown, params: QueryParams = {}): Promise<T> {
+  return request<T>(path + buildQuery(params), {
+    method: 'PUT',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+}
+
+export function apiDelete<T>(path: string, params: QueryParams = {}): Promise<T> {
+  return request<T>(path + buildQuery(params), { method: 'DELETE' })
+}
+
 /** 图片访问地址（缩略图/原图都走这里，避免各处手拼 query 串）。 */
 export function thumbnailUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 'img_type' | 'id'>, size = 600): string {
   return (
