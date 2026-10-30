@@ -929,6 +929,31 @@
 }
 .gallery-cat-item.active i { background: rgba(99,102,241,0.25); color: var(--primary); }
 
+/* 多标签匹配方式切换：交集（全部满足）/ 并集（任一满足） */
+.tag-match-mode {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.tag-mode-btn {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: 0.12s;
+}
+.tag-mode-btn:hover { border-color: var(--primary); color: var(--muted); }
+.tag-mode-btn.active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
 /* 标签云 —— 未选中透明底(幽灵态)，选中实心彩底白字 */
 .gallery-tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; }
 .gallery-tag {

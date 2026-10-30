@@ -16,6 +16,7 @@ window._persistGalleryState = function() {
   window.UiState.set("galleryPageSize", window._galleryPageSize || 50);
   window.UiState.set("galleryCategoryId", window._galleryCategoryId || "");
   window.UiState.set("galleryTagIds", (window._galleryTagIds || []).join(","));
+  window.UiState.set("galleryTagMatch", window._galleryTagMatch || "all");
 };
 
 // -------------------------------------------------------------------

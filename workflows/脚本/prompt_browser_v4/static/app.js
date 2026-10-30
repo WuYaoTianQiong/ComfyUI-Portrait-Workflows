@@ -47,6 +47,7 @@ window._galleryTagIds = (function () {
   const raw = window.UiState.get("galleryTagIds", "");
   return (typeof raw === "string" && raw) ? raw.split(",").filter(Boolean).map(Number) : [];
 })();
+window._galleryTagMatch = window.UiState.get("galleryTagMatch", "all") === "any" ? "any" : "all";
 // 同步画廊筛选控件，使首屏加载能读到已恢复的值
 const _gsEl = document.getElementById("gallerySort");
 if (_gsEl) _gsEl.value = window._gallerySort;

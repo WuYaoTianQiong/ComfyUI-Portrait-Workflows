@@ -136,7 +136,7 @@ class PromptDetail(BaseModel):
 
 # ---------- Routes ----------
 
-def _build_prompt_query(search, tag, category_id, tag_ids, sort, order):
+def _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match="all"):
     """构造提示词筛选 + 排序后的查询（不含分页），供列表与"定位到已选"共用，保证排序一致。"""
     query = Prompt.select()
     if search:
@@ -154,18 +154,27 @@ def _build_prompt_query(search, tag, category_id, tag_ids, sort, order):
     if category_id is not None:
         query = query.join(PromptCategory).where(PromptCategory.category == category_id)
 
-    # 按标签筛选（多选，取交集之外的语义保持原样：命中任意一个即选中）
+    # 按标签筛选（多选）：tag_match=all 取交集，any 取并集
     if tag_ids:
         tag_id_list = [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
         if tag_id_list:
             # 用子查询而非 join：join 会让一个提示词因多个标签出现多行，total 被放大
-            query = query.where(
-                Prompt.id
-                << EntityTag.select(EntityTag.entity_id).where(
-                    (EntityTag.entity_type == "prompt")
-                    & (EntityTag.tag.in_(tag_id_list))
+            def _has(tid):
+                return Prompt.id << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "prompt") & (EntityTag.tag == tid)
                 )
-            )
+
+            if tag_match == "any":
+                query = query.where(
+                    Prompt.id
+                    << EntityTag.select(EntityTag.entity_id).where(
+                        (EntityTag.entity_type == "prompt")
+                        & (EntityTag.tag.in_(tag_id_list))
+                    )
+                )
+            else:
+                for tid in tag_id_list:
+                    query = query.where(_has(tid))
     # ================================================
 
     # ======== 排序逻辑 ========
@@ -204,9 +213,10 @@ def prompt_position(
     tag_ids: Optional[str] = Query(None),
     sort: str = Query("newest"),
     order: str = Query("desc"),
+    tag_match: str = Query("all"),
 ):
     """返回某条提示词在给定筛选/排序下的 0-based 全局序号，用于"定位到已选"跨页跳转。"""
-    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order)
+    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match)
     ids = [r.id for r in query]
     if prompt_id in ids:
         return {"found": True, "index": ids.index(prompt_id), "total": len(ids)}
@@ -223,9 +233,10 @@ def list_prompts(
     order: str = Query("desc"),
     page: int = Query(1),
     page_size: int = Query(50),
+    tag_match: str = Query("all", description="多标签语义：all=交集, any=并集"),
 ):
     """搜索提示词列表，支持排序和分页"""
-    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order)
+    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match)
     total = query.count()
     
     offset = (page - 1) * page_size

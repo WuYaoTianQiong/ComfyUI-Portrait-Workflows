@@ -22,6 +22,8 @@ window.PBQuery = (function () {
       search: window._gallerySearch || "",
       category_id: window._galleryCategoryId || "",
       tag_ids: (window._galleryTagIds || []).join(","),
+      // 多标签语义：all=交集（同时满足）, any=并集（任一满足）
+      tag_match: window._galleryTagMatch || "all",
       source: window._gallerySource || "",
       date: window._galleryDate || "",
       model: window._galleryModel || "",

@@ -422,11 +422,12 @@ def list_history(
     model: str = Query(""),
     orientation: str = Query(""),
     missing: bool = Query(None),
+    tag_match: str = Query("all", description="多标签语义：all=交集, any=并集"),
 ):
     # 筛选构造统一走 _filtered_history_query + _apply_facet_filters：
     # 这两个函数是 /history、/history/ids、/history/facets、/history/cleanup_missing
     # 的唯一来源，避免"列表筛了、全选却选到范围外"这类错位。
-    q = _filtered_history_query(favorite, search, category_id, tag_ids, missing)
+    q = _filtered_history_query(favorite, search, category_id, tag_ids, missing, tag_match)
     q = _apply_facet_filters(q, source, date, model, orientation)
 
     total = q.count()
@@ -493,11 +494,14 @@ def _filtered_history_query(
     category_id: int | None = None,
     tag_ids: str = "",
     missing: bool | None = None,
+    tag_match: str = "all",
 ):
     """历史画廊的统一筛选构造器（favorite/search/分类/标签/缺失）。
 
     `/history`、`/history/ids`、`/history/facets` 必须共用这一份，
     否则会出现"列表按分类筛了、全选却选到类外"的错位。
+
+    `tag_match` 决定多标签的语义：`all` = 交集（同时满足），`any` = 并集（任一满足）。
     """
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
@@ -520,16 +524,29 @@ def _filtered_history_query(
     if tag_ids:
         tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
         if tid_list:
-            # 多标签取交集（图像必须同时拥有所有选中标签）
             # 单个标签的命中范围 = 直接打在图片上 ∪ 经来源提示词继承，统一查 entity_tags
-            for tid in tid_list:
+            def _hit(tid):
                 direct = Gh.id << EntityTag.select(EntityTag.entity_id).where(
                     (EntityTag.entity_type == "image") & (EntityTag.tag == tid)
                 )
                 via_prompt = Gh.prompt_id << EntityTag.select(EntityTag.entity_id).where(
                     (EntityTag.entity_type == "prompt") & (EntityTag.tag == tid)
                 )
+                return direct | via_prompt
+
+            if tag_match == "any":
+                # 并集：命中任意一个标签即可（一次 IN 查询，不需要逐个 AND）
+                direct = Gh.id << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "image") & (EntityTag.tag.in_(tid_list))
+                )
+                via_prompt = Gh.prompt_id << EntityTag.select(EntityTag.entity_id).where(
+                    (EntityTag.entity_type == "prompt") & (EntityTag.tag.in_(tid_list))
+                )
                 q = q.where(direct | via_prompt)
+            else:
+                # 交集：图片必须同时拥有所有选中标签
+                for tid in tid_list:
+                    q = q.where(_hit(tid))
     return q
 
 
@@ -566,10 +583,13 @@ def history_facets(
     category_id: int = Query(None),
     tag_ids: str = Query(""),
     missing: bool = Query(None),
+    tag_match: str = Query("all"),
 ):
     """分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），
     返回 source / date(年-月) / model 各取值的数量。"""
-    sub = _filtered_history_query(favorite, search, category_id, tag_ids, missing).select(Gh.id).distinct()
+    sub = _filtered_history_query(
+        favorite, search, category_id, tag_ids, missing, tag_match
+    ).select(Gh.id).distinct()
     q0 = Gh.select().where(Gh.id.in_(sub))
     src_rows = q0.select(Gh.source, fn.COUNT(Gh.id).alias("c")).group_by(Gh.source)
     sources = {r.source: r.c for r in src_rows}
@@ -609,6 +629,7 @@ def history_ids(
     model: str = Query(""),
     orientation: str = Query(""),
     missing: str = Query(""),
+    tag_match: str = Query("all"),
 ):
     """返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。"""
     q = _filtered_history_query(
@@ -617,6 +638,7 @@ def history_ids(
         category_id=category_id,
         tag_ids=tag_ids,
         missing=True if missing == "1" else None,
+        tag_match=tag_match,
     )
     q = _apply_facet_filters(q, source, date, model, orientation)
     ids = [r.id for r in q.select(Gh.id).distinct()]
@@ -638,7 +660,7 @@ def sync_history(page_size: int = Query(500)):
     data = list_history(
         page=1, page_size=page_size, favorite=None, sort="newest", search="",
         category_id=None, tag_ids="", source="", date="", model="", orientation="",
-        missing=None,
+        missing=None, tag_match="all",
     )
     return {"added": added, "items": data["items"], "total": data["total"]}
 
@@ -665,6 +687,7 @@ def cleanup_missing_files(
     date: str = Query(""),
     model: str = Query(""),
     orientation: str = Query(""),
+    tag_match: str = Query("all"),
 ):
     """把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。
 
@@ -675,7 +698,7 @@ def cleanup_missing_files(
     """
     from services.thumbnail import _get_image_path
 
-    q = _filtered_history_query(favorite, search, category_id, tag_ids)
+    q = _filtered_history_query(favorite, search, category_id, tag_ids, tag_match=tag_match)
     q = _apply_facet_filters(q, source, date, model, orientation)
     rows = list(q)
     missing = [

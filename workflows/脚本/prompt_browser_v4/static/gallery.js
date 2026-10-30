@@ -436,6 +436,8 @@ window._feedPromptToWorkflow = async function() {
 // ======== Phase 5: 图片分类 / 标签（gallery 侧栏）========
 window._galleryCategoryId = "";
 window._galleryTagIds = [];
+// 多标签语义：all = 交集（同时满足所有标签），any = 并集（满足任意一个）
+window._galleryTagMatch = "all";
 window._galleryCats = [];
 window._galleryTags = [];
 
@@ -768,6 +770,7 @@ window.clearGalleryFilter = function(type, value) {
   if (type === "all") {
     window._galleryCategoryId = "";
     window._galleryTagIds = [];
+    window._galleryTagMatch = "all";
     window._gallerySource = "";
     window._galleryDate = "";
     window._galleryModel = "";
@@ -792,7 +795,20 @@ window.clearGalleryFilter = function(type, value) {
   document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
 };
 
+window.setGalleryTagMatch = function(mode) {
+  const next = mode === "any" ? "any" : "all";
+  if (next === window._galleryTagMatch) return;
+  window._galleryTagMatch = next;
+  if (window._persistGalleryState) window._persistGalleryState();
+  window.syncGalleryFilterVisuals();
+  // 多标签语义变了，结果集必然变化，回到第一页（loadHistory(sync, resetPage)）
+  window.loadHistory?.(false, true);
+};
+
 window.syncGalleryFilterVisuals = function() {
+  document.querySelectorAll("#galleryTagMode .tag-mode-btn").forEach(el => {
+    el.classList.toggle("active", el.dataset.mode === (window._galleryTagMatch || "all"));
+  });
   document.querySelectorAll("#galleryCatTree .gallery-cat-item").forEach(el => {
     el.classList.toggle("active", String(el.dataset.cat) === String(window._galleryCategoryId));
   });

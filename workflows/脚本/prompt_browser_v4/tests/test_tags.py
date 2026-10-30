@@ -88,6 +88,51 @@ def test_tag_counts_by_scope(api, seed_history):
     assert image_counts["夜景"] == 1
 
 
+def test_history_tag_match_all_vs_any(api, seed_history):
+    """多标签：all=交集（同时满足），any=并集（任一满足）。"""
+    from models import EntityTag, Tag
+
+    tag_a = Tag.create(name="甲")
+    tag_b = Tag.create(name="乙")
+    both = seed_history(filename="both.png")
+    only_a = seed_history(filename="only_a.png")
+    EntityTag.create(entity_type="image", entity_id=both.id, tag=tag_a.id)
+    EntityTag.create(entity_type="image", entity_id=both.id, tag=tag_b.id)
+    EntityTag.create(entity_type="image", entity_id=only_a.id, tag=tag_a.id)
+
+    ids_all = api.get(
+        f"/api/history/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=all"
+    ).json()["ids"]
+    ids_any = api.get(
+        f"/api/history/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=any"
+    ).json()["ids"]
+
+    assert ids_all == [both.id]
+    assert sorted(ids_any) == sorted([both.id, only_a.id])
+
+
+def test_prompt_tag_match_all_vs_any(api):
+    """提示词侧的多标签语义与画廊保持一致。"""
+    from models import Tag
+
+    both = api.post(
+        "/api/prompts", json={"name": "both", "prompt": "x", "tags": "甲,乙"}
+    ).json()["id"]
+    only_a = api.post(
+        "/api/prompts", json={"name": "only_a", "prompt": "x", "tags": "甲"}
+    ).json()["id"]
+
+    tag_a = Tag.get(Tag.name == "甲")
+    tag_b = Tag.get(Tag.name == "乙")
+    query = f"tag_ids={tag_a.id},{tag_b.id}"
+
+    all_ids = [p["id"] for p in api.get(f"/api/prompts?{query}&tag_match=all").json()["prompts"]]
+    any_ids = [p["id"] for p in api.get(f"/api/prompts?{query}&tag_match=any").json()["prompts"]]
+
+    assert all_ids == [both]
+    assert sorted(any_ids) == sorted([both, only_a])
+
+
 def test_add_and_remove_prompt_tag_endpoint(api):
     """通过标签接口给提示词打/去标签时，文本与关联表必须同时更新。"""
     from models import Prompt, Tag

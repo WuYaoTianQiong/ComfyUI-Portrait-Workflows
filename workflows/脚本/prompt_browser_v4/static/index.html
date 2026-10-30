@@ -213,6 +213,10 @@
           <span class="gallery-group-arrow">▾</span>
         </div>
         <div class="gallery-group-body">
+          <div class="tag-match-mode" id="galleryTagMode">
+            <button class="tag-mode-btn active" data-mode="all" onclick="window.setGalleryTagMatch('all')" title="选中的标签必须同时满足">全部满足</button>
+            <button class="tag-mode-btn" data-mode="any" onclick="window.setGalleryTagMatch('any')" title="满足任意一个标签即可">任一满足</button>
+          </div>
           <div class="gallery-tag-cloud" id="galleryTagCloud"></div>
         </div>
       </div>
