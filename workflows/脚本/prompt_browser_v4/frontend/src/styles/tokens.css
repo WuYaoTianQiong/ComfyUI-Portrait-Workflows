@@ -1,0 +1,112 @@
+/**
+ * 设计令牌（S1.5 的最小可用版本）。
+ *
+ * 旧前端把颜色/间距/圆角散落在 11 个 CSS 文件、约 3.8k 行里，
+ * 同一个"面板底色"有 6 种写法。新前端所有页面只允许用这里的变量，
+ * 换肤或调对比度只改这一个文件。
+ */
+
+:root {
+  /* 色板 */
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel-2: #1c2128;
+  --panel-3: #22272e;
+  --border: #30363d;
+  --border-strong: #444c56;
+
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --primary: #6366f1;
+  --primary-soft: rgba(99, 102, 241, 0.16);
+  --danger: #ef4444;
+  --danger-soft: rgba(127, 29, 29, 0.88);
+  --success: #22c55e;
+  --warn: #f59e0b;
+
+  /* 尺度 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap: 12px;
+  --gap-lg: 20px;
+
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /* 字阶 */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs) / 1.55 system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--primary);
+}
+
+/* 通用按钮：新前端不再用内联 onclick，样式统一收在这里 */
+.btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  transition: 0.12s;
+}
+
+.btn:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-3);
+}
+
+.btn.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.btn-sm {
+  font-size: var(--fs-sm);
+  padding: 3px 8px;
+}

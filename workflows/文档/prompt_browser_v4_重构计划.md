@@ -60,6 +60,14 @@ PATH 里的 `python` 是 Microsoft Store 版，没有依赖。所有命令一律
 Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_$(Get-Date -f yyyyMMdd_HHmmss)"
 ```
 
+### 2.5 前端工程（S2 起）
+```powershell
+cd F:\ComfyUI_Migration\ComfyUI-Portrait-Workflows\workflows\脚本\prompt_browser_v4\frontend
+npm run dev      # http://127.0.0.1:5173 ，/api、/output 已代理到 8656
+npm run build    # 产物到 static/v2/（S2-5 才切换为默认首页）
+```
+迁移期间旧前端 `static/` 保持可用，随时可退回；新前端只跑在 5173，互不干扰。
+
 ### 2.4 每个任务的最小验证闭环（缺一不可）
 1. `& $PY -m pytest -q` —— 契约测试全绿
 2. `& $PY verify_smoke.py` —— 真实拉起 uvicorn（临时端口 8765）打关键接口并扫 Traceback
@@ -238,6 +246,13 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - `frontend/`（Vite + Vue3 + TS + Pinia + TanStack Query + Vue Router）
 - dev server 代理 `/api` → `http://127.0.0.1:8656`
 - 构建产物 `dist/` 由 FastAPI 挂载；开发期两套并存，用路径前缀切换
+- **状态**：✅ 2026-10-30 完成
+  - `frontend/`：Vite 5 + Vue 3.5 + TS（strict）+ Pinia + TanStack Query v5，依赖 40 包、`npm install` 14s
+  - `vite.config.ts` 代理 `/api` `/output` `/input` `/temp` → 8656；`build.outDir = ../static/v2`
+  - `src/styles/tokens.css`：设计令牌（颜色/尺度/字阶），新页面只允许用变量，旧前端 11 个 CSS 文件里 6 种"面板底色"的写法不再蔓延
+  - `src/api/client.ts` + `types.ts`：后端 JSON 契约的 TS 镜像，字段改名会先在契约测试里炸、再在编译期提示
+  - `src/views/GalleryView.vue`：画廊第一版 —— 列表状态收敛成**一个缓存键**（彻底取代十几个 `window._galleryXxx` 裸变量）、标签交集/并集、只看缺失、搜索、分页、缺失角标
+  - 实测（playwright）：卡片 10、标签 12、选 2 标签时 all=0 / any=3、0 个 JS 错误
 
 ### S2-2 画廊页（优先，痛点最集中）
 - 迁移 `gallery.js`(734) + `imageViewer.js`(956)
@@ -289,7 +304,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S1-6 契约测试铺满 + CI
 
 ### 阶段 2
-- [ ] S2-1 工程骨架
+- [x] S2-1 工程骨架
 - [ ] S2-2 画廊页
 - [ ] S2-3 提示词页
 - [ ] S2-4 组合器/换脸

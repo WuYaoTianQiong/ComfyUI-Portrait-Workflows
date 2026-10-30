@@ -155,4 +155,10 @@ workflows/.merkle-snapshot.json
 workflows/.codeartsdoer/
 .screenshots/
 
+# 前端工程（S2）：依赖目录与开发期日志不入库
+workflows/脚本/prompt_browser_v4/frontend/node_modules/
+workflows/脚本/prompt_browser_v4/frontend/_dev*.log
+workflows/脚本/prompt_browser_v4/static/v2/
+
+
 

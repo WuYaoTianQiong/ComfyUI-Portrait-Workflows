@@ -1,0 +1,132 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import GalleryView from './views/GalleryView.vue'
+
+/**
+ * 壳层：一个极简页签。
+ *
+ * 目前只迁了画廊（旧前端里痛点最集中的一页：734 行 gallery.js + 956 行
+ * imageViewer.js）。提示词页/组合器在 S2-3、S2-4 按同样方式接入，
+ * 旧页面在此期间保持可用（新前端只跑在 5173）。
+ */
+type TabKey = 'gallery' | 'prompt'
+
+const activeTab = ref<TabKey>('gallery')
+</script>
+
+<template>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">PB</span>
+        <span class="title">Prompt Browser</span>
+        <span class="badge">Vue 重构版 · 开发中</span>
+      </div>
+
+      <nav class="tabs">
+        <button
+          class="btn btn-sm"
+          :class="{ active: activeTab === 'gallery' }"
+          @click="activeTab = 'gallery'"
+        >
+          画廊
+        </button>
+        <button
+          class="btn btn-sm"
+          :class="{ active: activeTab === 'prompt' }"
+          @click="activeTab = 'prompt'"
+        >
+          提示词
+        </button>
+      </nav>
+
+      <a class="legacy-link" href="http://127.0.0.1:8656/" target="_blank" rel="noreferrer">
+        打开旧版 ↗
+      </a>
+    </header>
+
+    <main class="content">
+      <GalleryView v-if="activeTab === 'gallery'" />
+      <div v-else class="placeholder">
+        提示词页将在 S2-3 迁入，旧版本仍可使用。
+      </div>
+    </main>
+  </div>
+</template>
+
+<style scoped>
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 0 var(--gap-lg);
+  height: 52px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.badge {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--gap-xs);
+  margin-left: var(--gap-lg);
+}
+
+.legacy-link {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.legacy-link:hover {
+  color: var(--primary);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.placeholder {
+  padding: 60px;
+  text-align: center;
+  color: var(--muted);
+}
+</style>
