@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
+import TagInput from '../components/TagInput.vue'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
@@ -174,6 +175,25 @@ function toggleCategory(catId: number) {
   if (selectedId.value === null) return
   categoryMutation.mutate({ catId, attach: !isLinked(catId) })
 }
+/**
+ * 标签数组 ↔ `prompts.tags` 文本互转。
+ *
+ * 拆分规则必须与后端 `services/taxonomy.split_tags` 一致：只按中英文逗号与分号拆，
+ * **不拆空格** —— 库里有 "Moody Photography" 这种带空格的标签，拆开就是两个垃圾标签。
+ */
+function splitTagText(text: string): string[] {
+  return text
+    .split(/[,，;；]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+const draftTagList = computed<string[]>({
+  get: () => splitTagText(draft.value?.tags ?? ''),
+  set: (list: string[]) => {
+    if (draft.value) draft.value.tags = list.join(',')
+  },
+})
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
     apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
@@ -526,11 +546,13 @@ function clearFilters() {
           </button>
           <span class="meta">使用 {{ draft.usage_count }} 次 · 更新 {{ draft.updated_at.slice(0, 16) }}</span>
         </div>
-
-        <label class="field">
-          <span>标签（逗号分隔，保存后自动同步到标签库）</span>
-          <input v-model="draft.tags" />
-        </label>
+        <div class="field">
+          <span>标签（点选已有标签或直接输入新的，保存后同步到标签库）</span>
+          <TagInput
+            v-model="draftTagList"
+            :suggestions="tagData?.tags ?? []"
+          />
+        </div>
 
         <div class="field">
           <span>分类（点一下关联 / 取消）</span>
