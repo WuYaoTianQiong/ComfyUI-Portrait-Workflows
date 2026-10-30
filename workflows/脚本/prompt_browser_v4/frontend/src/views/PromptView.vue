@@ -9,7 +9,13 @@ import { useGenerate } from '../composables/useGenerate'
 import type { CategoryNode, PromptDetail, PromptListPage, TagRow } from '../api/types'
 
 const { workflowPath, quality, orientation } = useSettings()
-const { busy: generating, job: activeJob, error: generateError, run } = useGenerate()
+const {
+  busy: generating,
+  job: activeJob,
+  error: generateError,
+  run,
+  runBatch,
+} = useGenerate()
 
 const pageSize = 50
 const page = ref(1)
@@ -201,6 +207,112 @@ const rateMutation = useMutation({
   onSuccess: () => invalidateAll(selectedId.value),
 })
 
+// ---------------- 多选与批量 ----------------
+
+const selectedIds = ref<Set<number>>(new Set())
+const selectedCount = computed(() => selectedIds.value.size)
+const allOnPageSelected = computed(
+  () => list.value.length > 0 && list.value.every((it) => selectedIds.value.has(it.id)),
+)
+
+function toggleSelect(id: number) {
+  if (selectedIds.value.has(id)) selectedIds.value.delete(id)
+  else selectedIds.value.add(id)
+  selectedIds.value = new Set(selectedIds.value)
+}
+
+function selectAllOnPage() {
+  selectedIds.value = new Set(list.value.map((it) => it.id))
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+const batchFavoriteMutation = useMutation({
+  mutationFn: (ids: number[]) =>
+    apiPost<{ success: boolean }>('/api/prompts/batch_favorite', { ids }, { favorite: true }),
+  onSuccess: () => {
+    clearSelection()
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+  },
+})
+
+const batchDeleteMutation = useMutation({
+  mutationFn: (ids: number[]) =>
+    apiPost<{ success: boolean; deleted: number }>('/api/prompts/batch_delete', { ids }),
+  onSuccess: () => {
+    clearSelection()
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+    queryClient.invalidateQueries({ queryKey: ['tags'] })
+  },
+})
+
+function batchFavorite() {
+  if (!selectedIds.value.size) return
+  batchFavoriteMutation.mutate(Array.from(selectedIds.value))
+}
+
+function batchDelete() {
+  const ids = Array.from(selectedIds.value)
+  if (!ids.length) return
+  if (!confirm(`确定删除选中的 ${ids.length} 条提示词吗？\n\n出图记录会保留在画廊（只解除关联），不会一起删除。`)) return
+  batchDeleteMutation.mutate(ids)
+}
+
+function batchGenerate() {
+  const ids = Array.from(selectedIds.value)
+  if (!ids.length) return
+  if (!confirm(`用「${workflowPath.value.split('\\').pop() || '未选择'}」出图 ${ids.length} 张？（画质 ${quality.value}）`)) return
+  runBatch(ids, {
+    workflowPath: workflowPath.value,
+    quality: quality.value,
+    orientation: orientation.value,
+  })
+}
+
+// ---------------- 导入 / 导出 ----------------
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const importMessage = ref('')
+
+function exportPrompts() {
+  window.open('/api/prompts/export', '_blank')
+}
+
+const importMutation = useMutation({
+  mutationFn: (prompts: unknown[]) =>
+    apiPost<{ success: boolean; imported: number; message: string }>('/api/prompts/import', {
+      prompts,
+    }),
+  onSuccess: (result) => {
+    importMessage.value = result.message
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['tags'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
+  },
+})
+
+async function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importMessage.value = ''
+  try {
+    const parsed = JSON.parse(await file.text())
+    const rows = Array.isArray(parsed) ? parsed : parsed.prompts
+    if (!Array.isArray(rows) || !rows.length) {
+      importMessage.value = '文件里没有找到 prompts 数组'
+      return
+    }
+    importMutation.mutate(rows)
+  } catch (e) {
+    importMessage.value = `解析失败：${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 // ---------------- 筛选 ----------------
 
 function selectCategory(id: number | null) {
@@ -285,23 +397,60 @@ function clearFilters() {
         <span class="count">{{ total }} 条<span v-if="isFetching"> · 加载中</span></span>
       </div>
 
+      <div class="list-tools">
+        <button class="btn btn-sm" @click="allOnPageSelected ? clearSelection() : selectAllOnPage()">
+          {{ allOnPageSelected ? '取消本页' : '全选本页' }}
+        </button>
+        <span v-if="importMessage" class="import-msg">{{ importMessage }}</span>
+        <span class="spacer" />
+        <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">导出</button>
+        <button class="btn btn-sm" title="从 JSON 导入提示词" @click="fileInput?.click()">导入</button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept="application/json,.json"
+          hidden
+          @change="onImportFile"
+        />
+      </div>
+
+      <div v-if="selectedCount" class="bulk">
+        <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 条</span>
+        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
+        <button class="btn btn-sm" @click="clearSelection">取消</button>
+        <span class="spacer" />
+        <button class="btn btn-sm" @click="batchFavorite">收藏</button>
+        <button class="btn btn-sm primary" :disabled="generating" @click="batchGenerate">批量出图</button>
+        <button class="btn btn-sm danger" @click="batchDelete">删除</button>
+      </div>
+
       <div class="list">
-        <button
+        <div
           v-for="item in list"
           :key="item.id"
           class="row"
-          :class="{ active: selectedId === item.id }"
+          :class="{ active: selectedId === item.id, picked: selectedIds.has(item.id) }"
           @click="selectedId = item.id"
         >
-          <div class="row-title">
-            <span v-if="item.is_pinned" class="pin" title="置顶">📌</span>
-            <span v-if="item.is_favorite" class="star" title="收藏">★</span>
-            <span class="name">{{ item.name || `#${item.id}` }}</span>
-            <span v-if="item.rating" class="rating">{{ '★'.repeat(item.rating) }}</span>
+          <button
+            class="row-check"
+            :class="{ on: selectedIds.has(item.id) }"
+            :title="selectedIds.has(item.id) ? '取消选择' : '选择'"
+            @click.stop="toggleSelect(item.id)"
+          >
+            ✓
+          </button>
+          <div class="row-body">
+            <div class="row-title">
+              <span v-if="item.is_pinned" class="pin" title="置顶">📌</span>
+              <span v-if="item.is_favorite" class="star" title="收藏">★</span>
+              <span class="name">{{ item.name || `#${item.id}` }}</span>
+              <span v-if="item.rating" class="rating">{{ '★'.repeat(item.rating) }}</span>
+            </div>
+            <div class="row-preview">{{ item.prompt_preview }}</div>
+            <div v-if="item.tags" class="row-tags">{{ item.tags }}</div>
           </div>
-          <div class="row-preview">{{ item.prompt_preview }}</div>
-          <div v-if="item.tags" class="row-tags">{{ item.tags }}</div>
-        </button>
+        </div>
 
         <div v-if="!list.length && !isFetching" class="empty big">没有符合条件的提示词</div>
       </div>
@@ -520,15 +669,77 @@ function clearFilters() {
   overflow-y: auto;
 }
 
-.row {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: none;
+.list-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap) var(--gap-sm);
   border-bottom: 1px solid var(--border);
-  background: transparent;
+}
+
+.import-msg {
+  font-size: var(--fs-xs);
+  color: var(--primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 批量操作条：浮在页面底部居中。
+   放在 340px 的列表栏里会被挤成竖排文字，这里让它脱离文档流、宽度自适应。 */
+.bulk {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-lg);
+  border-radius: 999px;
+  background: var(--panel-3);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.bulk > button {
+  flex: none;
+}
+
+.bulk-count b {
+  color: var(--primary);
+}
+
+.btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn.primary:disabled {
+  opacity: 0.4;
+}
+
+.btn.danger {
+  border-color: var(--danger);
+  color: #fecaca;
+}
+
+.btn.danger:hover {
+  background: var(--danger-soft);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  border-bottom: 1px solid var(--border);
   padding: var(--gap-sm) var(--gap);
   transition: 0.1s;
+  cursor: pointer;
 }
 
 .row:hover {
@@ -538,6 +749,40 @@ function clearFilters() {
 .row.active {
   background: var(--primary-soft);
   box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.row.picked {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.row-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: transparent;
+  font-size: var(--fs-xs);
+  transition: 0.12s;
+}
+
+.row:hover .row-check,
+.row-check.on {
+  border-color: var(--primary);
+}
+
+.row-check.on {
+  background: var(--primary);
+  color: #fff;
+}
+
+.row-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .row-title {
@@ -760,16 +1005,6 @@ function clearFilters() {
 
 .spacer {
   flex: 1;
-}
-
-.btn.primary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #fff;
-}
-
-.btn.primary:disabled {
-  opacity: 0.4;
 }
 
 .empty {

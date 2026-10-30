@@ -96,5 +96,35 @@ export function useGenerate() {
     }
   }
 
-  return { busy, job, error, run, closeStream }
+  /**
+   * 批量出图：一次提交多条提示词，共用同一个 job 跟踪进度。
+   * 后端 `/api/batch_generate` 是同步提交（逐个入队），条数多时请求本身会持续几秒。
+   */
+  async function runBatch(
+    promptIds: number[],
+    options: { workflowPath: string; quality: string; orientation: string; title?: string },
+  ) {
+    error.value = ''
+    if (!options.workflowPath) {
+      error.value = '请先选择工作流'
+      return
+    }
+    if (!promptIds.length) return
+    try {
+      busy.value = true
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/batch_generate', {
+        items: promptIds.map((id) => ({ prompt_id: id, seed: 0 })),
+        workflow_path: options.workflowPath,
+        quality: options.quality,
+        orientation: options.orientation,
+        title: options.title ?? `批量生成 ${promptIds.length} 条`,
+      })
+      subscribe(result.job_id)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      busy.value = false
+    }
+  }
+
+  return { busy, job, error, run, runBatch, closeStream }
 }
