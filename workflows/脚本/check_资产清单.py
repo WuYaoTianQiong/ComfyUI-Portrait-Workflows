@@ -45,6 +45,33 @@ def find_dir_by_name(start, name, max_up=6):
     return None
 
 
+def _looks_like_models_dir(p):
+    """判断是不是真正的 ComfyUI models 目录。
+
+    只认含 diffusion_models / checkpoints / vae / text_encoders / unet 之一的目录，
+    防止从 F: 真实路径运行时被上层仓库里那种"只挂了两个 lora 的空壳 models"骗过去，
+    导致把 ComfyUI 实际模型全部误报成"清单有、磁盘无"。
+    """
+    if not os.path.isdir(p):
+        return False
+    return any(os.path.isdir(os.path.join(p, d))
+               for d in ("diffusion_models", "checkpoints", "vae", "text_encoders", "unet"))
+
+
+def find_models_root(start, max_up=6):
+    """从 start 向上逐级找"像样"的 models 目录（跳过空壳）。"""
+    cur = os.path.abspath(start)
+    for _ in range(max_up):
+        cand = os.path.join(cur, "models")
+        if _looks_like_models_dir(cand):
+            return cand
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return None
+
+
 def scan_models(models_root):
     """返回 {basename_lower: 绝对路径}"""
     found = {}
@@ -68,6 +95,9 @@ def scan_dir_jsons(*dirs):
                 dirnames[:] = []
                 continue
             for fn in filenames:
+                # 跳过隐藏文件（.merkle-snapshot.json 这类索引/快照，不是工作流）
+                if fn.startswith("."):
+                    continue
                 if fn.lower().endswith(".json"):
                     found.setdefault(fn.lower(), os.path.join(dirpath, fn))
     return found
@@ -106,9 +136,10 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     workflows_root = os.path.dirname(here)
     comfy_root = os.path.dirname(os.path.dirname(os.path.dirname(workflows_root)))
-    # 反向兜底：若从 F: 真实路径运行，comfy_root 可能不对，则向上找带 models 的目录
-    if not os.path.isdir(os.path.join(comfy_root, "models")):
-        alt = find_dir_by_name(workflows_root, "models")
+    # 反向兜底：若从 F: 真实路径运行，comfy_root 可能不对，则向上找"像样"的 models 目录
+    # （空壳 models 只含 loras 之类，会被 _looks_like_models_dir 跳过）
+    if not _looks_like_models_dir(os.path.join(comfy_root, "models")):
+        alt = find_models_root(workflows_root)
         if alt:
             comfy_root = os.path.dirname(alt)
     models_root = args.models_root or os.path.join(comfy_root, "models")

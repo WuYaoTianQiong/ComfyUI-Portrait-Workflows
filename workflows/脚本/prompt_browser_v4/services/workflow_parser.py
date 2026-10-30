@@ -1,6 +1,8 @@
 """工作流格式转换 —— 将 ComfyUI 内部格式转换为 API 格式"""
 import json
 import logging
+import math
+import re
 from urllib.parse import quote
 
 import httpx
@@ -13,6 +15,8 @@ COMFYUI_API = settings.comfyui_api
 
 # widget 名称顺序缓存
 _widget_name_cache: dict[str, list[tuple[str, int]]] = {}
+# COMBO 可选值缓存 {(节点类型, 输入名): [选项...]}
+_combo_options_cache: dict[tuple[str, str], list[str]] = {}
 
 SKIP_NODE_TYPES = {"Note", "MarkdownNote", "Label (rgthree)", "Comment", "StickyNote"}
 
@@ -26,6 +30,182 @@ _SAVE_NODE_TYPES = {
     "VHS_SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG",
     "ImageSave", "SaveLatent", "ETN_SaveImage",
 }
+
+# 文本编码节点：类名 → (正面字段, 负面粉字段 / None)
+# 新模型常带专用编码节点（如 Qwen-Image 2.1 的 TextEncodeQwenImage21，提示词是
+# prompt / negative_prompt 两个字段且自带负面，不能只认 CLIPTextEncode 的 text）。
+_TEXT_ENCODE_NODES: dict[str, tuple[str, str | None]] = {
+    "CLIPTextEncode": ("text", None),
+    "TextEncodeQwenImage21": ("prompt", "negative_prompt"),
+    "TextEncodeQwenImageEdit": ("prompt", None),
+    "TextEncodeQwenImageEditPlus": ("prompt", None),
+}
+
+
+def _as_int(val: object) -> int | None:
+    """把 widget 字面量解析成 int；连线引用 / 非数字字符串一律返回 None。"""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(val.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _linked_node(api_workflow: dict, val: object) -> dict | None:
+    """若 val 是 ["节点id", 输出槽] 形式的连线引用，返回源节点；否则 None。"""
+    if isinstance(val, (list, tuple)) and len(val) == 2 and isinstance(val[0], str):
+        src = api_workflow.get(val[0])
+        if isinstance(src, dict):
+            return src
+    return None
+
+
+_RATIO_RE = re.compile(r"\s*(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)")
+_SIZE_RE = re.compile(r"\s*(\d+)\s*[x×*]\s*(\d+)", re.IGNORECASE)
+
+
+def _extract_options(spec: object) -> list[str]:
+    """从 object_info 的 COMBO 描述里取选项。
+
+    新版是 ["COMBO", {"options": [...]}]，旧版是 [[opt, ...], {...}]，两种都要认。
+    """
+    if not isinstance(spec, (list, tuple)) or not spec:
+        return []
+    first = spec[0]
+    if isinstance(first, str) and first == "COMBO":
+        if len(spec) > 1 and isinstance(spec[1], dict):
+            opts = spec[1].get("options")
+            if isinstance(opts, list):
+                return [str(o) for o in opts]
+        return []
+    if isinstance(first, list):
+        return [str(o) for o in first]
+    return []
+
+
+def _get_combo_options(node_type: str, input_name: str) -> list[str]:
+    """取某节点某 COMBO 输入的全部合法选项（带缓存）。
+
+    拿不到（ComfyUI 离线 / 自定义节点未装）时返回空列表，调用方据此降级跳过，
+    绝不自己拼一个字符串——ComfyUI 会因非法枚举值直接拒收整个 prompt。
+    """
+    key = (node_type, input_name)
+    if key in _combo_options_cache:
+        return _combo_options_cache[key]
+    try:
+        safe = quote(node_type, safe="")
+        with httpx.Client(timeout=3) as client:
+            resp = client.get(f"{COMFYUI_API}/object_info/{safe}")
+            resp.raise_for_status()
+            info = resp.json().get(node_type, {})
+        options: list[str] = []
+        for group in ("required", "optional"):
+            spec = info.get("input", {}).get(group, {}).get(input_name)
+            options = _extract_options(spec)
+            if options:
+                break
+        if options:
+            _combo_options_cache[key] = options
+        return options
+    except Exception as exc:
+        logger.debug("取 %s.%s 可选值失败：%s", node_type, input_name, type(exc).__name__)
+        return []
+
+
+def _parse_ratio(text: str) -> float | None:
+    """'9:16 (Portrait Widescreen)' -> 0.5625"""
+    m = _RATIO_RE.match(str(text))
+    if not m:
+        return None
+    a, b = float(m.group(1)), float(m.group(2))
+    if a <= 0 or b <= 0:
+        return None
+    return a / b
+
+
+def _parse_size_ratio(text: str) -> float | None:
+    """'640x960 （2:3）' -> 0.6667"""
+    m = _SIZE_RE.match(str(text))
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    if w <= 0 or h <= 0:
+        return None
+    return w / h
+
+
+# 尺寸由上游节点计算时，按顺序尝试这些「横竖比旋钮」：(输入名, 选项解析方式)
+_ORIENTATION_KNOBS = (
+    ("aspect_ratio", _parse_ratio),   # ResolutionSelector: "9:16 (Portrait Widescreen)"
+    ("resolution", _parse_ratio),     # 部分自定义节点沿用这个命名
+    ("preset", _parse_size_ratio),    # ResolutionPresetPicker: "640x960 （2:3）"
+    ("size", _parse_size_ratio),
+)
+
+
+def _pick_orientation_option(options: list[str], current: str, orientation: str,
+                             parser) -> str | None:
+    """在合法选项里挑一个「与当前比例互为倒数、且处于目标方向」的值。
+
+    已经是目标方向 / 1:1 方图时返回 None（无需改动）。
+    """
+    if orientation not in ("portrait", "landscape"):
+        return None
+    want_landscape = orientation == "landscape"
+    cur = parser(current)
+    if cur is None or cur <= 0:
+        return None
+    if abs(cur - 1.0) < 1e-9:
+        return None  # 方图无横竖可分
+    if (cur > 1) == want_landscape:
+        return None  # 已经是目标方向
+    target = 1.0 / cur
+    best, best_score = None, None
+    for opt in options:
+        r = parser(opt)
+        if r is None or r <= 0:
+            continue
+        if (r > 1) != want_landscape:
+            continue
+        score = abs(math.log(r / target))
+        if best_score is None or score < best_score:
+            best, best_score = opt, score
+    return best
+
+
+def _apply_orientation_to_size_source(api_workflow: dict, latent_inputs: dict,
+                                      orientation: str) -> bool:
+    """尺寸由上游节点计算时（EmptyLatentImage 的 width/height 是连线），
+    改上游那个决定比例的旋钮来实现横竖屏切换。"""
+    src = _linked_node(api_workflow, latent_inputs.get("width")) or \
+        _linked_node(api_workflow, latent_inputs.get("height"))
+    if src is None:
+        return False
+    src_inputs = src.get("inputs") or {}
+    cls = src.get("class_type", "")
+    for key, parser in _ORIENTATION_KNOBS:
+        current = src_inputs.get(key)
+        if not isinstance(current, str) or not current:
+            continue
+        options = _get_combo_options(cls, key)
+        if not options:
+            logger.debug("%s.%s 拿不到合法选项，跳过横竖屏切换", cls, key)
+            return False
+        picked = _pick_orientation_option(options, current, orientation, parser)
+        if picked and picked != current:
+            src_inputs[key] = picked
+            logger.info("横竖屏 %s：%s.%s = %s", orientation, cls, key, picked)
+            return True
+        return False
+    logger.debug("%s 没有可切换的横竖比旋钮，跳过横竖屏切换", cls)
+    return False
 
 
 def _pytype_matches_comfy(py_val: object, comfy_type: str) -> bool:
@@ -224,21 +404,31 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     向工作流注入提示词 / 种子 / 方向 / 画质。
     修改传入的 dict（就地修改）。
     """
-    # 1. 注入提示词到 CLIPTextEncode 节点
-    #    若无 CLIPTextEncode 节点（如纯图片超分工作流），则跳过提示词注入
-    clip_nodes = []
+    # 1. 注入提示词到文本编码节点（CLIPTextEncode 或专用的 TextEncodeQwenImage21 等）
+    #    若无文本编码节点（如纯图片超分工作流），则跳过提示词注入
+    text_nodes = []
     for node_id, node in api_workflow.items():
-        if isinstance(node, dict) and node.get("class_type") == "CLIPTextEncode":
-            if node.get("inputs", {}).get("clip") is not None:
-                clip_nodes.append((node_id, node))
+        if not isinstance(node, dict):
+            continue
+        spec = _TEXT_ENCODE_NODES.get(node.get("class_type", ""))
+        if spec is None:
+            continue
+        if node.get("inputs", {}).get("clip") is not None:
+            text_nodes.append((node_id, node, spec))
 
-    if len(clip_nodes) == 0:
+    if len(text_nodes) == 0:
         # 纯图像工作流（如 SeedVR2 超分）不含文本编码节点，跳过提示词注入
-        print("[workflow_parser] 警告：未找到 CLIPTextEncode 节点，跳过提示词注入")
+        print("[workflow_parser] 警告：未找到文本编码节点（CLIPTextEncode / TextEncodeQwenImage21 等），跳过提示词注入")
     else:
-        clip_nodes[0][1]["inputs"]["text"] = prompt_data["prompt"]
-        if len(clip_nodes) >= 2:
-            clip_nodes[1][1]["inputs"]["text"] = prompt_data["negative_prompt"]
+        _nid, _node, (_pos_field, _neg_field) = text_nodes[0]
+        _node["inputs"][_pos_field] = prompt_data["prompt"]
+        _negative = prompt_data.get("negative_prompt") or ""
+        if _neg_field:
+            # 单节点自带负面字段（如 Qwen-Image 2.1），直接写同一个节点
+            _node["inputs"][_neg_field] = _negative
+        elif len(text_nodes) >= 2:
+            # 旧行为：第二个文本编码节点当负面
+            text_nodes[1][1]["inputs"][text_nodes[1][2][0]] = _negative
 
     # 2. 注入种子
     # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0
@@ -275,14 +465,22 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
             inputs["noise_seed"] = seed_val
 
     # 3. 注入方向（横竖屏）
+    #    EmptyLatentImage 的 width/height 可能是 ["节点id", 槽位] 连线引用
+    #    （如 ResolutionSelector / ResolutionPresetPicker 算出的尺寸）：
+    #    这时改不了字面量，改为切换上游节点的横竖比旋钮。
     orientation = prompt_data.get("orientation", "portrait")
     for node_id, node in api_workflow.items():
         if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
-            w, h = node["inputs"].get("width", 640), node["inputs"].get("height", 960)
-            if orientation == "landscape" and h > w:
-                node["inputs"]["width"], node["inputs"]["height"] = h, w
-            elif orientation == "portrait" and w > h:
-                node["inputs"]["width"], node["inputs"]["height"] = h, w
+            inputs = node["inputs"]
+            w = _as_int(inputs.get("width"))
+            h = _as_int(inputs.get("height"))
+            if w is not None and h is not None:
+                if orientation == "landscape" and h > w:
+                    inputs["width"], inputs["height"] = h, w
+                elif orientation == "portrait" and w > h:
+                    inputs["width"], inputs["height"] = h, w
+            else:
+                _apply_orientation_to_size_source(api_workflow, inputs, orientation)
             break
 
     # 4. 注入画质
@@ -309,10 +507,27 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     if not has_seedvr and scale != 1.0:
         for node_id, node in api_workflow.items():
             if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
-                w = node["inputs"].get("width", 640)
-                h = node["inputs"].get("height", 960)
-                node["inputs"]["width"] = max(256, min(4096, int(w * scale)))
-                node["inputs"]["height"] = max(256, min(4096, int(h * scale)))
+                inputs = node["inputs"]
+                w = _as_int(inputs.get("width"))
+                h = _as_int(inputs.get("height"))
+                if w is not None and h is not None:
+                    inputs["width"] = max(256, min(4096, int(w * scale)))
+                    inputs["height"] = max(256, min(4096, int(h * scale)))
+                else:
+                    # 尺寸由上游节点计算（如 ResolutionSelector：aspect_ratio + megapixels），
+                    # 无法直接改字面量；只能改上游的 megapixels，且面积按 scale² 缩放
+                    # 才等价于两轴同时乘 scale。
+                    for key in ("width", "height"):
+                        src = _linked_node(api_workflow, inputs.get(key))
+                        if src is None:
+                            continue
+                        src_inputs = src.get("inputs", {})
+                        mp = src_inputs.get("megapixels")
+                        if isinstance(mp, (int, float)) and not isinstance(mp, bool):
+                            src_inputs["megapixels"] = round(float(mp) * scale * scale, 3)
+                            logger.info("画质 %s：%s.megapixels = %s（尺寸由上游节点决定）",
+                                        quality, src.get("class_type"), src_inputs["megapixels"])
+                        break
                 break
 
     # 5. 为输出节点注入唯一文件名前缀，避免批量跑图时文件互相覆盖

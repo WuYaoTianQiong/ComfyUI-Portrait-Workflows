@@ -1,5 +1,6 @@
 """ComfyUI 代理 —— 状态 / 图片 / 缩略图 / 工作流列表 / 跑图 / 批量生成"""
 import json
+import logging
 import mimetypes
 import os
 import traceback
@@ -24,6 +25,7 @@ from routers.jobs import create_job, update_job_items
 from state import batch_stop_flag
 
 router = APIRouter(tags=["ComfyUI"])
+logger = logging.getLogger(__name__)
 
 DEPRECATED_DIR = settings.project_root / "废弃工作流"
 
@@ -406,9 +408,11 @@ def run_prompt(req: RunRequest):
     except FileNotFoundError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
+        logger.exception("跑图失败(prompt=%s, 工作流=%s)", req.id, workflow_path)
         raise HTTPException(500, str(e))
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("跑图失败(prompt=%s, 工作流=%s, 自定义内容=%s)",
+                         req.id, workflow_path, bool(req.workflow_content))
         raise HTTPException(500, f"{type(e).__name__}: {e}")
 
 

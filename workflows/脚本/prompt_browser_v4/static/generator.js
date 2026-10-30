@@ -305,16 +305,16 @@ window.updateRunBtn = function() {
     btn.textContent = "⏳ 生成中...";
     btn.disabled = true;
   } else if (window.selectedIds.size >= 2) {
-    btn.textContent = `🚀 批量跑图 (${window.selectedIds.size})`;
+    btn.textContent = `🚀 批量出图 (${window.selectedIds.size})`;
     btn.disabled = !online;
   } else if (window.selectedIds.size === 1) {
-    btn.textContent = "🚀 跑图";
+    btn.textContent = "🚀 出图";
     btn.disabled = !online;
   } else if (window.selectedId) {
-    btn.textContent = "🚀 跑图";
+    btn.textContent = "🚀 出图";
     btn.disabled = !online;
   } else {
-    btn.textContent = "🚀 跑图";
+    btn.textContent = "🚀 出图";
     btn.disabled = true;
   }
 

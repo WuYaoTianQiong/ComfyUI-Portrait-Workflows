@@ -349,6 +349,59 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
     return job, newly_done
 
 
+def _merge_items(computed: list[dict], fresh: list[dict]) -> list[dict]:
+    """把 _compute 的结果与库里最新的 items 按位置合并。
+
+    _compute 用的是锁外读到的 items，而提交阶段的请求线程（update_job_items）
+    可能在此期间刚把 comfyui_prompt_id 和逐条提交错误写回。旧实现直接整体覆盖，
+    于是那些 pid 被抹掉，宽限期一过整批被判成「提交失败」——图其实已经出来了。
+    合并规则：库里已有的 pid / 错误 / 已落定的终态优先，计算出的进度信息其次。
+    """
+    if not fresh:
+        return computed
+
+    merged: list[dict] = []
+    for idx, item in enumerate(computed):
+        base = dict(item)
+        old = fresh[idx] if idx < len(fresh) else None
+        if isinstance(old, dict):
+            if not base.get("comfyui_prompt_id") and old.get("comfyui_prompt_id"):
+                base["comfyui_prompt_id"] = old["comfyui_prompt_id"]
+            if not base.get("error") and old.get("error"):
+                base["error"] = old["error"]
+            if not base.get("images") and old.get("images"):
+                base["images"] = old["images"]
+            # 提交阶段写回的终态（done/error/cancelled）比基于陈旧队列的推断可信
+            if (old.get("status") in ("done", "error", "cancelled")
+                    and base.get("status") not in ("done", "error", "cancelled")):
+                base["status"] = old["status"]
+        merged.append(base)
+
+    # 计算期间新增的条目（理论上不会发生）原样保留，避免丢数据
+    merged.extend(fresh[len(computed):])
+    return merged
+
+
+def _counts_and_status(items: list[dict], fallback: str, db_status: str) -> tuple[int, int, str]:
+    """按合并后的 items 重新统计 counts 与总状态。"""
+    done = sum(1 for i in items if i.get("status") == "done")
+    errors = sum(1 for i in items if i.get("status") in ("error", "cancelled"))
+
+    if items and done + errors == len(items):
+        overall = "done" if errors == 0 else "error"
+    elif any(i.get("status") == "running" for i in items):
+        overall = "running"
+    elif any(i.get("status") == "pending" for i in items):
+        overall = "pending"
+    else:
+        overall = fallback
+
+    # 提交阶段刚把任务置成 running，不能被更早算出的 pending 覆盖回去
+    if overall == "pending" and db_status == "running":
+        overall = "running"
+    return done, errors, overall
+
+
 def _insert_history_for_item(
     job_id: int, prompt_id, comfy_pid: str, images: list[dict],
     preview: str = "", prompt_params=None,
@@ -457,6 +510,11 @@ def refresh_job(job_id: int) -> dict | None:
             # 计算期间被取消/完成：尊重已落库的终态，绝不"复活"
             return normalize(row_to_dict(current))
 
+        # 提交阶段写回的 pid / 错误不能丢：_compute 基于锁外读到的陈旧 items，
+        # 整体覆盖会让"已出图"的任务永远看不到 prompt_id。
+        merged = _merge_items(snapshot["items"], _parse_items(current.items))
+        done, errors, overall = _counts_and_status(merged, snapshot["status"], current.status)
+
         for item in newly_done:
             logger.info("任务 %s 完成一张：pid=%s images=%d",
                         job_id, item.get("comfyui_prompt_id"), len(item.get("images") or []))
@@ -467,10 +525,10 @@ def refresh_job(job_id: int) -> dict | None:
             )
 
         GenJob.update(
-            status=snapshot["status"],
-            done_count=snapshot["done_count"],
-            error_count=snapshot["error_count"],
-            items=json.dumps(snapshot["items"], ensure_ascii=False),
+            status=overall,
+            done_count=done,
+            error_count=errors,
+            items=json.dumps(merged, ensure_ascii=False),
             updated_at=datetime.now(),
         ).where(GenJob.id == job_id).execute()
 

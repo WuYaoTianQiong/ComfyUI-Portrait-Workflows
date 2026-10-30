@@ -48,7 +48,7 @@
       <option value="12K">12K</option>
     </select>
     <button class="btn btn-icon" id="orientBtn" onclick="toggleOrientation()" title="横竖屏切换">📱</button>
-    <button class="btn btn-primary" id="runBtn" onclick="onMainAction()" disabled>🚀 跑图</button>
+    <button class="btn btn-primary" id="runBtn" onclick="onMainAction()" title="把左侧选中的提示词提交给 ComfyUI 出图（多选即批量）" disabled>🚀 出图</button>
   </div>
 </header>
 
@@ -311,7 +311,7 @@
         <button class="btn btn-ghost" onclick="window.openTemplateModal()" title="查看和管理模板">&#x1F4C1; 模板收藏</button>
         <button class="btn btn-success" onclick="window.composerSaveAsPrompt()" title="将当前组合保存为普通提示词（快照，可编辑）">&#x1F4BE; 另存为提示词</button>
         <button class="btn btn-ghost" onclick="window.saveComposerTemplate()" title="将当前组合保存为引用模板（跟随源提示词更新）">&#x1F4C1; 保存模板</button>
-        <button class="btn btn-primary" id="composerRunBtn" onclick="window.composerRun()" disabled>&#x1F680; 跑图</button>
+        <button class="btn btn-primary" id="composerRunBtn" onclick="window.composerRun()" title="把右侧拼好的组合提示词提交给 ComfyUI 出图" disabled>&#x1F680; 组合出图</button>
         <span class="composer-batch-label">批量随机</span>
         <select id="composerBatchCount" class="composer-batch-select">
           <option value="1" selected>1组</option>
@@ -325,7 +325,7 @@
           <option value="9">9组</option>
           <option value="10">10组</option>
         </select>
-        <button class="btn btn-accent" id="composerBatchRunBtn" onclick="window.composerBatchRandomRun()" disabled title="按选定组数批量随机组合并跑图">&#x1F3B2; 批量随机跑图</button>
+        <button class="btn btn-accent" id="composerBatchRunBtn" onclick="window.composerBatchRandomRun()" disabled title="按选定组数批量随机组合并出图">&#x1F3B2; 批量随机出图</button>
       </div>
     </div>
 
@@ -629,7 +629,7 @@
       </div>
       <button class="btn btn-ghost" onclick="window.closeWorkbenchModal()">关闭</button>
       <button class="btn btn-success" onclick="window.composerSaveAsPrompt();window.closeWorkbenchModal()">&#x1F4BE; 另存</button>
-      <button class="btn btn-primary" onclick="window.composerRun();window.closeWorkbenchModal()">&#x1F680; 跑图</button>
+      <button class="btn btn-primary" onclick="window.composerRun();window.closeWorkbenchModal()">&#x1F680; 出图</button>
     </div>
   </div>
 </div>

@@ -266,6 +266,38 @@ def test_refresh_keeps_no_pid_items_pending_during_submission(api):
     assert snapshot["items"][0]["status"] == "pending"
 
 
+def test_refresh_keeps_pids_written_during_slow_compute(api, monkeypatch):
+    """写者在锁外算完再回写时，不能抹掉提交阶段刚写回的 comfyui_prompt_id。
+
+    真实故障：批量换脸提交 50 组耗时数分钟，写者用陈旧 items 整体覆盖，
+    所有 pid 丢失 → 宽限期后被判「提交失败」，而图其实已经生成（job 110）。
+    """
+    from models import GenJob
+    from services import job_state
+
+    job = GenJob.create(
+        job_type="faceswap", status="pending", title="批量换脸 1×2", total=2,
+        items=json.dumps([{"prompt_id": 0, "status": "pending"},
+                          {"prompt_id": 0, "status": "pending"}], ensure_ascii=False),
+    )
+    stale = json.loads(GenJob.get_by_id(job.id).items)
+
+    def fake_compute(job_dict):
+        # 模拟 _compute 期间请求线程写回 pid
+        fresh = [dict(it, comfyui_prompt_id=f"pid-{i}") for i, it in enumerate(stale)]
+        job_state.update_job_items(job.id, fresh, status="running")
+        return (dict(job_dict, items=[dict(it) for it in stale], status="pending",
+                     done_count=0, error_count=0), [])
+
+    monkeypatch.setattr(job_state, "_compute", fake_compute)
+
+    snapshot = job_state.refresh_job(job.id)
+    assert [it["comfyui_prompt_id"] for it in snapshot["items"]] == ["pid-0", "pid-1"]
+    assert snapshot["status"] == "running"          # 不能被更早算出的 pending 覆盖
+    saved = json.loads(GenJob.get_by_id(job.id).items)
+    assert [it["comfyui_prompt_id"] for it in saved] == ["pid-0", "pid-1"]
+
+
 def test_jobs_list_items_are_arrays(api):
     from models import GenJob
 
