@@ -202,6 +202,14 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 ### S1-6 契约测试铺满 + CI 脚本
 - **做法**：`test_contract.py` 扩到覆盖全部 89 个端点（至少 happy path + 关键错误码）；新增 `scripts/ci.ps1` 一次跑 pytest + verify_smoke
 - **验收**：`ci.ps1` 通过；故意改坏一个字段名能被测试捕获
+- **状态**：✅ 2026-10-30 完成（`scripts/` 实际放在 `tools/ci.ps1`）
+  - `tests/test_endpoints_smoke.py`：从 `app.routes` **动态枚举** 35 个 GET 端点逐个请求，断言无 5xx（新增端点自动纳入，不用维护清单）；SSE 端点显式跳过并有护栏用例防蒙混
+  - `tests/test_api_crud.py`：11 条写路径用例（分类/碎片/标签/提示词标记/图片动作/批量删除的"删得干净、关联不留孤儿"）
+  - `tools/ci.ps1`：一条命令跑 pytest（**109 条**）+ verify_smoke（25 项），任一步失败即退出
+  - **顺带揪出并修复 3 个真实 bug**：
+    1. `list_categories` 把 `count_scope` 当成 `parent_id` 传给 `build_category_tree` → 画架侧栏分类树**永远是空的**（只有"全部图片"，4 个分类根本不显示）
+    2. `delete_category` 不清 `PromptCategory`/`ImageCategory` 就直接删分类 → 外键约束开启后必抛 `FOREIGN KEY constraint failed`（删分类 500）
+    3. 分类的图片计数把软删除的图也算进去 → 侧栏写 6 张、画廊实际只有 2 张；改为 join `gen_history` 并排除 `is_deleted=1`
 
 ---
 
@@ -275,7 +283,7 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S1-3 写入路径收敛（原三态可见性方案已调整）
 - [ ] S1-4 service 层 + Pydantic
 - [ ] S1-5 派生列 + 索引
-- [ ] S1-6 契约测试铺满 + CI
+- [x] S1-6 契约测试铺满 + CI
 
 ### 阶段 2
 - [ ] S2-1 工程骨架

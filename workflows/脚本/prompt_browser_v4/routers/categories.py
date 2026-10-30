@@ -4,10 +4,27 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from models import (
-    Category, PromptCategory, Prompt, db, ImageCategory,
+    Category, PromptCategory, Prompt, db, ImageCategory, GenHistory,
     classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
     auto_classify_prompt,
 )
+
+
+def _image_count(category_id: int) -> int:
+    """分类下**存活**图片数。
+
+    直接数 ImageCategory 会把软删除的图也算进去（画廊只显示 2 张、侧栏却写 6 张），
+    所以必须 join gen_history 并排除 is_deleted=1。
+    """
+    return (
+        ImageCategory.select()
+        .join(GenHistory, on=(ImageCategory.image == GenHistory.id))
+        .where(
+            (ImageCategory.category == category_id)
+            & (GenHistory.is_deleted == False)
+        )
+        .count()
+    )
 
 router = APIRouter(tags=["分类"])
 
@@ -36,9 +53,12 @@ def list_categories(
 ):
     """获取分类列表（支持树形结构）"""
     if tree:
-        # 返回树形结构
+        # 返回树形结构。
+        # 注意第 2 个位置参数是 parent_id：旧代码把 count_scope 当成 parent_id 传进去，
+        # 于是 `c.parent_id == "prompt"` 恒为 False，树永远是空的 —— 画廊侧栏的分类树
+        # 因此长期只显示"全部图片"，没有任何分类节点。
         all_cats = list(Category.select().order_by(Category.sort_order, Category.id))
-        tree_data = build_category_tree(all_cats, count_scope)
+        tree_data = build_category_tree(all_cats, None, count_scope)
         return {"categories": tree_data}
     else:
         # 返回扁平列表
@@ -57,7 +77,7 @@ def list_categories(
                 "parent_id": c.parent_id,
                 "color": c.color,
                 "sort_order": c.sort_order,
-                "prompt_count": (ImageCategory.select().where(ImageCategory.category == c.id).count()
+                "prompt_count": (_image_count(c.id)
                              if count_scope == "image"
                              else PromptCategory.select().where(PromptCategory.category_id == c.id).count()),
             })
@@ -75,7 +95,7 @@ def build_category_tree(categories: list, parent_id: Optional[int] = None, count
                 "parent_id": c.parent_id,
                 "color": c.color,
                 "sort_order": c.sort_order,
-                "prompt_count": (ImageCategory.select().where(ImageCategory.category == c.id).count()
+                "prompt_count": (_image_count(c.id)
                                  if count_scope == "image"
                                  else PromptCategory.select().where(PromptCategory.category_id == c.id).count()),
                 "children": build_category_tree(categories, c.id, count_scope),
@@ -115,13 +135,25 @@ def delete_category(cat_id: int):
     c = Category.get_or_none(Category.id == cat_id)
     if c is None:
         raise HTTPException(404, "分类不存在")
-    
-    # 删除子分类
-    delete_children_recursive(cat_id)
-    
-    # 删除自身
-    c.delete_instance(recursive=False)
+
+    # 先清关联再删分类：外键约束是开启的，留下 PromptCategory / ImageCategory
+    # 引用会让 delete_instance 直接抛 FOREIGN KEY constraint failed（500）。
+    doomed = [cat_id] + collect_children_ids(cat_id)
+    with db.atomic():
+        PromptCategory.delete().where(PromptCategory.category.in_(doomed)).execute()
+        ImageCategory.delete().where(ImageCategory.category.in_(doomed)).execute()
+        delete_children_recursive(cat_id)
+        c.delete_instance(recursive=False)
     return {"success": True}
+
+
+def collect_children_ids(cat_id: int) -> list[int]:
+    """递归收集所有子孙分类 id。"""
+    result: list[int] = []
+    for child in Category.select().where(Category.parent_id == cat_id):
+        result.append(child.id)
+        result.extend(collect_children_ids(child.id))
+    return result
 
 
 def delete_children_recursive(cat_id: int):

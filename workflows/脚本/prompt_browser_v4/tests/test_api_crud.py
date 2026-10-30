@@ -1,0 +1,195 @@
+"""主要资源的 CRUD 行为基线。
+
+补齐 test_contract.py 之外的写路径：分类、碎片、标签、提示词标记、图片动作。
+重点是"删得干净"和"关联不留孤儿" —— 这两类问题在 SQLite 外键开启后
+会直接变成 500，而不是悄悄留下脏数据。
+"""
+
+
+# ---------------------------------------------------------------------------
+# 分类
+# ---------------------------------------------------------------------------
+
+def test_category_crud_lifecycle(api, seed_prompt):
+    created = api.post("/api/categories", json={"name": "测试分类", "color": "#123456"})
+    assert created.status_code == 201
+    cid = created.json()["id"]
+
+    cats = api.get("/api/categories").json()["categories"]
+    assert any(c["id"] == cid and c["name"] == "测试分类" for c in cats)
+
+    prompt = seed_prompt(name="分类用")
+    assert api.post(f"/api/categories/{cid}/prompts/{prompt.id}").status_code == 200
+
+    cats = api.get("/api/categories").json()["categories"]
+    assert next(c for c in cats if c["id"] == cid)["prompt_count"] == 1
+
+    assert api.put(f"/api/categories/{cid}", json={"name": "改过名"}).status_code == 200
+    assert any(
+        c["name"] == "改过名" for c in api.get("/api/categories").json()["categories"]
+    )
+
+    assert api.delete(f"/api/categories/{cid}/prompts/{prompt.id}").status_code == 200
+    assert api.delete(f"/api/categories/{cid}").status_code == 200
+    assert api.delete(f"/api/categories/{cid}").status_code == 404
+
+
+def test_delete_category_with_links_does_not_500(api, seed_prompt):
+    """删分类时必须连关联一起清掉：外键开启后留下 PromptCategory 会直接 500。"""
+    from models import Category, PromptCategory
+
+    cid = api.post("/api/categories", json={"name": "带关联"}).json()["id"]
+    prompt = seed_prompt(name="p")
+    api.post(f"/api/categories/{cid}/prompts/{prompt.id}")
+
+    assert api.delete(f"/api/categories/{cid}").status_code == 200
+    assert Category.get_or_none(Category.id == cid) is None
+    assert PromptCategory.select().where(PromptCategory.category == cid).count() == 0
+
+
+def test_category_image_count_excludes_soft_deleted(api, seed_history):
+    """侧栏分类计数必须和画廊里实际能看到的图一致：软删除的图不能算进去。"""
+    from models import ImageCategory
+
+    cid = api.post("/api/categories", json={"name": "计数"}).json()["id"]
+    live = seed_history(filename="live.png")
+    gone = seed_history(filename="gone.png")
+    ImageCategory.create(image=live.id, category=cid)
+    ImageCategory.create(image=gone.id, category=cid)
+    api.delete(f"/api/history/{gone.id}")
+
+    tree = api.get("/api/categories?tree=true&count_scope=image").json()["categories"]
+    node = next(c for c in tree if c["id"] == cid)
+    assert node["prompt_count"] == 1
+
+
+def test_category_tree_envelope(api, seed_prompt):
+    parent = api.post("/api/categories", json={"name": "父"}).json()["id"]
+    child = api.post(
+        "/api/categories", json={"name": "子", "parent_id": parent}
+    ).json()["id"]
+
+    tree = api.get("/api/categories?tree=true").json()["categories"]
+    node = next(c for c in tree if c["id"] == parent)
+    assert [c["id"] for c in node["children"]] == [child]
+
+
+# ---------------------------------------------------------------------------
+# 碎片库
+# ---------------------------------------------------------------------------
+
+def test_fragment_crud(api):
+    created = api.post(
+        "/api/fragments",
+        json={"name": "测试碎片", "fragment_type": "人物面部", "content": "微笑"},
+    )
+    assert created.status_code == 201
+    fid = created.json()["id"]
+
+    listed = api.get("/api/fragments").json()
+    assert any(f["id"] == fid for f in listed["items"])
+
+    assert api.get("/api/fragments?search=微笑").json()["total"] >= 1
+    assert "grouped" in api.get("/api/fragments/by_type").json()
+
+    assert api.put(f"/api/fragments/{fid}", json={"content": "大笑"}).status_code == 200
+    assert api.delete(f"/api/fragments/{fid}").status_code == 200
+    assert api.delete(f"/api/fragments/{fid}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 标签
+# ---------------------------------------------------------------------------
+
+def test_tag_crud(api):
+    created = api.post("/api/tags", json={"name": "新标签", "color": "#ff0000"})
+    assert created.status_code == 201
+    tid = created.json()["id"]
+
+    assert api.put(f"/api/tags/{tid}", json={"name": "改名标签"}).status_code == 200
+    names = [t["name"] for t in api.get("/api/tags").json()["tags"]]
+    assert "改名标签" in names
+
+    assert api.delete(f"/api/tags/{tid}").status_code == 200
+    assert api.get("/api/tags").json()["tags"] == []
+
+
+def test_delete_tag_clears_entity_links(api, seed_history):
+    """删标签要连带清掉 entity_tags，否则筛选时会查到不存在标签的图片。"""
+    from models import EntityTag
+
+    tid = api.post("/api/tags", json={"name": "待删"}).json()["id"]
+    img = seed_history(filename="t.png")
+    api.post(f"/api/history/{img.id}/tags/{tid}")
+
+    assert api.delete(f"/api/tags/{tid}").status_code == 200
+    assert EntityTag.select().where(EntityTag.tag == tid).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# 提示词标记
+# ---------------------------------------------------------------------------
+
+def test_prompt_flag_endpoints(api):
+    pid = api.post("/api/prompts", json={"name": "标记", "prompt": "x"}).json()["id"]
+
+    fav = api.post(f"/api/prompts/{pid}/favorite").json()
+    assert fav["is_favorite"] is True
+
+    assert api.post(f"/api/prompts/{pid}/pin").json()["is_pinned"] is True
+    assert api.post(f"/api/prompts/{pid}/rate?rating=5").json()["rating"] == 5
+    assert api.post(f"/api/prompts/{pid}/use").json()["usage_count"] == 1
+    assert api.get(f"/api/prompts/{pid}/history").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 图片动作
+# ---------------------------------------------------------------------------
+
+def test_history_item_actions(api, seed_history):
+    from models import GenHistory
+
+    img = seed_history(filename="act.png")
+
+    assert api.post(f"/api/history/{img.id}/favorite").json()["favorite"] is True
+
+    cid = api.post("/api/categories", json={"name": "图片分类"}).json()["id"]
+    assert api.post(f"/api/history/{img.id}/categories/{cid}").status_code == 200
+    assert api.delete(f"/api/history/{img.id}/categories/{cid}").status_code == 200
+
+    tid = api.post("/api/tags", json={"name": "图片标签"}).json()["id"]
+    assert api.post(f"/api/history/{img.id}/tags/{tid}").status_code == 200
+    assert api.delete(f"/api/history/{img.id}/tags/{tid}").status_code == 200
+
+    assert api.delete(f"/api/history/{img.id}").status_code == 200
+    assert bool(GenHistory.get_by_id(img.id).is_deleted) is True
+
+
+def test_history_batch_delete_keeps_prompt_records(api, seed_history):
+    """批量删图只软删，不碰提示词。"""
+    from models import GenHistory, Prompt
+
+    prompt = Prompt.create(name="保留", prompt="x")
+    a = seed_history(filename="b1.png", prompt_id=prompt.id)
+    b = seed_history(filename="b2.png", prompt_id=prompt.id)
+
+    assert api.post("/api/history/batch_delete", json={"ids": [a.id, b.id]}).status_code == 200
+    assert all(
+        bool(GenHistory.get_by_id(i).is_deleted) for i in (a.id, b.id)
+    )
+    assert Prompt.get_or_none(Prompt.id == prompt.id) is not None
+
+
+def test_batch_delete_prompts_detaches_history(api, seed_history):
+    """批量删提示词只解除关联，不能把画廊里的图片记录一起删掉。"""
+    from models import GenHistory, Prompt
+
+    prompt = Prompt.create(name="批量删", prompt="x")
+    img = seed_history(filename="detach.png", prompt_id=prompt.id)
+
+    resp = api.post("/api/prompts/batch_delete", json={"ids": [prompt.id]})
+    assert resp.status_code == 200
+
+    row = GenHistory.get_by_id(img.id)
+    assert row.prompt_id is None
+    assert bool(row.is_deleted) is False
