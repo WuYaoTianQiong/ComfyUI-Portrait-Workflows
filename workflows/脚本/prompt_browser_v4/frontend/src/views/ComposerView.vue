@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import TagCloud from '../components/TagCloud.vue'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import Modal from '../components/Modal.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -34,13 +35,28 @@ const { workflows } = useWorkflows()
  * 而且很多人更习惯行视图：碎片池能铺满屏幕宽，一屏能看到更多碎片，
  * 画布在下面不用侧着身子看。重构时只留了列视图 —— 这次补回来，默认行视图。
  */
-const viewMode = ref<'column' | 'list'>(
-  (localStorage.getItem('pb.composerView') as 'column' | 'list' | null) ?? 'list',
-)
+/**
+ * 读上次选的布局模式。
+ *
+ * localStorage 在隐私模式 / 某些测试环境下可能不可用或不抛异常但没有 getItem，
+ * 所以这里包一层 —— 读不到就用默认的「行视图」。
+ */
+function readStoredViewMode(): 'column' | 'list' {
+  try {
+    return (localStorage.getItem('pb.composerView') as 'column' | 'list' | null) ?? 'list'
+  } catch {
+    return 'list'
+  }
+}
+const viewMode = ref<'column' | 'list'>(readStoredViewMode())
 
 function toggleViewMode() {
   viewMode.value = viewMode.value === 'list' ? 'column' : 'list'
-  localStorage.setItem('pb.composerView', viewMode.value)
+  try {
+    localStorage.setItem('pb.composerView', viewMode.value)
+  } catch {
+    // 存不了就算了，本次会话内仍然生效
+  }
 }
 const toast = useToast()
 
@@ -129,7 +145,7 @@ function expandGroup(type: string) {
 interface CanvasSlot {
   content: string
   promptId: number | null
-  source: 'prompt' | 'library'
+  source: 'prompt' | 'library' | 'custom'
 }
 
 /** 每个类型一个槽位；同类型只能有一个碎片（这是【类型】格式的约束）。 */
@@ -147,6 +163,96 @@ function pick(item: FragmentItem) {
   canvas.value = {
     ...canvas.value,
     [item.type]: { content: item.content, promptId: item.prompt_id, source: item.source },
+  }
+}
+
+// ---------------- 自定义碎片 / 复制 / 存为提示词 ----------------
+
+/**
+ * 自定义碎片：直接手写一段填进某个槽位。
+ *
+ * 旧版有「自定义碎片」（`_addCustomFragment`）：既不来自提示词也不来自碎片库，
+ * 就是用户当场写的一段；写完还能「存进碎片库」（`_saveCustomFragmentToLibrary`）。
+ * 新前端之前两样都没有 —— 画布只能填现成的碎片，拼不出"自己写的那一段"。
+ */
+const customType = ref('')
+const customText = ref('')
+const customOpen = ref(false)
+
+function openCustom(type: string) {
+  customType.value = type
+  const slot = canvas.value[type]
+  customText.value = slot && slot.source === 'custom' ? slot.content : ''
+  customOpen.value = true
+}
+
+function applyCustom() {
+  const text = customText.value.trim()
+  if (!text || !customType.value) return
+  canvas.value = {
+    ...canvas.value,
+    [customType.value]: { content: text, promptId: null, source: 'custom' },
+  }
+  customOpen.value = false
+}
+
+/** 把槽位里的自定义碎片存进碎片库（之后就能像别的碎片一样用）。 */
+async function saveCustomToLibrary(type: string) {
+  const slot = canvas.value[type]
+  if (!slot || !slot.content.trim()) return
+  try {
+    await apiPost('/api/fragments', {
+      name: '',
+      fragment_type: type,
+      content: slot.content.trim(),
+      tags: '',
+    })
+    toast.success(`已存进碎片库（${type}）`)
+    queryClient.invalidateQueries({ queryKey: ['composer-fragments'] })
+  } catch (e) {
+    toast.error(`存库失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+/** 复制到剪贴板（组合结果 / 单个槽位）。 */
+async function copyText(text: string, label: string) {
+  if (!text) {
+    toast.error('没有可复制的内容')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(`已复制${label}`)
+  } catch {
+    toast.error('复制失败（浏览器拒绝了剪贴板访问）')
+  }
+}
+
+/**
+ * 把画布上的组合结果存成一条提示词。
+ *
+ * 与「另存为模板」不同：模板存的是**碎片引用**（要求每片都来自提示词，否则
+ * 建不了引用关系），这里存的是**组合好的文本** —— 所以碎片库碎片和自定义碎片
+ * 都能存进去。
+ */
+async function saveAsPrompt() {
+  if (!composedPrompt.value) {
+    toast.error('画布是空的')
+    return
+  }
+  const name = prompt('提示词名称')
+  if (!name) return
+  try {
+    await apiPost('/api/prompts', {
+      name: name.trim(),
+      prompt: composedPrompt.value,
+      negative_prompt: negativePrompt.value,
+      auto_categorize: true,
+    })
+    toast.success('已存进提示词库')
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+  } catch (e) {
+    toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -468,6 +574,22 @@ function toggleTag(id: number) {
         <span>组合画布</span>
         <span class="count">{{ canvasCount }} / 8</span>
         <span class="spacer" />
+        <button
+          class="btn btn-sm"
+          :disabled="!canvasCount"
+          title="复制组合结果"
+          @click="copyText(composedPrompt, '组合结果')"
+        >
+          复制
+        </button>
+        <button
+          class="btn btn-sm"
+          :disabled="!canvasCount"
+          title="把组合结果存成一条提示词"
+          @click="saveAsPrompt"
+        >
+          存为提示词
+        </button>
         <button class="btn btn-sm" :disabled="!canvasCount" @click="clearCanvas">清空</button>
       </div>
 
@@ -477,9 +599,22 @@ function toggleTag(id: number) {
           <template v-if="canvas[type]">
             <span class="slot-text">{{ canvas[type].content }}</span>
             <span v-if="canvas[type].source === 'library'" class="slot-src" title="来自碎片库">库</span>
+            <span v-else-if="canvas[type].source === 'custom'" class="slot-src custom" title="自定义碎片">自</span>
+            <button class="slot-remove" title="复制这一段" @click="copyText(canvas[type].content, '碎片')">⧉</button>
+            <button
+              v-if="canvas[type].source === 'custom'"
+              class="slot-remove"
+              title="存进碎片库，之后可以像别的碎片一样用"
+              @click="saveCustomToLibrary(type)"
+            >
+              ↓
+            </button>
             <button class="slot-remove" title="移除" @click="unpick(type)">✕</button>
           </template>
-          <span v-else class="slot-empty">点击左侧碎片填入</span>
+          <span v-else class="slot-empty">
+            点击左侧碎片填入
+            <button class="slot-remove" title="手写一段" @click="openCustom(type)">✎</button>
+          </span>
         </div>
       </div>
 
@@ -563,7 +698,26 @@ function toggleTag(id: number) {
         </div>
       </div>
     </aside>
-  </div>
+
+    <Modal
+      :open="customOpen"
+      :title="`自定义碎片 · ${customType}`"
+      @close="customOpen = false"
+    >
+      <div class="custom-body">
+        <textarea
+          v-model="customText"
+          placeholder="直接写一段内容，会填进「{{ customType }}」槽位…"
+          spellcheck="false"
+        />
+      </div>
+      <template #footer>
+        <span class="spacer" />
+        <button class="btn btn-sm primary" :disabled="!customText.trim()" @click="applyCustom">
+          填入画布
+        </button>
+      </template>
+    </Modal>  </div>
 </template>
 
 <style scoped>
@@ -865,7 +1019,38 @@ function toggleTag(id: number) {
   line-height: 1.4;
 }
 
-.slot-remove {
+
+.slot-src.custom {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.custom-body {
+  padding: var(--gap-lg);
+}
+
+.custom-body textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
+  outline: none;
+}
+
+.slot-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spacer {
+  flex: 1;
+}.slot-remove {
   flex: none;
   border: none;
   background: transparent;
