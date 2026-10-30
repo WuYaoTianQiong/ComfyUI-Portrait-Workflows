@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { useToast } from '../composables/useToast'
+import { FRAGMENT_TYPES } from '../constants'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
@@ -19,7 +20,7 @@ const COLORS = [
   '#ef4444', '#a855f7', '#ec4899', '#14b8a6',
 ]
 
-type Panel = 'category' | 'tag'
+type Panel = 'category' | 'tag' | 'fragment'
 const panel = ref<Panel>('category')
 
 const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
@@ -124,6 +125,95 @@ function autoClassifyAll() {
   if (!confirm('将对所有提示词重新计算类型分类（组合 / 单项 / 零散），继续？')) return
   autoClassifyMutation.mutate()
 }
+
+// ---------------- 碎片库 ----------------
+
+interface FragmentRow {
+  id: number
+  name: string
+  fragment_type: string
+  content: string
+  tags: string
+  usage_count: number
+}
+
+const fragSearch = ref('')
+const fragTypeFilter = ref('')
+
+const { data: fragData, refetch: refetchFrags } = useQuery<{
+  items: FragmentRow[]
+  total: number
+}>({
+  queryKey: computed(() => ['fragments', fragSearch.value, fragTypeFilter.value]),
+  queryFn: () =>
+    apiGet('/api/fragments', {
+      search: fragSearch.value.trim(),
+      fragment_type: fragTypeFilter.value,
+      page_size: 200,
+    }),
+})
+
+const fragments = computed<FragmentRow[]>(() => fragData.value?.items ?? [])
+
+const newFragType = ref<string>('人物面部')
+const newFragName = ref('')
+const newFragContent = ref('')
+
+async function createFragment() {
+  if (!newFragContent.value.trim()) {
+    toast.error('碎片内容不能为空')
+    return
+  }
+  try {
+    await apiPost('/api/fragments', {
+      name: newFragName.value.trim(),
+      fragment_type: newFragType.value,
+      content: newFragContent.value.trim(),
+      tags: '',
+    })
+    newFragName.value = ''
+    newFragContent.value = ''
+    refetchFrags()
+    toast.success('已添加碎片')
+  } catch (e) {
+    toast.error(`添加失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+const editingFragId = ref<number | null>(null)
+const editingFrag = ref({ name: '', content: '', fragment_type: '人物面部' })
+
+function startEditFrag(f: FragmentRow) {
+  editingFragId.value = f.id
+  editingFrag.value = { name: f.name, content: f.content, fragment_type: f.fragment_type }
+}
+
+async function saveFrag() {
+  if (editingFragId.value === null) return
+  try {
+    await apiPut(`/api/fragments/${editingFragId.value}`, {
+      name: editingFrag.value.name,
+      content: editingFrag.value.content,
+      fragment_type: editingFrag.value.fragment_type,
+    })
+    editingFragId.value = null
+    refetchFrags()
+    toast.success('已保存')
+  } catch (e) {
+    toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+async function removeFragment(id: number, label: string) {
+  if (!confirm(`确定删除碎片「${label}」吗？`)) return
+  try {
+    await apiDelete(`/api/fragments/${id}`)
+    refetchFrags()
+    toast.success('已删除')
+  } catch (e) {
+    toast.error(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 async function removeItem(kind: Panel, id: number, name: string) {
   const extra = kind === 'category' ? '，并会解除它与所有提示词的关联' : ''
   if (!confirm(`确定删除「${name}」吗${extra}？`)) return
@@ -150,9 +240,12 @@ async function removeItem(kind: Panel, id: number, name: string) {
       <button class="btn btn-sm" :class="{ active: panel === 'tag' }" @click="panel = 'tag'">
         标签
       </button>
+      <button class="btn btn-sm" :class="{ active: panel === 'fragment' }" @click="panel = 'fragment'">
+        碎片库
+      </button>
     </div>
 
-    <div class="creator">
+    <div v-if="panel !== 'fragment'" class="creator">
       <input
         v-model="newName"
         class="name-input"
@@ -187,6 +280,26 @@ async function removeItem(kind: Panel, id: number, name: string) {
       </label>
     </div>
 
+
+    <div v-else class="creator frag-tools">
+      <input v-model="fragSearch" class="frag-search" placeholder="搜索碎片内容 / 名称…" />
+      <select v-model="fragTypeFilter" class="frag-type-select">
+        <option value="">全部类型</option>
+        <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">{{ t }}</option>
+      </select>
+      <span class="count">{{ fragments.length }} 个</span>
+    </div>
+
+    <div v-if="panel === 'fragment'" class="creator frag-tools">
+      <select v-model="newFragType" class="frag-type-select">
+        <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">{{ t }}</option>
+      </select>
+      <input v-model="newFragName" class="frag-name-input" placeholder="名称（可选）" />
+      <textarea v-model="newFragContent" class="frag-content-input" placeholder="碎片内容…" />
+      <button class="btn btn-sm primary" :disabled="!newFragContent.trim()" @click="createFragment">
+        添加
+      </button>
+    </div>
     <div class="list">
       <template v-if="panel === 'category'">
         <div v-for="cat in flatCats" :key="cat.id" class="row" :style="{ paddingLeft: `${8 + cat.depth * 18}px` }">
@@ -206,7 +319,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
         <div v-if="!flatCats.length" class="empty">还没有分类</div>
       </template>
 
-      <template v-else>
+      <template v-else-if="panel === 'tag'">
         <div v-for="tag in visibleTags" :key="tag.id" class="row">
           <span class="dot" :style="{ background: tag.color }" />
           <input
@@ -223,9 +336,36 @@ async function removeItem(kind: Panel, id: number, name: string) {
         </div>
         <div v-if="!visibleTags.length" class="empty">没有符合条件的标签</div>
       </template>
-    </div>
 
-    <p class="hint">点名称可直接改名；计数是「挂了这个标签/分类的提示词数」。</p>
+      <template v-else>
+        <div v-for="f in fragments" :key="f.id" class="frag-row">
+          <template v-if="editingFragId === f.id">
+            <select v-model="editingFrag.fragment_type" class="frag-type-select mini">
+              <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">{{ t }}</option>
+            </select>
+            <input v-model="editingFrag.name" class="inline-edit" placeholder="名称" />
+            <textarea v-model="editingFrag.content" class="inline-edit grow" />
+            <button class="btn btn-sm" @click="saveFrag">保存</button>
+            <button class="btn btn-sm" @click="editingFragId = null">取消</button>
+          </template>
+          <template v-else>
+            <span class="frag-type">{{ f.fragment_type }}</span>
+            <span class="row-name" @click="startEditFrag(f)">{{ f.name || '(未命名)' }}</span>
+            <span class="frag-content" :title="f.content" @click="startEditFrag(f)">{{ f.content }}</span>
+            <span class="count" :title="'使用 ' + f.usage_count + ' 次'">{{ f.usage_count }}</span>
+            <button class="icon danger" title="删除" @click="removeFragment(f.id, f.name || f.content.slice(0, 10))">✕</button>
+          </template>
+        </div>
+        <div v-if="!fragments.length" class="empty">还没有碎片</div>
+      </template>    </div>
+
+    <p class="hint">
+      {{
+        panel === 'fragment'
+          ? '点名称或内容即可编辑；计数是碎片被使用的次数。'
+          : '点名称可直接改名；计数是「挂了这个标签/分类的提示词数」。'
+      }}
+    </p>
   </div>
 </template>
 <style scoped>
@@ -328,6 +468,84 @@ async function removeItem(kind: Panel, id: number, name: string) {
   padding: 1px 4px;
 }
 
+
+.frag-tools {
+  flex-wrap: wrap;
+}
+
+.frag-search {
+  flex: 1;
+  min-width: 160px;
+}
+
+.frag-type-select {
+  width: 118px;
+}
+
+.frag-type-select.mini {
+  width: 100px;
+}
+
+.frag-name-input {
+  width: 160px;
+}
+
+.frag-content-input {
+  flex: 1;
+  min-width: 220px;
+  min-height: 34px;
+  height: 34px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--gap-sm);
+  outline: none;
+}
+
+.frag-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 6px var(--gap);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.frag-type {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+}
+
+.frag-content {
+  flex: 1;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.inline-edit.grow {
+  flex: 1;
+  min-width: 220px;
+  min-height: 30px;
+  height: 30px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--gap-sm);
+  outline: none;
+}
 .count {
   color: var(--muted);
   font-size: var(--fs-xs);

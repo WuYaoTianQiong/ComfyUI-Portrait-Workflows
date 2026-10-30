@@ -14,6 +14,14 @@ vi.mock('../api/client', () => ({
         ],
       }
     }
+    if (path.includes('/api/fragments')) {
+      return {
+        items: [
+          { id: 1, name: '侧脸', fragment_type: '人物面部', content: '微微侧脸', tags: '', usage_count: 2 },
+        ],
+        total: 1,
+      }
+    }
     if (path.includes('/api/tags')) {
       return {
         tags: [
@@ -91,5 +99,28 @@ describe('ManageView 分类/标签管理', () => {
 
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(vi.mocked(apiPost).mock.calls[0][0]).toBe('/api/categories/auto-classify')
+  })
+  it('碎片库页签列出碎片', async () => {
+    const wrapper = await mountView()
+    await wrapper.findAll('.tabs button').find((b) => b.text() === '碎片库')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.frag-row').length).toBe(1)
+    expect(wrapper.text()).toContain('侧脸')
+  })
+
+  it('新增碎片调用 POST /api/fragments', async () => {
+    const wrapper = await mountView()
+    await wrapper.findAll('.tabs button').find((b) => b.text() === '碎片库')!.trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.frag-content-input').setValue('新的碎片内容')
+    const btn = wrapper.findAll('.btn').find((b) => b.text() === '添加')!
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    const [path, body] = vi.mocked(apiPost).mock.calls[0]
+    expect(path).toBe('/api/fragments')
+    expect((body as Record<string, unknown>).content).toBe('新的碎片内容')
   })
 })
