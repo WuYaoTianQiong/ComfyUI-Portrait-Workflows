@@ -128,12 +128,19 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
   3. 现有 19 个散落备份一次性移动归档
 - **验收**：重启后 `gen_history` 墓碑数下降（当前 528 条且文件全部已不存在，可安全回收）；`文档/` 根目录只剩 `提示词收藏.db` 与 `backups/`
 - **回滚**：归档前先整体复制一份到 `文档/backups/_pre_s0/`
+- **状态**：✅ 2026-10-30 完成（归档目录实际用 `文档/backups/` + `backups/legacy/`，删除了 `_pre_s0` 这个中间层）
+  - `services/maintenance.py`：`backup_database` / `rotate_backups` / `purge_tombstones` / `run_startup_maintenance`
+  - 保留期 7 天（`created_at` 是 UTC，比较时用 UTC now，否则东八区会凭空多 8 小时）
+  - 历史遗留备份进 `backups/legacy/` 且**不参与轮转**——那是过去的事故恢复点，不值得为省几十 MB 删掉；轮转只作用于新生成的备份
+  - 非生产库跳过维护：冒烟测试用临时库启动时不再把 `smoke.db` 备份写进真实 `backups/`
+  - 实测：`归档 21 个，清理 0 个，保留 3 个`；`墓碑 528 条，回收 266 条（保留最近 7 天）`；`gen_history` 538 → **272 行**，存活 10 条不变，部分唯一索引完好
 
 ### S0-7 收尾：版本控制卫生
 - **文件**：新建/修改 `.gitignore`
 - **做法**：忽略 `文档/提示词收藏.db*`、`文档/backups/`、`thumbnails/`、`logs/`、`_pb_*.log`、`__pycache__/`
 - **需你确认**：是否执行 `git rm --cached 文档/提示词收藏.db`（停止跟踪，历史里已有 3MB 记录不会消失，但能防止继续膨胀）
 - **验收**：`git status` 干净，不再出现 `.db` 变更
+- **状态**：✅ 2026-10-30 完成。已执行 `git rm --cached`（磁盘文件与历史提交均保留）；`.gitignore` 补 `workflows/文档/*.db`、`文档/backups/`、`prompt_browser_v4/logs/`、`_pb_*.log`、`workflows/.arts/`
 
 ---
 
@@ -231,8 +238,8 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 - [x] S0-3 删前端 30s `history_sync`
 - [x] S0-4 修 `_job_index` 失效
 - [x] S0-5 合并筛选构造器
-- [ ] S0-6 墓碑回收自动化 + 备份归档
-- [ ] S0-7 gitignore / DB 停止跟踪
+- [x] S0-6 墓碑回收自动化 + 备份归档
+- [x] S0-7 gitignore / DB 停止跟踪
 
 ### 阶段 1
 - [ ] S1-1 迁移框架化
