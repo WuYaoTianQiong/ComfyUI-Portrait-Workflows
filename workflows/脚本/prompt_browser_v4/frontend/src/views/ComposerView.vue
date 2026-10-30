@@ -26,6 +26,22 @@ interface FragmentItem {
 const { workflowPath, quality, orientation } = useSettings()
 const { busy: generating, job: activeJob, error: generateError, track } = useGenerate()
 const { workflows } = useWorkflows()
+
+/**
+ * 布局模式：列视图（左右三栏）/ 行视图（上下滚动）。
+ *
+ * 旧版（static/composer-core.js 的 toggleComposerView）就有这个切换，
+ * 而且很多人更习惯行视图：碎片池能铺满屏幕宽，一屏能看到更多碎片，
+ * 画布在下面不用侧着身子看。重构时只留了列视图 —— 这次补回来，默认行视图。
+ */
+const viewMode = ref<'column' | 'list'>(
+  (localStorage.getItem('pb.composerView') as 'column' | 'list' | null) ?? 'list',
+)
+
+function toggleViewMode() {
+  viewMode.value = viewMode.value === 'list' ? 'column' : 'list'
+  localStorage.setItem('pb.composerView', viewMode.value)
+}
 const toast = useToast()
 
 // ---------------- 碎片池 ----------------
@@ -356,7 +372,7 @@ function toggleTag(id: number) {
 </script>
 
 <template>
-  <div class="composer">
+  <div class="composer" :class="viewMode">
     <aside class="filters">
       <section class="group">
         <div class="group-head"><span>筛选</span></div>
@@ -398,6 +414,13 @@ function toggleTag(id: number) {
 
     <section class="pool">
       <div class="pool-head">
+        <button
+          class="btn btn-sm"
+          :title="viewMode === 'list' ? '切到左右三栏' : '切到上下滚动'"
+          @click="toggleViewMode"
+        >
+          {{ viewMode === 'list' ? '📐 列视图' : '📐 行视图' }}
+        </button>
         <span>碎片池</span>
         <span class="count">
           {{ fragmentTotal }} 个碎片<span v-if="isFetching"> · 加载中</span>
@@ -544,7 +567,48 @@ function toggleTag(id: number) {
 </template>
 
 <style scoped>
-.composer {
+
+/* ---------------------------------------------------------------------------
+   行视图：上下滚动布局。
+
+   三栏在纵向上依次排列，各占满宽度，页面整体滚动 —— 碎片池因此能铺满
+   屏幕宽（碎片卡片横向排更多），画布在下方不用侧着身子看。
+   --------------------------------------------------------------------------- */
+.composer.list {
+  flex-direction: column;
+  height: auto;
+  min-height: 100%;
+  overflow-y: auto;
+}
+
+.composer.list .filters {
+  width: 100%;
+  flex: none;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  overflow-y: visible;
+}
+
+.composer.list .pool {
+  flex: none;
+  width: 100%;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.composer.list .pool-body {
+  flex: none;
+  /* 给碎片池一个高度上限：否则 240 张卡片会把画布顶到 3700px 之外，
+     上下滚动就变成了"先滚过整个碎片池才看得见画布"。 */
+  overflow-y: auto;
+  max-height: 52vh;
+}
+
+.composer.list .canvas-pane {
+  width: 100%;
+  flex: none;
+  overflow-y: visible;
+}.composer {
   display: flex;
   height: 100%;
   min-height: 0;

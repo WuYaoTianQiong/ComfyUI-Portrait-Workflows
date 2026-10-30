@@ -3,10 +3,12 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import Lightbox from '../components/Lightbox.vue'
+import CompareModal from '../components/CompareModal.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
+import { useWorkflows } from '../composables/useWorkflows'
 import type { HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 
@@ -179,7 +181,33 @@ function batchDownload() {
 
 // ---------------- 灯箱 ----------------
 
+
+/**
+ * 多图对比：选中 2~4 张后打开对比弹层。
+ *
+ * 上限 4 张是旧版沿用的限制 —— 再多就没法看了，用户也不需要。
+ */
+const compareOpen = ref(false)
+
+const compareItems = computed<HistoryItem[]>(() =>
+  items.value.filter((it) => selected.value.has(it.id)),
+)
+
+function openCompare() {
+  if (selected.value.size < 2) {
+    toast.info('至少选择 2 张图片才能对比')
+    return
+  }
+  if (selected.value.size > 4) {
+    toast.error('对比最多只能选择 4 张图片，请取消部分选择')
+    return
+  }
+  compareOpen.value = true
+}
 const lightboxIndex = ref<number | null>(null)
+
+/** 灯箱里要能直接选工作流（投喂给工作流处理）。 */
+const { workflows } = useWorkflows()
 const lightboxOpen = computed(() => lightboxIndex.value !== null)
 
 function openLightbox(index: number) {
@@ -425,6 +453,7 @@ function clearFilters() {
         <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
         <button class="btn btn-sm" @click="clearSelection">取消选择</button>
         <span class="spacer" />
+        <button class="btn btn-sm" @click="openCompare">对比</button>
         <button class="btn btn-sm" @click="batchDownload">下载选中</button>
         <button class="btn btn-sm danger" :disabled="deleteMutation.isPending.value" @click="batchDelete">
           {{ deleteMutation.isPending.value ? '删除中…' : '删除选中' }}
@@ -479,8 +508,16 @@ function clearFilters() {
       v-if="lightboxOpen"
       :items="items"
       :index="lightboxIndex!"
+      :workflows="workflows"
       @update:index="lightboxIndex = $event"
       @close="lightboxIndex = null"
+      @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
+    />
+
+    <CompareModal
+      :open="compareOpen"
+      :items="compareItems"
+      @close="compareOpen = false"
     />
   </div>
 </template>
