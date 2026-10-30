@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
+import MissingRunPanel from '../components/MissingRunPanel.vue'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
@@ -24,6 +25,7 @@ const pageSize = 50
 const page = ref(1)
 const search = ref('')
 const categoryId = ref<number | null>(null)
+const missingOpen = ref(false)
 const tagIds = ref<number[]>([])
 const tagMatch = ref<'all' | 'any'>('all')
 const selectedId = ref<number | null>(null)
@@ -445,6 +447,13 @@ function clearFilters() {
         <span class="spacer" />
         <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">导出</button>
         <button class="btn btn-sm" title="从 JSON 导入提示词" @click="fileInput?.click()">导入</button>
+        <button
+          class="btn btn-sm"
+          title="给「有提示词但没出图」的条目补图"
+          @click="missingOpen = true"
+        >
+          补跑缺图
+        </button>
         <input
           ref="fileInput"
           type="file"
@@ -623,6 +632,7 @@ function clearFilters() {
         </footer>
       </div>
     </section>
+    <MissingRunPanel :open="missingOpen" @close="missingOpen = false" />
   </div>
 </template>
 
