@@ -130,6 +130,66 @@ def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
     assert body["ids"] == [keep.id]
 
 
+def _deleted_count():
+    from models import GenHistory
+
+    return GenHistory.select().where(GenHistory.is_deleted == True).count()
+
+
+def test_cleanup_missing_dry_run_does_not_write(api, seed_history):
+    """清理失效默认只预览：返回将清理多少条 + 样本，绝不写库。"""
+    seed_history(filename="gone1.png")
+    seed_history(filename="gone2.png")
+
+    body = api.post("/api/history/cleanup_missing").json()
+    assert body["dry_run"] is True
+    assert body["total"] == 2
+    assert body["will_clean"] == 2
+    assert [s["filename"] for s in body["samples"]] == ["gone1.png", "gone2.png"]
+    assert _deleted_count() == 0
+
+
+def test_cleanup_missing_requires_confirm(api, seed_history):
+    """dry_run=false 但没带 confirm=true 时不得执行。"""
+    seed_history(filename="gone.png")
+
+    body = api.post("/api/history/cleanup_missing?dry_run=false").json()
+    assert body["success"] is False
+    assert "confirm" in body["message"]
+    assert _deleted_count() == 0
+
+
+def test_cleanup_missing_guard_blocks_mass_delete(api, seed_history):
+    """缺失占比过半时要熔断：路径解析出错时一键清空整库是历史事故的根源。"""
+    for i in range(25):
+        seed_history(filename=f"gone_{i}.png")
+
+    assert api.post("/api/history/cleanup_missing").json()["guarded"] is True
+
+    body = api.post("/api/history/cleanup_missing?dry_run=false&confirm=true").json()
+    assert body["success"] is False
+    assert body["guarded"] is True
+    assert _deleted_count() == 0
+
+
+def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
+    """只清理当前筛选范围内的记录，范围外的一条都不能动。"""
+    from models import GenHistory, ImageCategory
+
+    inside = seed_history(filename="in_cat.png")
+    outside = seed_history(filename="out_cat.png")
+    cat, _ = seed_taxonomy()
+    ImageCategory.create(image=inside.id, category=cat.id)
+
+    body = api.post(
+        f"/api/history/cleanup_missing?dry_run=false&confirm=true&category_id={cat.id}"
+    ).json()
+    assert body["success"] is True
+    assert body["cleaned"] == 1
+    assert bool(GenHistory.get_by_id(inside.id).is_deleted) is True
+    assert bool(GenHistory.get_by_id(outside.id).is_deleted) is False
+
+
 def test_history_add_category_endpoint(api, seed_history, seed_taxonomy):
     item = seed_history(filename="cat.png")
     cat, _ = seed_taxonomy()

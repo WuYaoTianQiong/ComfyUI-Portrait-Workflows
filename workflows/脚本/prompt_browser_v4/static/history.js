@@ -227,25 +227,49 @@ window.deleteHistoryItem = async function(id) {
 };
 
 window.cleanupMissingFiles = async function() {
-  if (!confirm("将执行以下操作：\n\n1. 扫描所有历史记录，清理文件已被手动删除的条目（软删除）\n2. 清空全部缩略图缓存（下次浏览时自动重新生成）\n\n缩略图缓存键格式已修复，旧格式缩略图需整体重建。")) return;
-  try {
-    // 步骤 1：清理失效记录
-    const data = await window.api("/api/history/cleanup_missing", { method: "POST", timeout: 60000 });
-    // 步骤 2：清空缩略图缓存
-    let thumbDeleted = 0;
-    try {
-      const td = await window.api("/api/thumbnail/clear", { method: "POST", timeout: 30000 });
-      thumbDeleted = td.deleted || 0;
-    } catch (e) { console.error("thumbnail clear failed", e); }
+  // 参数统一走 PBQuery（store.js），只清理「当前筛选」范围内的记录：
+  // 旧实现是全库一把梭，用户在筛过的列表上点清理，会连范围外的记录一起清掉。
+  const qs = window.PBQuery
+    ? window.PBQuery.gallery({}, { paging: false }).toString()
+    : "";
+  const buildUrl = (extra) => "/api/history/cleanup_missing?" + [qs, extra].filter(Boolean).join("&");
 
-    const parts = [];
-    if (data.cleaned > 0) parts.push(`${data.cleaned} 条失效记录`);
-    if (thumbDeleted > 0) parts.push(`${thumbDeleted} 个旧缩略图`);
-    if (parts.length) {
-      window.showToast(`已清理 ${parts.join("、")}（共扫描 ${data.total} 条记录）`, "success");
-    } else {
-      window.showToast(`扫描完成，${data.total} 条记录均有效，无需清理`, "info");
+  try {
+    // 第一步：预览。后端默认 dry_run，不写库
+    const preview = await window.api(buildUrl("dry_run=true"), { method: "POST", timeout: 120000 });
+
+    if (preview.guarded) {
+      window.showToast(preview.message || "疑似路径异常，已阻止清理", "error");
+      return;
     }
+    if (!preview.will_clean) {
+      window.showToast(`扫描完成，${preview.total} 条记录的文件均存在，无需清理`, "info");
+      return;
+    }
+
+    const samples = (preview.samples || [])
+      .map(s => "  · " + (s.subfolder ? s.subfolder + "/" : "") + s.filename)
+      .join("\n");
+    const more = preview.will_clean > 10 ? `\n  … 另有 ${preview.will_clean - 10} 条` : "";
+    const allMissing = preview.total > 0 && preview.will_clean === preview.total;
+    const warn = allMissing
+      ? "\n\n⚠ 当前筛选下的记录会【全部】失效，请先确认 ComfyUI output 目录可正常访问。"
+      : "";
+
+    const ok = confirm(
+      `扫描 ${preview.total} 条记录，其中 ${preview.will_clean} 条的文件已不存在：\n\n` +
+      samples + more + warn +
+      "\n\n这一步只把记录标记为已删除，不动磁盘文件。确认继续？"
+    );
+    if (!ok) return;
+
+    // 第二步：执行（必须同时带 confirm=true）
+    const data = await window.api(buildUrl("dry_run=false&confirm=true"), { method: "POST", timeout: 120000 });
+    if (!data.success) {
+      window.showToast(data.message || "清理未执行", "error");
+      return;
+    }
+    window.showToast(`已清理 ${data.cleaned} 条失效记录（共扫描 ${data.total} 条）`, "success");
     document.body.dispatchEvent(new CustomEvent("galleryRefresh"));
   } catch (e) {
     window.showToast("清理失败: " + e.message, "error");

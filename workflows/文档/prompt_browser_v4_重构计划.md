@@ -79,6 +79,10 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
   6. **删除** `history.js:234-240` 里顺带调用 `/api/thumbnail/clear` 的第二步
 - **验收**：当前库 10 存活 0 缺失 → dry-run 返回 `will_clean=0`；手工把某张图改名后 dry-run 返回 1 且样本名正确
 - **回滚**：纯新增参数，旧调用方式仍然工作
+- **状态**：✅ 2026-10-30 完成
+  - 实现：`cleanup_missing` 默认 `dry_run=true`，返回 `{total, will_clean, samples, guarded, message}`；执行需 `dry_run=false&confirm=true`；熔断阈值「≥20 条且缺失占比 >50%」；筛选参数与画廊一致（顺带抽出 `_apply_facet_filters`，list_history / history_ids / cleanup_missing 三处共用）
+  - 前端：两段式（预览 → 确认），删除「顺带清空全站缩略图缓存」；`?v=` 未改（静态资源已由中间件 no-store）
+  - 验证：pytest 43 passed（新增 4 条契约用例：dry-run 不写库 / 缺 confirm 不执行 / 熔断拦截 / 按分类限定范围）；`verify_smoke.py` 25 通过 1 跳过、无 Traceback；重启后真实请求：`total=10, will_clean=0`、无 confirm 时 `success=false`、`/gallery` 200
 
 ### S0-2 缺失状态改为可自愈的派生列
 - **文件**：`models.py`、`services/integrity.py`（新建）、`services/job_state.py`、`routers/history.py`、`static/gallery.js`、`static/index.html`
@@ -198,7 +202,7 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 ## 7. 进度跟踪
 
 ### 阶段 0
-- [ ] S0-1 清理失效 dry-run + 熔断 + 解绑缩略图
+- [x] S0-1 清理失效 dry-run + 熔断 + 解绑缩略图
 - [ ] S0-2 `missing_since` 派生列 + 角标 + 筛选
 - [ ] S0-3 删前端 30s `history_sync`
 - [ ] S0-4 修 `_job_index` 失效

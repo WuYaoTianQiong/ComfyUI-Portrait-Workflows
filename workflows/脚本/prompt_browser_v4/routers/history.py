@@ -435,23 +435,7 @@ def list_history(
                 via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
                 q = q.where(direct | via_prompt)
 
-    if source:
-        q = q.where(Gh.source == source)
-    if date:
-        q = q.where(fn.strftime("%Y-%m", _captured_at_expr()) == date)
-    if model:
-        mq = fn.json_extract(Gh.prompt_params, "$.model")
-        if model == "未记录":
-            q = q.where((mq.is_null(True)) | (mq == "") | (mq == "unknown") | (mq == "null"))
-        else:
-            q = q.where(mq == model)
-
-    if orientation:
-        oq = fn.json_extract(Gh.prompt_params, "$.orientation")
-        if orientation == "未记录":
-            q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
-        else:
-            q = q.where(oq == orientation)
+    q = _apply_facet_filters(q, source, date, model, orientation)
 
     total = q.count()
 
@@ -547,6 +531,32 @@ def _filtered_history_query(
     return q
 
 
+def _apply_facet_filters(q, source: str = "", date: str = "", model: str = "", orientation: str = ""):
+    """source / date / model / orientation 四个分面筛选。
+
+    `/history`、`/history/ids`、`/history/cleanup_missing` 共用这一份。
+    这三处原先各自内联了一遍同样的 if 分支，加一个筛选项就要改三处，
+    并且已经出现过"列表筛了、全选却选到范围外"的错位。
+    """
+    if source:
+        q = q.where(Gh.source == source)
+    if date:
+        q = q.where(fn.strftime("%Y-%m", _captured_at_expr()) == date)
+    if model:
+        mq = fn.json_extract(Gh.prompt_params, "$.model")
+        if model == "未记录":
+            q = q.where((mq.is_null(True)) | (mq == "") | (mq == "unknown") | (mq == "null"))
+        else:
+            q = q.where(mq == model)
+    if orientation:
+        oq = fn.json_extract(Gh.prompt_params, "$.orientation")
+        if orientation == "未记录":
+            q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
+        else:
+            q = q.where(oq == orientation)
+    return q
+
+
 @router.get("/history/facets")
 def history_facets(
     favorite: bool = Query(None),
@@ -603,22 +613,7 @@ def history_ids(
         category_id=category_id,
         tag_ids=tag_ids,
     )
-    if source:
-        q = q.where(Gh.source == source)
-    if date:
-        q = q.where(fn.strftime("%Y-%m", _captured_at_expr()) == date)
-    if model:
-        mq = fn.json_extract(Gh.prompt_params, "$.model")
-        if model == "未记录":
-            q = q.where((mq.is_null(True)) | (mq == "") | (mq == "unknown") | (mq == "null"))
-        else:
-            q = q.where(mq == model)
-    if orientation:
-        oq = fn.json_extract(Gh.prompt_params, "$.orientation")
-        if orientation == "未记录":
-            q = q.where((oq.is_null(True)) | (oq == "") | (oq == "unknown") | (oq == "null"))
-        else:
-            q = q.where(oq == orientation)
+    q = _apply_facet_filters(q, source, date, model, orientation)
     ids = [r.id for r in q.select(Gh.id).distinct()]
     return {"ids": ids, "total": len(ids)}
 
@@ -646,25 +641,105 @@ def sync_history(page_size: int = Query(500)):
 # 清理文件已被手动删除的记录
 # ---------------------------------------------------------------------------
 
+# 熔断阈值：命中比例超过一半、且样本量不小的时候，几乎只能说明路径解析出了问题
+# （output 盘没挂、从 junction 启动导致 comfyui_root 指错），而不是真的"图都没了"。
+_GUARD_RATIO = 0.5
+_GUARD_MIN_TOTAL = 20
+
+
 @router.post("/history/cleanup_missing")
-def cleanup_missing_files():
-    """扫描所有未删除的历史记录，将对应文件已不存在的记录标记为软删除，
-    同时清理残留的缩略图缓存。用于手动从磁盘删除图片后的数据库同步。"""
+def cleanup_missing_files(
+    dry_run: bool = Query(True, description="true=只预览将清理哪些，不写库"),
+    confirm: bool = Query(False, description="dry_run=false 时必须显式传 true"),
+    favorite: bool = Query(None),
+    search: str = Query(""),
+    category_id: int = Query(None),
+    tag_ids: str = Query(""),
+    source: str = Query(""),
+    date: str = Query(""),
+    model: str = Query(""),
+    orientation: str = Query(""),
+):
+    """把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。
+
+    默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。
+    真正执行要同时传 `dry_run=false&confirm=true`。
+
+    筛选参数与画廊一致，避免"看着筛过的列表点清理，却清掉了范围外的记录"。
+    """
     from services.thumbnail import _get_image_path
 
-    rows = list(Gh.select().where(Gh.is_deleted == False))
-    missing: list[Gh] = []
-    for r in rows:
-        path = _get_image_path(r.filename, r.subfolder or "", r.img_type or "output")
-        if path is None:
-            missing.append(r)
-            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
+    q = _filtered_history_query(favorite, search, category_id, tag_ids)
+    q = _apply_facet_filters(q, source, date, model, orientation)
+    rows = list(q)
+    missing = [
+        r for r in rows
+        if _get_image_path(r.filename or "", r.subfolder or "", r.img_type or "output") is None
+    ]
+    total = len(rows)
+    will_clean = len(missing)
+    guarded = total >= _GUARD_MIN_TOTAL and will_clean / total > _GUARD_RATIO
+    samples = [
+        {
+            "id": r.id,
+            "filename": r.filename or "",
+            "subfolder": r.subfolder or "",
+            "img_type": r.img_type or "output",
+        }
+        for r in missing[:10]
+    ]
+
+    if guarded:
+        return {
+            "success": False,
+            "dry_run": dry_run,
+            "total": total,
+            "will_clean": will_clean,
+            "samples": samples,
+            "guarded": True,
+            "message": (
+                f"疑似路径解析异常：{will_clean}/{total} 条记录找不到文件，"
+                f"已阻止执行。请先确认 ComfyUI output 目录是否可访问。"
+            ),
+        }
+
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "total": total,
+            "will_clean": will_clean,
+            "samples": samples,
+            "guarded": False,
+            "message": "",
+        }
+
+    if not confirm:
+        return {
+            "success": False,
+            "dry_run": False,
+            "total": total,
+            "will_clean": will_clean,
+            "samples": samples,
+            "guarded": False,
+            "message": "未执行：dry_run=false 时必须同时传 confirm=true",
+        }
 
     if missing:
         ids = [r.id for r in missing]
         Gh.update(is_deleted=True).where(Gh.id.in_(ids)).execute()
+        # 只清理这些记录自己的缩略图缓存，绝不整体清空（那会让幸存图片全部重算）
+        for r in missing:
+            _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
 
-    return {"success": True, "cleaned": len(missing), "total": len(rows)}
+    return {
+        "success": True,
+        "dry_run": False,
+        "total": total,
+        "cleaned": will_clean,
+        "guarded": False,
+        "message": "",
+    }
 
 
 # ---------------------------------------------------------------------------
