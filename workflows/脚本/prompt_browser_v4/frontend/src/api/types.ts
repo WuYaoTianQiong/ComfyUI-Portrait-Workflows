@@ -65,6 +65,37 @@ export interface CategoryNode extends CategoryRef {
 }
 
 // ---------------------------------------------------------------------------
+// 任务
+// ---------------------------------------------------------------------------
+
+export interface JobItem {
+  prompt_id?: number
+  seed?: number
+  prompt_preview?: string
+  status?: string
+  error?: string
+  comfyui_prompt_id?: string
+  images?: Array<{ filename: string; subfolder?: string; type?: string }>
+}
+
+export interface JobSnapshot {
+  id: number
+  job_type: string
+  status: string
+  title: string
+  total: number
+  done_count: number
+  error_count: number
+  items: JobItem[]
+  workflow_path?: string
+  orientation?: string
+  quality?: string
+  extra?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+// ---------------------------------------------------------------------------
 // 提示词
 // ---------------------------------------------------------------------------
 

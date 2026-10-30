@@ -6,7 +6,24 @@ import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
 import FaceswapView from './views/FaceswapView.vue'
+import JobCenterView from './views/JobCenterView.vue'
 import { apiGet } from './api/client'
+import type { JobSnapshot } from './api/types'
+
+/**
+ * 顶栏的「进行中任务」角标。
+ *
+ * 只查 active 的任务、每 5 秒一次 —— 任务中心页面自己走 SSE 实时推送，
+ * 这里只需要一个粗粒度计数，不值得再开一条长连接。
+ */
+const { data: activeJobs } = useQuery<{ jobs: JobSnapshot[] }>({
+  queryKey: ['jobs', 'active-badge'],
+  queryFn: () => apiGet('/api/jobs', { active: 1, limit: 50 }),
+  refetchInterval: 5_000,
+  staleTime: 2_000,
+})
+
+const activeCount = computed(() => activeJobs.value?.jobs?.length ?? 0)
 
 /** ComfyUI 在线状态：离线时不该让用户以为能出图（历史上因此白跑 27 个任务）。 */
 const { data: status } = useQuery<{ comfyui: string }>({
@@ -24,7 +41,7 @@ const online = computed(() => status.value?.comfyui === 'online')
  * imageViewer.js）。提示词页/组合器在 S2-3、S2-4 按同样方式接入，
  * 旧页面在此期间保持可用（新前端只跑在 5173）。
  */
-type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap'
+type TabKey = 'gallery' | 'prompt' | 'composer' | 'faceswap' | 'jobs'
 
 const activeTab = ref<TabKey>('gallery')
 </script>
@@ -67,6 +84,14 @@ const activeTab = ref<TabKey>('gallery')
         >
           批量换脸
         </button>
+        <button
+          class="btn btn-sm"
+          :class="{ active: activeTab === 'jobs' }"
+          @click="activeTab = 'jobs'"
+        >
+          任务
+          <span v-if="activeCount" class="job-badge">{{ activeCount }}</span>
+        </button>
       </nav>
 
       <div class="status" :class="{ online }">
@@ -83,6 +108,7 @@ const activeTab = ref<TabKey>('gallery')
       <GalleryView v-if="activeTab === 'gallery'" />
       <ComposerView v-else-if="activeTab === 'composer'" />
       <FaceswapView v-else-if="activeTab === 'faceswap'" />
+      <JobCenterView v-else-if="activeTab === 'jobs'" />
       <PromptView v-else />
     </main>
   </div>
@@ -139,6 +165,21 @@ const activeTab = ref<TabKey>('gallery')
   display: flex;
   gap: var(--gap-xs);
   margin-left: var(--gap-lg);
+  align-items: center;
+}
+
+.job-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .status {

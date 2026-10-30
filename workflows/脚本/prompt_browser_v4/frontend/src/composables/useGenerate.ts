@@ -2,16 +2,7 @@ import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import { apiPost } from '../api/client'
-
-export interface JobSnapshot {
-  id: number
-  status: string
-  title?: string
-  total?: number
-  done_count?: number
-  error_count?: number
-  items?: Array<{ status?: string; error?: string }>
-}
+import type { JobSnapshot } from '../api/types'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
 
