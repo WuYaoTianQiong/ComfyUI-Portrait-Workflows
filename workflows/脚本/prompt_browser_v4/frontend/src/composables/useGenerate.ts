@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import { apiPost } from '../api/client'
+import { customWorkflowContent } from './useWorkflows'
 import type { JobSnapshot } from '../api/types'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
@@ -72,6 +73,8 @@ export function useGenerate() {
       const result = await apiPost<{ success: boolean; job_id: number }>('/api/run', {
         id: promptId,
         workflow_path: options.workflowPath,
+        // 自定义工作流不在后端磁盘上，内容必须一起带过去
+        workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
       })
@@ -106,6 +109,8 @@ export function useGenerate() {
       const result = await apiPost<{ success: boolean; job_id: number }>('/api/batch_generate', {
         items: promptIds.map((id) => ({ prompt_id: id, seed: 0 })),
         workflow_path: options.workflowPath,
+        // 自定义工作流不在后端磁盘上，内容必须一起带过去
+        workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
         title: options.title ?? `批量生成 ${promptIds.length} 条`,
@@ -145,6 +150,8 @@ export function useGenerate() {
         prompt: options.prompt,
         negative_prompt: options.negative_prompt ?? '',
         workflow_path: options.workflowPath,
+        // 自定义工作流不在后端磁盘上，内容必须一起带过去
+        workflow_content: customWorkflowContent(options.workflowPath),
         orientation: options.orientation,
         quality: options.quality,
         seed: options.seed ?? 0,

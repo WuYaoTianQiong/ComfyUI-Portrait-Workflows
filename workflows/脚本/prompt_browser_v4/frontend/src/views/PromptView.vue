@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
 import MissingRunPanel from '../components/MissingRunPanel.vue'
+import TrialPanel from '../components/TrialPanel.vue'
+import { renderSegmented, smartSegmentText } from '../utils/segmentation'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
@@ -270,6 +272,82 @@ function shotThumb(item: PromptShot): string {
 function shotFull(item: PromptShot): string {
   return `/api/image?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}`
 }
+// ---------------- 智能分段 / 试跑 / 草稿 ----------------
+
+const trialOpen = ref(false)
+
+/**
+ * 智能分段：把一整段提示词按关键词拆成【类型】结构。
+ *
+ * 库里很多提示词是「一整段话」，拆完之后才能直接喂给组合器 —— 组合器
+ * 认的就是【类型】格式。
+ */
+function smartSegment() {
+  const text = draft.value?.prompt ?? ''
+  if (!text.trim()) {
+    toast.error('提示词是空的')
+    return
+  }
+  const segments = smartSegmentText(text)
+  const rendered = renderSegmented(segments)
+  const keys = Object.keys(segments)
+  if (!rendered) {
+    toast.error('没能分出类型（文本里没命中任何关键词）')
+    return
+  }
+  if (!confirm(`分出 ${keys.length} 类：${keys.join('、')}。\n用分段结果替换当前提示词？`)) return
+  if (!draft.value) return
+  draft.value.prompt = rendered
+  toast.success('已按类型分段')
+}
+
+/**
+ * 草稿自动保存。
+ *
+ * 编辑到一半刷新页面 / 误关标签，草稿会丢 —— 存一份到 localStorage，
+ * 重新打开这条提示词时问要不要恢复。存的是"这台机器上的临时状态"，
+ * 不进数据库。
+ */
+const DRAFT_KEY = (id: number) => `pb.draft.${id}`
+
+let draftTimer: number | undefined
+
+watch(
+  draft,
+  (value) => {
+    if (!value || selectedId.value === null) return
+    window.clearTimeout(draftTimer)
+    draftTimer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY(selectedId.value!), JSON.stringify(value))
+      } catch {
+        /* 隐私模式下不可用，忽略 */
+      }
+    }, 800)
+  },
+  { deep: true },
+)
+
+/** 打开一条提示词时，若本地有未保存的草稿就问要不要恢复。 */
+watch(selectedId, (id) => {
+  if (id === null) return
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(id))
+    if (!raw) return
+    const saved = JSON.parse(raw) as Record<string, unknown>
+    if (!draft.value) return
+    // 与库里的内容一致就不打扰用户了
+    if (JSON.stringify(saved) === JSON.stringify(draft.value)) return
+    if (confirm('这条提示词有未保存的草稿，要恢复吗？')) {
+      draft.value = { ...draft.value, ...saved }
+    } else {
+      localStorage.removeItem(DRAFT_KEY(id))
+    }
+  } catch {
+    /* 解析失败就当没有草稿 */
+  }
+})
+
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
     apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
@@ -595,6 +673,12 @@ function clearFilters() {
             {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
           </span>
           <button class="btn btn-sm" title="复制正向提示词" @click="copyPromptText">复制</button>
+          <button class="btn btn-sm" title="按关键词把提示词拆成【类型】结构" @click="smartSegment">
+            ✂ 智能分段
+          </button>
+          <button class="btn btn-sm" title="用当前草稿出图，不写回提示词库" @click="trialOpen = true">
+            🧪 试跑
+          </button>
           <button
             class="btn btn-sm"
             title="临时改一下提示词直接出图，不写回提示词库"
@@ -718,6 +802,13 @@ function clearFilters() {
       </div>
     </section>
     <MissingRunPanel :open="missingOpen" @close="missingOpen = false" />
+    <TrialPanel
+      :open="trialOpen"
+      :prompt="draft?.prompt ?? ''"
+      :negative-prompt="draft?.negative_prompt ?? ''"
+      :prompt-id="draft?.id ?? null"
+      @close="trialOpen = false"
+    />
     <RunTextPanel
       :open="textPanelOpen"
       :prompt="draft?.prompt ?? ''"

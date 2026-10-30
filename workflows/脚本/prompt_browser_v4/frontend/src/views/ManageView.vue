@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { FRAGMENT_TYPES } from '../constants'
+import { useWorkflows } from '../composables/useWorkflows'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
@@ -21,7 +22,7 @@ const COLORS = [
   '#ef4444', '#a855f7', '#ec4899', '#14b8a6',
 ]
 
-type Panel = 'category' | 'tag' | 'fragment'
+type Panel = 'category' | 'tag' | 'fragment' | 'workflow'
 const panel = ref<Panel>('category')
 
 const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
@@ -226,6 +227,41 @@ async function removeFragment(id: number, label: string) {
     toast.error(`删除失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
+
+// ---------------- 工作流 ----------------
+
+const {
+  allWorkflows,
+  hiddenPaths,
+  addCustomWorkflow,
+  removeCustomWorkflow,
+  setHidden,
+  moveWorkflow,
+} = useWorkflows()
+
+/** 隐藏的默认也列出来（带"恢复"），不然藏了就找不回来了。 */
+const workflowRows = computed(() =>
+  allWorkflows.value.map((w) => ({ ...w, hidden: hiddenPaths.value.includes(w.path) })),
+)
+
+async function uploadWorkflow(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const path = await addCustomWorkflow(file)
+    toast.success(`已添加自定义工作流「${path.replace('custom://', '')}」`)
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e))
+  }
+  input.value = ''
+}
+
+async function removeWorkflow(path: string, name: string) {
+  if (!confirm(`删除自定义工作流「${name}」吗？`)) return
+  removeCustomWorkflow(path)
+  toast.success('已删除')
+}
 async function removeItem(kind: Panel, id: number, name: string) {
   const extra = kind === 'category' ? '，并会解除它与所有提示词的关联' : ''
   if (!confirm(`确定删除「${name}」吗${extra}？`)) return
@@ -255,6 +291,9 @@ async function removeItem(kind: Panel, id: number, name: string) {
       <button class="btn btn-sm" :class="{ active: panel === 'fragment' }" @click="panel = 'fragment'">
         碎片库
       </button>
+      <button class="btn btn-sm" :class="{ active: panel === 'workflow' }" @click="panel = 'workflow'">
+        工作流
+      </button>
       <span class="spacer" />
       <button
         class="btn btn-sm"
@@ -266,7 +305,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
       </button>
     </div>
 
-    <div v-if="panel !== 'fragment'" class="creator">
+    <div v-if="panel === 'category' || panel === 'tag'" class="creator">
       <input
         v-model="newName"
         class="name-input"
@@ -358,7 +397,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
         <EmptyState v-if="!visibleTags.length" text="没有符合条件的标签" />
       </template>
 
-      <template v-else>
+      <template v-else-if="panel === 'fragment'">
         <div v-for="f in fragments" :key="f.id" class="frag-row">
           <template v-if="editingFragId === f.id">
             <select v-model="editingFrag.fragment_type" class="frag-type-select mini">
@@ -378,7 +417,42 @@ async function removeItem(kind: Panel, id: number, name: string) {
           </template>
         </div>
         <EmptyState v-if="!fragments.length" text="还没有碎片" />
-      </template>    </div>
+        <EmptyState v-if="!fragments.length" text="还没有碎片" />
+      </template>
+
+      <template v-else>
+        <div class="wf-toolbar">
+          <label class="btn btn-sm wf-upload">
+            📁 上传自定义工作流
+            <input type="file" accept=".json,application/json" @change="uploadWorkflow" />
+          </label>
+          <span class="count">共 {{ workflowRows.length }} 个</span>
+        </div>
+        <div v-for="w in workflowRows" :key="w.path" class="wf-row" :class="{ hidden: w.hidden }">
+          <span class="wf-badge" :class="{ custom: w.custom }">{{ w.custom ? '自定义' : '磁盘' }}</span>
+          <span class="row-name">{{ w.name }}</span>
+          <span class="spacer" />
+          <button class="icon" title="上移" @click="moveWorkflow(w.path, -1)">↑</button>
+          <button class="icon" title="下移" @click="moveWorkflow(w.path, 1)">↓</button>
+          <button
+            v-if="w.custom"
+            class="icon danger"
+            title="删除"
+            @click="removeWorkflow(w.path, w.name)"
+          >
+            ✕
+          </button>
+          <button
+            class="icon"
+            :title="w.hidden ? '恢复显示' : '隐藏（从下拉里移除）'"
+            @click="setHidden(w.path, !w.hidden)"
+          >
+            {{ w.hidden ? '👁' : '🚫' }}
+          </button>
+        </div>
+        <EmptyState v-if="!workflowRows.length" text="没有找到工作流" />
+      </template>
+    </div>
 
     <p class="hint">
       {{
@@ -490,7 +564,83 @@ async function removeItem(kind: Panel, id: number, name: string) {
 }
 
 
-.frag-tools {
+
+.wf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-upload {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.wf-upload input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wf-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 6px var(--gap);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.wf-row.hidden {
+  opacity: 0.45;
+}
+
+.wf-badge {
+  flex: none;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.wf-badge.custom {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.wf-row .row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.wf-row .icon {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+}
+
+.wf-row .icon:hover {
+  color: var(--primary);
+}
+
+.wf-row .icon.danger:hover {
+  color: var(--danger);
+}
+
+.spacer {
+  flex: 1;
+}.frag-tools {
   flex-wrap: wrap;
 }
 
