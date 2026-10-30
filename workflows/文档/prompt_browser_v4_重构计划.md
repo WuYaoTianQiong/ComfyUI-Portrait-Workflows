@@ -523,3 +523,25 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
     1. `text="{{ expr }}"` 属性内插值在 Vue 3 已被移除，必须写 `:text="expr"`（TagCloud 的空状态文案一开始渲染成了字面量）
     2. `Teleport` 的内容不在 wrapper DOM 里，组件测试必须加 `stubs: { teleport: true }`，否则 `findAll` 一条都查不到（MissingRunPanel / FilePicker 的测试因此全灭）
   - 验证：CI 五道关全绿；playwright 实测磁盘弹层与补跑弹层渲染正常、Teleport 挂在 body 下、**Esc 可关闭**（Modal 新增能力）、326 条补跑列表完整、0 个 JS 错误
+
+---
+
+## 5.6 2026-10-30 收尾盘点
+
+**端点覆盖**：后端 62 个端点，新前端直接引用 55 个；未引用的 7 个全是内部/一次性/冗余端点
+（`config`、`fragments/by_type`、`generate_missing/count`、`history/backfill_taxonomy`、
+`progress`、`tags/popular`、`templates/migrate`），**无用户可见的功能缺口**。
+
+**功能回退清单（10 项）已全部补齐**：清理失效 / 画廊分面 / 全选全部 / 分类管理 / 标签管理 /
+碎片库管理 / 自动分类 / 批量补跑 / 文件浏览器 / 统计。
+
+**欠账已清**：裸文本跑图（`run_text`）、模板批量导入（`batch_import`）、组合器第三轮。
+
+**工程债**：
+- S2-7 删旧前端 ✅（35 个文件 520KB；回退见 git tag `legacy-frontend`）
+- 设计系统 ✅（`tokens.css` + Modal/EmptyState/Toast 三个基础组件 + 「设计」预览页）
+- S1-4 Pydantic 🟡（11 个核心端点已加响应模型 + 前后端契约一致性测试；其余 51 个端点仍返回裸 dict，
+  可按需按 `schemas.py` 的模式继续补）
+
+**当前护栏**：`pytest` 117 条 + `verify_smoke` 16 项 + `vue-tsc` 类型检查 + `vitest` 72 条 +
+`vite build` + 前端 E2E 13 项，一条命令 `tools\ci.ps1` 跑完。
