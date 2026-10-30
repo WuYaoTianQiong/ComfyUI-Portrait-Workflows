@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
+import FilePicker from '../components/FilePicker.vue'
 import { apiPost } from '../api/client'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
@@ -20,6 +21,11 @@ const { busy: generating, job: activeJob, error: generateError, track } = useGen
 
 const mainIds = ref<number[]>([])
 const refIds = ref<number[]>([])
+// 磁盘素材：后端 faceswap/batch 支持 main_paths / ref_paths 与画廊 id 混用
+const mainPaths = ref<string[]>([])
+const refPaths = ref<string[]>([])
+const mainPickerOpen = ref(false)
+const refPickerOpen = ref(false)
 
 const pairMode = ref<'cross' | 'zip'>('cross')
 const seedMode = ref<'fixed' | 'random' | 'increment'>('fixed')
@@ -44,9 +50,12 @@ const {
   retry: false,
 })
 
+const mainCount = computed(() => mainIds.value.length + mainPaths.value.length)
+const refCount = computed(() => refIds.value.length + refPaths.value.length)
+
 const comboCount = computed(() => {
-  if (!mainIds.value.length || !refIds.value.length) return 0
-  return pairMode.value === 'zip' ? mainIds.value.length : mainIds.value.length * refIds.value.length
+  if (!mainCount.value || !refCount.value) return 0
+  return pairMode.value === 'zip' ? mainCount.value : mainCount.value * refCount.value
 })
 
 const zipMismatch = computed(
@@ -77,7 +86,9 @@ async function submit() {
       '/api/faceswap/batch',
       {
         main_ids: mainIds.value,
+        main_paths: mainPaths.value,
         ref_ids: refIds.value,
+        ref_paths: refPaths.value,
         workflow_path: workflowPath.value,
         prompt: promptText.value,
         seed_mode: seedMode.value,
@@ -94,8 +105,25 @@ async function submit() {
 
 <template>
   <div class="faceswap">
-    <ImagePicker v-model="mainIds" title="主图（保留姿势/服装/背景）" />
-    <ImagePicker v-model="refIds" title="参考图（提供面部）" />
+    <div class="picker-col">
+      <div class="picker-head">
+        <span>主图（保留姿势/服装/背景）</span>
+        <button class="btn btn-sm" title="从磁盘任意目录选图" @click="mainPickerOpen = true">
+          📁 磁盘<template v-if="mainPaths.length"> {{ mainPaths.length }}</template>
+        </button>
+      </div>
+      <ImagePicker v-model="mainIds" title="" />
+    </div>
+
+    <div class="picker-col">
+      <div class="picker-head">
+        <span>参考图（提供面部）</span>
+        <button class="btn btn-sm" title="从磁盘任意目录选图" @click="refPickerOpen = true">
+          📁 磁盘<template v-if="refPaths.length"> {{ refPaths.length }}</template>
+        </button>
+      </div>
+      <ImagePicker v-model="refIds" title="" />
+    </div>
 
     <aside class="panel">
       <div class="section">
@@ -185,7 +213,18 @@ async function submit() {
         </button>
       </div>
     </aside>
-  </div>
+    <FilePicker
+      v-model="mainPaths"
+      :open="mainPickerOpen"
+      title="从磁盘选主图"
+      @close="mainPickerOpen = false"
+    />
+    <FilePicker
+      v-model="refPaths"
+      :open="refPickerOpen"
+      title="从磁盘选参考图"
+      @close="refPickerOpen = false"
+    />  </div>
 </template>
 
 <style scoped>
@@ -200,6 +239,26 @@ async function submit() {
   min-width: 0;
 }
 
+.picker-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-head .btn {
+  margin-left: auto;
+}
 .panel {
   width: 340px;
   flex: none;
