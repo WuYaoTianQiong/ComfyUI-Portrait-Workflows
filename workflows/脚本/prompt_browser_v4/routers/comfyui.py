@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Query
+from schemas import WorkflowListResponse
 from fastapi.responses import StreamingResponse, FileResponse
 from PIL import Image
 from pydantic import BaseModel
@@ -305,7 +306,7 @@ def validate_workflow(path: str = Query("")):
 
 # ---------- 工作流列表与配置 ----------
 
-@router.get("/workflows")
+@router.get("/workflows", response_model=WorkflowListResponse)
 def list_workflows(sort: str = Query("mtime")):
     """列出所有可用工作流"""
     results: list[dict] = []

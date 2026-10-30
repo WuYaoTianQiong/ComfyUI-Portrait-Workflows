@@ -1,5 +1,6 @@
 """分类管理 API"""
 from fastapi import APIRouter, HTTPException, Query
+from schemas import CategoryTreeResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -45,7 +46,7 @@ class CategoryUpdate(BaseModel):
 
 
 # ---------- Routes ----------
-@router.get("/categories", response_model=dict)
+@router.get("/categories", response_model=CategoryTreeResponse)
 def list_categories(
     parent_id: Optional[int] = Query(None, description="父分类 ID，NULL=顶级分类"),
     tree: bool = Query(False, description="是否返回树形结构"),

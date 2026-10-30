@@ -26,7 +26,8 @@ export interface HistoryItem {
   filename: string
   subfolder: string | null
   img_type: string | null
-  view_url: string
+  /** 后端可能给 null（没有可拼的地址） */
+  view_url: string | null
   favorite: boolean
   /** 文件缺失（派生状态，可自愈）：只影响展示与筛选，不代表记录被删除 */
   missing: boolean

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+from schemas import FacetsResponse, HistoryIdsResponse, HistoryListResponse
 from fastapi.responses import FileResponse
 from peewee import fn
 from pydantic import BaseModel
@@ -408,7 +409,7 @@ def _cleanup_thumbnails(filename: str, subfolder: str, img_type: str):
 # 查询（支持筛选 / 排序 / 搜索）
 # ---------------------------------------------------------------------------
 
-@router.get("/history")
+@router.get("/history", response_model=HistoryListResponse)
 def list_history(
     page: int = Query(1),
     page_size: int = Query(50),
@@ -576,7 +577,7 @@ def _apply_facet_filters(q, source: str = "", date: str = "", model: str = "", o
     return q
 
 
-@router.get("/history/facets")
+@router.get("/history/facets", response_model=FacetsResponse)
 def history_facets(
     favorite: bool = Query(None),
     search: str = Query(""),
@@ -617,7 +618,7 @@ def history_facets(
 
 
 
-@router.get("/history/ids", response_model=dict)
+@router.get("/history/ids", response_model=HistoryIdsResponse)
 def history_ids(
     favorite: str = Query(""),
     sort: str = Query("newest"),

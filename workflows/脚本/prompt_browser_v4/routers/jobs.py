@@ -10,6 +10,7 @@ import json
 import queue
 
 from fastapi import APIRouter, HTTPException, Query
+from schemas import JobListResponse
 from fastapi.responses import StreamingResponse
 
 from services import job_state
@@ -83,7 +84,7 @@ def job_events(ids: str = Query("", description="逗号分隔的 job id；为空
 # 查询（纯读）
 # ---------------------------------------------------------------------------
 
-@router.get("/jobs")
+@router.get("/jobs", response_model=JobListResponse)
 def list_jobs(active: bool = Query(False), limit: int = Query(50)):
     return {"jobs": job_state.list_snapshots(active=active, limit=limit)}
 

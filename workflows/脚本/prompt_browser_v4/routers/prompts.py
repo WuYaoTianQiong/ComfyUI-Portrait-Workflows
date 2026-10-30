@@ -3,6 +3,7 @@ import io
 import json
 import traceback
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from schemas import PromptDetail, PromptListResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -109,29 +110,6 @@ class PromptPreview(BaseModel):
     # ================================
 
 
-class PromptDetail(BaseModel):
-    id: int
-    name: str
-    prompt: str
-    negative_prompt: str
-    steps: Optional[int] = None
-    cfg_scale: Optional[float] = None
-    sampler: str
-    seed: Optional[int] = None
-    model: str
-    width: Optional[int] = None
-    height: Optional[int] = None
-    tags: str
-    note: str
-    created_at: str
-    updated_at: str
-    # ======== Phase 1 新增 ========
-    is_favorite: bool = False
-    is_pinned: bool = False
-    usage_count: int = 0
-    last_used_at: Optional[str] = None
-    rating: Optional[int] = None
-    # ================================
 
 
 # ---------- Routes ----------
@@ -223,7 +201,7 @@ def prompt_position(
     return {"found": False, "index": -1, "total": len(ids)}
 
 
-@router.get("/prompts", response_model=dict)
+@router.get("/prompts", response_model=PromptListResponse)
 def list_prompts(
     search: str = Query(""),
     tag: str = Query(""),
@@ -263,7 +241,7 @@ def list_prompts(
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
 
 
-@router.get("/prompts/{prompt_id}", response_model=dict)
+@router.get("/prompts/{prompt_id}", response_model=PromptDetail)
 def get_prompt(prompt_id: int):
     """获取单条提示词详情"""
     r = Prompt.get_or_none(Prompt.id == prompt_id)

@@ -1,6 +1,7 @@
 """碎片库 API —— 独立碎片 CRUD + 按类型分组（供 Composer 使用）"""
 import traceback
 from fastapi import APIRouter, HTTPException, Query, Request
+from schemas import FragmentListResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -36,7 +37,7 @@ class FragmentUpdate(BaseModel):
 
 # ---------- Routes ----------
 
-@router.get("/fragments")
+@router.get("/fragments", response_model=FragmentListResponse)
 def list_fragments(
     search: str = Query(""),
     fragment_type: str = Query(""),

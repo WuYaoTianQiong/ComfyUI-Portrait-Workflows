@@ -1,5 +1,6 @@
 """标签管理 API（读写都走 entity_tags，由 services.taxonomy 统一维护）"""
 from fastapi import APIRouter, HTTPException, Query
+from schemas import TagListResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -41,7 +42,7 @@ def _tag_to_dict(t, count_scope: str = "prompt", counts_map: dict = None) -> dic
 
 
 # ---------- Routes ----------
-@router.get("/tags")
+@router.get("/tags", response_model=TagListResponse)
 def list_tags(
     search: str = Query(""),
     popular: bool = Query(False, description="按使用次数排序"),

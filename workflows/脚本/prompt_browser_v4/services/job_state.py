@@ -85,12 +85,27 @@ def row_to_dict(r) -> dict:
         "workflow_path": r.workflow_path,
         "orientation": r.orientation,
         "quality": r.quality,
-        "extra": r.extra,
+        # extra 存的是 JSON 字符串，对外给对象 —— 前端要直接取字段（节点映射等）
+        "extra": _parse_extra(r.extra),
         "created_at": str(r.created_at) if r.created_at else "",
         "updated_at": str(r.updated_at) if r.updated_at else "",
     }
 
 
+
+
+def _parse_extra(raw):
+    """extra 列存的是 JSON 字符串，对外还原成对象。
+
+    之前直接返回字符串，前端拿到后只能自己再 parse 一次；加了响应模型之后
+    更会直接校验失败（模型声明的是 dict）。
+    """
+    if isinstance(raw, str) and raw:
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    return raw
 def _parse_items(raw) -> list[dict]:
     if not raw:
         return []

@@ -331,6 +331,19 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
   - 新前端补了内联 SVG favicon（避免控制台 404），标题从「Prompt Browser · 新前端」改为正式名
   - 实测：根路径返回新 index.html、`/assets/*.js` 200（163KB）、`/assets/*.css` 200；playwright 打开 8656 → 标题 `Prompt Browser`、画廊 11 张卡片、16 个标签、5 个页签全部可切换、**0 个 JS 错误**
 
+
+### 工程债 C：Pydantic 出入参（核心端点）
+- **状态**：🟡 2026-10-30 部分完成 —— 给前端实际依赖的 **11 个端点**加了响应模型，其余端点仍返回裸 dict
+  - 新增 `schemas.py`：HistoryItem / PromptDetail / TagRow / CategoryNode / FragmentRow / JobSnapshot / StatsResponse / WorkflowListResponse 等 22 个模型，字段与 `frontend/src/api/types.ts` 一一对应
+  - 加了 `response_model` 的端点：`/history`、`/history/facets`、`/history/ids`、`/prompts`、`/prompts/{id}`、`/tags`、`/categories`、`/fragments`、`/jobs`、`/stats`、`/workflows`
+  - **响应会按模型过滤**：模型里没声明的字段会被丢掉 —— 这既是保护（契约漂移在首次请求就暴露），也是风险（模型漏字段前端就拿 undefined），所以必须有测试盯着
+  - **新增 `tests/test_schemas.py`（8 条）**：用正则解析前端 types.ts 的 interface，断言「前端声明的字段后端模型都有」+「登记的模型前端都有对应 interface」+ 实际请求各端点断言关键字段在响应里
+  - **顺带修掉 3 个真实问题**：
+    1. `prompts.py` 里有一个**旧的本地 `class PromptDetail`**，覆盖了从 schemas 导入的同名类；它字段更少（没有 categories/tags_detail/updated_at），一旦挂上 response_model 就会把前端要的分类关联字段**过滤掉** —— 提示词详情页的分类高亮会失效
+    2. `view_url` 后端可能返回 `None`，前端类型却声明 `string`；响应模型直接报 500。模型与前端类型都改为可空
+    3. 任务的 `extra` 存的是 **JSON 字符串**而非对象，前端类型声明是对象；响应模型校验失败导致 `/api/jobs` 500、任务中心空白。改为对外还原成对象（`_parse_extra`）
+  - **教训**：加 `response_model` 前必须先确认模块里没有同名类覆盖 —— Python 的模块级名字是"后定义覆盖先定义"，`from schemas import PromptDetail` 会被后面的 `class PromptDetail` 顶掉，而且不报错
+  - 未做：其余 58 个端点、请求体（Pydantic 请求模型）与 service 层拆分（沿用原计划随页做）
 ### S2-7 收尾（可选）
 - 删除 `static/*.js` 手写模块与 `?v=N` 版本号机制，静态目录只留构建产物与 vendor
 
