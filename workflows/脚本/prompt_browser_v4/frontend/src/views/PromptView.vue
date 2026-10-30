@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
-import { apiGet, apiPost, apiPut } from '../api/client'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -146,6 +146,34 @@ function invalidateAll(id: number | null) {
   queryClient.invalidateQueries({ queryKey: ['tags'] })
 }
 
+/**
+ * 关联 / 取消关联分类。
+ *
+ * 分类没有文本字段，关联只存在于 prompt_categories 表，所以必须走专用端点；
+ * 不像标签那样"改文本再同步"。成功后同时失效详情与列表缓存 —— 分类计数会变。
+ */
+const categoryMutation = useMutation({
+  mutationFn: (payload: { catId: number; attach: boolean }) =>
+    payload.attach
+      ? apiPost(`/api/categories/${payload.catId}/prompts/${selectedId.value}`)
+      : apiDelete(`/api/categories/${payload.catId}/prompts/${selectedId.value}`),
+  onSuccess: () => {
+    if (selectedId.value !== null) {
+      queryClient.invalidateQueries({ queryKey: ['prompt', selectedId.value] })
+    }
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
+  },
+})
+
+function isLinked(catId: number): boolean {
+  return (detail.value?.categories ?? []).some((c) => c.id === catId)
+}
+
+function toggleCategory(catId: number) {
+  if (selectedId.value === null) return
+  categoryMutation.mutate({ catId, attach: !isLinked(catId) })
+}
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
     apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
@@ -504,6 +532,23 @@ function clearFilters() {
           <input v-model="draft.tags" />
         </label>
 
+        <div class="field">
+          <span>分类（点一下关联 / 取消）</span>
+          <div class="cat-chips">
+            <button
+              v-for="cat in flatCats"
+              :key="cat.id"
+              class="cat-chip"
+              :class="{ on: isLinked(cat.id) }"
+              :style="{ '--c': cat.color }"
+              :title="cat.name"
+              @click="toggleCategory(cat.id)"
+            >
+              {{ cat.name }}
+            </button>
+            <span v-if="!flatCats.length" class="empty">暂无分类</span>
+          </div>
+        </div>
         <label class="field grow">
           <span>正向提示词</span>
           <textarea v-model="draft.prompt" spellcheck="false" />
@@ -937,6 +982,32 @@ function clearFilters() {
   min-height: 0;
 }
 
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cat-chip {
+  font-size: var(--fs-xs);
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  transition: 0.12s;
+}
+
+.cat-chip:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.cat-chip.on {
+  background: var(--c, var(--primary));
+  border-color: var(--c, var(--primary));
+  color: #fff;
+}
 .field textarea {
   flex: 1;
   min-height: 120px;
