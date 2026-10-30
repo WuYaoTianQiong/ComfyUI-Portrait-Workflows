@@ -20,6 +20,11 @@ sys.path.insert(0, str(ROOT))
 _TMP = Path(tempfile.mkdtemp(prefix="pb_contract_"))
 os.environ["PB_DB_PATH"] = str(_TMP / "contract.db")
 os.environ["PB_THUMBNAIL_DIR"] = str(_TMP / "thumbs")
+# 隔离 ComfyUI 根目录：否则 get_image_metadata 会去读本机真实 output，
+# 测试结果就取决于磁盘上恰好存在哪些文件（缺文件判定尤其敏感）
+_COMFY_ROOT = _TMP / "comfyui"
+(_COMFY_ROOT / "output").mkdir(parents=True, exist_ok=True)
+os.environ["PB_COMFYUI_ROOT_ENV"] = str(_COMFY_ROOT)
 # 指向一个必然拒绝连接的端口：任何意外外呼都会立刻失败，不会挂住测试
 os.environ["PB_COMFYUI_API"] = "http://127.0.0.1:9"
 

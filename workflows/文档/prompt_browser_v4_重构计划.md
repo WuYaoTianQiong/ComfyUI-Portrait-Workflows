@@ -94,6 +94,11 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
   5. 画廊：给缺失项加角标（🚫 文件缺失），筛选栏加「仅看失效」
 - **验收**：改名一张图 → 最多 10 分钟角标出现 → 改回原名 → 角标消失，且 `favorite`/标签/分类**一个都没丢**
 - **回滚**：列可留，代码回退即可
+- **状态**：✅ 2026-10-30 完成
+  - 后端：`gen_history.missing_since`（迁移列）+ `services/integrity.py::scan_missing()`（分批 500、每批一次批量 UPDATE、只写派生列）+ `writer_loop(integrity_interval=600)` 启动即跑一次；`/api/history` 与 `/api/history/ids` 支持 `missing=1`，列表项新增 `missing` 字段
+  - 前端：卡片 `is-missing` 灰化 + 顶部居中标「🚫 文件缺失」；筛选下拉新增「🚫 仅失效」；`store.js` 统一带上 `missing` 参数
+  - 顺带修复（验收时发现的既有 bug）：`ui.js::applyUiState` 原会按 localStorage 先切一次 Tab 并改写 URL，导致**直接访问 `/gallery`、`/composer` 被踢回提示词页**。已改为「首屏 Tab 只由 URL 决定」，`/gallery` 现在稳定停留在画廊
+  - 验证：pytest 45 passed（新增 missing 筛选 + 巡检标记/自愈 2 条）；`verify_smoke.py` 25 通过 1 跳过、无 Traceback；真实浏览器（playwright）：10 张卡片中 1 张带 `is-missing`、切「仅失效」后剩 1 张、0 个 JS 错误；真实库改名 → 巡检 `marked=1` → 接口命中 → 还原 → `cleared=1` 自愈，记录全程未被删除
 
 ### S0-3 去掉前端重复的全量同步
 - **文件**：`static/app.js:115-122`
@@ -162,6 +167,22 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 
 ---
 
+## 4.5 UX / UI 优化节奏（为什么不是现在）
+
+UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段会不断改数据语义和接口，
+样式先做等于做完再返工。具体安排：
+
+| 时期 | 做什么 | 不做什么 |
+|---|---|---|
+| S0（本周） | 只修"用了会错/会烦"的地方：缺失角标与筛选、空状态文案、按钮行为可预期、首屏 Tab 跟着 URL 走 | 不动配色、间距、字体、布局 |
+| S1 末（新增 S1.5，2~3 天） | **设计系统落地**：颜色/间距/字阶/圆角/阴影/动效令牌（`tokens.css`）+ 基础组件（Button/Select/Modal/Toast/Card/Tag/Badge/EmptyState）+ 一个组件预览页 | 不逐页改样式 |
+| S2（1~2 周） | 每迁一页就套用 S1.5 的令牌与组件，顺手做视觉升级：画廊虚拟滚动、图片 hover 信息层、批量操作条、键盘导航、骨架屏 | 不再新增零散 CSS |
+
+放在 S1.5 的理由：S2 是逐页迁移，如果边迁边设计，会出现"画廊一套风格、提示词页另一套"；
+先把令牌和组件定死，迁移时只是拼装，返工最少、评审也最容易。
+
+---
+
 ## 5. 阶段 2：前端重构（目标 1~2 周，可与 S1 并行）
 
 ### S2-1 工程骨架
@@ -203,7 +224,7 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 
 ### 阶段 0
 - [x] S0-1 清理失效 dry-run + 熔断 + 解绑缩略图
-- [ ] S0-2 `missing_since` 派生列 + 角标 + 筛选
+- [x] S0-2 `missing_since` 派生列 + 角标 + 筛选（含路由首屏 Tab bug 修复）
 - [ ] S0-3 删前端 30s `history_sync`
 - [ ] S0-4 修 `_job_index` 失效
 - [ ] S0-5 合并筛选构造器

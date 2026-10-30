@@ -137,17 +137,10 @@ window.applyUiState = function() {
   window.selectedId = window.UiState.get("selectedId", null) || null;
   window.lastClickedId = window.selectedId;
 
-  const activeTab = window.UiState.get("activeTab", "promptTab");
-  if (activeTab === "promptTab") {
-    const btn = document.querySelector('.tab-btn[data-tab="promptTab"]');
-    if (btn) window.switchTab("promptTab", btn);
-  } else if (activeTab === "galleryTab") {
-    const btn = document.querySelector('.tab-btn[data-tab="galleryTab"]');
-    if (btn) window.switchTab("galleryTab", btn);
-  } else if (activeTab === "composerTab") {
-    const btn = document.querySelector('.tab-btn[data-tab="composerTab"]');
-    if (btn) window.switchTab("composerTab", btn);
-  }
+  // 刻意不在这里恢复 activeTab：决定"首屏显示哪个 Tab"的唯一依据是 URL
+  // （由 router.handleRoute 统一切换）。旧实现在这里按 localStorage 先切一次，
+  // 会先于 handleRoute 执行并把 URL 改写成上次的 Tab，导致直接访问 /gallery、
+  // /composer 等地址时被踢回提示词页。
 };
 
 // -------------------------------------------------------------------

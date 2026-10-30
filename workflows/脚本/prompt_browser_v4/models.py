@@ -120,6 +120,9 @@ class GenHistory(BaseModel):
     captured_at = DateTimeField(null=True)
     source = TextField(default="local")
     is_deleted = BooleanField(default=False)  # 软删除标记
+    # 文件缺失的派生状态：巡检发现磁盘上找不到文件时写入，文件回来后清空。
+    # 与 is_deleted 严格区分——缺失只是"取不到图"，记录、标签、收藏全部保留且可自愈。
+    missing_since = DateTimeField(null=True)
 
     class Meta:
         table_name = "gen_history"
@@ -445,6 +448,8 @@ def init_db():
     # 迁移：软删除字段
     _migrate_column(db, "gen_history", "is_deleted",
                     "is_deleted BOOLEAN NOT NULL DEFAULT 0")
+    # 迁移：文件缺失派生列（可自愈，不参与唯一索引，也不影响 is_deleted 语义）
+    _migrate_column(db, "gen_history", "missing_since", "missing_since DATETIME")
 
     # ======== Phase 3: 模板表 ========
     db.create_tables([Template, TemplateFragment], safe=True)

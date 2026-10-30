@@ -118,6 +118,28 @@
   position: relative;
   z-index: 1;
 }
+/* 文件缺失（派生状态，可自愈）：灰化 + 右上角标签，不遮挡底部参数与操作按钮 */
+.gallery-item.is-missing img {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+.gallery-item.is-missing::after {
+  content: "🚫 文件缺失";
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(127, 29, 29, 0.88);
+  color: #fecaca;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.7;
+  white-space: nowrap;
+  pointer-events: none;
+}
 /* 画廊卡片 overlay 布局说明：
  * 顶部左侧：[fav] [prompt-name]
  * 顶部右侧：[check]

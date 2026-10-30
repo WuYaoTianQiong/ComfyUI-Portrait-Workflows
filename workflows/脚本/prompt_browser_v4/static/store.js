@@ -17,6 +17,8 @@ window.PBQuery = (function () {
     return {
       sort: window._gallerySort || "newest",
       favorite: window._galleryFilter === "favorite" ? "1" : "",
+      // 「仅失效」是独立筛选项（后端 missing=1 查 missing_since 非空），与收藏互斥
+      missing: window._galleryFilter === "missing" ? "1" : "",
       search: window._gallerySearch || "",
       category_id: window._galleryCategoryId || "",
       tag_ids: (window._galleryTagIds || []).join(","),

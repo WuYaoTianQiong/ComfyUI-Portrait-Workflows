@@ -85,6 +85,9 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
         "captured_at": str(r.captured_at) if r.captured_at else "",
         "source": r.source,
         "prompt_name": "",  # 默认空字符串
+        # 文件缺失：以巡检写的派生列为准，同时兼容"刚被删、巡检还没跑到"的情况
+        # （meta 为空 = 路径 stat 失败 = 取不到图）。只用于展示与筛选，不参与删除。
+        "missing": bool(r.missing_since) or not meta,
         **meta,
     }
     # 优先从缓存获取提示词名称
@@ -407,10 +410,14 @@ def list_history(
     date: str = Query(""),
     model: str = Query(""),
     orientation: str = Query(""),
+    missing: bool = Query(None),
 ):
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
         q = q.where(Gh.favorite == favorite)
+    if missing is not None:
+        # missing_since 由 services.integrity.scan_missing 巡检写入（可自愈）
+        q = q.where(Gh.missing_since.is_null(not missing))
 
     if search:
         like = f"%{search}%"
@@ -498,8 +505,9 @@ def _filtered_history_query(
     search: str = "",
     category_id: int | None = None,
     tag_ids: str = "",
+    missing: bool | None = None,
 ):
-    """历史画廊的统一筛选构造器（favorite/search/分类/标签）。
+    """历史画廊的统一筛选构造器（favorite/search/分类/标签/缺失）。
 
     `/history`、`/history/ids`、`/history/facets` 必须共用这一份，
     否则会出现"列表按分类筛了、全选却选到类外"的错位。
@@ -507,6 +515,8 @@ def _filtered_history_query(
     q = Gh.select().where(Gh.is_deleted == False)
     if favorite is not None:
         q = q.where(Gh.favorite == favorite)
+    if missing is not None:
+        q = q.where(Gh.missing_since.is_null(not missing))
     if search:
         like = f"%{search}%"
         condition = (
@@ -605,6 +615,7 @@ def history_ids(
     date: str = Query(""),
     model: str = Query(""),
     orientation: str = Query(""),
+    missing: str = Query(""),
 ):
     """返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。"""
     q = _filtered_history_query(
@@ -612,6 +623,7 @@ def history_ids(
         search=search,
         category_id=category_id,
         tag_ids=tag_ids,
+        missing=True if missing == "1" else None,
     )
     q = _apply_facet_filters(q, source, date, model, orientation)
     ids = [r.id for r in q.select(Gh.id).distinct()]
@@ -633,6 +645,7 @@ def sync_history(page_size: int = Query(500)):
     data = list_history(
         page=1, page_size=page_size, favorite=None, sort="newest", search="",
         category_id=None, tag_ids="", source="", date="", model="", orientation="",
+        missing=None,
     )
     return {"added": added, "items": data["items"], "total": data["total"]}
 

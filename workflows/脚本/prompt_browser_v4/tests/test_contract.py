@@ -130,6 +130,50 @@ def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
     assert body["ids"] == [keep.id]
 
 
+def test_history_missing_filter(api, seed_history):
+    """「仅失效」按 missing_since 派生列筛选；文件缺失只是标记，记录本身仍保留。"""
+    from datetime import datetime
+
+    from models import GenHistory
+
+    gone = seed_history(filename="gone.png")
+    kept = seed_history(filename="kept.png")
+    GenHistory.update(missing_since=datetime.now()).where(GenHistory.id == gone.id).execute()
+
+    body = api.get("/api/history?missing=1").json()
+    assert [it["id"] for it in body["items"]] == [gone.id]
+    assert body["items"][0]["missing"] is True
+
+    # 不筛选时两条都在 —— 缺失绝不等于删除
+    body = api.get("/api/history").json()
+    assert body["total"] == 2
+    assert api.get("/api/history/ids?missing=1").json()["ids"] == [gone.id]
+    kept_row = GenHistory.get_by_id(kept.id)
+    assert bool(kept_row.is_deleted) is False
+
+
+def test_scan_missing_marks_and_heals(api, seed_history):
+    """巡检只维护派生列：第一次标记缺失，文件出现后再次巡检应清除标记。"""
+    from models import GenHistory
+    from services.integrity import scan_missing
+
+    item = seed_history(filename="probe.png")
+
+    scan_missing()
+    assert GenHistory.get_by_id(item.id).missing_since is not None
+
+    # 把文件补到隔离的 output 目录，再巡检一次应自愈
+    from config import settings
+
+    (settings.comfyui_root / "output" / "probe.png").write_bytes(b"not-a-real-png")
+    try:
+        result = scan_missing()
+        assert result["cleared"] >= 1
+        assert GenHistory.get_by_id(item.id).missing_since is None
+    finally:
+        (settings.comfyui_root / "output" / "probe.png").unlink(missing_ok=True)
+
+
 def _deleted_count():
     from models import GenHistory
 

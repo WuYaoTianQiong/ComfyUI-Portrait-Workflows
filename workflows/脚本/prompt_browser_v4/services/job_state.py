@@ -620,14 +620,19 @@ def refresh_active_jobs(limit: int = 20) -> int:
 
 
 def writer_loop(stop_event: threading.Event, interval: float = 1.0,
-                sync_interval: float = 30.0) -> None:
-    """后台唯一写者：推进活跃任务 + 定期同步 ComfyUI 历史。
+                sync_interval: float = 30.0, integrity_interval: float = 600.0) -> None:
+    """后台唯一写者：推进活跃任务 + 定期同步 ComfyUI 历史 + 低频文件完整性巡检。
 
     这是一个普通线程，不是 async task —— 旧的 job_monitor_loop 在事件循环里
     跑同步 HTTP/DB，ComfyUI 一慢就会阻塞所有请求。
     """
-    logger.info("任务写者线程已启动（interval=%.1fs, sync=%.0fs）", interval, sync_interval)
+    logger.info(
+        "任务写者线程已启动（interval=%.1fs, sync=%.0fs, integrity=%.0fs）",
+        interval, sync_interval, integrity_interval,
+    )
     last_sync = 0.0
+    # -1e9 保证启动后立刻巡检一次，不用等满一个周期
+    last_integrity = -1e9
     while not stop_event.is_set():
         try:
             refresh_active_jobs()
@@ -644,6 +649,20 @@ def writer_loop(stop_event: threading.Event, interval: float = 1.0,
                 _sync_disk_orphans()
             except Exception:
                 logger.exception("同步 ComfyUI 历史失败")
+
+        if now - last_integrity >= integrity_interval:
+            last_integrity = now
+            try:
+                from services.integrity import scan_missing
+
+                result = scan_missing()
+                if result["marked"] or result["cleared"]:
+                    logger.info(
+                        "文件完整性巡检：检查 %s 条，新标记缺失 %s 条，恢复 %s 条",
+                        result["checked"], result["marked"], result["cleared"],
+                    )
+            except Exception:
+                logger.exception("文件完整性巡检失败")
 
         stop_event.wait(interval)
     logger.info("任务写者线程已停止")

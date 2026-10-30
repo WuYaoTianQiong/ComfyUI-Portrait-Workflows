@@ -56,7 +56,9 @@ window.renderGalleryPagination = function() {
 /** 共享：创建单个画廊 item 的 DOM 元素 */
 window._createGalleryItemDiv = function(item, idx) {
   const div = document.createElement('div');
-  div.className = 'gallery-item';
+  // 文件缺失是派生状态（可自愈）：只做视觉标记 + 可筛选，记录本身仍然保留
+  div.className = item.missing ? 'gallery-item is-missing' : 'gallery-item';
+  if (item.missing) div.title = '磁盘上找不到这个文件（切到筛选「仅失效」可批量清理记录）';
   div.dataset.id = item.id;
   div.dataset.index = idx;
 
