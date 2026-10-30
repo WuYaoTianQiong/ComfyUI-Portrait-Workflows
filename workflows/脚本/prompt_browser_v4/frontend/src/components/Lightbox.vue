@@ -47,9 +47,19 @@ function go(delta: number) {
 
 // ---------------------------------------------------------------------------
 // 缩放 / 旋转 / 翻转
+//
+// 关键：**不能用 transform: scale 做缩放**。
+// transform 不改变布局尺寸，图片放大后会被 overflow:hidden 裁掉 ——
+// 看起来只是"变大了"，但看不到任何新细节，等于假缩放。
+// 正确做法是按「自然尺寸 × 比例」设置真实宽高，让容器产生滚动条。
 // ---------------------------------------------------------------------------
 
-/** 1 = 适应窗口；1:1 模式下表示原图像素。 */
+/** 图片的自然像素尺寸（1:1 时的基准）。 */
+const natural = ref({ w: 0, h: 0 })
+const stageEl = ref<HTMLElement | null>(null)
+const stageSize = ref({ w: 0, h: 0 })
+
+/** 1 = 适应窗口；1:1 模式下为原始像素倍率。 */
 const zoom = ref(1)
 /** true = 适应窗口，false = 原始尺寸（1:1） */
 const fitMode = ref(true)
@@ -57,7 +67,6 @@ const rotate = ref(0)
 const flipped = ref(false)
 const showInfo = ref(true)
 
-/** 切换图片时重置变换 —— 旧版也是这个行为（每张图各自一套视图状态）。 */
 watch(
   () => props.index,
   () => {
@@ -65,12 +74,44 @@ watch(
     fitMode.value = true
     rotate.value = 0
     flipped.value = false
+    natural.value = { w: 0, h: 0 }
   },
 )
 
+/** "适应窗口"时的显示比例。 */
+const fitScale = computed(() => {
+  if (!natural.value.w || !stageSize.value.w) return 1
+  const availW = Math.max(80, stageSize.value.w - 48)
+  const availH = Math.max(80, stageSize.value.h - 80)
+  return Math.min(availW / natural.value.w, availH / natural.value.h)
+})
+
+/**
+ * 实际显示比例：
+ * - 适应模式：fitScale × zoom（zoom=1 刚好铺满）
+ * - 1:1 模式：zoom 就是像素倍率（zoom=1 → 原始像素）
+ */
+const displayScale = computed(() =>
+  fitMode.value ? fitScale.value * zoom.value : zoom.value,
+)
+
+/** 真实宽高（不是 transform），放大后容器才滚得动。 */
+const imageStyle = computed(() => {
+  const scale = displayScale.value
+  return {
+    width: `${Math.round(natural.value.w * scale)}px`,
+    height: `${Math.round(natural.value.h * scale)}px`,
+    transform: `rotate(${rotate.value}deg) scaleX(${flipped.value ? -1 : 1})`,
+  }
+})
+
+function onImageLoad(event: Event) {
+  const img = event.target as HTMLImageElement
+  natural.value = { w: img.naturalWidth, h: img.naturalHeight }
+}
+
 function setZoom(value: number) {
   zoom.value = Math.min(8, Math.max(0.1, value))
-  fitMode.value = false
 }
 
 function zoomBy(delta: number) {
@@ -79,7 +120,9 @@ function zoomBy(delta: number) {
 
 function toggleFit() {
   fitMode.value = !fitMode.value
-  zoom.value = 1
+  // 从"适应"切到"1:1"时把倍率接上 fitScale，避免画面突然缩到很小
+  if (!fitMode.value) zoom.value = 1 / (fitScale.value || 1)
+  else zoom.value = 1
 }
 
 function resetView() {
@@ -101,10 +144,20 @@ function onWheel(event: WheelEvent) {
   zoomBy(event.deltaY > 0 ? -0.15 : 0.15)
 }
 
-/** 图片变换：缩放 + 旋转 + 翻转合成一个 transform。 */
-const transformStyle = computed(() => ({
-  transform: `scale(${zoom.value}) rotate(${rotate.value}deg) scaleX(${flipped.value ? -1 : 1})`,
-}))
+/** 容器尺寸变了（窗口缩放 / 信息栏收起）要重算适应比例。 */
+let observer: ResizeObserver | null = null
+
+onMounted(() => {
+  window.addEventListener('keydown', onKey)
+  if (stageEl.value) {
+    stageSize.value = { w: stageEl.value.clientWidth, h: stageEl.value.clientHeight }
+    observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (rect) stageSize.value = { w: rect.width, h: rect.height }
+    })
+    observer.observe(stageEl.value)
+  }
+})
 
 // ---------------------------------------------------------------------------
 // 写操作：收藏 / 删除 / 下载 / 投喂工作流
@@ -222,7 +275,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         1:1
       </button>
       <button class="tool" title="缩小 (-)" @click="zoomBy(-0.2)">−</button>
-      <span class="zoom">{{ Math.round(zoom * 100) }}%</span>
+      <span class="zoom">{{ Math.round(displayScale * 100) }}%</span>
       <button class="tool" title="放大 (+)" @click="zoomBy(0.2)">+</button>
       <button class="tool" title="重置视图 (0)" @click="resetView">重置</button>
       <button class="tool" :class="{ active: showInfo }" title="显示/隐藏信息" @click="showInfo = !showInfo">
@@ -234,11 +287,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
     <button class="nav prev" :disabled="!hasPrev" title="上一张 (←)" @click="go(-1)">‹</button>
 
-    <figure class="stage" :class="{ fit: fitMode }" @wheel.prevent="onWheel">
+    <figure ref="stageEl" class="stage" @wheel.prevent="onWheel">
       <img
         :src="viewUrl(item)"
         :alt="item.filename"
-        :style="transformStyle"
+        :style="imageStyle"
+        @load="onImageLoad"
         :draggable="false"
       />
     </figure>
@@ -277,7 +331,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </p>
 
       <p class="hint">
-        快捷键：← → 翻页 · + − 缩放 · 0 重置 · F 翻转 · R 旋转 · Esc 关闭
+        快捷键：← → 翻页 · 滚轮/+ − 缩放 · 0 重置 · F 翻转 · R 旋转 · Esc 关闭
       </p>
     </aside>
   </div>
@@ -289,7 +343,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   inset: 0;
   z-index: 100;
   display: flex;
-  align-items: center;
+  /* 必须 stretch：stage 高度若按内容（图片高度）算，而图片高度又依赖
+     「适应窗口」的比例（依赖 stage 高度），就成了循环依赖 —— 比例会被压到 3%。 */
+  align-items: stretch;
   justify-content: center;
   background: rgba(0, 0, 0, 0.88);
   backdrop-filter: blur(2px);
@@ -374,30 +430,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .stage {
   margin: 0;
+  /* 必须占满剩余空间：stage 是 flex item，宽度默认由内容（图片）撑开，
+     图片还没加载时宽度就是 0，"适应窗口"的缩放比会算成 3%。 */
+  flex: 1;
+  min-width: 0;
   max-width: calc(100% - 360px);
   max-height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: var(--gap-lg);
   padding-top: calc(var(--gap-lg) + 40px);
-  overflow: hidden;
+  /* 放大后要能滚动 —— 这正是不能用 transform 缩放的原因 */
+  overflow: auto;
 }
 
 .stage img {
-  max-width: 100%;
-  max-height: calc(100vh - 120px);
-  object-fit: contain;
+  /* 宽高由脚本按「自然尺寸 × 比例」算好，这里不能再限死 */
+  flex: none;
+  max-width: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
-  transition: transform 0.12s ease-out;
   user-select: none;
-}
-
-/* 1:1 模式：不受容器尺寸约束，按原始像素显示 */
-.stage:not(.fit) img {
-  max-width: none;
-  max-height: none;
 }
 
 .nav {

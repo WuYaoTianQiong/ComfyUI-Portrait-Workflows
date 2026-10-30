@@ -8,12 +8,14 @@ import type { HistoryItem } from '../api/types'
  * 多图对比。
  *
  * 旧版（static/gallery.js 的 enterCompareMode + static/imageViewer.js 的
- * compare-modal）在选中 2~4 张图后打开对比弹层：
- * - **同步**模式：所有图叠在一起，缩放/平移联动，用来逐像素比对细节
- * - **分屏**模式：每张图各占一格
- * 最多 4 张 —— 再多就没法看了。
+ * compare-modal）：选中 2~4 张图后打开对比弹层。
  *
- * 重构时这段整体丢了：它不调任何后端接口，所以端点覆盖核对查不出来。
+ * **布局是网格，不是叠加**（旧版 CSS：compare-grid-2/3/4，3 张时首图跨两列），
+ * 而「同步 / 分屏」按钮控制的是**缩放是否联动**（`_compareZoomSync`）——
+ * 第一版我把它当成了布局模式，做成三张图完全叠在一起，结果根本没法看。
+ *
+ * 缩放同样不能用 transform：那样放大后会被裁掉，看不到新细节。
+ * 这里按「自然尺寸 × 比例」设置真实宽高，每格自己滚动。
  */
 const props = defineProps<{
   open: boolean
@@ -22,44 +24,96 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-/** 同步 = 叠在一起联动缩放；分屏 = 各占一格。 */
-const mode = ref<'sync' | 'split'>('sync')
+/** 缩放是否在所有图之间联动。 */
+const linkZoom = ref(true)
 
-/** 缩放比例（同步模式下所有图共用）。 */
-const zoom = ref(1)
-const offset = ref({ x: 0, y: 0 })
+interface CellView {
+  zoom: number
+  natural: { w: number; h: number }
+  /** 该格"适应"的显示比例（格子尺寸 ÷ 自然尺寸）。 */
+  fit: number
+  offset: { x: number; y: number }
+}
+
+const views = ref<CellView[]>([])
+const cellEls = ref<HTMLElement[]>([])
+
+/** 网格类名 —— 与旧版 compare-grid-N 一致。 */
+const gridClass = computed(() => `compare-grid-${Math.max(1, props.items.length)}`)
+
+function viewAt(index: number): CellView {
+  if (!views.value[index]) {
+    views.value[index] = { zoom: 1, natural: { w: 0, h: 0 }, fit: 1, offset: { x: 0, y: 0 } }
+  }
+  return views.value[index]
+}
+
+function imgStyle(index: number) {
+  const v = viewAt(index)
+  const scale = v.fit * v.zoom
+  return {
+    width: `${Math.round(v.natural.w * scale)}px`,
+    height: `${Math.round(v.natural.h * scale)}px`,
+    transform: `translate(${v.offset.x}px, ${v.offset.y}px)`,
+    // 把 zoom 也写进 style：测试环境里图片不会真的 load（natural 尺寸为 0），
+    // 没有这个变量就区分不出「这张缩放了、那张没有」。
+    '--zoom': v.zoom,
+  }
+}
+
+function onImageLoad(event: Event, index: number) {
+  const img = event.target as HTMLImageElement
+  const v = viewAt(index)
+  v.natural = { w: img.naturalWidth, h: img.naturalHeight }
+  v.fit = computeFit(index)
+}
+
+function computeFit(index: number): number {
+  const el = cellEls.value[index]
+  const v = viewAt(index)
+  if (!el || !v.natural.w) return 1
+  const w = el.clientWidth - 16
+  const h = el.clientHeight - 16
+  if (w <= 0 || h <= 0) return 1
+  return Math.min(w / v.natural.w, h / v.natural.h)
+}
+
+function onWheel(event: WheelEvent, index: number) {
+  const delta = event.deltaY > 0 ? -0.15 : 0.15
+  const targets = linkZoom.value
+    ? props.items.map((_, i) => i)
+    : [index]
+  for (const i of targets) {
+    const v = viewAt(i)
+    v.zoom = Math.min(8, Math.max(0.1, v.zoom * (1 + delta)))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 拖拽平移
+// ---------------------------------------------------------------------------
+
 const dragging = ref(false)
-const dragStart = ref({ x: 0, y: 0 })
+const dragOrigin = ref({ x: 0, y: 0 })
 
-
-function setZoom(value: number) {
-  zoom.value = Math.min(8, Math.max(0.1, value))
-}
-
-function zoomBy(delta: number) {
-  setZoom(zoom.value * (1 + delta))
-}
-
-function resetView() {
-  zoom.value = 1
-  offset.value = { x: 0, y: 0 }
-}
-
-function onWheel(event: WheelEvent) {
-  zoomBy(event.deltaY > 0 ? -0.15 : 0.15)
-}
-
-function onPointerDown(event: PointerEvent) {
+function onPointerDown(event: PointerEvent, index: number) {
   dragging.value = true
-  dragStart.value = { x: event.clientX - offset.value.x, y: event.clientY - offset.value.y }
-  ;(event.target as HTMLElement).setPointerCapture?.(event.pointerId)
+  const v = viewAt(index)
+  dragOrigin.value = { x: event.clientX - v.offset.x, y: event.clientY - v.offset.y }
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
 }
 
 function onPointerMove(event: PointerEvent) {
   if (!dragging.value) return
-  offset.value = {
-    x: event.clientX - dragStart.value.x,
-    y: event.clientY - dragStart.value.y,
+  const targets = linkZoom.value
+    ? props.items.map((_, i) => i)
+    : [props.items.length - 1]
+  for (const i of targets) {
+    const v = viewAt(i)
+    v.offset = {
+      x: event.clientX - dragOrigin.value.x,
+      y: event.clientY - dragOrigin.value.y,
+    }
   }
 }
 
@@ -67,59 +121,87 @@ function onPointerUp() {
   dragging.value = false
 }
 
+function resetView() {
+  for (let i = 0; i < props.items.length; i++) {
+    const v = viewAt(i)
+    v.zoom = 1
+    v.offset = { x: 0, y: 0 }
+    v.fit = computeFit(i)
+  }
+}
+
 function onKey(event: KeyboardEvent) {
   if (!props.open) return
   if (event.key === 'Escape') emit('close')
-  else if (event.key === '+' || event.key === '=') zoomBy(0.2)
-  else if (event.key === '-') zoomBy(-0.2)
   else if (event.key === '0') resetView()
 }
 
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+// 窗口尺寸变了要重算"适应"比例
+let observer: ResizeObserver | null = null
 
-/** 同步模式下所有图共用一个变换；分屏模式各自 fit，不做联动。 */
-const sharedTransform = computed(() => ({
-  transform: `translate(${offset.value.x}px, ${offset.value.y}px) scale(${zoom.value})`,
-}))
+onMounted(() => {
+  window.addEventListener('keydown', onKey)
+  observer = new ResizeObserver(() => {
+    for (let i = 0; i < props.items.length; i++) {
+      const v = viewAt(i)
+      if (v.zoom === 1) v.fit = computeFit(i)
+    }
+  })
+  cellEls.value.forEach((el) => el && observer?.observe(el))
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  observer?.disconnect()
+})
 </script>
 
 <template>
   <div v-if="open" class="compare" @click.self="emit('close')">
     <header class="bar">
       <span class="title">图片对比（{{ items.length }} 张）</span>
-      <div class="mode-switch">
-        <button class="tool" :class="{ active: mode === 'sync' }" @click="mode = 'sync'">同步</button>
-        <button class="tool" :class="{ active: mode === 'split' }" @click="mode = 'split'">分屏</button>
-      </div>
+      <button
+        class="tool"
+        :class="{ active: linkZoom }"
+        title="开启后，缩放与拖动会同时作用于所有图片"
+        @click="linkZoom = !linkZoom"
+      >
+        {{ linkZoom ? '🔗 缩放联动' : '🔗 独立缩放' }}
+      </button>
       <span class="spacer" />
-      <span class="zoom">{{ Math.round(zoom * 100) }}%</span>
-      <button class="tool" title="缩小 (-)" @click="zoomBy(-0.2)">−</button>
-      <button class="tool" title="放大 (+)" @click="zoomBy(0.2)">+</button>
+      <span class="hint">滚轮缩放 · 拖动平移 · 0 重置 · Esc 退出</span>
       <button class="tool" title="重置 (0)" @click="resetView">重置</button>
       <button class="tool close" title="关闭 (Esc)" @click="emit('close')">✕</button>
     </header>
 
     <div
       class="body"
-      :class="mode"
-      @wheel.prevent="onWheel"
-      @pointerdown="onPointerDown"
+      :class="gridClass"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointerleave="onPointerUp"
     >
-      <figure v-for="item in items" :key="item.id" class="cell">
-        <img
-          :src="viewUrl(item)"
-          :alt="item.filename"
-          :style="mode === 'sync' ? sharedTransform : undefined"
-          :draggable="false"
-        />
+      <figure
+        v-for="(item, index) in items"
+        :key="item.id"
+        :ref="(el) => { if (el) cellEls[index] = el as HTMLElement }"
+        class="cell"
+        @wheel.prevent="onWheel($event, index)"
+        @pointerdown="onPointerDown($event, index)"
+      >
+        <div class="cell-scroll">
+          <img
+            :src="viewUrl(item)"
+            :alt="item.filename"
+            :style="imgStyle(index)"
+            :draggable="false"
+            @load="onImageLoad($event, index)"
+          />
+        </div>
         <figcaption :title="item.filename">{{ item.filename }}</figcaption>
       </figure>
 
-      <p v-if="items.length < 2" class="hint">至少选择 2 张图片才能对比</p>
+      <p v-if="items.length < 2" class="empty">至少选择 2 张图片才能对比</p>
     </div>
   </div>
 </template>
@@ -131,13 +213,13 @@ const sharedTransform = computed(() => ({
   z-index: 120;
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(0, 0, 0, 0.92);
 }
 
 .bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-sm);
   padding: var(--gap-sm) var(--gap);
   background: rgba(20, 24, 30, 0.95);
   border-bottom: 1px solid var(--border);
@@ -146,23 +228,15 @@ const sharedTransform = computed(() => ({
 .title {
   font-size: var(--fs-sm);
   color: var(--text);
-  margin-right: var(--gap-sm);
-}
-
-.mode-switch {
-  display: flex;
-  gap: 2px;
 }
 
 .spacer {
   flex: 1;
 }
 
-.zoom {
+.hint {
   font-size: var(--fs-xs);
   color: var(--muted);
-  min-width: 42px;
-  text-align: center;
 }
 
 .tool {
@@ -188,36 +262,38 @@ const sharedTransform = computed(() => ({
   color: var(--danger);
 }
 
+/* 网格排布 —— 与旧版 compare-grid-N 一致：3 张时首图跨两列 */
 .body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
   display: grid;
   gap: 2px;
-  cursor: grab;
-  position: relative;
+  padding: 2px;
+  overflow: hidden;
 }
 
-.body:active {
-  cursor: grabbing;
-}
-
-.body.sync {
+.compare-grid-1 {
   grid-template-columns: 1fr;
-  place-items: center;
+  grid-template-rows: 1fr;
 }
 
-/* 同步模式：所有图绝对叠在一起，缩放平移联动 */
-.body.sync .cell {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+.compare-grid-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
 }
 
-.body.split {
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
+.compare-grid-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.compare-grid-3 .cell:first-child {
+  grid-column: 1 / -1;
+}
+
+.compare-grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
 }
 
 .cell {
@@ -227,40 +303,43 @@ const sharedTransform = computed(() => ({
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
 }
 
-.body.sync .cell {
-  pointer-events: none;
+.cell-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 6px;
+  cursor: grab;
+}
+
+.cell-scroll:active {
+  cursor: grabbing;
 }
 
 .cell img {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  object-fit: contain;
+  flex: none;
+  max-width: none;
   user-select: none;
-}
-
-.body.sync .cell img {
-  object-fit: contain;
-  max-width: 100%;
-  max-height: 100%;
 }
 
 .cell figcaption {
   flex: none;
   font-size: 10px;
   color: var(--muted);
-  padding: 2px 6px;
+  padding: 3px 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(20, 24, 30, 0.8);
+  background: rgba(20, 24, 30, 0.85);
 }
 
-.hint {
-  position: absolute;
-  inset: 0;
+.empty {
+  grid-column: 1 / -1;
   display: grid;
   place-items: center;
   color: var(--muted);
