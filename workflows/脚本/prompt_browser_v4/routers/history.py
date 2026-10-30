@@ -10,7 +10,7 @@ from peewee import fn, SQL
 from pydantic import BaseModel
 
 from config import settings
-from models import GenHistory as Gh, Prompt, PromptTag, ImageCategory, ImageTag, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from models import GenHistory as Gh, GenJob, Prompt, PromptTag, ImageCategory, ImageTag, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
 from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
 from services.thumbnail import _get_image_path
 
@@ -54,7 +54,6 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
     # （job_state._insert_history_for_item / 同步 / 磁盘扫描）。
     if (prompt_params is None or prompt_id is None) and r.job_id:
         try:
-            from models import GenJob
             job = GenJob.get_or_none(GenJob.id == r.job_id)
             if job and job.items:
                 items = json.loads(job.items) if isinstance(job.items, str) else job.items
@@ -96,7 +95,6 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
     # 如果缓存中没有，直接从数据库查询
     if prompt_id and not item["prompt_name"]:
         try:
-            from models import Prompt
             prompt = Prompt.get_or_none(Prompt.id == prompt_id)
             if prompt:
                 item["prompt_name"] = prompt.name
@@ -227,16 +225,37 @@ def _sync_comfyui_history() -> int:
 
 # 从 GenJob.items 按文件名查找提示词关联的缓存
 _job_index = {}
-_job_index_built = False
+# 缓存版本签名：(done 任务数, 最大 updated_at)。旧实现用布尔标记，建好一次就永不过期，
+# 服务起来之后新出的图全都匹配不到来源提示词（索引里压根没有它们的文件名）。
+_job_index_version = None
+
+
+def _job_index_signature():
+    """gen_jobs 的变化签名。查询很便宜（走 status 索引 + 聚合），每轮同步算一次。"""
+    try:
+        row = (
+            GenJob.select(
+                fn.COUNT(GenJob.id).alias("c"),
+                fn.MAX(GenJob.updated_at).alias("m"),
+            )
+            .where(GenJob.status == "done")
+            .first()
+        )
+        return (row.c, str(row.m))
+    except Exception:
+        return None
 
 
 def _build_job_index():
     """构建 filename → (job_id, prompt_id, prompt_text) 索引。
-    仅当 _sync_disk_orphans 需要查找时才生成（避免每30秒全量扫描 GenJob）。"""
-    global _job_index, _job_index_built
-    if _job_index_built:
+
+    仅当 _sync_disk_orphans 需要查找时才生成（避免每 30 秒全量扫描 GenJob），
+    并按 gen_jobs 的变化签名自动失效重建。
+    """
+    global _job_index, _job_index_version
+    signature = _job_index_signature()
+    if _job_index_version is not None and signature == _job_index_version:
         return
-    from models import GenJob, Prompt
 
     prompt_map = {}
     for p in Prompt.select():
@@ -258,7 +277,7 @@ def _build_job_index():
                 if fn and fn not in idx:
                     idx[fn] = (j.id, pid, prompt_text)
     _job_index = idx
-    _job_index_built = True
+    _job_index_version = signature
 
 
 def _sync_disk_orphans() -> int:
@@ -297,8 +316,7 @@ def _sync_disk_orphans() -> int:
                 job_id = None
                 prompt_id = None
                 prompt_text = ""
-                if not _job_index:
-                    _build_job_index()
+                _build_job_index()
                 match = _job_index.get(fname)
                 if match:
                     job_id, prompt_id, prompt_text = match
@@ -412,36 +430,10 @@ def list_history(
     orientation: str = Query(""),
     missing: bool = Query(None),
 ):
-    q = Gh.select().where(Gh.is_deleted == False)
-    if favorite is not None:
-        q = q.where(Gh.favorite == favorite)
-    if missing is not None:
-        # missing_since 由 services.integrity.scan_missing 巡检写入（可自愈）
-        q = q.where(Gh.missing_since.is_null(not missing))
-
-    if search:
-        like = f"%{search}%"
-        condition = (
-            (Gh.filename ** like)
-            | (Gh.subfolder ** like)
-            | (Gh.comfyui_prompt_id ** like)
-        )
-        prompt_matches = [r.id for r in Prompt.select(Prompt.id).where(Prompt.name ** like)]
-        if prompt_matches:
-            condition = condition | (Gh.prompt_id << prompt_matches)
-        q = q.where(condition)
-
-    if category_id is not None:
-        q = q.join(ImageCategory).where(ImageCategory.category == category_id)
-    if tag_ids:
-        tid_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
-        if tid_list:
-            # 多标签取交集（图像必须同时拥有所有选中标签）
-            for tid in tid_list:
-                direct = Gh.id << ImageTag.select(ImageTag.image).where(ImageTag.tag == tid)
-                via_prompt = Gh.prompt_id << PromptTag.select(PromptTag.prompt).where(PromptTag.tag == tid)
-                q = q.where(direct | via_prompt)
-
+    # 筛选构造统一走 _filtered_history_query + _apply_facet_filters：
+    # 这两个函数是 /history、/history/ids、/history/facets、/history/cleanup_missing
+    # 的唯一来源，避免"列表筛了、全选却选到范围外"这类错位。
+    q = _filtered_history_query(favorite, search, category_id, tag_ids, missing)
     q = _apply_facet_filters(q, source, date, model, orientation)
 
     total = q.count()
@@ -573,10 +565,11 @@ def history_facets(
     search: str = Query(""),
     category_id: int = Query(None),
     tag_ids: str = Query(""),
+    missing: bool = Query(None),
 ):
-    """分面计数：基于 favorite/search/category/tag 当前筛选（不含分面维度自身），
+    """分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），
     返回 source / date(年-月) / model 各取值的数量。"""
-    sub = _filtered_history_query(favorite, search, category_id, tag_ids).select(Gh.id).distinct()
+    sub = _filtered_history_query(favorite, search, category_id, tag_ids, missing).select(Gh.id).distinct()
     q0 = Gh.select().where(Gh.id.in_(sub))
     src_rows = q0.select(Gh.source, fn.COUNT(Gh.id).alias("c")).group_by(Gh.source)
     sources = {r.source: r.c for r in src_rows}

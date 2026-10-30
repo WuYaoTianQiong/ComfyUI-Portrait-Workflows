@@ -104,18 +104,21 @@ Copy-Item '文档\提示词收藏.db' "文档\backups\提示词收藏.db.bak_s0_
 - **文件**：`static/app.js:115-122`
 - **做法**：删除前端 `setInterval(.../api/history_sync...)` 那一段。后台 `writer_loop(sync_interval=30)` 已经在做同一件事，前端只保留 `loadHistory()` 刷新
 - **验收**：画廊新图仍在 30s 内出现（来自后台线程）；Network 面板 30s 周期内不再出现 `history_sync` 请求
+- **状态**：✅ 2026-10-30 完成。定时器只保留 `loadHistory(false,false)`；`history.js` 里切到画廊时的一次性 `history_sync` 属事件驱动，保留
 
 ### S0-4 修复 `_job_index` 永不失效
 - **文件**：`routers/history.py:226-258`
 - **做法**：新增 `_invalidate_job_index()`，在 `create_job` / `update_job_items` 写入后调用；或改成基于 `gen_jobs.max(updated_at)` 的版本号比对
 - **验收**：新建任务出图后，新图能匹配到来源 `prompt_id`
 - **回滚**：无副作用
+- **状态**：✅ 2026-10-30 完成。采用**版本签名**方案（`(COUNT(status=done), MAX(updated_at))`），不跨模块耦合、不需要 jobs 侧主动通知；契约测试 `test_disk_scan_job_index_invalidates_after_new_job` 锁死
 
 ### S0-5 合并三处重复的筛选构造器
 - **文件**：`routers/history.py`
 - **做法**：`list_history`（411-455 内联）、`_filtered_history_query`（512-547）、`history_facets`（550-583）、`history_ids`（587-623）统一到**一个** `build_history_query(filters)`，支持 `favorite/search/category/tag/source/date/model/orientation/missing`
 - **验收**：四个端点在相同参数下返回的集合完全一致（补一条契约测试断言 `ids ⊆ list` 且计数相等）
 - **回滚**：行为不变，纯重构
+- **状态**：✅ 2026-10-30 完成。最终形态为两层：`_filtered_history_query`（favorite/search/category/tag/missing）+ `_apply_facet_filters`（source/date/model/orientation），`list_history` / `history_ids` / `history_facets` / `cleanup_missing` 四处共用；契约测试 `test_history_filters_consistent_between_endpoints` 对 4 组筛选参数断言「列表 == 全选」
 
 ### S0-6 墓碑回收自动化 + 备份轮转
 - **文件**：`services/job_state.py`（或新 `services/maintenance.py`）、`tools/cleanup_tombstones.py`、`文档/`
@@ -225,9 +228,9 @@ UX/UI 分三段走，**不在 S0/S1 期间做视觉重设计**——那两阶段
 ### 阶段 0
 - [x] S0-1 清理失效 dry-run + 熔断 + 解绑缩略图
 - [x] S0-2 `missing_since` 派生列 + 角标 + 筛选（含路由首屏 Tab bug 修复）
-- [ ] S0-3 删前端 30s `history_sync`
-- [ ] S0-4 修 `_job_index` 失效
-- [ ] S0-5 合并筛选构造器
+- [x] S0-3 删前端 30s `history_sync`
+- [x] S0-4 修 `_job_index` 失效
+- [x] S0-5 合并筛选构造器
 - [ ] S0-6 墓碑回收自动化 + 备份归档
 - [ ] S0-7 gitignore / DB 停止跟踪
 

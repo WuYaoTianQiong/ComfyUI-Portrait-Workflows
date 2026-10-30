@@ -174,6 +174,67 @@ def test_scan_missing_marks_and_heals(api, seed_history):
         (settings.comfyui_root / "output" / "probe.png").unlink(missing_ok=True)
 
 
+def test_disk_scan_job_index_invalidates_after_new_job(api, seed_prompt):
+    """新增任务后，磁盘兜底扫描要能重新匹配到来源提示词。
+
+    旧实现用布尔标记缓存 job 索引，建一次就永不过期 → 服务启动之后新出的图
+    全部匹配不到 prompt_id。
+    """
+    from config import settings
+    from models import GenHistory, GenJob
+    from routers import history as history_router
+
+    prompt = seed_prompt(name="索引提示词")
+    target = settings.comfyui_root / "output" / "poll_me.png"
+    target.write_bytes(b"x")
+    try:
+        history_router._job_index_version = None
+        history_router._sync_disk_orphans()
+        row = GenHistory.get_or_none(GenHistory.filename == "poll_me.png")
+        assert row is not None and row.prompt_id is None
+
+        # 模拟"任务后建、同名文件重新出现"：清掉记录后建一个已完成任务
+        GenHistory.delete().where(GenHistory.filename == "poll_me.png").execute()
+        GenJob.create(
+            job_type="single", status="done", title="已完成的活", total=1,
+            done_count=1,
+            items=json.dumps(
+                [{"prompt_id": prompt.id, "images": [{"filename": "poll_me.png"}]}],
+                ensure_ascii=False,
+            ),
+        )
+
+        history_router._sync_disk_orphans()
+        row = GenHistory.get_or_none(GenHistory.filename == "poll_me.png")
+        assert row is not None
+        assert row.prompt_id == prompt.id, "job 索引没有随新任务失效，新图匹配不到提示词"
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_history_filters_consistent_between_endpoints(api, seed_history, seed_taxonomy):
+    """列表、全选、分面共用同一套筛选：相同参数下返回的集合必须一致。
+
+    这三处曾经各写一遍过滤逻辑，已经出现过"列表筛了、全选却选到范围外"，
+    紧接着的批量删除就是真删。
+    """
+    from models import ImageCategory, ImageTag
+
+    hit = seed_history(filename="aaa.png", favorite=True)
+    seed_history(filename="bbb.png", favorite=False)
+    cat, tag = seed_taxonomy()
+    ImageCategory.create(image=hit.id, category=cat.id)
+    ImageTag.create(image=hit.id, tag=tag.id)
+
+    for qs in ("favorite=1", f"category_id={cat.id}", f"tag_ids={tag.id}", "search=aaa"):
+        listed = {
+            it["id"]
+            for it in api.get(f"/api/history?{qs}&page_size=100").json()["items"]
+        }
+        ids = set(api.get(f"/api/history/ids?{qs}").json()["ids"])
+        assert listed == ids, f"筛选条件 {qs} 下列表与全选结果不一致：{listed} vs {ids}"
+
+
 def _deleted_count():
     from models import GenHistory
 
