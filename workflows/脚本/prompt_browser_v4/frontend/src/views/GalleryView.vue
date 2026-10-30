@@ -16,6 +16,12 @@ const selectedTags = ref<number[]>([])
 const tagMatch = ref<'all' | 'any'>('all')
 const onlyMissing = ref(false)
 
+// 分面筛选（来源 / 年月 / 模型 / 方向）—— 每个维度单选，再点一次取消
+const source = ref('')
+const dateFacet = ref('')
+const model = ref('')
+const orientation = ref('')
+
 const queryClient = useQueryClient()
 
 /**
@@ -33,7 +39,19 @@ const historyKey = computed(() => [
   tagMatch.value,
   onlyMissing.value,
   search.value.trim(),
+  source.value,
+  dateFacet.value,
+  model.value,
+  orientation.value,
 ])
+
+/** 列表与分面共用的筛选参数（不含分面维度自身 —— 后端就是按这个口径算的）。 */
+const facetScope = computed(() => ({
+  search: search.value.trim(),
+  tag_ids: selectedTags.value.join(','),
+  tag_match: tagMatch.value,
+  missing: onlyMissing.value ? 1 : undefined,
+}))
 
 const {
   data: history,
@@ -50,9 +68,28 @@ const {
       tag_match: tagMatch.value,
       missing: onlyMissing.value ? 1 : undefined,
       search: search.value.trim(),
+      source: source.value,
+      date: dateFacet.value,
+      model: model.value,
+      orientation: orientation.value,
     }),
   // 翻页时保留上一页内容，避免整页闪烁
   placeholderData: (prev) => prev,
+})
+
+interface Facets {
+  source: Record<string, number>
+  date: Record<string, number>
+  model: Record<string, number>
+  orientation: Record<string, number>
+}
+
+/** 分面计数：后端按「当前筛选（不含分面维度自身）」算，避免「数出来的和筛出来的对不上」。 */
+const { data: facets } = useQuery<Facets>({
+  queryKey: computed(() => ['facets', facetScope.value]),
+  queryFn: () => apiGet('/api/history/facets', facetScope.value),
+  placeholderData: (prev) => prev,
+  staleTime: 15_000,
 })
 
 const { data: tagData } = useQuery<{ tags: TagRow[] }>({
@@ -232,6 +269,33 @@ async function cleanupMissing() {
   }
 }
 
+/** 分面维度定义（每个维度单选，再点一次取消）。 */
+const facetDimDefs = [
+  { key: 'source' as const, label: '来源' },
+  { key: 'date' as const, label: '年月' },
+  { key: 'model' as const, label: '模型' },
+  { key: 'orientation' as const, label: '方向' },
+]
+
+/** 分面值可能很长（模型名是一整个 safetensors 文件名），截断显示但保留完整 title。 */
+function facetLabel(name: string): string {
+  return name.length > 20 ? name.slice(0, 19) + '…' : name
+}
+function facetValue(key: 'source' | 'date' | 'model' | 'orientation'): string {
+  return {
+    source: source.value,
+    date: dateFacet.value,
+    model: model.value,
+    orientation: orientation.value,
+  }[key]
+}
+
+function toggleFacet(key: 'source' | 'date' | 'model' | 'orientation', value: string) {
+  const targets = { source, date: dateFacet, model, orientation }
+  const target = targets[key]
+  target.value = target.value === value ? '' : value
+  page.value = 1
+}
 function clearFilters() {
   selectedTags.value = []
   tagMatch.value = 'all'
@@ -266,6 +330,21 @@ function clearFilters() {
         />
       </section>
 
+      <section v-for="dim in facetDimDefs" :key="dim.key" class="group">
+        <div class="group-head"><span>{{ dim.label }}</span></div>
+        <div class="chips">
+          <button
+            v-for="(count, name) in facets?.[dim.key] ?? {}"
+            :key="name"
+            class="chip" :title="String(name)"
+            :class="{ active: facetValue(dim.key) === name }"
+            @click="toggleFacet(dim.key, String(name))"
+          >
+            {{ facetLabel(String(name)) }}<i>{{ count }}</i>
+          </button>
+          <div v-if="!Object.keys(facets?.[dim.key] ?? {}).length" class="empty">无</div>
+        </div>
+      </section>
       <section class="group">
         <div class="group-head"><span>状态</span></div>
         <label class="check">
@@ -405,6 +484,38 @@ function clearFilters() {
   padding: 1px 6px;
 }
 
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  transition: 0.12s;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.chip.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chip i {
+  font-style: normal;
+  opacity: 0.7;
+  margin-left: 3px;
+}
 .check {
   display: flex;
   align-items: center;

@@ -3,11 +3,19 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GalleryView from './GalleryView.vue'
-import { apiPost } from '../api/client'
+import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
+    if (path.includes('/api/history/facets')) {
+      return {
+        source: { local: 2, comfyui_sync: 0 },
+        date: { '2026-10': 2 },
+        model: {},
+        orientation: { '竖图': 2 },
+      }
+    }
     if (path.includes('/api/tags')) {
       return { tags: [{ id: 1, name: '标签', color: '#5b8fb9', usage_count: 0, prompt_count: 3 }] }
     }
@@ -88,5 +96,37 @@ describe('GalleryView 清理失效', () => {
     const toasts = useToast().toasts.value
     expect(toasts.length).toBe(1)
     expect(toasts[0].text).toContain('无需清理')
+  })
+  it('点分面 chip 会把该维度加进查询参数', async () => {
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const chip = wrapper.findAll('.chip').find((b) => b.text().includes('local'))
+    expect(chip).toBeTruthy()
+    await chip!.trigger('click')
+    await flushPromises()
+
+    const historyCalls = vi
+      .mocked(apiGet)
+      .mock.calls.filter((c) => String(c[0]).includes('/api/history') && !String(c[0]).includes('facets'))
+    const last = historyCalls[historyCalls.length - 1]
+    expect((last[1] as Record<string, unknown>)?.source).toBe('local')
+  })
+
+  it('再点一次同一个 chip 取消该维度筛选', async () => {
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const chip = wrapper.findAll('.chip').find((b) => b.text().includes('local'))
+    await chip!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.chip').find((b) => b.text().includes('local'))!.trigger('click')
+    await flushPromises()
+
+    const historyCalls = vi
+      .mocked(apiGet)
+      .mock.calls.filter((c) => String(c[0]).includes('/api/history') && !String(c[0]).includes('facets'))
+    const last = historyCalls[historyCalls.length - 1]
+    expect((last[1] as Record<string, unknown>)?.source).toBe('')
   })
 })
