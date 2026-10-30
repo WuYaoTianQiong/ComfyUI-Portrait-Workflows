@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
-import { apiGet, apiPost } from '../api/client'
+import { apiDelete, apiGet, apiPost } from '../api/client'
 import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -120,21 +120,29 @@ function expandGroup(type: string) {
 
 // ---------------- 画布 ----------------
 
+/** 画布槽位：除了内容还要记住来源，保存模板时要用 prompt_id 建立引用关系。 */
+interface CanvasSlot {
+  content: string
+  promptId: number | null
+  source: 'prompt' | 'library'
+}
+
 /** 每个类型一个槽位；同类型只能有一个碎片（这是【类型】格式的约束）。 */
-const canvas = ref<Record<string, string>>({})
+const canvas = ref<Record<string, CanvasSlot>>({})
 
 const canvasTypes = computed(() => FRAGMENT_TYPES.filter((t) => canvas.value[t]))
 const canvasCount = computed(() => canvasTypes.value.length)
 
 /** 渲染成标准文本：与后端 `composition.render` 完全一致的格式。 */
 const composedPrompt = computed(() =>
-  FRAGMENT_TYPES.filter((t) => canvas.value[t])
-    .map((t) => `【${t}】\n${canvas.value[t]}`)
-    .join('\n\n'),
+  canvasTypes.value.map((t) => `【${t}】\n${canvas.value[t].content}`).join('\n\n'),
 )
 
 function pick(item: FragmentItem) {
-  canvas.value = { ...canvas.value, [item.type]: item.content }
+  canvas.value = {
+    ...canvas.value,
+    [item.type]: { content: item.content, promptId: item.prompt_id, source: item.source },
+  }
 }
 
 function unpick(type: string) {
@@ -156,8 +164,112 @@ const randomCount = ref(4)
 
 function fixedFragments(): Record<string, string> {
   const fixed: Record<string, string> = {}
-  for (const type of canvasTypes.value) fixed[type] = canvas.value[type]
+  for (const type of canvasTypes.value) fixed[type] = canvas.value[type].content
   return fixed
+}
+
+// ---------------- 组合模板 ----------------
+
+interface TemplateFragmentRow {
+  id: number
+  prompt_id: number | null
+  fragment_type: string
+  content: string
+  source_exists: boolean
+  source_name: string
+}
+
+interface TemplateRow {
+  id: number
+  name: string
+  fragment_count: number
+  fragments?: TemplateFragmentRow[]
+}
+
+const queryClient = useQueryClient()
+
+const { data: templateData } = useQuery<{ templates: TemplateRow[] }>({
+  queryKey: ['templates'],
+  queryFn: () => apiGet('/api/templates'),
+})
+
+const templates = computed(() => templateData.value?.templates ?? [])
+const selectedTemplateId = ref<number | null>(null)
+const templateSearch = ref('')
+
+/** 线上有 381 个模板，下拉直接铺开根本找不到；加本地过滤（数据量小，不必走接口）。 */
+const filteredTemplates = computed(() => {
+  const keyword = templateSearch.value.trim()
+  if (!keyword) return templates.value
+  return templates.value.filter((t) => t.name.includes(keyword))
+})
+
+/**
+ * 套用模板：把模板里的碎片引用填回画布。
+ *
+ * 模板是**引用式**的（存 prompt_id + 类型，内容实时解析），所以套用拿到的是
+ * 提示词当前的内容，而不是保存模板那一刻的快照 —— 源提示词改过，模板会跟着变。
+ */
+async function applyTemplate() {
+  const id = selectedTemplateId.value
+  if (!id) return
+  try {
+    const result = await apiGet<{ template: TemplateRow }>(`/api/templates/${id}`)
+    const next: Record<string, CanvasSlot> = {}
+    for (const fragment of result.template.fragments ?? []) {
+      next[fragment.fragment_type] = {
+        content: fragment.content,
+        promptId: fragment.prompt_id,
+        source: fragment.prompt_id ? 'prompt' : 'library',
+      }
+    }
+    canvas.value = next
+  } catch (e) {
+    alert(`套用失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+/** 把当前画布保存成模板。只有来自提示词的碎片能建立引用，碎片库碎片会被跳过。 */
+async function saveTemplate() {
+  const usable = canvasTypes.value.filter(
+    (t) => canvas.value[t].source === 'prompt' && canvas.value[t].promptId,
+  )
+  if (!usable.length) {
+    alert('画布里的碎片都来自"碎片库"，无法建立引用关系，请至少放入一个来自提示词的碎片')
+    return
+  }
+  const skipped = canvasTypes.value.length - usable.length
+  const name = prompt(
+    skipped
+      ? `模板名称（注意：${skipped} 个碎片库碎片不会被保存）`
+      : '模板名称',
+  )
+  if (!name) return
+  try {
+    await apiPost('/api/templates', {
+      name,
+      fragments: usable.map((t) => ({
+        prompt_id: canvas.value[t].promptId,
+        fragment_type: t,
+      })),
+    })
+    queryClient.invalidateQueries({ queryKey: ['templates'] })
+  } catch (e) {
+    alert(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+async function deleteTemplate() {
+  const id = selectedTemplateId.value
+  if (!id) return
+  if (!confirm('确定删除这个模板吗？（不会删除来源提示词）')) return
+  try {
+    await apiDelete(`/api/templates/${id}`)
+    selectedTemplateId.value = null
+    queryClient.invalidateQueries({ queryKey: ['templates'] })
+  } catch (e) {
+    alert(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 async function runOnce() {
@@ -310,7 +422,8 @@ function toggleTag(id: number) {
         <div v-for="type in FRAGMENT_TYPES" :key="type" class="slot" :class="{ filled: !!canvas[type] }">
           <span class="slot-type">{{ type }}</span>
           <template v-if="canvas[type]">
-            <span class="slot-text">{{ canvas[type] }}</span>
+            <span class="slot-text">{{ canvas[type].content }}</span>
+            <span v-if="canvas[type].source === 'library'" class="slot-src" title="来自碎片库">库</span>
             <button class="slot-remove" title="移除" @click="unpick(type)">✕</button>
           </template>
           <span v-else class="slot-empty">点击左侧碎片填入</span>
@@ -357,6 +470,37 @@ function toggleTag(id: number) {
         >
           {{ orientation === 'portrait' ? '📱 竖' : '🖥️ 横' }}
         </button>
+      </div>
+
+      <div class="template-box">
+        <div class="template-head">
+          <span>组合模板</span>
+          <span class="count">{{ templates.length }} 个</span>
+        </div>
+        <div class="template-row">
+          <input v-model="templateSearch" class="tpl-filter" placeholder="筛选模板…" />
+          <select v-model="selectedTemplateId" class="tpl-select">
+            <option :value="null">选择模板…</option>
+            <option v-for="tpl in filteredTemplates" :key="tpl.id" :value="tpl.id">
+              {{ tpl.name }}（{{ tpl.fragment_count }} 片）
+            </option>
+          </select>
+        </div>
+        <div class="template-row">
+          <button class="btn btn-sm" :disabled="!selectedTemplateId" @click="applyTemplate">套用</button>
+          <button class="btn btn-sm" @click="saveTemplate">另存为</button>
+          <button
+            class="btn btn-sm danger"
+            :disabled="!selectedTemplateId"
+            title="删除选中的模板"
+            @click="deleteTemplate"
+          >
+            删
+          </button>
+        </div>
+        <div class="template-hint">
+          模板保存的是"引用"而不是快照 —— 来源提示词改了，套用的内容跟着变
+        </div>
       </div>
     </aside>
   </div>
@@ -610,6 +754,16 @@ function toggleTag(id: number) {
   color: var(--border-strong);
 }
 
+.slot-src {
+  flex: none;
+  font-size: 10px;
+  color: var(--warn);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 3px;
+  line-height: 1.4;
+}
+
 .slot-remove {
   flex: none;
   border: none;
@@ -704,6 +858,59 @@ function toggleTag(id: number) {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
+}
+
+.template-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.template-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.tpl-filter {
+  flex: none;
+  width: 92px;
+}
+
+.tpl-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.template-hint {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.btn.danger {
+  border-color: var(--danger);
+  color: #fecaca;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .wf-select {
