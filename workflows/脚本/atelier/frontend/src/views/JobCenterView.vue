@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { apiGet, apiPost } from '../api/client'
+import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import type { JobSnapshot } from '../api/types'
@@ -197,14 +197,9 @@ const TYPE_LABEL: Record<string, string> = {
   faceswap: '图像编辑',
 }
 
-function thumbUrl(item: { filename: string; subfolder?: string; type?: string }): string {
-  const search = new URLSearchParams({
-    filename: item.filename,
-    subfolder: item.subfolder ?? '',
-    type: item.type ?? 'output',
-    size: '200',
-  })
-  return `/api/media/thumbnail?${search.toString()}`
+/** 任务快照里的图片项用 `type` 而不是 `img_type`，这里做一次字段名转换。 */
+function thumbUrl(image: { filename: string; subfolder?: string | null; type?: string | null }): string {
+  return thumbnailUrl({ filename: image.filename, subfolder: image.subfolder, img_type: image.type }, 200)
 }
 </script>
 

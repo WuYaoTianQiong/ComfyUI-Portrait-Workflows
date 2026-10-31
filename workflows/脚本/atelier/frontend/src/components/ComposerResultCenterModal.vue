@@ -2,6 +2,7 @@
 import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
 import { statusLabel } from '../utils/format'
+import { thumbnailUrl } from '../api/client'
 import type { JobSnapshot } from '../api/types'
 
 /**
@@ -46,14 +47,9 @@ const emit = defineEmits<{
   'go-jobs': []
 }>()
 
-function thumbUrl(item: { filename: string; subfolder?: string; type?: string }): string {
-  const search = new URLSearchParams({
-    filename: item.filename,
-    subfolder: item.subfolder ?? '',
-    type: item.type ?? 'output',
-    size: '240',
-  })
-  return `/api/media/thumbnail?${search.toString()}`
+/** 任务快照里的图片项用 `type` 而不是 `img_type`，这里做一次字段名转换。 */
+function thumbUrl(image: { filename: string; subfolder?: string | null; type?: string | null }): string {
+  return thumbnailUrl({ filename: image.filename, subfolder: image.subfolder, img_type: image.type }, 240)
 }
 </script>
 

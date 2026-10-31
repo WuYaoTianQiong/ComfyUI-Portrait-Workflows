@@ -1,0 +1,6952 @@
+{
+  "components": {
+    "schemas": {
+      "BatchDeleteRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "BatchDeleteRequest",
+        "type": "object"
+      },
+      "BatchIdsRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "BatchIdsRequest",
+        "type": "object"
+      },
+      "BatchImportItem": {
+        "properties": {
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentRef"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "fragments"
+        ],
+        "title": "BatchImportItem",
+        "type": "object"
+      },
+      "BatchItem": {
+        "properties": {
+          "prompt_id": {
+            "title": "Prompt Id",
+            "type": "integer"
+          },
+          "prompt_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Override"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_id"
+        ],
+        "title": "BatchItem",
+        "type": "object"
+      },
+      "BatchRandomRunRequest": {
+        "properties": {
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "composed_prompts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composed Prompts"
+          },
+          "count": {
+            "default": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "fixed_fragments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Fragments"
+          },
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "search": {
+            "default": "",
+            "title": "Search",
+            "type": "string"
+          },
+          "tag_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Ids"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "BatchRandomRunRequest",
+        "type": "object"
+      },
+      "BatchRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "title": {
+            "default": "批量生成",
+            "title": "Title",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BatchRequest",
+        "type": "object"
+      },
+      "CategoryCreate": {
+        "properties": {
+          "color": {
+            "default": "#6366f1",
+            "title": "Color",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "sort_order": {
+            "default": 0,
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CategoryCreate",
+        "type": "object"
+      },
+      "CategoryNode": {
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryNode"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "prompt_count": {
+            "default": 0,
+            "title": "Prompt Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ],
+        "title": "CategoryNode",
+        "type": "object"
+      },
+      "CategoryRef": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ],
+        "title": "CategoryRef",
+        "type": "object"
+      },
+      "CategoryTreeResponse": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryNode"
+            },
+            "title": "Categories",
+            "type": "array"
+          }
+        },
+        "title": "CategoryTreeResponse",
+        "type": "object"
+      },
+      "CategoryUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "title": "CategoryUpdate",
+        "type": "object"
+      },
+      "ComposerRunRequest": {
+        "properties": {
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "ComposerRunRequest",
+        "type": "object"
+      },
+      "FaceswapRequest": {
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "main_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Main Ids",
+            "type": "array"
+          },
+          "main_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Node"
+          },
+          "main_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Main Paths",
+            "type": "array"
+          },
+          "mask_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Mask Paths",
+            "type": "array"
+          },
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "pair_mode": {
+            "default": "cross",
+            "title": "Pair Mode",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "ref2_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ref2 Ids",
+            "type": "array"
+          },
+          "ref2_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref2 Node"
+          },
+          "ref2_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ref2 Paths",
+            "type": "array"
+          },
+          "ref_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ref Ids",
+            "type": "array"
+          },
+          "ref_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Node"
+          },
+          "ref_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ref Paths",
+            "type": "array"
+          },
+          "seed": {
+            "default": 100000,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "seed_mode": {
+            "default": "fixed",
+            "title": "Seed Mode",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "FaceswapRequest",
+        "type": "object"
+      },
+      "FacetsResponse": {
+        "properties": {
+          "date": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Date",
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Model",
+            "type": "object"
+          },
+          "orientation": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Orientation",
+            "type": "object"
+          },
+          "source": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Source",
+            "type": "object"
+          }
+        },
+        "title": "FacetsResponse",
+        "type": "object"
+      },
+      "FragmentCreate": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "fragment_type": {
+            "default": "人物面部",
+            "title": "Fragment Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          }
+        },
+        "title": "FragmentCreate",
+        "type": "object"
+      },
+      "FragmentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "FragmentListResponse",
+        "type": "object"
+      },
+      "FragmentRef": {
+        "properties": {
+          "fragment_type": {
+            "title": "Fragment Type",
+            "type": "string"
+          },
+          "prompt_id": {
+            "title": "Prompt Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_id",
+          "fragment_type"
+        ],
+        "title": "FragmentRef",
+        "type": "object"
+      },
+      "FragmentRow": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "fragment_type": {
+            "default": "",
+            "title": "Fragment Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "usage_count": {
+            "default": 0,
+            "title": "Usage Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "FragmentRow",
+        "type": "object"
+      },
+      "FragmentUpdate": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "fragment_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fragment Type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "title": "FragmentUpdate",
+        "type": "object"
+      },
+      "GenerateMissingRequest": {
+        "description": "为所有「没有生成过图片」的提示词批量出图",
+        "properties": {
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "prompt_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Ids"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "GenerateMissingRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoryIdsResponse": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "HistoryIdsResponse",
+        "type": "object"
+      },
+      "HistoryItem": {
+        "properties": {
+          "captured_at": {
+            "default": "",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "comfyui_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comfyui Prompt Id"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "img_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Img Type"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "missing": {
+            "default": false,
+            "title": "Missing",
+            "type": "boolean"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id"
+          },
+          "prompt_name": {
+            "default": "",
+            "title": "Prompt Name",
+            "type": "string"
+          },
+          "prompt_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Params"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "subfolder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subfolder"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagRef"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "view_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Url"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "HistoryItem",
+        "type": "object"
+      },
+      "HistoryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "HistoryListResponse",
+        "type": "object"
+      },
+      "JobImage": {
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "subfolder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subfolder"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "filename"
+        ],
+        "title": "JobImage",
+        "type": "object"
+      },
+      "JobItem": {
+        "properties": {
+          "comfyui_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comfyui Prompt Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/JobImage"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id"
+          },
+          "prompt_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Preview"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "title": "JobItem",
+        "type": "object"
+      },
+      "JobListResponse": {
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobSnapshot"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "title": "JobListResponse",
+        "type": "object"
+      },
+      "JobSnapshot": {
+        "properties": {
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done_count": {
+            "default": 0,
+            "title": "Done Count",
+            "type": "integer"
+          },
+          "error_count": {
+            "default": 0,
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "job_type": {
+            "default": "",
+            "title": "Job Type",
+            "type": "string"
+          },
+          "orientation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orientation"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workflow_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Path"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "JobSnapshot",
+        "type": "object"
+      },
+      "MaskSaveRequest": {
+        "properties": {
+          "data_url": {
+            "title": "Data Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_url"
+        ],
+        "title": "MaskSaveRequest",
+        "type": "object"
+      },
+      "NodesRequest": {
+        "properties": {
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "NodesRequest",
+        "type": "object"
+      },
+      "ProcessImageRequest": {
+        "properties": {
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_path"
+        ],
+        "title": "ProcessImageRequest",
+        "type": "object"
+      },
+      "PromptCreate": {
+        "properties": {
+          "auto_categorize": {
+            "default": false,
+            "title": "Auto Categorize",
+            "type": "boolean"
+          },
+          "cfg_scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cfg Scale"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "is_pinned": {
+            "default": false,
+            "title": "Is Pinned",
+            "type": "boolean"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "sampler": {
+            "default": "",
+            "title": "Sampler",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "title": "PromptCreate",
+        "type": "object"
+      },
+      "PromptDetail": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "cfg_scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cfg Scale"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "is_pinned": {
+            "default": false,
+            "title": "Is Pinned",
+            "type": "boolean"
+          },
+          "last_used_at": {
+            "default": "",
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "sampler": {
+            "default": "",
+            "title": "Sampler",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "tags_detail": {
+            "items": {
+              "$ref": "#/components/schemas/TagRef"
+            },
+            "title": "Tags Detail",
+            "type": "array"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "usage_count": {
+            "default": 0,
+            "title": "Usage Count",
+            "type": "integer"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PromptDetail",
+        "type": "object"
+      },
+      "PromptListItem": {
+        "properties": {
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "is_pinned": {
+            "default": false,
+            "title": "Is Pinned",
+            "type": "boolean"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt_preview": {
+            "default": "",
+            "title": "Prompt Preview",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "sampler": {
+            "default": "",
+            "title": "Sampler",
+            "type": "string"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "usage_count": {
+            "default": 0,
+            "title": "Usage Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PromptListItem",
+        "type": "object"
+      },
+      "PromptListResponse": {
+        "properties": {
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/PromptListItem"
+            },
+            "title": "Prompts",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "PromptListResponse",
+        "type": "object"
+      },
+      "PromptUpdate": {
+        "properties": {
+          "cfg_scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cfg Scale"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "is_favorite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Favorite"
+          },
+          "is_pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Pinned"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "sampler": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampler"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "title": "PromptUpdate",
+        "type": "object"
+      },
+      "RunRequest": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "seed_override": {
+            "default": 0,
+            "title": "Seed Override",
+            "type": "integer"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "RunRequest",
+        "type": "object"
+      },
+      "RunTextRequest": {
+        "properties": {
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "portrait",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "quality": {
+            "default": "4K",
+            "title": "Quality",
+            "type": "string"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "source_prompt_id": {
+            "default": 0,
+            "title": "Source Prompt Id",
+            "type": "integer"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "RunTextRequest",
+        "type": "object"
+      },
+      "StatsResponse": {
+        "properties": {
+          "fragment_count": {
+            "default": 0,
+            "title": "Fragment Count",
+            "type": "integer"
+          },
+          "history_count": {
+            "default": 0,
+            "title": "History Count",
+            "type": "integer"
+          },
+          "job_count": {
+            "default": 0,
+            "title": "Job Count",
+            "type": "integer"
+          },
+          "prompt_count": {
+            "default": 0,
+            "title": "Prompt Count",
+            "type": "integer"
+          },
+          "top_tags": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Top Tags",
+            "type": "array"
+          }
+        },
+        "title": "StatsResponse",
+        "type": "object"
+      },
+      "TagCreate": {
+        "properties": {
+          "color": {
+            "default": "#5b8fb9",
+            "title": "Color",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TagCreate",
+        "type": "object"
+      },
+      "TagListResponse": {
+        "properties": {
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagRow"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "title": "TagListResponse",
+        "type": "object"
+      },
+      "TagRef": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ],
+        "title": "TagRef",
+        "type": "object"
+      },
+      "TagRow": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt_count": {
+            "default": 0,
+            "title": "Prompt Count",
+            "type": "integer"
+          },
+          "usage_count": {
+            "default": 0,
+            "title": "Usage Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ],
+        "title": "TagRow",
+        "type": "object"
+      },
+      "TagUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "TagUpdate",
+        "type": "object"
+      },
+      "TemplateCreate": {
+        "properties": {
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentRef"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "fragments"
+        ],
+        "title": "TemplateCreate",
+        "type": "object"
+      },
+      "TemplateUpdate": {
+        "properties": {
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "fragments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FragmentRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fragments"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "TemplateUpdate",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkflowCaps": {
+        "description": "工作流能接受哪些注入项；前端据此隐藏无效旋钮。\n\n默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。",
+        "properties": {
+          "negative": {
+            "default": true,
+            "title": "Negative",
+            "type": "boolean"
+          },
+          "orientation": {
+            "default": true,
+            "title": "Orientation",
+            "type": "boolean"
+          },
+          "prompt": {
+            "default": true,
+            "title": "Prompt",
+            "type": "boolean"
+          },
+          "quality": {
+            "default": true,
+            "title": "Quality",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkflowCaps",
+        "type": "object"
+      },
+      "WorkflowListResponse": {
+        "properties": {
+          "default": {
+            "default": "",
+            "title": "Default",
+            "type": "string"
+          },
+          "workflows": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowRow"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "title": "WorkflowListResponse",
+        "type": "object"
+      },
+      "WorkflowParams": {
+        "description": "画质 / 方向参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。",
+        "properties": {
+          "base_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Height"
+          },
+          "base_megapixels": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Megapixels"
+          },
+          "base_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Width"
+          },
+          "orientation_mode": {
+            "default": "none",
+            "title": "Orientation Mode",
+            "type": "string"
+          },
+          "quality_mode": {
+            "default": "none",
+            "title": "Quality Mode",
+            "type": "string"
+          }
+        },
+        "title": "WorkflowParams",
+        "type": "object"
+      },
+      "WorkflowRow": {
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/WorkflowCaps"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowParams"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "WorkflowRow",
+        "type": "object"
+      },
+      "app__routers__prompts__BatchImportRequest": {
+        "properties": {
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/PromptCreate"
+            },
+            "title": "Prompts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "prompts"
+        ],
+        "title": "BatchImportRequest",
+        "type": "object"
+      },
+      "app__routers__templates__BatchImportRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchImportItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BatchImportRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "提示词工作台 + ComfyUI 出图控制台",
+    "title": "Atelier",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/browser/image": {
+      "get": {
+        "description": "任意图片文件的原图",
+        "operationId": "browser_image_api_browser_image_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browser Image",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/browser/list": {
+      "get": {
+        "description": "列出目录内容。path 为空时返回盘符列表（作为浏览起点）。",
+        "operationId": "browser_list_api_browser_list_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browser List",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/browser/thumb": {
+      "get": {
+        "description": "任意图片文件的缩略图（带磁盘缓存，按 路径+mtime+尺寸 做键）",
+        "operationId": "browser_thumb_api_browser_thumb_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 300,
+              "title": "Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browser Thumb",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/categories": {
+      "get": {
+        "description": "获取分类列表（支持树形结构）",
+        "operationId": "list_categories_api_categories_get",
+        "parameters": [
+          {
+            "description": "父分类 ID，NULL=顶级分类",
+            "in": "query",
+            "name": "parent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "父分类 ID，NULL=顶级分类",
+              "title": "Parent Id"
+            }
+          },
+          {
+            "description": "是否返回树形结构",
+            "in": "query",
+            "name": "tree",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "是否返回树形结构",
+              "title": "Tree",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "计数维度: prompt=提示词数, image=图片数",
+            "in": "query",
+            "name": "count_scope",
+            "required": false,
+            "schema": {
+              "default": "prompt",
+              "description": "计数维度: prompt=提示词数, image=图片数",
+              "title": "Count Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryTreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Categories",
+        "tags": [
+          "分类"
+        ]
+      },
+      "post": {
+        "description": "创建分类",
+        "operationId": "create_category_api_categories_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Category",
+        "tags": [
+          "分类"
+        ]
+      }
+    },
+    "/api/categories/auto-classify": {
+      "post": {
+        "description": "自动为所有提示词分配类型分类（组合/单项/零散）。\n幂等：重分类前清除旧自动类型标签，并删除已废弃的「片段提示词」分类。",
+        "operationId": "auto_classify_all_api_categories_auto_classify_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auto Classify All",
+        "tags": [
+          "分类"
+        ]
+      }
+    },
+    "/api/categories/auto-classify/{prompt_id}": {
+      "post": {
+        "description": "为单条提示词自动分类",
+        "operationId": "auto_classify_one_api_categories_auto_classify__prompt_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auto Classify One",
+        "tags": [
+          "分类"
+        ]
+      }
+    },
+    "/api/categories/{cat_id}": {
+      "delete": {
+        "description": "删除分类（同时删除子分类和关联关系）",
+        "operationId": "delete_category_api_categories__cat_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Category",
+        "tags": [
+          "分类"
+        ]
+      },
+      "put": {
+        "description": "更新分类",
+        "operationId": "update_category_api_categories__cat_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Category",
+        "tags": [
+          "分类"
+        ]
+      }
+    },
+    "/api/categories/{cat_id}/prompts/{prompt_id}": {
+      "delete": {
+        "description": "从分类中移除提示词",
+        "operationId": "remove_prompt_from_category_api_categories__cat_id__prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Prompt From Category",
+        "tags": [
+          "分类"
+        ]
+      },
+      "post": {
+        "description": "将提示词添加到分类",
+        "operationId": "add_prompt_to_category_api_categories__cat_id__prompts__prompt_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Prompt To Category",
+        "tags": [
+          "分类"
+        ]
+      }
+    },
+    "/api/composer/batch_random_run": {
+      "post": {
+        "description": "批量随机组合碎片并跑图",
+        "operationId": "composer_batch_random_run_api_composer_batch_random_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRandomRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Composer Batch Random Run",
+        "tags": [
+          "组合创作"
+        ]
+      }
+    },
+    "/api/composer/fragments": {
+      "get": {
+        "description": "获取当前筛选提示词范围内的碎片列表，按类型分组",
+        "operationId": "get_fragments_api_composer_fragments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fragments",
+        "tags": [
+          "组合创作"
+        ]
+      }
+    },
+    "/api/composer/run": {
+      "post": {
+        "description": "组合提示词直接跑图（不保存到提示词库）",
+        "operationId": "composer_run_api_composer_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposerRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Composer Run",
+        "tags": [
+          "组合创作"
+        ]
+      }
+    },
+    "/api/editor/faceswap/batch": {
+      "post": {
+        "description": "批量图像编辑：目标图 × 参考图 → 逐条推送 ComfyUI",
+        "operationId": "faceswap_batch_api_editor_faceswap_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceswapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Faceswap Batch",
+        "tags": [
+          "批量图像编辑"
+        ]
+      }
+    },
+    "/api/editor/faceswap/mask": {
+      "post": {
+        "description": "保存前端涂抹出来的遮罩 PNG（白=重绘，黑=保留），返回可供注入的绝对路径。",
+        "operationId": "faceswap_save_mask_api_editor_faceswap_mask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaskSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Faceswap Save Mask",
+        "tags": [
+          "批量图像编辑"
+        ]
+      }
+    },
+    "/api/editor/faceswap/nodes": {
+      "post": {
+        "description": "探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2」映射",
+        "operationId": "faceswap_nodes_api_editor_faceswap_nodes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Faceswap Nodes",
+        "tags": [
+          "批量图像编辑"
+        ]
+      }
+    },
+    "/api/fragments": {
+      "get": {
+        "description": "列出碎片库，支持搜索和类型筛选",
+        "operationId": "list_fragments_api_fragments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FragmentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fragments",
+        "tags": [
+          "碎片库"
+        ]
+      },
+      "post": {
+        "description": "创建独立碎片",
+        "operationId": "create_fragment_api_fragments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FragmentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Fragment",
+        "tags": [
+          "碎片库"
+        ]
+      }
+    },
+    "/api/fragments/by_type": {
+      "get": {
+        "description": "按碎片类型分组（供 Composer 使用）",
+        "operationId": "get_fragments_by_type_api_fragments_by_type_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fragments By Type",
+        "tags": [
+          "碎片库"
+        ]
+      }
+    },
+    "/api/fragments/{fragment_id}": {
+      "delete": {
+        "description": "删除碎片",
+        "operationId": "delete_fragment_api_fragments__fragment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fragment_id",
+            "required": true,
+            "schema": {
+              "title": "Fragment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Fragment",
+        "tags": [
+          "碎片库"
+        ]
+      },
+      "put": {
+        "description": "更新碎片",
+        "operationId": "update_fragment_api_fragments__fragment_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fragment_id",
+            "required": true,
+            "schema": {
+              "title": "Fragment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FragmentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Fragment",
+        "tags": [
+          "碎片库"
+        ]
+      }
+    },
+    "/api/generate_missing": {
+      "post": {
+        "description": "为所有「没有生成过图片」的提示词统一批量出图。\n\n缺图判定（DB 关联）：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。\n每条提示词使用其自身保存的参数（steps/cfg/sampler/seed/分辨率），\n实际出图逻辑完全复用 batch_generate。",
+        "operationId": "generate_missing_api_generate_missing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateMissingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Missing",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/generate_missing/count": {
+      "get": {
+        "description": "仅统计缺图提示词数量，不触发出图（供前端二次确认使用）。",
+        "operationId": "generate_missing_count_api_generate_missing_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Generate Missing Count",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/generate_missing/list": {
+      "get": {
+        "description": "返回所有缺图提示词的概要清单，供前端审核模态框展示与勾选。",
+        "operationId": "generate_missing_list_api_generate_missing_list_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Generate Missing List",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/images": {
+      "delete": {
+        "operationId": "clear_history_api_images_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Clear History",
+        "tags": [
+          "图片"
+        ]
+      },
+      "get": {
+        "operationId": "list_history_api_images_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "favorite",
+            "required": false,
+            "schema": {
+              "title": "Favorite",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "newest",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag Ids",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orientation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Orientation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "missing",
+            "required": false,
+            "schema": {
+              "title": "Missing",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "多标签语义：all=交集, any=并集",
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "多标签语义：all=交集, any=并集",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "逗号分隔的历史 id，只取这些记录",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "逗号分隔的历史 id，只取这些记录",
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List History",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/backfill_taxonomy": {
+      "post": {
+        "description": "为所有带 prompt_id 且尚未分类的图片批量补齐来源提示词的分类/标签。",
+        "operationId": "backfill_taxonomy_api_images_backfill_taxonomy_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Backfill Taxonomy",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/batch_delete": {
+      "post": {
+        "operationId": "batch_delete_history_api_images_batch_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Delete History",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/cleanup_missing": {
+      "post": {
+        "description": "把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。\n\n默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。\n真正执行要同时传 `dry_run=false&confirm=true`。\n\n筛选参数与画廊一致，避免\"看着筛过的列表点清理，却清掉了范围外的记录\"。",
+        "operationId": "cleanup_missing_files_api_images_cleanup_missing_post",
+        "parameters": [
+          {
+            "description": "true=只预览将清理哪些，不写库",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "true=只预览将清理哪些，不写库",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "dry_run=false 时必须显式传 true",
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "dry_run=false 时必须显式传 true",
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "favorite",
+            "required": false,
+            "schema": {
+              "title": "Favorite",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag Ids",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orientation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Orientation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cleanup Missing Files",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/facets": {
+      "get": {
+        "description": "分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），\n返回 source / date(年-月) / model 各取值的数量。",
+        "operationId": "history_facets_api_images_facets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "favorite",
+            "required": false,
+            "schema": {
+              "title": "Favorite",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag Ids",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "missing",
+            "required": false,
+            "schema": {
+              "title": "Missing",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FacetsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History Facets",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/ids": {
+      "get": {
+        "description": "返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。",
+        "operationId": "history_ids_api_images_ids_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "favorite",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Favorite",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "newest",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag Ids",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orientation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Orientation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "missing",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Missing",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryIdsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History Ids",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/sync": {
+      "get": {
+        "operationId": "sync_history_api_images_sync_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync History",
+        "tags": [
+          "图片"
+        ]
+      },
+      "post": {
+        "operationId": "sync_history_api_images_sync_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync History",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}": {
+      "delete": {
+        "operationId": "delete_history_item_api_images__item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete History Item",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/categories/{cat_id}": {
+      "delete": {
+        "operationId": "remove_image_category_api_images__item_id__categories__cat_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Image Category",
+        "tags": [
+          "图片"
+        ]
+      },
+      "post": {
+        "operationId": "add_image_category_api_images__item_id__categories__cat_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cat_id",
+            "required": true,
+            "schema": {
+              "title": "Cat Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Image Category",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/download": {
+      "get": {
+        "operationId": "download_history_item_api_images__item_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download History Item",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/favorite": {
+      "post": {
+        "operationId": "toggle_favorite_api_images__item_id__favorite_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toggle Favorite",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/inherit": {
+      "post": {
+        "operationId": "inherit_image_taxonomy_api_images__item_id__inherit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inherit Image Taxonomy",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/process": {
+      "post": {
+        "description": "将历史图片作为输入，用指定工作流处理（如超分、重绘等）",
+        "operationId": "process_history_image_api_images__item_id__process_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process History Image",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/tags/{tag_id}": {
+      "delete": {
+        "operationId": "remove_image_tag_api_images__item_id__tags__tag_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Image Tag",
+        "tags": [
+          "图片"
+        ]
+      },
+      "post": {
+        "operationId": "add_image_tag_api_images__item_id__tags__tag_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Image Tag",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "operationId": "list_jobs_api_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Active",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/jobs/events": {
+      "get": {
+        "operationId": "job_events_api_jobs_events_get",
+        "parameters": [
+          {
+            "description": "逗号分隔的 job id；为空则订阅全部",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "逗号分隔的 job id；为空则订阅全部",
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Events",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/jobs/progress": {
+      "get": {
+        "operationId": "check_progress_api_jobs_progress_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "prompt_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Progress",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/jobs/stop_all": {
+      "post": {
+        "description": "停止所有进行中的任务（定向取消，不再 clear 整个队列）。",
+        "operationId": "stop_all_jobs_api_jobs_stop_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop All Jobs",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_detail_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Detail",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
+    "/api/media/image": {
+      "get": {
+        "operationId": "proxy_image_api_media_image_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subfolder",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Subfolder",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "output",
+              "title": "Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Proxy Image",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/media/thumbnail": {
+      "get": {
+        "operationId": "serve_thumbnail_api_media_thumbnail_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subfolder",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Subfolder",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "output",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 300,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "v",
+            "required": false,
+            "schema": {
+              "title": "V",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Thumbnail",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/media/thumbnail/clear": {
+      "post": {
+        "description": "清空所有缩略图缓存文件。下次访问时自动按新缓存键重新生成。",
+        "operationId": "clear_thumbnail_cache_api_media_thumbnail_clear_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Clear Thumbnail Cache",
+        "tags": [
+          "媒体与文件浏览"
+        ]
+      }
+    },
+    "/api/prompts": {
+      "get": {
+        "description": "搜索提示词列表，支持排序和分页",
+        "operationId": "list_prompts_api_prompts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "newest",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "多标签语义：all=交集, any=并集",
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "多标签语义：all=交集, any=并集",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Prompts",
+        "tags": [
+          "提示词"
+        ]
+      },
+      "post": {
+        "description": "新建提示词",
+        "operationId": "create_prompt_api_prompts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Prompt",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/batch_delete": {
+      "post": {
+        "description": "批量删除提示词（连带清理关联关系）",
+        "operationId": "batch_delete_prompts_api_prompts_batch_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Delete Prompts",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/batch_favorite": {
+      "post": {
+        "description": "批量设置/取消收藏",
+        "operationId": "batch_favorite_prompts_api_prompts_batch_favorite_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "favorite",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Favorite",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Favorite Prompts",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/export": {
+      "get": {
+        "description": "导出所有提示词为 JSON 文件",
+        "operationId": "export_prompts_api_prompts_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Export Prompts",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/full": {
+      "get": {
+        "description": "按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。\n\n列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全\n相同的筛选条件，避免\"看到的和替换的不是同一批\"。\n`ids` 用于\"只替换左侧已勾选的提示词\"——勾选可能跨页/跨筛选，不能再套筛选。",
+        "operationId": "list_prompts_full_api_prompts_full_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Prompts Full",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/import": {
+      "post": {
+        "description": "批量导入提示词（JSON 格式）\n\n修复：PromptCreate 含 prompts 表不存在的字段（如 auto_categorize），\n直接 model_dump 建库会报错，需先剥离；并复用单条创建的自动类型分类逻辑。",
+        "operationId": "import_prompts_api_prompts_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__prompts__BatchImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Prompts",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/position": {
+      "get": {
+        "description": "返回某条提示词在给定筛选/排序下的 0-based 全局序号，用于\"定位到已选\"跨页跳转。",
+        "operationId": "prompt_position_api_prompts_position_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "newest",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Prompt Position Api Prompts Position Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prompt Position",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}": {
+      "delete": {
+        "description": "删除提示词（清理关联的分类/标签，但保留生成历史）。\n\n以前这里会 `Image.delete()`：删一条提示词，它名下所有出图记录一起消失，\n而磁盘文件还在 —— 下次同步又把图扫回来，表现为\"删不干净 + 记录反复重建\"。\n现在改为只解除关联（prompt_id 置空），图片仍留在画廊。",
+        "operationId": "delete_prompt_api_prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Prompt",
+        "tags": [
+          "提示词"
+        ]
+      },
+      "get": {
+        "description": "获取单条提示词详情",
+        "operationId": "get_prompt_api_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt",
+        "tags": [
+          "提示词"
+        ]
+      },
+      "put": {
+        "description": "更新提示词（仅更新提供值的字段）",
+        "operationId": "update_prompt_api_prompts__prompt_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Prompt",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}/favorite": {
+      "post": {
+        "description": "切换提示词收藏状态",
+        "operationId": "toggle_favorite_api_prompts__prompt_id__favorite_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Toggle Favorite Api Prompts  Prompt Id  Favorite Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toggle Favorite",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}/history": {
+      "get": {
+        "description": "获取某条提示词的生成历史图片",
+        "operationId": "get_prompt_history_api_prompts__prompt_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Prompt History Api Prompts  Prompt Id  History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt History",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}/pin": {
+      "post": {
+        "description": "切换提示词置顶状态",
+        "operationId": "toggle_pin_api_prompts__prompt_id__pin_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Toggle Pin Api Prompts  Prompt Id  Pin Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toggle Pin",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}/rate": {
+      "post": {
+        "description": "设置提示词评级（1-5）",
+        "operationId": "rate_prompt_api_prompts__prompt_id__rate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rating",
+            "required": true,
+            "schema": {
+              "maximum": 5,
+              "minimum": 1,
+              "title": "Rating",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rate Prompt Api Prompts  Prompt Id  Rate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rate Prompt",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/prompts/{prompt_id}/use": {
+      "post": {
+        "description": "标记提示词已被使用（增加使用次数）",
+        "operationId": "mark_prompt_used_api_prompts__prompt_id__use_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Prompt Used Api Prompts  Prompt Id  Use Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Prompt Used",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
+    "/api/runs": {
+      "post": {
+        "description": "单图生成",
+        "operationId": "run_prompt_api_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Prompt",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/runs/batch": {
+      "post": {
+        "description": "批量 / 变体生成",
+        "operationId": "batch_generate_api_runs_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Generate",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/runs/text": {
+      "post": {
+        "description": "直接提交 prompt 文本生成，无需数据库中已有记录",
+        "operationId": "run_text_prompt_api_runs_text_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunTextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Text Prompt",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/system/config": {
+      "get": {
+        "description": "返回默认工作流和数据库路径等配置",
+        "operationId": "get_system_config_api_system_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Config",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/system/stats": {
+      "get": {
+        "description": "返回项目整体统计数据",
+        "operationId": "get_system_stats_api_system_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Stats",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/system/status": {
+      "get": {
+        "operationId": "get_system_status_api_system_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Status",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/tags": {
+      "get": {
+        "operationId": "list_tags_api_tags_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "按使用次数排序",
+            "in": "query",
+            "name": "popular",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "按使用次数排序",
+              "title": "Popular",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "计数维度: prompt=提示词数, image=图片数",
+            "in": "query",
+            "name": "count_scope",
+            "required": false,
+            "schema": {
+              "default": "prompt",
+              "description": "计数维度: prompt=提示词数, image=图片数",
+              "title": "Count Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tags",
+        "tags": [
+          "标签"
+        ]
+      },
+      "post": {
+        "operationId": "create_tag_api_tags_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Tag",
+        "tags": [
+          "标签"
+        ]
+      }
+    },
+    "/api/tags/popular": {
+      "get": {
+        "operationId": "get_popular_tags_api_tags_popular_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "计数维度: prompt=提示词数, image=图片数",
+            "in": "query",
+            "name": "count_scope",
+            "required": false,
+            "schema": {
+              "default": "prompt",
+              "description": "计数维度: prompt=提示词数, image=图片数",
+              "title": "Count Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Popular Tags",
+        "tags": [
+          "标签"
+        ]
+      }
+    },
+    "/api/tags/{tag_id}": {
+      "delete": {
+        "operationId": "delete_tag_api_tags__tag_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Tag",
+        "tags": [
+          "标签"
+        ]
+      },
+      "put": {
+        "operationId": "update_tag_api_tags__tag_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Tag",
+        "tags": [
+          "标签"
+        ]
+      }
+    },
+    "/api/tags/{tag_id}/prompts/{prompt_id}": {
+      "delete": {
+        "operationId": "remove_prompt_from_tag_api_tags__tag_id__prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Prompt From Tag",
+        "tags": [
+          "标签"
+        ]
+      },
+      "post": {
+        "operationId": "add_prompt_to_tag_api_tags__tag_id__prompts__prompt_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Prompt To Tag",
+        "tags": [
+          "标签"
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "description": "获取模板列表，可选按分类筛选",
+        "operationId": "list_templates_api_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Templates Api Templates Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "模板"
+        ]
+      },
+      "post": {
+        "description": "创建模板（自动保存碎片缓存快照）",
+        "operationId": "create_template_api_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Template",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/templates/as_items": {
+      "get": {
+        "description": "返回模板列表，格式兼容 prompt 列表前端渲染，支持排序",
+        "operationId": "list_templates_as_prompt_items_api_templates_as_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Order",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Templates As Prompt Items Api Templates As Items Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates As Prompt Items",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/templates/batch_import": {
+      "post": {
+        "description": "批量从 localStorage 导入旧模板（每个模板一个事务）。",
+        "operationId": "batch_import_templates_api_templates_batch_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__templates__BatchImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Import Templates",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/templates/migrate": {
+      "post": {
+        "description": "将浏览器 localStorage 中的模板一次性导入数据库",
+        "operationId": "migrate_templates_api_templates_migrate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Migrate Templates",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/templates/{template_id}": {
+      "delete": {
+        "description": "删除模板",
+        "operationId": "delete_template_api_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Template",
+        "tags": [
+          "模板"
+        ]
+      },
+      "get": {
+        "description": "获取单个模板详情（碎片实时解析）",
+        "operationId": "get_template_api_templates__template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Template Api Templates  Template Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "模板"
+        ]
+      },
+      "put": {
+        "description": "更新模板（名称/分类/碎片）",
+        "operationId": "update_template_api_templates__template_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Template",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/templates/{template_id}/resolve": {
+      "get": {
+        "description": "手动重新解析模板碎片（获取实时内容）",
+        "operationId": "resolve_template_api_templates__template_id__resolve_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Template Api Templates  Template Id  Resolve Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Template",
+        "tags": [
+          "模板"
+        ]
+      }
+    },
+    "/api/validate_workflow": {
+      "get": {
+        "description": "验证工作流文件是否合法（仅检查格式，不要求特定节点类型）",
+        "operationId": "validate_workflow_api_validate_workflow_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Workflow",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/workflows": {
+      "get": {
+        "description": "列出所有可用工作流",
+        "operationId": "list_workflows_api_workflows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "mtime",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workflows",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    }
+  }
+}

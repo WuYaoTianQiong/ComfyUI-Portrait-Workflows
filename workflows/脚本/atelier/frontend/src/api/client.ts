@@ -1,7 +1,5 @@
 /** 极薄的请求封装：统一错误处理与查询参数拼装。 */
 
-import type { HistoryItem } from './types'
-
 export type QueryValue = string | number | boolean | null | undefined
 export type QueryParams = Record<string, QueryValue>
 
@@ -52,8 +50,19 @@ export function apiDelete<T>(path: string, params: QueryParams = {}): Promise<T>
   return request<T>(path + buildQuery(params), { method: 'DELETE' })
 }
 
+/**
+ * 图片地址的入参：只要求有 filename，其余可缺可 null。
+ * 宽进（`string | null`）是因为任务快照里的 `images` 项与历史记录都靠它拼 URL，
+ * 两边的可空性不完全一致，硬要求 `string` 只会让调用点堆 `?? undefined`。
+ */
+interface ImageRef {
+  filename: string
+  subfolder?: string | null
+  img_type?: string | null
+}
+
 /** 图片访问地址（缩略图/原图都走这里，避免各处手拼 query 串）。 */
-export function thumbnailUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 'img_type' | 'id'>, size = 600): string {
+export function thumbnailUrl(item: ImageRef & { id?: number }, size = 600): string {
   return (
     '/api/media/thumbnail' +
     buildQuery({
@@ -67,7 +76,7 @@ export function thumbnailUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 
 }
 
 /** 原图地址 */
-export function viewUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 'img_type'>): string {
+export function viewUrl(item: ImageRef): string {
   return (
     '/api/media/image' +
     buildQuery({

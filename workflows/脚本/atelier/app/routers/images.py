@@ -664,7 +664,10 @@ def history_ids(
 # 同步
 # ---------------------------------------------------------------------------
 
-@router.api_route("/images/sync", methods=["GET", "POST"])
+# 两个方法写成两个装饰器（而不是 api_route(methods=[...])）：
+# 多方法路由会让 FastAPI 生成重复的 operationId，OpenAPI 导出时会告警。
+@router.get("/images/sync")
+@router.post("/images/sync")
 def sync_history(page_size: int = Query(500)):
     added = _sync_comfyui_history()
     added += _sync_disk_orphans()
