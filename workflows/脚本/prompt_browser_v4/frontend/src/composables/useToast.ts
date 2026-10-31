@@ -1,5 +1,7 @@
 import { ref } from 'vue'
 
+import { getMessageApi } from '../utils/naive'
+
 export type ToastKind = 'info' | 'success' | 'error'
 
 export interface ToastMessage {
@@ -19,6 +21,15 @@ let seq = 0
 
 export function useToast() {
   function push(text: string, kind: ToastKind = 'info', ttl = 4000) {
+    // 生产环境由 Naive Message 统一反馈；测试/未初始化时用内置 ToastHost 兜底
+    const message = getMessageApi()
+    if (message) {
+      const options = { duration: ttl }
+      if (kind === 'success') message.success(text, options)
+      else if (kind === 'error') message.error(text, options)
+      else message.info(text, options)
+      return
+    }
     const id = ++seq
     toasts.value = [...toasts.value, { id, text, kind }]
     setTimeout(() => {
