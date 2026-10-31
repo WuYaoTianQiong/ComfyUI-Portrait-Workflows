@@ -50,10 +50,12 @@ desktop.ini
 *.bak
 *.bak_*
 *.log
-run_*.py
-fix_*.py
-convert_*.py
-submit_*.py
+# 一次性脚本只忽略仓库根目录下的：不带 / 的 run_*.py 会连 tools/ 与 tests/ 里的
+# 正式脚本一起吞掉（历史事故：tests/e2e/run_e2e.py、tools/run_prompts.py 从未入库）
+/run_*.py
+/fix_*.py
+/convert_*.py
+/submit_*.py
 
 # ComfyUI temp
 comfyui.log
