@@ -5,9 +5,11 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiGet, apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
-import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
+import { useSettings } from '../composables/useSettings'
+import { useWorkflowCaps } from '../composables/useWorkflowCaps'
+import WorkflowParams from './WorkflowParams.vue'
 import { useGenerate } from '../composables/useGenerate'
-import { useWorkflows } from '../composables/useWorkflows'
+import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useToast } from '../composables/useToast'
 
 /**
@@ -33,7 +35,8 @@ interface MissingItem {
 }
 
 const { workflowPath, quality, orientation } = useSettings()
-const { workflows } = useWorkflows()
+const { workflows, allWorkflows } = useWorkflows()
+const { caps, params } = useWorkflowCaps(workflowPath, allWorkflows)
 const { track } = useGenerate()
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -92,8 +95,10 @@ async function submit() {
     }>('/api/generate_missing', {
       prompt_ids: Array.from(selected.value),
       workflow_path: workflowPath.value,
-      quality: quality.value,
-      orientation: orientation.value,
+      // 自定义工作流不在后端磁盘上，内容必须一起带过去
+      workflow_content: customWorkflowContent(workflowPath.value),
+      quality: caps.value.quality ? quality.value : '4K',
+      orientation: caps.value.orientation ? orientation.value : 'keep',
     })
     if (!result.job_id) {
       toast.info(result.message || '没有需要补跑的条目')
@@ -129,16 +134,13 @@ async function submit() {
           <option value="">选择工作流…</option>
           <option v-for="wf in workflows" :key="wf.path" :value="wf.path">{{ wf.name }}</option>
         </select>
-        <select v-model="quality" class="mini-select">
-          <option v-for="q in QUALITY_OPTIONS" :key="q" :value="q">{{ q }}</option>
-        </select>
-        <button
-          class="btn btn-sm"
-          :title="orientation === 'portrait' ? '竖图' : '横图'"
-          @click="orientation = orientation === 'portrait' ? 'landscape' : 'portrait'"
-        >
-          {{ orientation === 'portrait' ? '📱 竖' : '🖥️ 横' }}
-        </button>
+        <WorkflowParams
+          v-model:quality="quality"
+          v-model:orientation="orientation"
+          :workflow-path="workflowPath"
+          :caps="caps"
+          :params="params"
+        />
       </div>
 
       <div class="list">
@@ -204,10 +206,6 @@ async function submit() {
 
 .wf-select {
   width: 230px;
-}
-
-.mini-select {
-  width: 74px;
 }
 
 .list {

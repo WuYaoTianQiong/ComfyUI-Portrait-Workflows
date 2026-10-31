@@ -5,6 +5,8 @@ import { apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowCaps } from '../composables/useWorkflowCaps'
+import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useToast } from '../composables/useToast'
 
 /**
@@ -57,7 +59,15 @@ function saveLog() {
 }
 
 const { workflowPath, quality, orientation } = useSettings()
+const { allWorkflows } = useWorkflows()
+const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
 const toast = useToast()
+
+/** 面板里只展示当前档位对应的真实尺寸/MP，不支持画质时写明"由工作流固定"。 */
+const qualityLabel = computed(() => {
+  if (!caps.value.quality) return '由工作流固定'
+  return qualityOptions.value.find((o) => o.value === quality.value)?.label ?? quality.value
+})
 
 /** 变体张数（1~4）与种子（0 = 随机）。 */
 const variantCount = ref(2)
@@ -100,9 +110,12 @@ async function runTrial() {
       prompt: props.prompt,
       negative_prompt: props.negativePrompt,
       workflow_path: workflowPath.value,
-      orientation: orientation.value,
-      quality: quality.value,
+      workflow_content: customWorkflowContent(workflowPath.value),
+      orientation: caps.value.orientation ? orientation.value : 'keep',
+      quality: caps.value.quality ? quality.value : '4K',
       seed: seed.value,
+      // 与「改文本跑」一致：出图仍关联回当前提示词
+      source_prompt_id: props.promptId ?? 0,
     })
     record('trial', seed.value, result.job_id ?? null, 1)
     toast.success('已提交试跑，可在「任务」页看进度')
@@ -129,9 +142,11 @@ async function runVariants() {
         prompt: props.prompt,
         negative_prompt: props.negativePrompt,
         workflow_path: workflowPath.value,
-        orientation: orientation.value,
-        quality: quality.value,
+        workflow_content: customWorkflowContent(workflowPath.value),
+        orientation: caps.value.orientation ? orientation.value : 'keep',
+        quality: caps.value.quality ? quality.value : '4K',
         seed: useSeed,
+        source_prompt_id: props.promptId ?? 0,
       }).then((result) => {
         record('variant', useSeed, result.job_id ?? null, 1)
         return result
@@ -182,14 +197,27 @@ function clearLog() {
       </div>
 
       <div class="actions">
-        <button class="btn btn-sm primary" :disabled="busy || !canRun" @click="runTrial">
+        <button
+          class="btn btn-sm primary"
+          :class="{ loading: busy }"
+          :disabled="busy || !canRun"
+          @click="runTrial"
+        >
           {{ busy ? '提交中…' : '🧪 试跑一张' }}
         </button>
-        <button class="btn btn-sm" :disabled="busy || !canRun" @click="runVariants">
-          生成 {{ variantCount }} 张变体
+        <button
+          class="btn btn-sm"
+          :class="{ loading: busy }"
+          :disabled="busy || !canRun"
+          @click="runVariants"
+        >
+          {{ busy ? '提交中…' : '生成 ' + variantCount + ' 张变体' }}
         </button>
         <span class="spacer" />
-        <span class="hint">画质 {{ quality }} · {{ orientation === 'portrait' ? '竖图' : '横图' }}</span>
+        <span class="hint">
+          画质 {{ qualityLabel }} ·
+          {{ caps.orientation ? (orientation === 'portrait' ? '竖图' : '横图') : '方向固定' }}
+        </span>
       </div>
 
       <div class="log-head">

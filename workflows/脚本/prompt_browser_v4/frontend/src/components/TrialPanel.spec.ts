@@ -8,7 +8,9 @@ import { useSettings } from '../composables/useSettings'
 
 vi.mock('../api/client', () => ({
   apiPost: vi.fn(async () => ({ success: true, job_id: 42 })),
-  apiGet: vi.fn(),
+  apiGet: vi.fn(async (path: string) =>
+    path.includes('/api/workflows') ? { workflows: [], default: '' } : {},
+  ),
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
 }))

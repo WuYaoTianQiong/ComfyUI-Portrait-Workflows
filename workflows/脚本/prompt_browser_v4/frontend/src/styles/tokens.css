@@ -100,10 +100,41 @@ select:focus {
   background: var(--panel-3);
 }
 
+/* 之前没有这条：禁用的按钮看起来和可点的一样 */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:disabled:hover {
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+
 .btn.active {
   border-color: var(--primary);
   background: var(--primary-soft);
   color: var(--primary);
+}
+
+/* 提交/生成中的按钮：加一个小转圈，避免"点了没反应" */
+.btn.loading::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  vertical-align: -1px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-sm {
