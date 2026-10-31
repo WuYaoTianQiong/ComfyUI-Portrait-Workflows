@@ -873,7 +873,7 @@ def inject_input_image(
     else:
         # 生成唯一文件名，避免覆盖
         ts = int(time.time() * 1000)
-        dst_name = f"pb_process_{ts}_{src.name}"
+        dst_name = f"atelier_process_{ts}_{src.name}"
         dst_path = Path(dest_dir) / dst_name
         shutil.copy2(str(src), str(dst_path))
 

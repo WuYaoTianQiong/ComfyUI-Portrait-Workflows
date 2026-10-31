@@ -146,9 +146,12 @@ def _collect_sources(ids: list[int], paths: list[str], label: str) -> list[dict]
 
 
 def _dest_name(src: dict) -> str:
-    """拷进 ComfyUI input 目录时用的稳定文件名：同一条素材只拷一份，不同素材不撞名。"""
+    """拷进 ComfyUI input 目录时用的稳定文件名：同一条素材只拷一份，不同素材不撞名。
+
+    前缀是 `atelier_`（不是历史遗留的 `pb_`）：派生文件也要能一眼看出归属。
+    """
     h = hashlib.sha1(str(src["path"]).lower().encode("utf-8")).hexdigest()[:10]
-    return f"pb_fs_{h}_{src['name']}"
+    return f"atelier_fs_{h}_{src['name']}"
 
 
 def output_prefix(job_id, labels: list[str], max_label: int = 24) -> str:
@@ -217,7 +220,7 @@ def _compose_masked_target(target_path: Path, mask_path: Path, dest_dir: Path) -
     digest = hashlib.sha1(
         f"{target_path}|{mask_path}|{target_path.stat().st_mtime}|{mask_path.stat().st_mtime}".encode("utf-8")
     ).hexdigest()[:12]
-    dest = Path(dest_dir) / f"pb_edit_{digest}.png"
+    dest = Path(dest_dir) / f"atelier_edit_{digest}.png"
     output.save(dest, "PNG")
     return dest
 
@@ -515,7 +518,7 @@ def faceswap_batch(req: FaceswapRequest):
                         digest = hashlib.sha1(
                             f"{src['path']}|{mask_path}".encode("utf-8")
                         ).hexdigest()[:10]
-                        dest_name = f"pb_fs_{digest}_{src['name']}"
+                        dest_name = f"atelier_fs_{digest}_{src['name']}"
                 inject_input_image(api_wf, str(source_path), input_dir,
                                    node_id=node_id, dest_name=dest_name)
             # 输出名带「任务号 + 组合」，配对关系一眼可查。
