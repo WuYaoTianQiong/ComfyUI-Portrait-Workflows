@@ -17,8 +17,8 @@ from shared import FRAGMENT_TYPES, parse_prompt_fragments
 router = APIRouter(tags=["组合创作"])
 
 
-def _get_fragment_data(search="", category_id=None, tag_ids=None):
-    """获取碎片数据，按类型分组，供随机组合使用"""
+def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=""):
+    """获取碎片数据，按类型分组，供随机组合 / 批量替换使用"""
     query = Prompt.select()
 
     if search:
@@ -47,8 +47,11 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
             )
 
     rows = list(query.order_by(Prompt.id.desc()))
+    keyword = (search or "").strip().lower()
 
-    grouped = {t: [] for t in FRAGMENT_TYPES}
+    # 只请求某一类时不要把所有类型的碎片都算一遍（批量替换只需要候选列表）
+    only = fragment_type if fragment_type in FRAGMENT_TYPES else ""
+    grouped = {only: []} if only else {t: [] for t in FRAGMENT_TYPES}
     seen_content = {}
 
     def content_key(ftype, content):
@@ -59,6 +62,10 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
         for f in fragments:
             ftype = f["type"]
             if ftype not in grouped:
+                continue
+            # 关键词必须命中碎片正文：只命来源提示词的话，用户搜一个词却看到
+            # 该提示词的全部碎片，检索等于没生效
+            if keyword and keyword not in (f["content"] or "").lower():
                 continue
             ck = content_key(ftype, f["content"])
             if ck in seen_content:
@@ -90,6 +97,8 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None):
             ft = r.fragment_type
             if ft not in grouped:
                 continue
+            if keyword and keyword not in (r.content or "").lower() and keyword not in (r.name or "").lower():
+                continue
             ck = content_key(ft, r.content)
             if ck in seen_content:
                 continue
@@ -117,9 +126,10 @@ def get_fragments(
     search: str = Query(""),
     category_id: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
+    fragment_type: str = Query(""),
 ):
     """获取当前筛选提示词范围内的碎片列表，按类型分组"""
-    grouped = _get_fragment_data(search, category_id, tag_ids)
+    grouped = _get_fragment_data(search, category_id, tag_ids, fragment_type)
     total_fragments = sum(len(v) for v in grouped.values())
     return {
         "grouped": grouped,
@@ -199,6 +209,7 @@ class BatchRandomRunRequest(BaseModel):
     category_id: int | None = None
     tag_ids: str | None = None
     fixed_fragments: dict | None = None  # {类型名: 碎片内容, ...} 固定碎片，不参与随机
+    composed_prompts: list[str] | None = None  # 前端预览确认后的组合文本；有则按原样提交
 
 
 @router.post("/composer/batch_random_run")
@@ -213,53 +224,72 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
         # 获取碎片数据
         grouped = _get_fragment_data(req.search, req.category_id, req.tag_ids)
 
-        # 检查每个类型是否有碎片
-        for ft in FRAGMENT_TYPES:
-            frags = grouped.get(ft, [])
-            if not frags:
-                raise HTTPException(400, f"碎片类型「{ft}」没有可用碎片，请先添加")
+        # 检查每个类型是否有碎片（仅后端随机时需要；前端已给组合文本则跳过）
+        provided = [p.strip() for p in (req.composed_prompts or []) if p and p.strip()][:count]
+        if not provided:
+            for ft in FRAGMENT_TYPES:
+                frags = grouped.get(ft, [])
+                if not frags:
+                    raise HTTPException(400, f"碎片类型「{ft}」没有可用碎片，请先添加")
 
-        # 生成随机组合
+        # 生成组合：前端预览确认过的直接按原样提交；否则后端随机
         fixed = req.fixed_fragments or {}
         job_items = []
-        for i in range(count):
-            # 从每个类型中随机选一个（固定类型直接用固定内容）
-            selection = {}
-            composed_parts = []
-            for ft in FRAGMENT_TYPES:
-                if ft in fixed and fixed[ft]:
-                    # 固定类型：直接使用固定内容
-                    selection[ft] = fixed[ft]
-                    composed_parts.append(f"【{ft}】\n{fixed[ft]}")
-                else:
-                    # 随机类型：从碎片池中随机选
-                    frags = grouped[ft]
-                    pick = frags[random.randint(0, len(frags) - 1)]
-                    selection[ft] = pick["content"]
-                    composed_parts.append(f"【{ft}】\n{pick['content']}")
-
-            composed_prompt = "\n\n".join(composed_parts)
-            # 每个任务独立随机种子，避免批量时所有图用同一个种子
-            task_seed = random.randint(0, 2**32 - 1)
-
-            job_items.append({
-                "prompt_id": 0,
-                "seed": task_seed,
-                "prompt_preview": composed_prompt[:120],
-                "prompt_params": json.dumps({
-                    "prompt": composed_prompt,
-                    "negative_prompt": req.negative_prompt,
-                    "source": "composer_random",
-                    "selection": selection,
+        if provided:
+            for composed_prompt in provided:
+                task_seed = random.randint(0, 2**32 - 1)
+                job_items.append({
+                    "prompt_id": 0,
                     "seed": task_seed,
-                    "fixed_types": list(fixed.keys()),
-                }, ensure_ascii=False),
-            })
+                    "prompt_preview": composed_prompt[:120],
+                    "prompt_params": json.dumps({
+                        "prompt": composed_prompt,
+                        "negative_prompt": req.negative_prompt,
+                        "source": "composer_random",
+                        "selection": {},
+                        "seed": task_seed,
+                        "fixed_types": list(fixed.keys()),
+                    }, ensure_ascii=False),
+                })
+        else:
+            for i in range(count):
+                # 从每个类型中随机选一个（固定类型直接用固定内容）
+                selection = {}
+                composed_parts = []
+                for ft in FRAGMENT_TYPES:
+                    if ft in fixed and fixed[ft]:
+                        # 固定类型：直接使用固定内容
+                        selection[ft] = fixed[ft]
+                        composed_parts.append(f"【{ft}】\n{fixed[ft]}")
+                    else:
+                        # 随机类型：从碎片池中随机选
+                        frags = grouped[ft]
+                        pick = frags[random.randint(0, len(frags) - 1)]
+                        selection[ft] = pick["content"]
+                        composed_parts.append(f"【{ft}】\n{pick['content']}")
+
+                composed_prompt = "\n\n".join(composed_parts)
+                # 每个任务独立随机种子，避免批量时所有图用同一个种子
+                task_seed = random.randint(0, 2**32 - 1)
+
+                job_items.append({
+                    "prompt_id": 0,
+                    "seed": task_seed,
+                    "prompt_preview": composed_prompt[:120],
+                    "prompt_params": json.dumps({
+                        "prompt": composed_prompt,
+                        "negative_prompt": req.negative_prompt,
+                        "source": "composer_random",
+                        "selection": selection,
+                        "seed": task_seed,
+                        "fixed_types": list(fixed.keys()),
+                    }, ensure_ascii=False),
+                })
 
         # 创建任务
         job_id = create_job(
-            "batch" if count > 1 else "single",
-            f"批量随机组合 ({count} 组)",
+            "batch" if len(job_items) > 1 else "single",
+            f"批量随机组合 ({len(job_items)} 组)",
             job_items,
             workflow_path,
             req.orientation,

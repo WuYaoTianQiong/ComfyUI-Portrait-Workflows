@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
+import { useRouter } from 'vue-router'
 import TagCloud from '../components/TagCloud.vue'
+import ComposerResultModal from '../components/ComposerResultModal.vue'
+import WorkflowPicker from '../components/WorkflowPicker.vue'
+import FragmentDetailModal from '../components/FragmentDetailModal.vue'
+import { flattenCategories } from '../utils/categories'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
-import { QUALITY_OPTIONS, useSettings } from '../composables/useSettings'
+import { useSettings } from '../composables/useSettings'
+import { useWorkflowCaps } from '../composables/useWorkflowCaps'
+import WorkflowParams from '../components/WorkflowParams.vue'
 import { useGenerate } from '../composables/useGenerate'
-import { useWorkflows } from '../composables/useWorkflows'
+import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { FRAGMENT_TYPES } from '../constants'
 import { useToast } from '../composables/useToast'
+import { readSession, writeSession } from '../composables/useSessionState'
+import { confirmDialog, inputDialog } from '../utils/naive'
 import type { CategoryNode, TagRow } from '../api/types'
 
 interface FragmentItem {
@@ -24,48 +34,50 @@ interface FragmentItem {
   dup_count: number
 }
 
-const { workflowPath, quality, orientation } = useSettings()
-const { busy: generating, job: activeJob, error: generateError, track } = useGenerate()
-const { workflows } = useWorkflows()
+// 组合器有自己的一份工作流，不跟提示词页/换脸页联动
+const { composerWorkflowPath, quality, orientation } = useSettings()
+const workflowPath = composerWorkflowPath
+const { busy: generating, job: activeJob, error: generateError, submitAndTrack } = useGenerate()
+const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
+/** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
+const { caps, params } = useWorkflowCaps(workflowPath, allWorkflows)
+const router = useRouter()
+const resultOpen = ref(false)
+const resultTab = ref<'canvas' | 'random' | 'job'>('canvas')
 
-/**
- * 布局模式：列视图（左右三栏）/ 行视图（上下滚动）。
- *
- * 旧版（static/composer-core.js 的 toggleComposerView）就有这个切换，
- * 而且很多人更习惯行视图：碎片池能铺满屏幕宽，一屏能看到更多碎片，
- * 画布在下面不用侧着身子看。重构时只留了列视图 —— 这次补回来，默认行视图。
- */
-/**
- * 读上次选的布局模式。
- *
- * localStorage 在隐私模式 / 某些测试环境下可能不可用或不抛异常但没有 getItem，
- * 所以这里包一层 —— 读不到就用默认的「行视图」。
- */
-function readStoredViewMode(): 'column' | 'list' {
-  try {
-    return (localStorage.getItem('pb.composerView') as 'column' | 'list' | null) ?? 'list'
-  } catch {
-    return 'list'
-  }
+/** 会话状态：检索条件、负向提示词、随机组数、各列已加载条数。 */
+interface ComposerSession {
+  search: string
+  categoryId: number | null
+  tagIds: number[]
+  tagMatch: 'all' | 'any'
+  negativePrompt: string
+  randomCount: number
+  limits: Record<string, number>
 }
-const viewMode = ref<'column' | 'list'>(readStoredViewMode())
 
-function toggleViewMode() {
-  viewMode.value = viewMode.value === 'list' ? 'column' : 'list'
-  try {
-    localStorage.setItem('pb.composerView', viewMode.value)
-  } catch {
-    // 存不了就算了，本次会话内仍然生效
-  }
-}
+const SESSION_KEY = 'pb.session.composer'
+const savedSession = readSession<ComposerSession>(SESSION_KEY, {
+  search: '',
+  categoryId: null,
+  tagIds: [],
+  tagMatch: 'all',
+  negativePrompt: '',
+  randomCount: 1,
+  limits: {},
+})
+
+/** 检索条常驻在顶部（旧版就是常驻的 25px 条），标签放抽屉。 */
+const search = ref(savedSession.search)
+const categoryId = ref<number | null>(savedSession.categoryId)
+const tagIds = ref<number[]>(savedSession.tagIds)
+const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
+const filtersOpen = ref(false)
+const settingsOpen = ref(false)
+
 const toast = useToast()
 
 // ---------------- 碎片池 ----------------
-
-const search = ref('')
-const categoryId = ref<number | null>(null)
-const tagIds = ref<number[]>([])
-const tagMatch = ref<'all' | 'any'>('all')
 
 const { data: fragmentData, isFetching } = useQuery<{
   grouped: Record<string, FragmentItem[]>
@@ -102,42 +114,86 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
   queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'prompt' }),
 })
 
-const flatCats = computed(() => {
-  const out: Array<CategoryNode & { depth: number }> = []
-  const walk = (nodes: CategoryNode[], depth: number) => {
-    nodes.forEach((node) => {
-      out.push({ ...node, depth })
-      if (node.children?.length) walk(node.children, depth + 1)
-    })
-  }
-  walk(catData.value?.categories ?? [], 0)
-  return out
-})
-
-/** 折叠状态：默认全部展开，点标题收起。 */
-const collapsed = ref<Record<string, boolean>>({})
-function toggleGroup(type: string) {
-  collapsed.value = { ...collapsed.value, [type]: !collapsed.value[type] }
-}
+const flatCats = computed(() => flattenCategories(catData.value?.categories))
 
 /**
- * 每组默认只渲染 30 个。
+ * 每列分批加载：首屏 40 个，滚到列底自动再加载 40 个。
  *
- * 线上碎片池有 2100+ 个（提示词碎片 × 8 类型 + 碎片库合并去重），
- * 全部铺开会产生 6000+ 个 DOM 节点，首屏和滚动都会明显发卡。
- * 想看全部再点"展开"。
+ * 线上碎片池有 2100+ 个（8 类各 230–300），8 列全铺会产生 6000+ DOM 节点，
+ * 首屏会卡；旧版要求滚到列底再手动点「展开全部」，既难发现又会一次性铺满。
  */
-const PAGE_SIZE = 30
-const expanded = ref<Record<string, boolean>>({})
+const PAGE_SIZE = 40
+/** 每列已加载条数，缺省 40；触底时按 PAGE_SIZE 递增。 */
+const limits = ref<Record<string, number>>(savedSession.limits)
+
+function limitOf(type: string): number {
+  return limits.value[type] ?? PAGE_SIZE
+}
 
 function visibleFrags(type: string): FragmentItem[] {
-  const list = grouped.value[type] ?? []
-  return expanded.value[type] ? list : list.slice(0, PAGE_SIZE)
+  return (grouped.value[type] ?? []).slice(0, limitOf(type))
 }
 
-function expandGroup(type: string) {
-  expanded.value = { ...expanded.value, [type]: true }
+function hasMore(type: string): boolean {
+  return (grouped.value[type] ?? []).length > limitOf(type)
 }
+
+function loadMore(type: string) {
+  if (!hasMore(type)) return
+  limits.value = { ...limits.value, [type]: limitOf(type) + PAGE_SIZE }
+}
+
+/** 筛选条件变了就从第一批重新开始，免得沿用上一轮很深的加载量。 */
+watch(
+  () => [
+    search.value,
+    categoryId.value,
+    tagIds.value.slice().sort((a, b) => a - b).join(','),
+  ].join('|'),
+  () => {
+    limits.value = {}
+  },
+)
+
+/**
+ * 触底自动加载：列底那个「加载更多」按钮同时是 observer 的哨兵。
+ * 按钮保留下来当兜底（observer 不可用 / 没滚到位时仍可手动点）。
+ */
+const moreEls = new Map<string, HTMLElement>()
+let moreObserver: IntersectionObserver | null = null
+
+function setMoreEl(type: string, el: Element | ComponentPublicInstance | null) {
+  const prev = moreEls.get(type)
+  if (prev) moreObserver?.unobserve(prev)
+  if (el instanceof HTMLElement) {
+    moreEls.set(type, el)
+    moreObserver?.observe(el)
+  } else {
+    moreEls.delete(type)
+  }
+}
+
+onMounted(() => {
+  // happy-dom / 老浏览器没有 IntersectionObserver：保留手动按钮即可
+  if (typeof IntersectionObserver === 'undefined') return
+  moreObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const type = (entry.target as HTMLElement).dataset.type
+        if (entry.isIntersecting && type) loadMore(type)
+      }
+    },
+    // 提前一屏左右触发，滚动到底时下一批通常已经在了
+    { rootMargin: '160px' },
+  )
+  for (const el of moreEls.values()) moreObserver.observe(el)
+})
+
+onBeforeUnmount(() => {
+  moreObserver?.disconnect()
+  moreObserver = null
+  moreEls.clear()
+})
 
 // ---------------- 画布 ----------------
 
@@ -148,8 +204,38 @@ interface CanvasSlot {
   source: 'prompt' | 'library' | 'custom'
 }
 
-/** 每个类型一个槽位；同类型只能有一个碎片（这是【类型】格式的约束）。 */
-const canvas = ref<Record<string, CanvasSlot>>({})
+/** 每个类型一列；同类型只能有一个碎片（这是【类型】格式的约束）。 */
+const CANVAS_KEY = 'pb.composerCanvas'
+
+function readCanvas(): Record<string, CanvasSlot> {
+  try {
+    const raw = localStorage.getItem(CANVAS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as Record<string, CanvasSlot>) : {}
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, CanvasSlot> = {}
+    for (const [type, slot] of Object.entries(parsed)) {
+      if ((FRAGMENT_TYPES as readonly string[]).includes(type) && slot?.content) out[type] = slot
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+const canvas = ref<Record<string, CanvasSlot>>(readCanvas())
+
+// 刷新/切页不再丢画布（旧版把选中状态存进 UiState，重构时漏了）
+watch(
+  canvas,
+  (value: Record<string, CanvasSlot>) => {
+    try {
+      localStorage.setItem(CANVAS_KEY, JSON.stringify(value))
+    } catch {
+      /* 隐私模式下忽略 */
+    }
+  },
+  { deep: true },
+)
 
 const canvasTypes = computed(() => FRAGMENT_TYPES.filter((t) => canvas.value[t]))
 const canvasCount = computed(() => canvasTypes.value.length)
@@ -197,18 +283,21 @@ function applyCustom() {
 }
 
 /** 把槽位里的自定义碎片存进碎片库（之后就能像别的碎片一样用）。 */
-async function saveCustomToLibrary(type: string) {
-  const slot = canvas.value[type]
-  if (!slot || !slot.content.trim()) return
+async function saveCustomToLibrary() {
+  const type = customType.value
+  const text = customText.value.trim()
+  if (!text || !type) return
   try {
     await apiPost('/api/fragments', {
       name: '',
       fragment_type: type,
-      content: slot.content.trim(),
+      content: text,
       tags: '',
     })
     toast.success(`已存进碎片库（${type}）`)
+    // 管理页的碎片列表是另一个缓存根，两边都要刷
     queryClient.invalidateQueries({ queryKey: ['composer-fragments'] })
+    queryClient.invalidateQueries({ queryKey: ['fragments'] })
   } catch (e) {
     toast.error(`存库失败：${e instanceof Error ? e.message : String(e)}`)
   }
@@ -240,7 +329,12 @@ async function saveAsPrompt() {
     toast.error('画布是空的')
     return
   }
-  const name = prompt('提示词名称')
+  const name = await inputDialog({
+    title: '存为提示词',
+    placeholder: '提示词名称',
+    positiveText: '保存',
+    negativeText: '取消',
+  })
   if (!name) return
   try {
     await apiPost('/api/prompts', {
@@ -251,6 +345,9 @@ async function saveAsPrompt() {
     })
     toast.success('已存进提示词库')
     queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    // 新提示词会带标签，标签云与分类计数都会变
+    queryClient.invalidateQueries({ queryKey: ['tags'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
   } catch (e) {
     toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
   }
@@ -262,22 +359,271 @@ function unpick(type: string) {
   canvas.value = next
 }
 
-function clearCanvas() {
-  canvas.value = {}
-}
-
-const negativePrompt = ref('')
+const negativePrompt = ref(savedSession.negativePrompt)
 
 // ---------------- 跑图 ----------------
 
 /** 画布上的碎片作为"固定碎片"，其余类型由后端随机填充。 */
-const randomCount = ref(4)
+const randomCount = ref(savedSession.randomCount)
 
-function fixedFragments(): Record<string, string> {
-  const fixed: Record<string, string> = {}
-  for (const type of canvasTypes.value) fixed[type] = canvas.value[type].content
-  return fixed
+watch(
+  [search, categoryId, tagIds, tagMatch, negativePrompt, randomCount, limits],
+  () => {
+    writeSession(SESSION_KEY, {
+      search: search.value,
+      categoryId: categoryId.value,
+      tagIds: tagIds.value,
+      tagMatch: tagMatch.value,
+      negativePrompt: negativePrompt.value,
+      randomCount: randomCount.value,
+      limits: limits.value,
+    })
+  },
+  { deep: true },
+)
+
+/**
+ * 固定列：随机组合时该列保持当前选中，不参与随机。
+ *
+ * 与旧版 `_composerFixed` 等价；只把**固定且有内容**的列发给后端，
+ * 未固定的列即使画布里有内容也会被随机替换 —— 这正是"随机"的语义。
+ */
+const PIN_KEY = 'pb.composerPinned'
+const pinned = ref<string[]>([])
+
+try {
+  const raw = localStorage.getItem(PIN_KEY)
+  const parsed = raw ? (JSON.parse(raw) as string[]) : []
+  pinned.value = Array.isArray(parsed)
+    ? parsed.filter((t) => (FRAGMENT_TYPES as readonly string[]).includes(t))
+    : []
+} catch {
+  pinned.value = []
 }
+
+function togglePin(type: string) {
+  pinned.value = pinned.value.includes(type)
+    ? pinned.value.filter((t) => t !== type)
+    : [...pinned.value, type]
+  try {
+    localStorage.setItem(PIN_KEY, JSON.stringify(pinned.value))
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 每列滚动容器：随机后把选中卡片滚到可视区中间。 */
+const reelBodies = new Map<string, HTMLElement>()
+
+function setReelBody(type: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) reelBodies.set(type, el)
+  else reelBodies.delete(type)
+}
+
+interface Picked {
+  content: string
+  promptId: number | null
+  source: CanvasSlot['source']
+  index: number
+}
+
+/**
+ * 为某一列抽一个碎片：固定列沿用画布内容，其余从当前筛选结果里随机。
+ * `index` 是它在 grouped 里的位置，用来在渲染后滚动定位。
+ */
+function pickForType(type: string): Picked | null {
+  const slot = canvas.value[type]
+  const list = grouped.value[type] ?? []
+  if (pinned.value.includes(type) && slot?.content) {
+    return {
+      content: slot.content,
+      promptId: slot.promptId,
+      source: slot.source,
+      index: list.findIndex((f) => f.content === slot.content),
+    }
+  }
+  if (!list.length) {
+    return slot?.content ? { ...slot, index: -1 } : null
+  }
+  const i = Math.floor(Math.random() * list.length)
+  const item = list[i]
+  return { content: item.content, promptId: item.prompt_id, source: item.source, index: i }
+}
+
+/** 拼成与后端 `composition.render` 一致的【类型】格式。 */
+function buildCombo(): string {
+  const parts: string[] = []
+  for (const type of FRAGMENT_TYPES) {
+    const picked = pickForType(type)
+    if (picked?.content) parts.push(`【${type}】\n${picked.content}`)
+  }
+  return parts.join('\n\n')
+}
+
+/**
+ * 🎲 随机一版：本地抽，不提交任务。
+ *
+ * 旧版 `randomComposer` 的"老虎机"体验：抽完每列滚到选中卡片并高亮。
+ */
+async function rollOne() {
+  const next = { ...canvas.value }
+  for (const type of FRAGMENT_TYPES) {
+    const picked = pickForType(type)
+    if (!picked?.content) continue
+    next[type] = {
+      content: picked.content,
+      promptId: picked.promptId,
+      source: picked.source,
+    }
+    // 抽到当前批次之后时，先把该列加载到那一批，否则卡片根本没渲染，无法滚动定位
+    if (picked.index >= limitOf(type)) {
+      limits.value = { ...limits.value, [type]: picked.index + PAGE_SIZE }
+    }
+  }
+  canvas.value = next
+  await nextTick()
+  for (const type of FRAGMENT_TYPES) {
+    const body = reelBodies.get(type)
+    body?.querySelector<HTMLElement>('.card.on')?.scrollIntoView({
+      block: 'center',
+      behavior: 'smooth',
+    })
+  }
+  toast.info('已随机组合一版（未出图）')
+}
+
+// ---------------- 批量随机：先预览，确认后才出图 ----------------
+
+/** 碎片全文弹层的数据形状（与 FragmentDetailModal 的结构一致）。 */
+interface FragmentDetail {
+  type: string
+  content: string
+  source: 'prompt' | 'library' | 'custom'
+  promptId: number | null
+  promptName: string
+  dupCount: number
+}
+
+const randomCombos = ref<string[]>([])
+/** 结果中心随机页里勾选的组（下标）；默认全选。 */
+const selectedCombos = ref<number[]>([])
+const detailOpen = ref(false)
+const detailFrag = ref<FragmentDetail | null>(null)
+
+/** 打开结果中心（画布页）。 */
+function openResultCanvas() {
+  resultTab.value = 'canvas'
+  resultOpen.value = true
+}
+
+function openRandomPreview() {
+  randomCombos.value = Array.from({ length: randomCount.value }, buildCombo)
+  selectedCombos.value = randomCombos.value.map((_, i) => i)
+  resultTab.value = 'random'
+  resultOpen.value = true
+}
+
+/** 结果中心里改了组数后重新生成。 */
+function regenerateCombos() {
+  randomCombos.value = Array.from({ length: randomCount.value }, buildCombo)
+  selectedCombos.value = randomCombos.value.map((_, i) => i)
+}
+
+function setRandomCount(n: number) {
+  randomCount.value = n
+}
+
+function rerollCombo(index: number) {
+  const next = [...randomCombos.value]
+  next[index] = buildCombo()
+  randomCombos.value = next
+}
+
+function removeCombo(index: number) {
+  randomCombos.value = randomCombos.value.filter((_, i) => i !== index)
+  // 删除后下标会前移，勾选集合要同步调整
+  selectedCombos.value = selectedCombos.value
+    .filter((i) => i !== index)
+    .map((i) => (i > index ? i - 1 : i))
+}
+
+function toggleCombo(index: number) {
+  selectedCombos.value = selectedCombos.value.includes(index)
+    ? selectedCombos.value.filter((i) => i !== index)
+    : [...selectedCombos.value, index]
+}
+
+/** 双击卡片查看全文（卡片只有 3 行，长碎片看不全）。 */
+function openDetail(item: FragmentItem) {
+  detailFrag.value = {
+    type: item.type,
+    content: item.content,
+    source: item.source,
+    promptId: item.prompt_id,
+    promptName: item.prompt_name,
+    dupCount: item.dup_count,
+  }
+  detailOpen.value = true
+}
+
+function pickFromDetail() {
+  if (!detailFrag.value) return
+  const f = detailFrag.value
+  canvas.value = {
+    ...canvas.value,
+    [f.type]: { content: f.content, promptId: f.promptId, source: f.source },
+  }
+  detailOpen.value = false
+}
+
+/** 锁定/解锁一列；锁定前必须有内容，否则随机时会静默失效。 */
+function toggleLock(type: string) {
+  if (!pinned.value.includes(type) && !canvas.value[type]?.content) {
+    toast.error(`「${type}」还没有选碎片，先选一个再锁定`)
+    return
+  }
+  togglePin(type)
+}
+
+// ---------------- 检索高亮与定位 ----------------
+
+const keyword = computed(() => search.value.trim())
+
+function isHit(content: string): boolean {
+  const k = keyword.value.toLowerCase()
+  return !!k && content.toLowerCase().includes(k)
+}
+
+/** 把正文按关键词切成片段，命中的片段单独着色（不拼 HTML，避免 XSS）。 */
+function textParts(text: string): Array<{ text: string; hit: boolean }> {
+  const k = keyword.value
+  if (!k) return [{ text, hit: false }]
+  const parts: Array<{ text: string; hit: boolean }> = []
+  const lower = text.toLowerCase()
+  const kl = k.toLowerCase()
+  let from = 0
+  while (from < text.length) {
+    const at = lower.indexOf(kl, from)
+    if (at < 0) break
+    if (at > from) parts.push({ text: text.slice(from, at), hit: false })
+    parts.push({ text: text.slice(at, at + k.length), hit: true })
+    from = at + k.length
+  }
+  if (from < text.length) parts.push({ text: text.slice(from), hit: false })
+  return parts.length ? parts : [{ text, hit: false }]
+}
+
+/** 搜索后把每列第一条命中的卡片滚到可视区。 */
+async function locateFirstHit() {
+  if (!keyword.value) return
+  await nextTick()
+  for (const type of FRAGMENT_TYPES) {
+    const body = reelBodies.get(type)
+    body?.querySelector<HTMLElement>('.card.hit')?.scrollIntoView({ block: 'center' })
+  }
+}
+
+watch(() => fragmentData.value, () => void locateFirstHit())
 
 // ---------------- 组合模板 ----------------
 
@@ -307,6 +653,7 @@ const { data: templateData } = useQuery<{ templates: TemplateRow[] }>({
 const templates = computed(() => templateData.value?.templates ?? [])
 const selectedTemplateId = ref<number | null>(null)
 const templateSearch = ref('')
+const templateOpen = ref(false)
 
 /** 线上有 381 个模板，下拉直接铺开根本找不到；加本地过滤（数据量小，不必走接口）。 */
 const filteredTemplates = computed(() => {
@@ -336,7 +683,7 @@ async function applyTemplate() {
     }
     canvas.value = next
   } catch (e) {
-    alert(`套用失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`套用失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -346,15 +693,16 @@ async function saveTemplate() {
     (t) => canvas.value[t].source === 'prompt' && canvas.value[t].promptId,
   )
   if (!usable.length) {
-    alert('画布里的碎片都来自"碎片库"，无法建立引用关系，请至少放入一个来自提示词的碎片')
+    toast.error('画布里的碎片都来自"碎片库"，无法建立引用关系，请至少放入一个来自提示词的碎片')
     return
   }
   const skipped = canvasTypes.value.length - usable.length
-  const name = prompt(
-    skipped
-      ? `模板名称（注意：${skipped} 个碎片库碎片不会被保存）`
-      : '模板名称',
-  )
+  const name = await inputDialog({
+    title: skipped ? `模板名称（${skipped} 个碎片库碎片不会被保存）` : '模板名称',
+    placeholder: '给这个组合模板起个名字',
+    positiveText: '保存',
+    negativeText: '取消',
+  })
   if (!name) return
   try {
     await apiPost('/api/templates', {
@@ -366,10 +714,9 @@ async function saveTemplate() {
     })
     queryClient.invalidateQueries({ queryKey: ['templates'] })
   } catch (e) {
-    alert(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
-
 
 /**
  * 从旧前端的 localStorage 导入组合模板。
@@ -411,63 +758,105 @@ async function importLegacyTemplates() {
     toast.error(`导入失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
-async function deleteTemplate() {
-  const id = selectedTemplateId.value
-  if (!id) return
-  if (!confirm('确定删除这个模板吗？（不会删除来源提示词）')) return
+async function deleteTemplateById(id: number) {
+  const ok = await confirmDialog({
+    title: '删除模板',
+    content: '确定删除这个模板吗？（不会删除来源提示词）',
+    positiveText: '删除',
+    negativeText: '取消',
+  })
+  if (!ok) return
   try {
     await apiDelete(`/api/templates/${id}`)
-    selectedTemplateId.value = null
+    if (selectedTemplateId.value === id) selectedTemplateId.value = null
     queryClient.invalidateQueries({ queryKey: ['templates'] })
   } catch (e) {
-    alert(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`删除失败：${e instanceof Error ? e.message : String(e)}`)
   }
+}
+
+/** 模板面板里点「套用」：先选中再复用原有解析逻辑。 */
+async function applyTemplateById(id: number) {
+  selectedTemplateId.value = id
+  await applyTemplate()
+  templateOpen.value = false
 }
 
 async function runOnce() {
   if (!composedPrompt.value) return
   if (!workflowPath.value) {
-    alert('请先选择工作流')
+    toast.error('请先选择工作流')
     return
   }
   try {
-    const result = await apiPost<{ success: boolean; job_id: number }>('/api/composer/run', {
+    const result = await submitAndTrack<{ success: boolean; job_id: number }>('/api/composer/run', {
       prompt: composedPrompt.value,
       negative_prompt: negativePrompt.value,
       workflow_path: workflowPath.value,
-      quality: quality.value,
-      orientation: orientation.value,
+      // 自定义工作流不在后端磁盘上，内容必须一起带过去
+      workflow_content: customWorkflowContent(workflowPath.value),
+      quality: caps.value.quality ? quality.value : '4K',
+      orientation: caps.value.orientation ? orientation.value : 'keep',
     })
-    if (result.success) track(result.job_id)
+    if (!result.success) toast.error('提交失败')
   } catch (e) {
-    alert(`提交失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`提交失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
-async function runRandom() {
+async function confirmRandomRun() {
   if (!workflowPath.value) {
-    alert('请先选择工作流')
+    toast.error('请先选择工作流')
+    return
+  }
+  const chosen = randomCombos.value.filter((_, i) => selectedCombos.value.includes(i))
+  if (!chosen.length) {
+    toast.error('请至少勾选一组')
     return
   }
   try {
-    const result = await apiPost<{ success: boolean; job_id: number }>(
-      '/api/composer/batch_random_run',
-      {
-        count: randomCount.value,
-        workflow_path: workflowPath.value,
-        quality: quality.value,
-        orientation: orientation.value,
-        negative_prompt: negativePrompt.value,
-        search: search.value.trim(),
-        category_id: categoryId.value,
-        tag_ids: tagIds.value.length ? tagIds.value.join(',') : null,
-        fixed_fragments: fixedFragments(),
-      },
-    )
-    if (result.success) track(result.job_id)
+    const result = await submitAndTrack<{
+      success: boolean
+      job_id: number
+      results?: Array<{ index: number; success: boolean; error?: string }>
+    }>('/api/composer/batch_random_run', {
+      count: chosen.length,
+      // 用户已经在预览里确认过每一组文本，后端按原样提交，不再二次随机
+      composed_prompts: chosen,
+      workflow_path: workflowPath.value,
+      workflow_content: customWorkflowContent(workflowPath.value),
+      quality: caps.value.quality ? quality.value : '4K',
+      orientation: caps.value.orientation ? orientation.value : 'keep',
+      negative_prompt: negativePrompt.value,
+    })
+    if (!result.success) return
+    const failed = (result.results ?? []).filter((r) => !r.success)
+    const submitted = (result.results ?? []).length - failed.length
+    // submitAndTrack 已在提交成功后订阅进度，这里只切页签
+    resultTab.value = 'job'
+    resultOpen.value = true
+    if (failed.length && !submitted) {
+      toast.error(`全部提交失败：${failed[0]?.error ?? '未知错误'}`)
+    } else if (failed.length) {
+      toast.info(`已提交 ${submitted} 组，${failed.length} 组失败（详见结果面板）`)
+    } else {
+      toast.success(`已提交 ${submitted} 组`)
+    }
   } catch (e) {
-    alert(`提交失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`提交失败：${e instanceof Error ? e.message : String(e)}`)
   }
+}
+
+watch(
+  () => activeJob.value?.status,
+  (status, prev) => {
+    if (status === 'done' && prev && prev !== 'done') toast.success('随机组合已完成')
+  },
+)
+
+function goJobs() {
+  resultOpen.value = false
+  router.push('/jobs')
 }
 
 function toggleTag(id: number) {
@@ -476,37 +865,102 @@ function toggleTag(id: number) {
   else tagIds.value.push(id)
 }
 </script>
-
 <template>
-  <div class="composer" :class="viewMode">
-    <aside class="filters">
-      <section class="group">
-        <div class="group-head"><span>筛选</span></div>
-        <input v-model="search" type="search" placeholder="搜索碎片内容…" />
-      </section>
+  <div class="composer">
+    <div class="composer-bar">
+      <input
+        v-model="search"
+        class="bar-search"
+        type="search"
+        placeholder="检索碎片内容…"
+      />
+      <select v-model="categoryId" class="bar-select" title="按分类筛选碎片">
+        <option :value="null">全部分类</option>
+        <option v-for="cat in flatCats" :key="cat.id" :value="cat.id">
+          {{ '　'.repeat(cat.depth) + cat.name }}
+        </option>
+      </select>
+      <button
+        class="btn btn-sm"
+        :class="{ on: filtersOpen || tagIds.length }"
+        @click="filtersOpen = !filtersOpen"
+      >
+        标签{{ tagIds.length ? ` · ${tagIds.length}` : '' }}
+      </button>
+      <span class="count">
+        碎片 {{ fragmentTotal }}<span v-if="isFetching"> · 加载中</span>
+      </span>
+      <div class="bar-wf">
+        <WorkflowPicker v-model="workflowPath" :workflows="workflows" />
+      </div>
+      <WorkflowParams
+        v-model:quality="quality"
+        v-model:orientation="orientation"
+        :workflow-path="workflowPath"
+        :caps="caps"
+        :params="params"
+      />
+      <button
+        class="btn btn-sm"
+        :class="{ on: canvasCount }"
+        title="查看组合结果（画布 / 随机组 / 任务结果）"
+        @click="openResultCanvas"
+      >
+        组合结果 · {{ canvasCount }} 个碎片
+      </button>
+      <button
+        class="btn btn-sm"
+        :class="{ on: settingsOpen }"
+        title="负向提示词"
+        @click="settingsOpen = !settingsOpen"
+      >
+        ⚙ 高级
+      </button>
+      <button class="btn btn-sm" @click="templateOpen = true">
+        📚 模板 {{ templates.length }}
+      </button>
+      <button class="btn btn-sm" title="随机抽一版并滚动定位，不出图" @click="rollOne">
+        🎲 随机一版
+      </button>
+      <button
+        class="btn btn-sm"
+        :disabled="generating"
+        :title="pinned.length ? `锁定 ${pinned.length} 列，其余随机` : '预览随机组合，确认后才出图'"
+        @click="openRandomPreview"
+      >
+        🎲 预览
+      </button>
+      <button
+        class="btn btn-sm primary"
+        :class="{ loading: generating }"
+        :disabled="generating || !canvasCount"
+        @click="runOnce"
+      >
+        {{ generating ? '生成中…' : '🚀 试跑' }}
+      </button>
+      <span v-if="generateError" class="gen-error">{{ generateError }}</span>
+      <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
+        {{ activeJob.status }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
+      </span>
+    </div>
 
-      <section class="group">
-        <div class="group-head"><span>分类</span></div>
-        <div class="cat-list">
-          <button class="cat" :class="{ active: categoryId === null }" @click="categoryId = null">
-            全部
-          </button>
-          <button
-            v-for="cat in flatCats"
-            :key="cat.id"
-            class="cat"
-            :class="{ active: categoryId === cat.id }"
-            :style="{ paddingLeft: `${8 + cat.depth * 14}px` }"
-            @click="categoryId = cat.id"
-          >
-            <span class="dot" :style="{ background: cat.color }" />
-            <span class="cat-name">{{ cat.name }}</span>
-          </button>
-        </div>
-      </section>
+    <div v-if="settingsOpen" class="settings-panel">
+      <div class="drawer-head">
+        <span>高级设置</span>
+        <button class="close" @click="settingsOpen = false">✕</button>
+      </div>
+      <label class="field">
+        <span>负向提示词</span>
+        <textarea v-model="negativePrompt" />
+      </label>
+    </div>
 
+    <div v-if="filtersOpen" class="filter-drawer">
+      <div class="drawer-head">
+        <span>标签筛选</span>
+        <button class="close" @click="filtersOpen = false">✕</button>
+      </div>
       <section class="group">
-        <div class="group-head"><span>标签</span></div>
         <TagCloud
           :tags="tagData?.tags ?? []"
           :selected="tagIds"
@@ -516,387 +970,416 @@ function toggleTag(id: number) {
           @update:match="tagMatch = $event"
         />
       </section>
-    </aside>
+    </div>
 
-    <section class="pool">
-      <div class="pool-head">
-        <button
-          class="btn btn-sm"
-          :title="viewMode === 'list' ? '切到左右三栏' : '切到上下滚动'"
-          @click="toggleViewMode"
+    <div class="reels">
+      <section v-for="type in FRAGMENT_TYPES" :key="type" class="reel">
+        <header
+          class="reel-head"
+          :class="{ on: pinned.includes(type) }"
+          :title="
+            pinned.includes(type)
+              ? `已锁定：${type}（随机时保持不变，点击解锁）`
+              : `锁定「${type}」：随机时保持不变`
+          "
+          @click="toggleLock(type)"
         >
-          {{ viewMode === 'list' ? '📐 列视图' : '📐 行视图' }}
-        </button>
-        <span>碎片池</span>
-        <span class="count">
-          {{ fragmentTotal }} 个碎片<span v-if="isFetching"> · 加载中</span>
-        </span>
-      </div>
+          <span class="pin-ico">{{ pinned.includes(type) ? '🔒' : '🔓' }}</span>
+          <span class="reel-type">{{ type }}</span>
+          <span class="reel-count">{{ (grouped[type] ?? []).length }}</span>
+        </header>
 
-      <div class="pool-body">
-        <div v-for="type in FRAGMENT_TYPES" :key="type" class="frag-group">
-          <button class="frag-head" @click="toggleGroup(type)">
-            <span class="arrow">{{ collapsed[type] ? '▸' : '▾' }}</span>
-            <span class="frag-type">{{ type }}</span>
-            <span class="frag-num">{{ (grouped[type] ?? []).length }}</span>
-          </button>
-
-          <div v-if="!collapsed[type]" class="frag-list">
-            <button
-              v-for="(item, idx) in visibleFrags(type)"
-              :key="`${type}-${item.fragment_id ?? item.prompt_id}-${idx}`"
-              class="frag"
-              :class="{ used: canvas[type]?.content === item.content }"
-              :title="item.content"
-              @click="pick(item)"
-            >
-              <span class="frag-text">{{ item.content }}</span>
-              <span class="frag-meta">
-                {{ item.source === 'library' ? '碎片库' : item.prompt_name || '提示词' }}
-                <i v-if="item.dup_count > 1">×{{ item.dup_count }}</i>
-              </span>
-            </button>
-            <button
-              v-if="!expanded[type] && (grouped[type] ?? []).length > PAGE_SIZE"
-              class="more"
-              @click="expandGroup(type)"
-            >
-              展开全部 {{ (grouped[type] ?? []).length }} 个
-            </button>
-            <EmptyState v-if="!(grouped[type] ?? []).length" text="该类型暂无碎片" />
-          </div>
+        <div v-if="canvas[type]" class="reel-picked" :title="canvas[type].content">
+          <span class="picked-label">已选</span>
+          <span class="picked-text">{{ canvas[type].content }}</span>
+          <button class="picked-x" title="清空这一列" @click="unpick(type)">✕</button>
         </div>
-      </div>
-    </section>
 
-    <aside class="canvas-pane">
-      <div class="canvas-head">
-        <span>组合画布</span>
-        <span class="count">{{ canvasCount }} / 8</span>
-        <span class="spacer" />
-        <button
-          class="btn btn-sm"
-          :disabled="!canvasCount"
-          title="复制组合结果"
-          @click="copyText(composedPrompt, '组合结果')"
-        >
-          复制
-        </button>
-        <button
-          class="btn btn-sm"
-          :disabled="!canvasCount"
-          title="把组合结果存成一条提示词"
-          @click="saveAsPrompt"
-        >
-          存为提示词
-        </button>
-        <button class="btn btn-sm" :disabled="!canvasCount" @click="clearCanvas">清空</button>
-      </div>
-
-      <div class="slots">
-        <div v-for="type in FRAGMENT_TYPES" :key="type" class="slot" :class="{ filled: !!canvas[type] }">
-          <span class="slot-type">{{ type }}</span>
-          <template v-if="canvas[type]">
-            <span class="slot-text">{{ canvas[type].content }}</span>
-            <span v-if="canvas[type].source === 'library'" class="slot-src" title="来自碎片库">库</span>
-            <span v-else-if="canvas[type].source === 'custom'" class="slot-src custom" title="自定义碎片">自</span>
-            <button class="slot-remove" title="复制这一段" @click="copyText(canvas[type].content, '碎片')">⧉</button>
-            <button
-              v-if="canvas[type].source === 'custom'"
-              class="slot-remove"
-              title="存进碎片库，之后可以像别的碎片一样用"
-              @click="saveCustomToLibrary(type)"
-            >
-              ↓
-            </button>
-            <button class="slot-remove" title="移除" @click="unpick(type)">✕</button>
-          </template>
-          <span v-else class="slot-empty">
-            点击左侧碎片填入
-            <button class="slot-remove" title="手写一段" @click="openCustom(type)">✎</button>
-          </span>
-        </div>
-      </div>
-
-      <label class="field">
-        <span>负向提示词</span>
-        <textarea v-model="negativePrompt" spellcheck="false" />
-      </label>
-
-      <div class="preview">
-        <div class="preview-head">预览（提交给 ComfyUI 时会自动去掉【类型】标题）</div>
-        <pre>{{ composedPrompt || '（画布为空）' }}</pre>
-      </div>
-
-      <div class="actions">
-        <span v-if="generateError" class="gen-error">{{ generateError }}</span>
-        <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
-          {{ activeJob.status }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
-        </span>
-        <span class="spacer" />
-        <button class="btn btn-sm" :disabled="generating" @click="runRandom">
-          随机组合 {{ randomCount }} 组
-        </button>
-        <input v-model.number="randomCount" class="count-input" type="number" min="1" max="10" />
-        <button class="btn btn-sm primary" :disabled="generating || !canvasCount" @click="runOnce">
-          {{ generating ? '生成中…' : '🚀 试跑' }}
-        </button>
-      </div>
-
-      <div class="settings">
-        <select v-model="workflowPath" class="wf-select">
-          <option value="">选择工作流…</option>
-          <option v-for="wf in workflows" :key="wf.path" :value="wf.path">{{ wf.name }}</option>
-        </select>
-        <select v-model="quality">
-          <option v-for="q in QUALITY_OPTIONS" :key="q" :value="q">{{ q }}</option>
-        </select>
-        <button
-          class="btn btn-sm"
-          title="横竖屏"
-          @click="orientation = orientation === 'portrait' ? 'landscape' : 'portrait'"
-        >
-          {{ orientation === 'portrait' ? '📱 竖' : '🖥️ 横' }}
-        </button>
-      </div>
-
-      <div class="template-box">
-        <div class="template-head">
-          <span>组合模板</span>
-          <span class="count">{{ templates.length }} 个</span>
-        </div>
-        <div class="template-row">
-          <input v-model="templateSearch" class="tpl-filter" placeholder="筛选模板…" />
-          <select v-model="selectedTemplateId" class="tpl-select">
-            <option :value="null">选择模板…</option>
-            <option v-for="tpl in filteredTemplates" :key="tpl.id" :value="tpl.id">
-              {{ tpl.name }}（{{ tpl.fragment_count }} 片）
-            </option>
-          </select>
-        </div>
-        <div class="template-row">
-          <button class="btn btn-sm" :disabled="!selectedTemplateId" @click="applyTemplate">套用</button>
-          <button class="btn btn-sm" @click="saveTemplate">另存为</button>
+        <div class="reel-body" :ref="(el) => setReelBody(type, el)">
           <button
-            class="btn btn-sm"
-            title="把旧前端存在 localStorage 里的模板导入到数据库"
-            @click="importLegacyTemplates"
+            v-if="canvas[type]?.source === 'custom'"
+            class="card on custom"
+            @click="openCustom(type)"
           >
-            导入旧模板
+            <span class="card-text">{{ canvas[type].content }}</span>
+            <span class="card-meta">自定义<span class="tag-self">自</span></span>
           </button>
-          <button
-            class="btn btn-sm danger"
-            :disabled="!selectedTemplateId"
-            title="删除选中的模板"
-            @click="deleteTemplate"
-          >
-            删
-          </button>
-        </div>
-        <div class="template-hint">
-          模板保存的是"引用"而不是快照 —— 来源提示词改了，套用的内容跟着变
-        </div>
-      </div>
-    </aside>
 
-    <Modal
-      :open="customOpen"
-      :title="`自定义碎片 · ${customType}`"
-      @close="customOpen = false"
-    >
+          <button
+            v-for="(item, idx) in visibleFrags(type)"
+            :key="`${type}-${item.fragment_id ?? item.prompt_id}-${idx}`"
+            class="card"
+            :class="{
+              on: canvas[type]?.source !== 'custom' && canvas[type]?.content === item.content,
+              hit: isHit(item.content),
+            }"
+            :title="`双击查看全文：${item.content}`"
+            @click="pick(item)"
+            @dblclick.stop="openDetail(item)"
+          >
+            <span class="card-text">
+              <span
+                v-for="(part, pi) in textParts(item.content)"
+                :key="pi"
+                :class="{ mark: part.hit }"
+              >{{ part.text }}</span>
+            </span>
+            <span class="card-meta">
+              {{ item.source === 'library' ? '碎片库' : item.prompt_name || '提示词' }}
+              <i v-if="item.dup_count > 1">×{{ item.dup_count }}</i>
+            </span>
+          </button>
+
+          <!-- 滚到列底会自动加载下一批；这个按钮是兜底，不要求用户先滚到底 -->
+          <button
+            v-if="hasMore(type)"
+            :ref="(el) => setMoreEl(type, el)"
+            :data-type="type"
+            class="more"
+            @click="loadMore(type)"
+          >
+            加载更多 · 还有 {{ (grouped[type] ?? []).length - limitOf(type) }} 个
+          </button>
+          <EmptyState
+            v-if="!(grouped[type] ?? []).length && !canvas[type]"
+            compact
+            text="暂无碎片"
+          />
+
+          <button class="card add" @click="openCustom(type)">✎ 自定义…</button>
+        </div>
+      </section>
+    </div>
+
+    <Modal :open="customOpen" :title="`自定义碎片 · ${customType}`" @close="customOpen = false">
       <div class="custom-body">
         <textarea
           v-model="customText"
-          placeholder="直接写一段内容，会填进「{{ customType }}」槽位…"
           spellcheck="false"
+          :placeholder="`直接写一段内容，会填进「${customType}」列…`"
         />
       </div>
       <template #footer>
         <span class="spacer" />
+        <button
+          class="btn btn-sm"
+          :disabled="!customText.trim()"
+          title="把这段存进碎片库，之后可以像别的碎片一样用"
+          @click="saveCustomToLibrary"
+        >
+          存进碎片库
+        </button>
         <button class="btn btn-sm primary" :disabled="!customText.trim()" @click="applyCustom">
           填入画布
         </button>
       </template>
-    </Modal>  </div>
+    </Modal>
+
+    <Modal
+      :open="templateOpen"
+      title="组合模板"
+      width="min(680px, 94vw)"
+      @close="templateOpen = false"
+    >
+      <div class="tpl-panel">
+        <input v-model="templateSearch" type="search" placeholder="搜索模板名…" />
+        <div class="tpl-list">
+          <div v-for="tpl in filteredTemplates" :key="tpl.id" class="tpl-row">
+            <span class="tpl-name" :title="tpl.name">{{ tpl.name }}</span>
+            <span class="count">{{ tpl.fragment_count }} 片</span>
+            <button class="btn btn-sm" @click="applyTemplateById(tpl.id)">套用</button>
+            <button class="btn btn-sm danger" @click="deleteTemplateById(tpl.id)">删</button>
+          </div>
+          <EmptyState v-if="!filteredTemplates.length" compact text="没有匹配的模板" />
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn btn-sm" @click="saveTemplate">存为模板</button>
+        <button
+          class="btn btn-sm"
+          title="把旧前端存在 localStorage 里的模板导入到数据库"
+          @click="importLegacyTemplates"
+        >
+          导入旧模板
+        </button>
+        <span class="spacer" />
+        <button class="btn btn-sm" @click="templateOpen = false">关闭</button>
+      </template>
+    </Modal>
+
+    <ComposerResultModal
+      :open="resultOpen"
+      :tab="resultTab"
+      :composed="composedPrompt"
+      :combos="randomCombos"
+      :selected="selectedCombos"
+      :job="activeJob"
+      :count="randomCount"
+      :canvas-count="canvasCount"
+      :fixed-count="pinned.length"
+      :generating="generating"
+      @close="resultOpen = false"
+      @set-tab="resultTab = $event"
+      @set-count="setRandomCount"
+      @regenerate="regenerateCombos"
+      @confirm="confirmRandomRun"
+      @reroll="rerollCombo"
+      @remove="removeCombo"
+      @toggle="toggleCombo"
+      @run-canvas="runOnce"
+      @copy-canvas="copyText(composedPrompt, '组合结果')"
+      @save-prompt="saveAsPrompt"
+      @go-jobs="goJobs"
+    />
+
+    <FragmentDetailModal
+      :open="detailOpen"
+      :fragment="detailFrag"
+      @close="detailOpen = false"
+      @pick="pickFromDetail"
+      @jump="(id) => { detailOpen = false; router.push(`/prompt/${id}`) }"
+    />
+  </div>
 </template>
 
 <style scoped>
-
-/* ---------------------------------------------------------------------------
-   行视图：上下滚动布局。
-
-   三栏在纵向上依次排列，各占满宽度，页面整体滚动 —— 碎片池因此能铺满
-   屏幕宽（碎片卡片横向排更多），画布在下方不用侧着身子看。
-   --------------------------------------------------------------------------- */
-.composer.list {
-  flex-direction: column;
-  height: auto;
-  min-height: 100%;
-  overflow-y: auto;
-}
-
-.composer.list .filters {
-  width: 100%;
-  flex: none;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  overflow-y: visible;
-}
-
-.composer.list .pool {
-  flex: none;
-  width: 100%;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-}
-
-.composer.list .pool-body {
-  flex: none;
-  /* 给碎片池一个高度上限：否则 240 张卡片会把画布顶到 3700px 之外，
-     上下滚动就变成了"先滚过整个碎片池才看得见画布"。 */
-  overflow-y: auto;
-  max-height: 52vh;
-}
-
-.composer.list .canvas-pane {
-  width: 100%;
-  flex: none;
-  overflow-y: visible;
-}.composer {
+.composer {
   display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
+  position: relative;
 }
 
-.filters {
-  width: 220px;
+.composer-bar {
   flex: none;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
-  padding: var(--gap);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-lg);
-}
-
-.group-head {
-  font-size: var(--fs-sm);
-  color: var(--muted);
-  margin-bottom: var(--gap-sm);
-}
-
-.cat-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cat {
   display: flex;
   align-items: center;
-  gap: var(--gap-sm);
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  padding: 6px var(--gap-lg);
+  border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
-  text-align: left;
 }
 
-.cat:hover {
-  background: var(--panel-2);
-}
-
-.cat.active {
-  background: var(--primary-soft);
+.composer-bar .on {
   color: var(--primary);
 }
 
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
+.bar-search {
+  flex: 1 1 220px;
+  min-width: 160px;
 }
 
-.cat-name {
+.bar-select {
+  max-width: 190px;
+}
+
+/* 工作流和画质是出图时始终有效的状态，常驻控制条中段（原来收在设置浮层里，
+   宽屏时控制条中间反而空出一大块）。WorkflowPicker 自带可搜索下拉，比原生 select 好认长文件名。
+   搜索框和它一起做弹性项，把剩余宽度分摊掉，避免行尾留白。 */
+.bar-wf {
+  flex: 1 1 220px;
+  min-width: 150px;
+}
+
+/* 组件自带的 max-width 会在超宽屏下卡住选择器、反而在行尾留白 */
+.bar-wf :deep(.wf-picker) {
+  max-width: none;
+}
+
+/* 筛选改成抽屉：常驻会让首屏少掉 1/3 高度 */
+.filter-drawer {
+  position: absolute;
+  top: 41px;
+  left: 8px;
+  z-index: 20;
+  width: 268px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: var(--gap);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.drawer-head .close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* 高级设置浮层：与筛选抽屉同款，但贴右侧 */
+.settings-panel {
+  position: absolute;
+  top: 41px;
+  right: 8px;
+  z-index: 20;
+  width: 320px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: var(--gap);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* 8 条并列滚筒：每列独立滚动，候选与选中项同列 */
+.reels {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 5px;
+  padding: 6px;
+  overflow-x: auto;
+}
+
+.reel {
+  flex: 1 1 0;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.reel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 整行表头都能切锁定，不必去点小图标 */
+.reel-head:hover {
+  background: var(--panel-2);
+}
+
+.reel-type {
+  font-weight: 600;
+}
+
+.reel-count {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  margin-left: auto;
+}
+
+.pin-ico {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.reel-head.on .pin-ico {
+  color: var(--warn);
+}
+
+/* 列头下方：当前选中的碎片，替代旧版底部 8/8 的信息 */
+.reel-picked {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.picked-label {
+  flex: none;
+  color: var(--primary);
+}
+
+.picked-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pool {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-}
-
-.pool-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  padding: var(--gap) var(--gap-lg);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-sm);
-}
-
-.count {
+.picked-x {
+  flex: none;
+  border: none;
+  background: transparent;
   color: var(--muted);
   font-size: var(--fs-xs);
 }
 
-.pool-body {
-  flex: 1;
+.picked-x:hover {
+  color: var(--danger);
+}
+
+.tpl-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap-lg);
+}
+
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 56vh;
   overflow-y: auto;
-  padding: var(--gap);
 }
 
-.frag-group {
-  margin-bottom: var(--gap);
-}
-
-.frag-head {
+.tpl-row {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  width: 100%;
-  border: none;
-  background: transparent;
-  padding: 4px 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
   font-size: var(--fs-sm);
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
 }
 
-.frag-head:hover {
-  color: var(--text);
+.tpl-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.arrow {
-  width: 12px;
+.reel-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
 }
 
-.frag-type {
-  font-weight: 600;
-}
-
-.frag-num {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-}
-
-.frag-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 6px;
-  padding: var(--gap-sm) 0;
-}
-
-.frag {
+.card {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -904,36 +1387,59 @@ function toggleTag(id: number) {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
-  padding: 6px 8px;
+  padding: 5px 7px;
   transition: 0.12s;
 }
 
-.frag:hover {
+.card:hover {
   border-color: var(--primary);
   background: var(--panel-3);
 }
 
-.frag.used {
+.card.on {
   border-color: var(--primary);
   background: var(--primary-soft);
 }
 
-.frag-text {
+/* 检索命中：整卡描边 + 关键词着色，便于定位 */
+.card.hit {
+  border-color: var(--warn);
+}
+
+.card-text .mark {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.card.custom {
+  border-color: var(--warn);
+}
+
+.card-text {
   font-size: var(--fs-xs);
-  color: var(--text);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.frag-meta {
+.card-meta {
   font-size: 10px;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-self {
+  color: var(--primary);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin-left: 4px;
 }
 
 .more {
-  grid-column: 1 / -1;
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -947,82 +1453,46 @@ function toggleTag(id: number) {
   color: var(--primary);
 }
 
-.canvas-pane {
-  width: 400px;
-  flex: none;
-  background: var(--panel);
-  padding: var(--gap);
+.card.add {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.field {
   display: flex;
   flex-direction: column;
-  gap: var(--gap-sm);
-  overflow-y: auto;
-}
-
-.canvas-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  font-size: var(--fs-sm);
-}
-
-.spacer {
-  flex: 1;
-}
-
-.slots {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.slot {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--gap-sm);
-  padding: 5px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px dashed var(--border);
+  gap: 2px;
   font-size: var(--fs-xs);
-  min-height: 30px;
-}
-
-.slot.filled {
-  border-style: solid;
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
-
-.slot-type {
-  flex: none;
-  width: 56px;
   color: var(--muted);
 }
 
-.slot-text {
-  flex: 1;
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  max-height: 66px;
+  resize: vertical;
+  font: inherit;
   color: var(--text);
-  max-height: 48px;
-  overflow: hidden;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
 }
 
-.slot-empty {
-  color: var(--border-strong);
+.gen-error {
+  color: var(--danger);
+  font-size: var(--fs-xs);
 }
 
-.slot-src {
-  flex: none;
-  font-size: 10px;
-  color: var(--warn);
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  padding: 0 3px;
-  line-height: 1.4;
-}
-
-
-.slot-src.custom {
-  border-color: var(--primary);
-  color: var(--primary);
+.job-state {
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 
 .custom-body {
@@ -1042,170 +1512,20 @@ function toggleTag(id: number) {
   outline: none;
 }
 
-.slot-empty {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .spacer {
   flex: 1;
-}.slot-remove {
-  flex: none;
-  border: none;
-  background: transparent;
+}
+
+.count {
   color: var(--muted);
   font-size: var(--fs-xs);
 }
 
-.slot-remove:hover {
-  color: var(--danger);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  font-size: var(--fs-sm);
-  color: var(--muted);
-}
-
-.field textarea {
-  min-height: 52px;
-  resize: vertical;
-  font: inherit;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm);
-  outline: none;
-}
-
-.preview {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.preview-head {
-  padding: 4px 8px;
-  font-size: 10px;
-  color: var(--muted);
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
-}
-
-.preview pre {
-  margin: 0;
-  padding: var(--gap-sm);
-  max-height: 160px;
-  overflow-y: auto;
-  font-size: var(--fs-xs);
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--muted);
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  font-size: var(--fs-xs);
-}
-
-.count-input {
-  width: 46px;
-  padding: 2px 4px;
-}
-
-.gen-error {
-  color: var(--danger);
-}
-
-.job-state {
-  color: var(--muted);
-}
-
-.job-state.running,
-.job-state.pending {
-  color: var(--primary);
-}
-
-.job-state.done {
-  color: var(--success);
-}
-
-.job-state.error {
-  color: var(--danger);
-}
-
-.settings {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-}
-
-.template-box {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm);
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-}
-
-.template-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--fs-sm);
-  color: var(--muted);
-}
-
-.template-row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-}
-
-.tpl-filter {
-  flex: none;
-  width: 92px;
-}
-
-.tpl-select {
-  flex: 1;
-  min-width: 0;
-}
-
-.template-hint {
-  font-size: 10px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.btn.danger {
-  border-color: var(--danger);
-  color: #fecaca;
-}
-
-.btn.danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-}
-
-.btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.wf-select {
-  flex: 1;
-  min-width: 0;
-}
-
-.empty {
-  font-size: var(--fs-xs);
-  color: var(--muted);
+/* 1366 / 1024 收一档：窄屏时控制条自动换行，滚筒再窄一点 */
+@media (max-width: 1280px) {
+  .reel {
+    min-width: 132px;
+  }
 }
 </style>
+
