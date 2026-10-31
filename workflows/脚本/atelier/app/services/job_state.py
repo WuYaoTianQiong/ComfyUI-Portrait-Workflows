@@ -32,13 +32,13 @@ from app.services.comfyui_client import (
     get_queue,
     interrupt,
 )
-from app.services.helpers import (
-    build_view_url,
+from app.services.image_meta import (
     captured_at_for_image,
     compute_orientation,
     extract_model_name,
     get_image_metadata,
 )
+from app.services.paths import build_view_url
 
 logger = logging.getLogger("atelier.jobs")
 

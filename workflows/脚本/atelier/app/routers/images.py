@@ -12,7 +12,13 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
-from app.services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
+from app.services.image_meta import (
+    compute_orientation,
+    extract_model_from_comfy_prompt,
+    get_image_metadata,
+    get_image_metadata_fast,
+)
+from app.services.paths import _resolve_if_reparse, build_view_url
 from app.services.thumbnail import _get_image_path
 
 router = APIRouter(tags=["历史"])

@@ -3,15 +3,10 @@ import json
 import logging
 import math
 import re
-from urllib.parse import quote
 
-import httpx
-
-from app.config import settings
+from app.services.comfyui_client import get_object_info
 
 logger = logging.getLogger("atelier.workflow")
-
-COMFYUI_API = settings.comfyui_api
 
 # widget 名称顺序缓存
 _widget_name_cache: dict[str, list[tuple[str, int]]] = {}
@@ -100,11 +95,7 @@ def _get_combo_options(node_type: str, input_name: str) -> list[str]:
     if key in _combo_options_cache:
         return _combo_options_cache[key]
     try:
-        safe = quote(node_type, safe="")
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(f"{COMFYUI_API}/object_info/{safe}")
-            resp.raise_for_status()
-            info = resp.json().get(node_type, {})
+        info = get_object_info().get(node_type, {})
         options: list[str] = []
         for group in ("required", "optional"):
             spec = info.get("input", {}).get(group, {}).get(input_name)
@@ -229,13 +220,7 @@ def _get_widget_order(node_type: str) -> list[tuple[str, int]]:
 
     entries: list[tuple[str, int]] = []
     try:
-        safe = quote(node_type, safe="")
-        with httpx.Client(timeout=3) as client:
-            resp = client.get(f"{COMFYUI_API}/object_info/{safe}")
-            resp.raise_for_status()
-            info = resp.json()
-
-        nd = info.get(node_type, {})
+        nd = get_object_info().get(node_type, {})
         for group in ["required", "optional"]:
             for k, v in nd.get("input", {}).get(group, {}).items():
                 if not isinstance(v, list) or len(v) == 0:

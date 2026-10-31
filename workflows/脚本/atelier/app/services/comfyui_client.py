@@ -1,6 +1,7 @@
 """ComfyUI API 客户端 —— 所有与 ComfyUI 的 HTTP 交互"""
 import json
 import logging
+import time
 
 import httpx
 
@@ -9,6 +10,49 @@ from app.config import settings
 logger = logging.getLogger("atelier.comfy")
 
 COMFYUI_API = settings.comfyui_api
+
+# object_info 缓存：成功缓存 5 分钟，失败缓存 30 秒。
+# 失败也要缓存，否则 ComfyUI 无响应时每个节点类型都要各等一次超时。
+_OBJECT_INFO_TTL = 300.0
+_OBJECT_INFO_FAIL_TTL = 30.0
+_OBJECT_INFO_TIMEOUT = 4.0
+_object_info: dict | None = None
+_object_info_at = 0.0
+_object_info_fail_until = 0.0
+
+
+def get_object_info(force: bool = False) -> dict:
+    """一次性拉取 ComfyUI 的 `/object_info` 并缓存，返回 {node_type: spec}。
+
+    为什么整份拉取而不是按节点类型逐个请求 `/object_info/{node}`：
+    逐个请求时，每个未缓存过的节点类型都要一次往返；ComfyUI 无响应（在跑图、
+    或卡死）时每个都要等满超时 —— 实测冷启动列 11 个工作流要 57 秒。
+    整份只取一次后，离线场景也最多只等一次超时，且 30 秒内不再重试。
+    """
+    global _object_info, _object_info_at, _object_info_fail_until
+
+    now = time.monotonic()
+    if not force:
+        if _object_info is not None and now - _object_info_at < _OBJECT_INFO_TTL:
+            return _object_info
+        if now < _object_info_fail_until:
+            return {}
+
+    try:
+        with httpx.Client(timeout=_OBJECT_INFO_TIMEOUT) as client:
+            resp = client.get(f"{COMFYUI_API}/object_info")
+            resp.raise_for_status()
+            data = resp.json()
+        _object_info = data if isinstance(data, dict) else {}
+        _object_info_at = now
+        _object_info_fail_until = 0.0
+        return _object_info
+    except Exception as exc:
+        _object_info_fail_until = now + _OBJECT_INFO_FAIL_TTL
+        logger.debug(
+            "拉取 object_info 失败（%.0fs 内不再重试）：%s", _OBJECT_INFO_FAIL_TTL, type(exc).__name__
+        )
+        return {}
 
 
 def fetch_json(url: str, timeout: int = 5) -> dict | None:

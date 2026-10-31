@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from PIL import Image as PILImage
 
 from app.config import settings
-from app.services.helpers import _resolve_if_reparse, missing_image_response
+from app.services.paths import _resolve_if_reparse, missing_image_response
 
 router = APIRouter(tags=["文件浏览"])
 

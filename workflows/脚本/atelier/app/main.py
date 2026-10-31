@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from app import __version__
 from app.config import settings
 from app.models import init_db, db
-from app.services.helpers import _resolve_if_reparse
+from app.services.paths import _resolve_if_reparse
 from app.services.logging_setup import setup_logging
 
 logger = logging.getLogger("atelier")
@@ -119,6 +119,7 @@ from app.routers.prompts import router as prompts_router
 from app.routers.jobs import router as jobs_router
 from app.routers.images import router as images_router
 from app.routers.comfyui import router as comfyui_router
+from app.routers.media import router as media_router
 from app.routers.categories import router as categories_router
 from app.routers.tags import router as tags_router
 from app.routers.composer import router as composer_router
@@ -132,6 +133,7 @@ app.include_router(prompts_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(comfyui_router, prefix="/api")
+app.include_router(media_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(tags_router, prefix="/api")
 app.include_router(composer_router, prefix="/api")

@@ -1,54 +1,16 @@
-"""共享工具函数 —— 消除跨模块重复代码"""
-import os
-import traceback
-from pathlib import Path
-from urllib.parse import quote
+"""图片元数据：尺寸/大小、采集时间、方向分面、主模型名。
 
-from app.config import settings
+从原 `helpers.py` 拆出。这里只关心"从一张图里读出什么"，路径解析统一走
+`app.services.paths.resolve_image_path`（原来三个函数各写了一遍同样的
+subfolder 逐段 junction 解析）。
+"""
+import json
+import logging
+from datetime import datetime
 
+from app.services.paths import resolve_image_path
 
-def _resolve_if_reparse(p: Path) -> Path:
-    """Windows 跨卷 junction/symlink 会被 Python 的 exists()/stat()/realpath
-    判定为“不受信任的装入点”(WinError 448/22)，导致缩略图与本地图片代理 404。
-
-    若路径本身是重解析点（junction），用 os.readlink 解析到真实目标后再访问，
-    彻底绕开 junction 上的信任校验；普通目录则原样返回。
-    """
-    try:
-        target = os.readlink(p)
-        if target:
-            return Path(target)
-    except (OSError, ValueError):
-        pass
-    return p
-
-
-def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
-    """构建图片访问 URL（始终走 /api/image，确保统一的 Cache-Control 策略，
-    避免静态文件路径缺失缓存控制导致浏览器旧缓存与新文件内容不一致）"""
-    return (
-        f"/api/image"
-        f"?filename={quote(filename)}"
-        f"&subfolder={quote(subfolder or '')}"
-        f"&type={quote(img_type or 'output')}"
-    )
-
-
-# 图片文件确实找不到时给前端看的占位图（static 目录下，随静态目录一起发布）
-# 「文件缺失」占位图。
-#
-# 原来是一个静态文件（static/img-missing.svg），S2-7 删除旧前端目录时被一起删掉，
-# 结果缺失图片的请求直接 500。改成内联 SVG：不再依赖任何外部文件，
-# 删目录、换部署方式都不会再影响它。
-MISSING_IMAGE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
-<rect width="300" height="300" fill="#23232e"/>
-<g fill="none" stroke="#5b5b70" stroke-width="3">
-<rect x="96" y="104" width="108" height="84" rx="6"/>
-<path d="M96 168l30-28 26 24 20-18 32 30"/>
-</g>
-<text x="150" y="222" text-anchor="middle" fill="#8b8b9e" font-size="15" font-family="sans-serif">文件缺失</text>
-<text x="150" y="242" text-anchor="middle" fill="#63637a" font-size="12" font-family="sans-serif">已被删除或移动</text>
-</svg>"""
+logger = logging.getLogger("atelier.image_meta")
 
 
 def captured_at_for_image(filename: str, subfolder: str, img_type: str):
@@ -57,11 +19,7 @@ def captured_at_for_image(filename: str, subfolder: str, img_type: str):
     入库时写进 gen_history.captured_at。created_at 是"入库时间"，同步/扫描进来的
     图片会全部落在导入那一刻，画廊按 created_at 排序等于按导入批次排序。
     """
-    from datetime import datetime
-
-    from app.services.thumbnail import _get_image_path
-
-    path = _get_image_path(filename, subfolder or "", img_type or "output")
+    path = resolve_image_path(filename, subfolder or "", img_type or "output")
     if path is None:
         return None
     try:
@@ -70,47 +28,16 @@ def captured_at_for_image(filename: str, subfolder: str, img_type: str):
         return None
 
 
-def missing_image_response():
-    """返回「文件缺失」占位图（HTTP 200），而不是 404。
-
-    历史库里只要有一批记录对应的文件被手动删掉，`<img>` 就会每张刷一条
-    404，控制台噪音很大；而 404 在前端也只能显示裂图，信息量还不如占位图上
-    写着的"文件缺失/已被删除"。用 no-store，保证文件恢复后立刻能取到真图。
-    """
-    from fastapi.responses import Response
-
-    return Response(
-        content=MISSING_IMAGE_SVG,
-        media_type="image/svg+xml",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
 def get_image_metadata(filename: str, subfolder: str, img_type: str) -> dict:
     """读取图片文件的分辨率和大小（始终从磁盘读取）"""
-    if not filename:
+    path = resolve_image_path(filename, subfolder, img_type)
+    if path is None:
         return {}
     try:
-        if img_type == "input":
-            base_dir = settings.comfyui_root / "input"
-        else:
-            base_dir = settings.comfyui_root / "output"
-        base_dir = _resolve_if_reparse(base_dir)
-        # 子目录本身也可能是 junction（如 image/2026-07-04），逐段解析，避免 Windows
-        # 跨卷 junction 上 exists()/stat() 抛 WinError 448 被误判为文件缺失
-        cur = base_dir
-        if subfolder:
-            for part in subfolder.replace("\\", "/").split("/"):
-                if not part:
-                    continue
-                cur = cur / part
-                cur = _resolve_if_reparse(cur)
-        img_path = cur / filename
-        if not img_path.exists():
-            return {}
-        file_size = img_path.stat().st_size
+        file_size = path.stat().st_size
         from PIL import Image as PILImage
-        with PILImage.open(img_path) as img:
+
+        with PILImage.open(path) as img:
             width, height = img.size
         return {"width": width, "height": height, "file_size": file_size}
     except Exception:
@@ -124,28 +51,15 @@ def get_image_metadata_fast(filename: str, subfolder: str, img_type: str,
 
     性能：page_size=1000 时 PIL 打开 1000 次大 PNG 可耗时 5-20s 导致前端超时。
     本函数将 1000 次 PIL 打开的极端情况降为 0 次（所有图片都有 prompt_params 时）
-    或极少次（仅缺失图片）。"""
-    if not filename:
+    或极少次（仅缺失图片）。
+    """
+    path = resolve_image_path(filename, subfolder, img_type)
+    if path is None:
         return {}
-    # ---- file_size 直接用 os.stat，无需 PIL ----
+
     try:
-        if img_type == "input":
-            base_dir = settings.comfyui_root / "input"
-        else:
-            base_dir = settings.comfyui_root / "output"
-        base_dir = _resolve_if_reparse(base_dir)
-        cur = base_dir
-        if subfolder:
-            for part in subfolder.replace("\\", "/").split("/"):
-                if not part:
-                    continue
-                cur = cur / part
-                cur = _resolve_if_reparse(cur)
-        img_path = cur / filename
-        if not img_path.exists():
-            return {}
-        file_size = img_path.stat().st_size
-    except Exception:
+        file_size = path.stat().st_size
+    except OSError:
         file_size = 0
 
     # ---- 宽/高优先从 prompt_params JSON 取（同步/入库时已写入）----
@@ -165,7 +79,8 @@ def get_image_metadata_fast(filename: str, subfolder: str, img_type: str,
     if not width or not height:
         try:
             from PIL import Image as PILImage
-            with PILImage.open(img_path) as img:
+
+            with PILImage.open(path) as img:
                 width, height = img.size
         except Exception:
             pass
@@ -187,9 +102,6 @@ def compute_orientation(width, height):
     if abs(width - height) <= max(width, height) * 0.02:
         return "方图"
     return "横图" if width > height else "竖图"
-
-
-import json
 
 
 # ComfyUI 中用于加载主模型的节点类型（其 checkpoint/unet 名称输入键）
@@ -249,20 +161,14 @@ def _extract_model_from_workflow(wf) -> str | None:
 
 
 def extract_model_name(filename: str, subfolder: str, img_type: str) -> str | None:
-    """从出图 PNG 的元数据（workflow/prompt text chunk）提取主模型名；找不到返回 None。
-
-    复用 get_image_metadata 的图片定位逻辑（settings.comfyui_root + junction 解析）。
-    """
-    if not filename:
+    """从出图 PNG 的元数据（workflow/prompt text chunk）提取主模型名；找不到返回 None。"""
+    path = resolve_image_path(filename, subfolder, img_type)
+    if path is None:
         return None
     try:
-        base_dir = settings.comfyui_root / ("input" if img_type == "input" else "output")
-        base_dir = _resolve_if_reparse(base_dir)
-        img_path = base_dir / (subfolder or "") / filename if subfolder else base_dir / filename
-        if not img_path.exists():
-            return None
         from PIL import Image as PILImage
-        with PILImage.open(img_path) as img:
+
+        with PILImage.open(path) as img:
             info = dict(img.info)
         for key in ("workflow", "prompt"):
             raw = info.get(key)
@@ -283,4 +189,3 @@ def extract_model_name(filename: str, subfolder: str, img_type: str) -> str | No
 def extract_model_from_comfy_prompt(prompt_dict) -> str | None:
     """从 ComfyUI history API 的 prompt 字典（{node_id: {class_type, inputs}}）提取模型名。"""
     return _extract_model_from_workflow(prompt_dict)
-

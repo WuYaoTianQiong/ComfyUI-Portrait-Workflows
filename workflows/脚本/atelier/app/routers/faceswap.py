@@ -34,7 +34,7 @@ from app.models import Image
 from app.routers.fsbrowse import IMAGE_EXT
 from app.routers.jobs import create_job, update_job_items
 from app.services.comfyui_client import push_prompt
-from app.services.helpers import _resolve_if_reparse
+from app.services.paths import _resolve_if_reparse
 from app.services.workflow_parser import (
     find_loadimage_nodes,
     find_size_source_loadimage,
