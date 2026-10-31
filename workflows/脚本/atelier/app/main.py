@@ -126,7 +126,7 @@ from app.routers.composer import router as composer_router
 from app.routers.templates import router as templates_router
 from app.routers.fragments import router as fragments_router
 from app.routers.stats import router as stats_router
-from app.routers.faceswap import router as faceswap_router
+from app.routers.editor import router as editor_router
 from app.routers.fsbrowse import router as fsbrowse_router
 
 app.include_router(prompts_router, prefix="/api")
@@ -140,7 +140,7 @@ app.include_router(composer_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(fragments_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
-app.include_router(faceswap_router, prefix="/api")
+app.include_router(editor_router, prefix="/api")
 app.include_router(fsbrowse_router, prefix="/api")
 
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）

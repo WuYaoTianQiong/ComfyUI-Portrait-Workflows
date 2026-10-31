@@ -19,7 +19,7 @@ from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["任务"])
 
-# 兼容旧引用：comfyui.py / composer.py / faceswap.py / history.py 都从本模块导入
+# 兼容旧引用：comfyui.py / composer.py / editor.py / images.py 都从本模块导入
 create_job = job_state.create_job
 update_job_items = job_state.update_job_items
 _row_to_dict = job_state.row_to_dict
