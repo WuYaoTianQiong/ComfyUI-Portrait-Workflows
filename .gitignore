@@ -145,8 +145,8 @@ workflows/logs/
 # prompt_browser_v4 运行期产物（数据库本体不再纳入版本控制，改由 文档/backups/ 快照保全）
 workflows/文档/*.db
 workflows/文档/backups/
-workflows/脚本/prompt_browser_v4/logs/
-workflows/脚本/prompt_browser_v4/_pb_*.log
+workflows/脚本/atelier/logs/
+workflows/脚本/atelier/_pb_*.log
 workflows/.arts/
 
 # 实验/验证产物：构图公式验证图（单张 2~3MB）、IDE 索引与截图目录
@@ -156,11 +156,12 @@ workflows/.codeartsdoer/
 .screenshots/
 
 # 前端工程（S2）：依赖目录与开发期日志不入库
-workflows/脚本/prompt_browser_v4/frontend/node_modules/
-workflows/脚本/prompt_browser_v4/frontend/_dev*.log
-workflows/脚本/prompt_browser_v4/static/v2/
-workflows/脚本/prompt_browser_v4/static_next/
-workflows/脚本/prompt_browser_v4/_e2e_shot.png
+workflows/脚本/atelier/frontend/node_modules/
+workflows/脚本/atelier/frontend/_dev*.log
+workflows/脚本/atelier/static/v2/
+workflows/脚本/atelier/web/
+workflows/脚本/atelier/_e2e_shot.png
+workflows/脚本/atelier/.pytest_cache/
 
 
 

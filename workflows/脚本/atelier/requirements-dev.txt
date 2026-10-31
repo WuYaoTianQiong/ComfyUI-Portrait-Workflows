@@ -1,0 +1,4 @@
+# 开发 / CI 依赖（运行期依赖见 requirements.txt）
+pytest>=8.0
+# tests/e2e/run_e2e.py 需要；未安装时 tools/ci.ps1 会自动 SKIP 该关卡
+playwright>=1.45

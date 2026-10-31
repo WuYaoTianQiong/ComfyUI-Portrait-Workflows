@@ -83,7 +83,7 @@ huggingface-cli download <repo_name>
 
 - [MoodyZIT 完整指南](workflows/文档/Moody_ZIT_完整指南与踩坑手册.md) - 从安装到出图的完整教程
 - [LoRA 训练规划](workflows/文档/LoRA训练_定制人脸_完整规划.md) - 自定义人脸训练
-- [提示词浏览器](workflows/脚本/prompt_browser_v4/) - 提示词管理、组合创作、历史追踪的 Web 工具
+- [画室 Atelier](workflows/脚本/atelier/) - 提示词资产 + ComfyUI 出图/组合/换脸工作台
 
 ## 常见问题
 
