@@ -17,7 +17,7 @@ def _safe_is_dir(p: Path) -> bool:
     """容错 is_dir：junction/符号链接在 Windows 上可能抛 WinError 448，视为不存在。
 
     用 os.readlink 解析单层重解析点（junction）得到真实目标后再判目录，与
-    services.helpers._resolve_if_reparse 一致；避免 os.path.realpath/exists 在
+    services.paths._resolve_if_reparse 一致；避免 os.path.realpath/exists 在
     不受信任的装入点上抛 WinError 448 而被误判为不存在。
     """
     import os
