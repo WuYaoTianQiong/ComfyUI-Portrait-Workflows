@@ -424,12 +424,20 @@ def list_history(
     orientation: str = Query(""),
     missing: bool = Query(None),
     tag_match: str = Query("all", description="多标签语义：all=交集, any=并集"),
+    ids: str = Query("", description="逗号分隔的历史 id，只取这些记录"),
 ):
     # 筛选构造统一走 _filtered_history_query + _apply_facet_filters：
     # 这两个函数是 /history、/history/ids、/history/facets、/history/cleanup_missing
     # 的唯一来源，避免"列表筛了、全选却选到范围外"这类错位。
     q = _filtered_history_query(favorite, search, category_id, tag_ids, missing, tag_match)
     q = _apply_facet_filters(q, source, date, model, orientation)
+
+    # 按 id 精确取图：图像编辑页要用它把已选目标图的文件名/缩略图取回来配遮罩
+    # （list_history 也会被 sync_history 内部直接调用，此时 ids 可能是默认 Query 对象）
+    if isinstance(ids, str) and ids:
+        wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        if wanted:
+            q = q.where(Gh.id.in_(wanted))
 
     total = q.count()
 

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet } from '../api/client'
 import Modal from './Modal.vue'
+import JustifiedGrid from './JustifiedGrid.vue'
 
 /**
  * 磁盘选图：在任意文件夹里挑图，交给换脸这类需要"主图 / 参考图"的场景。
@@ -102,6 +103,23 @@ function imageUrl(path: string): string {
 function thumbUrl(path: string): string {
   return `/api/fs/thumb?path=${encodeURIComponent(path)}&size=240`
 }
+/** 磁盘文件没有宽高，图片 onload 后记下真实比例，再重排一次。 */
+const ratios = ref<Record<string, number>>({})
+
+function fsRatio(img: FsEntry) {
+  return ratios.value[img.path] ?? 3 / 4
+}
+
+function fsKey(img: FsEntry) {
+  return img.path
+}
+
+function rememberRatio(img: FsEntry, event: Event) {
+  const el = event.target as HTMLImageElement
+  if (el.naturalWidth && el.naturalHeight) {
+    ratios.value[img.path] = el.naturalWidth / el.naturalHeight
+  }
+}
 </script>
 <template>
   <Modal
@@ -145,18 +163,34 @@ function thumbUrl(path: string): string {
         </div>
 
         <div class="grid">
-          <button
-            v-for="img in data?.images ?? []"
-            :key="img.path"
-            class="cell"
-            :class="{ on: picked.includes(img.path) }"
-            :title="img.name"
-            @click="toggle(img.path)"
-            @dblclick="previewPath = img.path"
+          <JustifiedGrid
+            v-if="(data?.images ?? []).length"
+            :items="data?.images ?? []"
+            :ratio="fsRatio"
+            :key-of="fsKey"
+            :target-row-height="150"
+            :gap="6"
           >
-            <img :src="thumbUrl(img.path)" :alt="img.name" loading="lazy" />
-            <span class="name">{{ img.name }}</span>
-          </button>
+            <template #default="{ item, height }">
+              <button
+                class="cell"
+                :class="{ on: picked.includes(item.path) }"
+                :title="item.name"
+                @click="toggle(item.path)"
+                @dblclick="previewPath = item.path"
+              >
+                <span class="thumb" :style="{ height: `${height}px` }">
+                  <img
+                    :src="thumbUrl(item.path)"
+                    :alt="item.name"
+                    loading="lazy"
+                    @load="rememberRatio(item, $event)"
+                  />
+                </span>
+                <span class="name">{{ item.name }}</span>
+              </button>
+            </template>
+          </JustifiedGrid>
           <div v-if="!(data?.images ?? []).length && !isFetching" class="muted small">
             这个目录里没有图片
           </div>
@@ -255,37 +289,45 @@ function thumbUrl(path: string): string {
   min-width: 0;
   overflow-y: auto;
   padding: var(--gap-sm);
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 6px;
-  align-content: start;
 }
 
 .cell {
-  position: relative;
-  border: 2px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  padding: 0;
-  overflow: hidden;
-}
-
-.cell img {
   display: block;
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
-  background: var(--panel-3);
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
 }
 
-.cell.on {
-  border-color: var(--primary);
+.thumb {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cell:hover .thumb {
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.cell.on .thumb {
+  box-shadow: 0 0 0 2px var(--primary);
 }
 
 .cell .name {
   display: block;
   font-size: 10px;
-  padding: 2px 4px;
+  padding: 2px 2px 0;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;

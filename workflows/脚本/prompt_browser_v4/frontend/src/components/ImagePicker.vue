@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, thumbnailUrl } from '../api/client'
 import EmptyState from './EmptyState.vue'
+import JustifiedGrid from './JustifiedGrid.vue'
+import { imageAspect } from '../utils/image'
 import type { HistoryItem, HistoryPage } from '../api/types'
 
 /**
@@ -37,6 +39,10 @@ const { data, isFetching } = useQuery<HistoryPage>({
 
 const items = computed<HistoryItem[]>(() => data.value?.items ?? [])
 
+function imageKey(item: HistoryItem) {
+  return item.id
+}
+
 function orderOf(id: number): number {
   const index = props.modelValue.indexOf(id)
   return index >= 0 ? index + 1 : 0
@@ -65,18 +71,30 @@ function clear() {
 
     <input v-model="search" class="search" type="search" placeholder="搜索文件名…" />
 
-    <div class="grid">
-      <button
-        v-for="item in items"
-        :key="item.id"
-        class="cell"
-        :class="{ picked: orderOf(item.id) > 0, fav: item.favorite }"
-        :title="item.filename"
-        @click="toggle(item.id)"
+        <div class="grid">
+      <JustifiedGrid
+        v-if="items.length"
+        :items="items"
+        :ratio="imageAspect"
+        :key-of="imageKey"
+        :target-row-height="170"
+        :gap="6"
       >
-        <img :src="thumbnailUrl(item, 240)" :alt="item.filename" loading="lazy" />
-        <span v-if="orderOf(item.id)" class="order">{{ orderOf(item.id) }}</span>
-      </button>
+        <template #default="{ item, height }">
+          <button
+            class="cell"
+            :class="{ picked: orderOf(item.id) > 0, fav: item.favorite }"
+            :title="item.filename"
+            @click="toggle(item.id)"
+          >
+            <span class="thumb" :style="{ height: `${height}px` }">
+              <img :src="thumbnailUrl(item, 240)" :alt="item.filename" loading="lazy" />
+              <span v-if="orderOf(item.id)" class="order">{{ orderOf(item.id) }}</span>
+            </span>
+            <span class="name">{{ item.filename }}</span>
+          </button>
+        </template>
+      </JustifiedGrid>
       <EmptyState v-if="!items.length && !isFetching" text="没有可选图片" />
     </div>
   </section>
@@ -119,37 +137,52 @@ function clear() {
 .grid {
   flex: 1;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 6px;
-  align-content: start;
 }
 
 .cell {
-  position: relative;
+  display: block;
+  width: 100%;
   padding: 0;
-  border: 2px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  overflow: hidden;
+  border: none;
+  background: transparent;
+  text-align: left;
   transition: 0.12s;
 }
 
-.cell img {
+.thumb {
+  position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 1;
-  /* contain：选素材要看清整张图（换脸尤其要确认脸和姿势），裁掉头部就没法选了 */
-  object-fit: contain;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
   background: var(--panel-3);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
-.cell:hover {
-  border-color: var(--border-strong);
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 比例由 JustifiedGrid 按原图算好，contain 只保证不裁画面 */
+  object-fit: contain;
 }
 
-.cell.picked {
-  border-color: var(--primary);
+.cell:hover .thumb {
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.cell.picked .thumb {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.name {
+  display: block;
+  padding: 2px 2px 0;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .order {

@@ -42,7 +42,7 @@ export function sourceLabel(source: string): string {
     comfyui_sync: 'ComfyUI 同步',
     disk_scan: '磁盘扫描',
     composer: '组合创作',
-    faceswap: '换脸',
+    faceswap: '图像编辑',
   }
   return map[source] ?? source ?? ''
 }

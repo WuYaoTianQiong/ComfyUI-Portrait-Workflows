@@ -1,44 +1,148 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
 import FilePicker from '../components/FilePicker.vue'
-import { apiPost } from '../api/client'
+import MaskEditorModal from '../components/MaskEditorModal.vue'
+import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
-import { useWorkflows } from '../composables/useWorkflows'
+import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { statusLabel } from '../utils/format'
+import { confirmDialog } from '../utils/naive'
+import { useToast } from '../composables/useToast'
+import { readSession, writeSession } from '../composables/useSessionState'
+import type { HistoryItem, HistoryPage } from '../api/types'
 
 /** 与后端 `faceswap.DEFAULT_PROMPT` 保持一致；留空提交时后端也会用这句。 */
 const DEFAULT_PROMPT =
-  '保持主图人物的姿势、构图、服装、背景与光线完全不变，' +
-  '只把人物的面部替换成参考图中人物的脸，脸型与五官保持一致，自然真实，写实人像摄影，高清细节'
+  '只修改提示词中描述的部分，其余人物相貌、姿势、构图、服装、背景与光线保持与目标图一致，自然真实，高清细节'
 
-const { workflowPath } = useSettings()
+/** 常用编辑场景的参考提示词：点一下填入，省得用户从零手写。 */
+const PROMPT_PRESETS: Array<{ label: string; text: string }> = [
+  { label: '通用编辑', text: DEFAULT_PROMPT },
+  {
+    label: '换脸',
+    text:
+      '保持人物的姿势、构图、服装、背景与光线完全不变，只把面部替换成参考图中人物的脸，' +
+      '脸型与五官保持一致，自然真实，高清细节',
+  },
+  {
+    label: '换衣',
+    text:
+      '保持人物姿势、面部、背景与光线不变，把服装换成参考图中的款式、材质与颜色，' +
+      '版型自然贴合身体，高清细节',
+  },
+  {
+    label: '换背景',
+    text:
+      '保持人物的姿势、面部与服装不变，把背景替换成参考图中的场景，' +
+      '光照方向与人物自然融合，高清细节',
+  },
+  {
+    label: '三图参考',
+    text:
+      '人物相貌参考参考图1，服装参考参考图2，保持目标图的姿势、构图与背景，' +
+      '自然融合，高清细节',
+  },
+  {
+    label: '局部重绘',
+    text:
+      '只修改遮罩标记的区域，其余区域保持不变，' +
+      '修改结果与周围光照、材质自然过渡，高清细节',
+  },
+]
+
+// 换脸必须用「双 LoadImage」的换脸工作流，单独一份，不能被文生图工作流覆盖
+const { faceswapWorkflowPath: workflowPath } = useSettings()
 const { workflows } = useWorkflows()
-const { busy: generating, job: activeJob, error: generateError, track } = useGenerate()
+const { busy: generating, job: activeJob, error: generateError, submitAndTrack } = useGenerate()
+const toast = useToast()
 
-const mainIds = ref<number[]>([])
-const refIds = ref<number[]>([])
-// 磁盘素材：后端 faceswap/batch 支持 main_paths / ref_paths 与画廊 id 混用
-const mainPaths = ref<string[]>([])
-const refPaths = ref<string[]>([])
-const mainPickerOpen = ref(false)
-const refPickerOpen = ref(false)
+/** 会话状态：三组素材、组合方式、种子、提示词。 */
+interface EditGroup {
+  ids: number[]
+  paths: string[]
+  pickerOpen: boolean
+}
 
-const pairMode = ref<'cross' | 'zip'>('cross')
-const seedMode = ref<'fixed' | 'random' | 'increment'>('fixed')
-const seed = ref(100000)
-const promptText = ref('')
+interface EditSession {
+  targetIds: number[]
+  targetPaths: string[]
+  refIds: number[]
+  refPaths: string[]
+  ref2Ids: number[]
+  ref2Paths: string[]
+  /** 目标图 → 遮罩文件绝对路径；key 形如 id:12 / file:<路径>。 */
+  masks: Record<string, string>
+  pairMode: 'cross' | 'zip'
+  seedMode: 'fixed' | 'random' | 'increment'
+  seed: number
+  promptText: string
+}
+
+const SESSION_KEY = 'pb.session.faceswap'
+/** 旧会话只有主图/参考图两组，读取时做一次兼容映射。 */
+const savedSession = readSession<
+  Partial<EditSession> & { mainIds?: number[]; mainPaths?: string[] }
+>(SESSION_KEY, {
+  masks: {},
+  pairMode: 'cross',
+  seedMode: 'fixed',
+  seed: 100000,
+  promptText: '',
+})
+
+const groups = ref<EditGroup[]>([
+  {
+    ids: savedSession.targetIds ?? savedSession.mainIds ?? [],
+    paths: savedSession.targetPaths ?? savedSession.mainPaths ?? [],
+    pickerOpen: false,
+  },
+  { ids: savedSession.refIds ?? [], paths: savedSession.refPaths ?? [], pickerOpen: false },
+  { ids: savedSession.ref2Ids ?? [], paths: savedSession.ref2Paths ?? [], pickerOpen: false },
+])
+
+const pairMode = ref<'cross' | 'zip'>(savedSession.pairMode ?? 'cross')
+const seedMode = ref<'fixed' | 'random' | 'increment'>(savedSession.seedMode ?? 'fixed')
+const seed = ref(savedSession.seed ?? 100000)
+const promptText = ref(savedSession.promptText ?? '')
+const maskEntries = ref<Record<string, string>>({ ...(savedSession.masks ?? {}) })
+
+watch(
+  [groups, maskEntries, pairMode, seedMode, seed, promptText],
+  () => {
+    const [target, ref1, ref2] = groups.value
+    writeSession(SESSION_KEY, {
+      targetIds: target.ids,
+      targetPaths: target.paths,
+      refIds: ref1.ids,
+      refPaths: ref1.paths,
+      ref2Ids: ref2.ids,
+      ref2Paths: ref2.paths,
+      masks: maskEntries.value,
+      pairMode: pairMode.value,
+      seedMode: seedMode.value,
+      seed: seed.value,
+      promptText: promptText.value,
+    })
+  },
+  { deep: true },
+)
 
 interface NodeInfo {
   loadimages: Array<{ id: string; title: string }>
-  main: string | null
-  ref: string | null
+  inputs: Array<{ role: 'target' | 'ref1' | 'ref2'; id: string }>
+  roles: string[]
+  target: string | null
+  refs: string[]
+  /** 工作流是否带遮罩链路（VAEEncodeForInpaint）。 */
+  mask: boolean
+  max_combos: number
 }
 
-/** 探测工作流的 LoadImage 节点，提前暴露"只有一个 LoadImage"这类不可用配置。 */
+/** 探测工作流的 LoadImage 节点，按数量决定页面显示 1/2/3 列。 */
 const {
   data: nodeInfo,
   error: nodeError,
@@ -50,86 +154,267 @@ const {
   retry: false,
 })
 
-const mainCount = computed(() => mainIds.value.length + mainPaths.value.length)
-const refCount = computed(() => refIds.value.length + refPaths.value.length)
+/** 目标图的文件名/缩略图：遮罩按图配，行里得让用户认得出是哪张。 */
+const { data: targetBriefs } = useQuery<HistoryPage>({
+  queryKey: computed(() => ['fs-target-briefs', groups.value[0].ids.join(',')]),
+  queryFn: () =>
+    apiGet<HistoryPage>('/api/history', {
+      ids: groups.value[0].ids.join(','),
+      page_size: 200,
+    }),
+  enabled: computed(() => groups.value[0].ids.length > 0),
+  staleTime: 30_000,
+})
+
+const briefMap = computed<Record<number, HistoryItem>>(() => {
+  const map: Record<number, HistoryItem> = {}
+  for (const item of targetBriefs.value?.items ?? []) map[item.id] = item
+  return map
+})
+
+function fileName(path: string) {
+  return path.split(/[/\\]/).pop() || path
+}
+
+interface TargetRow {
+  key: string
+  label: string
+  thumb: string
+  /** 原图地址：涂抹遮罩时铺到 canvas 上。 */
+  imageUrl: string
+}
+
+/** 与后端 _collect_sources 的顺序一致：先画廊 id，再磁盘路径。 */
+const targetRows = computed<TargetRow[]>(() => {
+  const [target] = groups.value
+  const rows: TargetRow[] = target.ids.map((id) => {
+    const item = briefMap.value[id]
+    return {
+      key: `id:${id}`,
+      label: item?.filename ?? `#${id}`,
+      thumb: item ? thumbnailUrl(item, 120) : '',
+      imageUrl: item ? viewUrl(item) : '',
+    }
+  })
+  for (const path of target.paths) {
+    rows.push({
+      key: `file:${path}`,
+      label: fileName(path),
+      thumb: `/api/fs/thumb?path=${encodeURIComponent(path)}&size=120`,
+      imageUrl: `/api/fs/image?path=${encodeURIComponent(path)}`,
+    })
+  }
+  return rows
+})
+
+const targetKeys = computed(() => targetRows.value.map((row) => row.key))
+
+/** 提交时按目标图顺序摊平成数组；空串 = 这张不配遮罩（整图重绘）。 */
+const maskPaths = computed(() => targetKeys.value.map((key) => maskEntries.value[key] ?? ''))
+
+// 目标图被移除后，对应遮罩也清掉，避免换图时错配
+watch(targetKeys, (keys) => {
+  const next = { ...maskEntries.value }
+  let changed = false
+  for (const key of Object.keys(next)) {
+    if (!keys.includes(key)) {
+      delete next[key]
+      changed = true
+    }
+  }
+  if (changed) maskEntries.value = next
+})
+
+const maskPickerOpen = ref(false)
+const maskPickTarget = ref('')
+const maskPickPaths = ref<string[]>([])
+
+function pickMask(key: string) {
+  maskPickTarget.value = key
+  maskPickPaths.value = []
+  maskPickerOpen.value = true
+}
+
+function onMaskPickerClose() {
+  const picked = maskPickPaths.value[0]
+  if (picked && maskPickTarget.value) {
+    maskEntries.value = { ...maskEntries.value, [maskPickTarget.value]: picked }
+  }
+  maskPickerOpen.value = false
+}
+
+function clearMask(key: string) {
+  const next = { ...maskEntries.value }
+  delete next[key]
+  maskEntries.value = next
+}
+
+// ---------------- 涂抹遮罩 ----------------
+
+const maskEditorOpen = ref(false)
+const maskEditorKey = ref('')
+const maskEditorImage = ref('')
+const maskEditorInitial = ref('')
+const maskSaving = ref(false)
+
+function openMaskEditor(row: TargetRow) {
+  if (!row.imageUrl) return
+  maskEditorKey.value = row.key
+  maskEditorImage.value = row.imageUrl
+  const existing = maskEntries.value[row.key]
+  maskEditorInitial.value = existing
+    ? `/api/fs/image?path=${encodeURIComponent(existing)}`
+    : ''
+  maskEditorOpen.value = true
+}
+
+async function onMaskSaved(payload: { dataUrl: string | null }) {
+  const key = maskEditorKey.value
+  maskEditorOpen.value = false
+  if (!payload.dataUrl) {
+    clearMask(key)
+    return
+  }
+  maskSaving.value = true
+  try {
+    const result = await apiPost<{ path: string }>('/api/faceswap/mask', {
+      data_url: payload.dataUrl,
+    })
+    maskEntries.value = { ...maskEntries.value, [key]: result.path }
+  } catch (e) {
+    toast.error(`遮罩保存失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    maskSaving.value = false
+  }
+}
+
+/** 文案与角色：工作流有几个 LoadImage，就显示几列，顺序固定为目标图 → 参考1 → 参考2。 */
+const ROLE_META = {
+  target: { label: '目标图', hint: '保留姿势/服装/背景，决定输出尺寸' },
+  ref1: { label: '参考图1', hint: '提供要参考/替换的内容' },
+  ref2: { label: '参考图2', hint: '第二张参考' },
+} as const
+const ROLE_KEYS = ['target', 'ref1', 'ref2'] as const
+
+function roleMeta(index: number) {
+  return ROLE_META[ROLE_KEYS[index] ?? 'ref2']
+}
+
+/** 未选工作流时按旧版双图布局兜底；选中后按实际 LoadImage 数量显示。 */
+const columnCount = computed(() => {
+  const n = nodeInfo.value?.loadimages.length
+  if (!n) return 2
+  return Math.min(3, n)
+})
+
+const tooManyInputs = computed(() => (nodeInfo.value?.loadimages.length ?? 0) > 3)
+const visibleGroups = computed(() => groups.value.slice(0, columnCount.value))
+const groupCounts = computed(() => groups.value.map((g) => g.ids.length + g.paths.length))
+const activeCounts = computed(() => groupCounts.value.slice(0, columnCount.value))
 
 const comboCount = computed(() => {
-  if (!mainCount.value || !refCount.value) return 0
-  return pairMode.value === 'zip' ? mainCount.value : mainCount.value * refCount.value
+  if (activeCounts.value.some((c) => c === 0)) return 0
+  if (columnCount.value === 1) return activeCounts.value[0]
+  if (pairMode.value === 'zip') {
+    return activeCounts.value.every((c) => c === activeCounts.value[0])
+      ? activeCounts.value[0]
+      : 0
+  }
+  return activeCounts.value.reduce((a, b) => a * b, 1)
 })
 
 const zipMismatch = computed(
-  () => pairMode.value === 'zip' && mainIds.value.length !== refIds.value.length,
+  () =>
+    columnCount.value >= 2 &&
+    pairMode.value === 'zip' &&
+    activeCounts.value.some((c) => c !== activeCounts.value[0]),
+)
+
+const maxCombos = computed(() => nodeInfo.value?.max_combos ?? 10)
+const comboOverLimit = computed(() => comboCount.value > maxCombos.value)
+
+const summaryText = computed(() =>
+  activeCounts.value.map((c, i) => `${roleMeta(i).label} ${c}`).join(' × '),
 )
 
 /**
- * 换脸工作流必须有两个 LoadImage（主图 + 参考图）。
- * 选到文生图工作流是常见误操作，这里提前拦住，不要等提交时报 400。
+ * 工作流的 LoadImage 数量必须和页面列数一致：
+ * 1 个 = 单图编辑，2 个 = 双图参考，3 个 = 三图参考。
+ * 多于 3 个后端注入不了，0 个则不是图像编辑工作流。
  */
-const nodeReady = computed(() => !!(nodeInfo.value?.main && nodeInfo.value?.ref))
+const nodeReady = computed(() => {
+  const info = nodeInfo.value
+  if (!info || tooManyInputs.value || !info.target) return false
+  return (info.inputs?.length ?? 0) === columnCount.value
+})
 
 const canSubmit = computed(
   () =>
     !generating.value &&
     !!workflowPath.value &&
     nodeReady.value &&
-    mainIds.value.length > 0 &&
-    refIds.value.length > 0 &&
-    !zipMismatch.value,
+    activeCounts.value.every((c) => c > 0) &&
+    !zipMismatch.value &&
+    !comboOverLimit.value,
 )
 
 async function submit() {
   if (!canSubmit.value) return
-  if (!confirm(`将提交 ${comboCount.value} 个换脸任务，确认继续？`)) return
+  const ok = await confirmDialog({
+    title: '图像编辑',
+    content: `将提交 ${comboCount.value} 张（${summaryText.value}），确认继续？`,
+    positiveText: '提交',
+    negativeText: '取消',
+  })
+  if (!ok) return
+  const [target, ref1, ref2] = groups.value
   try {
-    const result = await apiPost<{ success: boolean; job_id: number; total: number; submitted: number }>(
-      '/api/faceswap/batch',
-      {
-        main_ids: mainIds.value,
-        main_paths: mainPaths.value,
-        ref_ids: refIds.value,
-        ref_paths: refPaths.value,
-        workflow_path: workflowPath.value,
-        prompt: promptText.value,
-        seed_mode: seedMode.value,
-        seed: seed.value,
-        pair_mode: pairMode.value,
-      },
-    )
-    if (result.success) track(result.job_id)
+    const result = await submitAndTrack<{
+      success: boolean
+      job_id: number
+      total: number
+      submitted: number
+    }>('/api/faceswap/batch', {
+      main_ids: target.ids,
+      main_paths: target.paths,
+      ref_ids: columnCount.value >= 2 ? ref1.ids : [],
+      ref_paths: columnCount.value >= 2 ? ref1.paths : [],
+      ref2_ids: columnCount.value >= 3 ? ref2.ids : [],
+      ref2_paths: columnCount.value >= 3 ? ref2.paths : [],
+      // 工作流没有遮罩链路时不提交，避免后端报错
+      mask_paths: nodeInfo.value?.mask ? maskPaths.value : [],
+      workflow_path: workflowPath.value,
+      // 自定义工作流不在后端磁盘上，内容必须一起带过去
+      workflow_content: customWorkflowContent(workflowPath.value),
+      prompt: promptText.value,
+      seed_mode: seedMode.value,
+      seed: seed.value,
+      pair_mode: pairMode.value,
+    })
+    if (!result.success) toast.error('提交失败')
   } catch (e) {
-    alert(`提交失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`提交失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 </script>
 
 <template>
   <div class="faceswap">
-    <div class="picker-col">
+    <div v-for="(group, i) in visibleGroups" :key="ROLE_KEYS[i]" class="picker-col">
       <div class="picker-head">
-        <span>主图（保留姿势/服装/背景）</span>
-        <button class="btn btn-sm" title="从磁盘任意目录选图" @click="mainPickerOpen = true">
-          📁 磁盘<template v-if="mainPaths.length"> {{ mainPaths.length }}</template>
+        <span>{{ roleMeta(i).label }}（{{ roleMeta(i).hint }}）</span>
+        <button class="btn btn-sm" title="从磁盘任意目录选图" @click="group.pickerOpen = true">
+          📁 磁盘<template v-if="group.paths.length"> {{ group.paths.length }}</template>
         </button>
       </div>
-      <ImagePicker v-model="mainIds" title="" />
-    </div>
-
-    <div class="picker-col">
-      <div class="picker-head">
-        <span>参考图（提供面部）</span>
-        <button class="btn btn-sm" title="从磁盘任意目录选图" @click="refPickerOpen = true">
-          📁 磁盘<template v-if="refPaths.length"> {{ refPaths.length }}</template>
-        </button>
-      </div>
-      <ImagePicker v-model="refIds" title="" />
+      <ImagePicker v-model="group.ids" title="" />
     </div>
 
     <aside class="panel">
       <div class="section">
         <span class="label">工作流</span>
         <select v-model="workflowPath">
-          <option value="">选择换脸工作流…</option>
+          <option value="">选择图像编辑工作流…</option>
           <option v-for="wf in workflows" :key="wf.path" :value="wf.path">{{ wf.name }}</option>
         </select>
       </div>
@@ -140,14 +425,18 @@ async function submit() {
         <div v-else-if="nodeError" class="err-text">{{ nodeError.message }}</div>
         <template v-else-if="nodeInfo">
           <div v-if="nodeReady" class="node-row">
-            <span class="node-role">主图</span>
-            <span class="node-id">{{ nodeInfo.main }}</span>
-            <span class="node-role">参考</span>
-            <span class="node-id">{{ nodeInfo.ref }}</span>
+            <template v-for="(item, i) in nodeInfo.inputs" :key="item.role">
+              <span class="node-role">{{ roleMeta(i).label }}</span>
+              <span class="node-id">{{ item.id }}</span>
+            </template>
           </div>
           <div v-else class="err-text">
-            这个工作流只有 {{ nodeInfo.loadimages.length }} 个 LoadImage，
-            不是换脸工作流，请换一个（换脸工作流需要两个 LoadImage 分别接主图与参考图）
+            <template v-if="tooManyInputs">
+              这个工作流有 {{ nodeInfo.loadimages.length }} 个 LoadImage，当前最多支持 3 个输入
+            </template>
+            <template v-else>
+              这个工作流没有可注入的 LoadImage，请换一个图像编辑工作流
+            </template>
           </div>
           <div class="node-list">
             LoadImage 节点 {{ nodeInfo.loadimages.length }} 个：
@@ -156,7 +445,55 @@ async function submit() {
         </template>
       </div>
 
-      <div class="section">
+      <div class="section masks">
+        <span class="label">遮罩（可选，按目标图单独配）</span>
+        <div v-if="!workflowPath" class="hint">
+          先选择支持遮罩的单图 / 双图工作流，选好目标图后这里会出现「涂抹」按钮
+        </div>
+        <div v-else-if="probing" class="hint">探测工作流中…</div>
+        <div v-else-if="nodeError" class="err-text">{{ nodeError.message }}</div>
+        <div v-else-if="nodeInfo && !nodeInfo.mask" class="hint">
+          该工作流没有遮罩链路（三图参考工作流不支持遮罩）
+        </div>
+        <template v-else-if="nodeInfo">
+          <div class="hint">白/不透明 = 要改；黑/透明 = 保留；不配 = 整图重绘</div>
+          <div v-if="!targetRows.length" class="hint">先在左侧选目标图，再点「涂抹」画遮罩</div>
+          <div v-else class="mask-list">
+            <div v-for="row in targetRows" :key="row.key" class="mask-row">
+              <img
+                v-if="row.thumb"
+                class="mask-thumb"
+                :src="row.thumb"
+                :alt="row.label"
+                loading="lazy"
+              />
+              <span v-else class="mask-thumb placeholder">?</span>
+              <div class="mask-info">
+                <span class="mask-target" :title="row.label">{{ row.label }}</span>
+                <span class="mask-file" :title="maskEntries[row.key] || ''">
+                  {{ maskEntries[row.key] ? fileName(maskEntries[row.key]) : '未配（全图重绘）' }}
+                </span>
+              </div>
+              <button class="btn btn-sm" :disabled="!row.imageUrl || maskSaving" title="在目标图上涂抹遮罩" @click="openMaskEditor(row)">
+                涂抹
+              </button>
+              <button class="btn btn-sm" @click="pickMask(row.key)">
+                {{ maskEntries[row.key] ? '换' : '导入' }}
+              </button>
+              <button
+                v-if="maskEntries[row.key]"
+                class="btn btn-sm"
+                title="清除这张目标图的遮罩"
+                @click="clearMask(row.key)"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div v-if="columnCount >= 2" class="section">
         <span class="label">组合方式</span>
         <div class="seg">
           <button class="btn btn-sm" :class="{ active: pairMode === 'cross' }" @click="pairMode = 'cross'">
@@ -167,10 +504,13 @@ async function submit() {
           </button>
         </div>
         <div class="hint">
-          全组合 = 主图 × 参考图的笛卡尔积；1:1 = 按两侧选中顺序一一对应
+          全组合 = 各组素材的笛卡尔积；1:1 = 各组按选中顺序一一对应
         </div>
         <div v-if="zipMismatch" class="err-text">
-          1:1 配对要求两侧数量相同（当前 {{ mainIds.length }} vs {{ refIds.length }}）
+          1:1 配对要求各组数量相同（当前 {{ activeCounts.join(' vs ') }}）
+        </div>
+        <div v-if="comboOverLimit" class="err-text">
+          共 {{ comboCount }} 张，超过上限 {{ maxCombos }} 张，请减少素材
         </div>
       </div>
 
@@ -190,16 +530,29 @@ async function submit() {
         <input v-if="seedMode !== 'random'" v-model.number="seed" type="number" class="seed-input" />
       </div>
 
-      <label class="section">
-        <span class="label">提示词（留空使用内置换脸提示）</span>
+      <div class="section">
+        <span class="label">提示词（留空使用内置默认提示）</span>
+        <div class="presets">
+          <button
+            v-for="p in PROMPT_PRESETS"
+            :key="p.label"
+            class="btn btn-sm"
+            :class="{ on: promptText === p.text }"
+            @click="promptText = p.text"
+          >
+            {{ p.label }}
+          </button>
+          <button class="btn btn-sm" :disabled="!promptText" @click="promptText = ''">
+            清空
+          </button>
+        </div>
         <textarea v-model="promptText" spellcheck="false" :placeholder="DEFAULT_PROMPT" />
-        <button class="btn btn-sm" @click="promptText = DEFAULT_PROMPT">填入默认提示词</button>
-      </label>
+      </div>
 
       <div class="summary">
         <span>将生成</span>
         <b>{{ comboCount }}</b>
-        <span>张（{{ mainIds.length }} 主图 × {{ refIds.length }} 参考图）</span>
+        <span>张（{{ summaryText }}）</span>
       </div>
 
       <div class="actions">
@@ -208,23 +561,39 @@ async function submit() {
           {{ statusLabel(activeJob.status) }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
         </span>
         <span class="spacer" />
-        <button class="btn btn-sm primary" :disabled="!canSubmit" @click="submit">
-          {{ generating ? '提交中…' : '🚀 开始换脸' }}
+        <button
+          class="btn btn-sm primary"
+          :class="{ loading: generating }"
+          :disabled="!canSubmit"
+          @click="submit"
+        >
+          {{ generating ? '生成中…' : '🚀 开始编辑' }}
         </button>
       </div>
     </aside>
+
     <FilePicker
-      v-model="mainPaths"
-      :open="mainPickerOpen"
-      title="从磁盘选主图"
-      @close="mainPickerOpen = false"
+      v-for="(group, i) in visibleGroups"
+      :key="'fs-picker-' + i"
+      v-model="group.paths"
+      :open="group.pickerOpen"
+      :title="`从磁盘选${roleMeta(i).label}`"
+      @close="group.pickerOpen = false"
     />
     <FilePicker
-      v-model="refPaths"
-      :open="refPickerOpen"
-      title="从磁盘选参考图"
-      @close="refPickerOpen = false"
-    />  </div>
+      v-model="maskPickPaths"
+      :open="maskPickerOpen"
+      title="从磁盘选遮罩图（取第一张）"
+      @close="onMaskPickerClose"
+    />
+    <MaskEditorModal
+      :open="maskEditorOpen"
+      :image-url="maskEditorImage"
+      :initial-mask-url="maskEditorInitial"
+      @close="maskEditorOpen = false"
+      @save="onMaskSaved"
+    />
+  </div>
 </template>
 
 <style scoped>
@@ -289,6 +658,62 @@ async function submit() {
 
 .seg .btn {
   flex: 1;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.presets .btn.on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.mask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.mask-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+}
+
+.mask-thumb {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.mask-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mask-target,
+.mask-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mask-file {
+  color: var(--muted);
 }
 
 .nodes {
