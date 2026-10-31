@@ -1,4 +1,4 @@
-"""历史记录"""
+"""图片（原 `history` 路由）—— 画廊列表 / 分面 / 同步 / 批量操作 / 标签分类关联。"""
 import json
 import traceback
 from pathlib import Path
@@ -21,7 +21,7 @@ from app.services.image_meta import (
 from app.services.paths import _resolve_if_reparse, build_view_url
 from app.services.thumbnail import _get_image_path
 
-router = APIRouter(tags=["历史"])
+router = APIRouter(tags=["图片"])
 
 COMFYUI_API = settings.comfyui_api
 OUTPUT_ROOT = _resolve_if_reparse(settings.comfyui_root / "output")
@@ -415,7 +415,7 @@ def _cleanup_thumbnails(filename: str, subfolder: str, img_type: str):
 # 查询（支持筛选 / 排序 / 搜索）
 # ---------------------------------------------------------------------------
 
-@router.get("/history", response_model=HistoryListResponse)
+@router.get("/images", response_model=HistoryListResponse)
 def list_history(
     page: int = Query(1),
     page_size: int = Query(50),
@@ -433,7 +433,7 @@ def list_history(
     ids: str = Query("", description="逗号分隔的历史 id，只取这些记录"),
 ):
     # 筛选构造统一走 _filtered_history_query + _apply_facet_filters：
-    # 这两个函数是 /history、/history/ids、/history/facets、/history/cleanup_missing
+    # 这两个函数是 /images、/images/ids、/images/facets、/images/cleanup_missing
     # 的唯一来源，避免"列表筛了、全选却选到范围外"这类错位。
     q = _filtered_history_query(favorite, search, category_id, tag_ids, missing, tag_match)
     q = _apply_facet_filters(q, source, date, model, orientation)
@@ -513,7 +513,7 @@ def _filtered_history_query(
 ):
     """历史画廊的统一筛选构造器（favorite/search/分类/标签/缺失）。
 
-    `/history`、`/history/ids`、`/history/facets` 必须共用这一份，
+    `/images`、`/images/ids`、`/images/facets` 必须共用这一份，
     否则会出现"列表按分类筛了、全选却选到类外"的错位。
 
     `tag_match` 决定多标签的语义：`all` = 交集（同时满足），`any` = 并集（任一满足）。
@@ -568,7 +568,7 @@ def _filtered_history_query(
 def _apply_facet_filters(q, source: str = "", date: str = "", model: str = "", orientation: str = ""):
     """source / date / model / orientation 四个分面筛选。
 
-    `/history`、`/history/ids`、`/history/cleanup_missing` 共用这一份。
+    `/images`、`/images/ids`、`/images/cleanup_missing` 共用这一份。
     这三处原先各自内联了一遍同样的 if 分支，加一个筛选项就要改三处，
     并且已经出现过"列表筛了、全选却选到范围外"的错位。
     """
@@ -591,7 +591,7 @@ def _apply_facet_filters(q, source: str = "", date: str = "", model: str = "", o
     return q
 
 
-@router.get("/history/facets", response_model=FacetsResponse)
+@router.get("/images/facets", response_model=FacetsResponse)
 def history_facets(
     favorite: bool = Query(None),
     search: str = Query(""),
@@ -632,7 +632,7 @@ def history_facets(
 
 
 
-@router.get("/history/ids", response_model=HistoryIdsResponse)
+@router.get("/images/ids", response_model=HistoryIdsResponse)
 def history_ids(
     favorite: str = Query(""),
     sort: str = Query("newest"),
@@ -664,7 +664,7 @@ def history_ids(
 # 同步
 # ---------------------------------------------------------------------------
 
-@router.api_route("/history_sync", methods=["GET", "POST"])
+@router.api_route("/images/sync", methods=["GET", "POST"])
 def sync_history(page_size: int = Query(500)):
     added = _sync_comfyui_history()
     added += _sync_disk_orphans()
@@ -690,7 +690,7 @@ _GUARD_RATIO = 0.5
 _GUARD_MIN_TOTAL = 20
 
 
-@router.post("/history/cleanup_missing")
+@router.post("/images/cleanup_missing")
 def cleanup_missing_files(
     dry_run: bool = Query(True, description="true=只预览将清理哪些，不写库"),
     confirm: bool = Query(False, description="dry_run=false 时必须显式传 true"),
@@ -790,7 +790,7 @@ def cleanup_missing_files(
 # 单条删除
 # ---------------------------------------------------------------------------
 
-@router.delete("/history/{item_id}")
+@router.delete("/images/{item_id}")
 def delete_history_item(item_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
@@ -806,7 +806,7 @@ def delete_history_item(item_id: int):
 # 批量删除
 # ---------------------------------------------------------------------------
 
-@router.post("/history/batch_delete")
+@router.post("/images/batch_delete")
 def batch_delete_history(body: BatchDeleteRequest):
     ids = body.ids
     if not ids:
@@ -822,7 +822,7 @@ def batch_delete_history(body: BatchDeleteRequest):
 # 收藏切换
 # ---------------------------------------------------------------------------
 
-@router.post("/history/{item_id}/favorite")
+@router.post("/images/{item_id}/favorite")
 def toggle_favorite(item_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
@@ -836,7 +836,7 @@ def toggle_favorite(item_id: int):
 # 下载图片
 # ---------------------------------------------------------------------------
 
-@router.get("/history/{item_id}/download")
+@router.get("/images/{item_id}/download")
 def download_history_item(item_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
@@ -863,7 +863,7 @@ def download_history_item(item_id: int):
 # 清空
 # ---------------------------------------------------------------------------
 
-@router.delete("/history")
+@router.delete("/images")
 def clear_history():
     Image.update(is_deleted=True).execute()
     # 清理全部缩略图
@@ -878,7 +878,7 @@ def clear_history():
     return {"success": True}
 
 
-@router.post("/history/backfill_taxonomy")
+@router.post("/images/backfill_taxonomy")
 def backfill_taxonomy():
     """为所有带 prompt_id 且尚未分类的图片批量补齐来源提示词的分类/标签。"""
     done = backfill_image_taxonomy()
@@ -892,7 +892,7 @@ class ProcessImageRequest(BaseModel):
     quality: str = "4K"
 
 
-@router.post("/history/{item_id}/process")
+@router.post("/images/{item_id}/process")
 def process_history_image(item_id: int, data: ProcessImageRequest):
     """将历史图片作为输入，用指定工作流处理（如超分、重绘等）"""
     r = Image.get_or_none(Image.id == item_id)
@@ -970,7 +970,7 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
 
 
 # ======== Phase 5: 图片分类 / 标签管理 ========
-@router.post("/history/{item_id}/categories/{cat_id}")
+@router.post("/images/{item_id}/categories/{cat_id}")
 def add_image_category(item_id: int, cat_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
@@ -982,7 +982,7 @@ def add_image_category(item_id: int, cat_id: int):
     return {"success": True, "created": created}
 
 
-@router.delete("/history/{item_id}/categories/{cat_id}")
+@router.delete("/images/{item_id}/categories/{cat_id}")
 def remove_image_category(item_id: int, cat_id: int):
     pc = ImageCategory.get_or_none((ImageCategory.image == item_id) & (ImageCategory.category == cat_id))
     if pc is None:
@@ -991,7 +991,7 @@ def remove_image_category(item_id: int, cat_id: int):
     return {"success": True}
 
 
-@router.post("/history/{item_id}/tags/{tag_id}")
+@router.post("/images/{item_id}/tags/{tag_id}")
 def add_image_tag(item_id: int, tag_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
@@ -1007,7 +1007,7 @@ def add_image_tag(item_id: int, tag_id: int):
     return {"success": True, "created": created}
 
 
-@router.delete("/history/{item_id}/tags/{tag_id}")
+@router.delete("/images/{item_id}/tags/{tag_id}")
 def remove_image_tag(item_id: int, tag_id: int):
     it = EntityTag.get_or_none(
         (EntityTag.entity_type == "image")
@@ -1021,7 +1021,7 @@ def remove_image_tag(item_id: int, tag_id: int):
     return {"success": True}
 
 
-@router.post("/history/{item_id}/inherit")
+@router.post("/images/{item_id}/inherit")
 def inherit_image_taxonomy(item_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:

@@ -61,10 +61,10 @@ def test_image_inherits_prompt_tags(api, seed_history):
     ).json()["id"]
     img = seed_history(filename="inherit.png", prompt_id=pid)
 
-    assert api.post(f"/api/history/{img.id}/inherit").status_code == 200
+    assert api.post(f"/api/images/{img.id}/inherit").status_code == 200
 
     tag = Tag.get(Tag.name == "夏日")
-    assert api.get(f"/api/history/ids?tag_ids={tag.id}").json()["ids"] == [img.id]
+    assert api.get(f"/api/images/ids?tag_ids={tag.id}").json()["ids"] == [img.id]
 
 
 def test_tag_counts_by_scope(api, seed_history):
@@ -73,7 +73,7 @@ def test_tag_counts_by_scope(api, seed_history):
         "/api/prompts", json={"name": "c1", "prompt": "x", "tags": "夏日,夜景"}
     ).json()["id"]
     img = seed_history(filename="c.png", prompt_id=pid)
-    api.post(f"/api/history/{img.id}/inherit")
+    api.post(f"/api/images/{img.id}/inherit")
 
     prompt_counts = {
         t["name"]: t["prompt_count"] for t in api.get("/api/tags?count_scope=prompt").json()["tags"]
@@ -101,10 +101,10 @@ def test_history_tag_match_all_vs_any(api, seed_history):
     EntityTag.create(entity_type="image", entity_id=only_a.id, tag=tag_a.id)
 
     ids_all = api.get(
-        f"/api/history/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=all"
+        f"/api/images/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=all"
     ).json()["ids"]
     ids_any = api.get(
-        f"/api/history/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=any"
+        f"/api/images/ids?tag_ids={tag_a.id},{tag_b.id}&tag_match=any"
     ).json()["ids"]
 
     assert ids_all == [both.id]

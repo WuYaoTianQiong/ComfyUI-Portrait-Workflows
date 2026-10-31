@@ -8,9 +8,9 @@
     PORT=8770 python tools/smoke.py  # 自定义端口
 
 覆盖的端点（HTMX 分支已在 B4 删除，旧 /html 端点应返回 404）：
-    - /api/history/facets          方向分面计数
-    - /api/history?orientation=... 按方向筛选
-    - /api/history/html?...        已下线，断言 404
+    - /api/images/facets          方向分面计数
+    - /api/images?orientation=... 按方向筛选
+    - /api/images/html?...        已下线，断言 404
     - /api/workflows               工作流列表（界面格式工作流也应列出）
     - /api/faceswap/nodes          双图工作流的 LoadImage 节点探测
     - /api/faceswap/batch          批量换脸（dry_run，不占显存）
@@ -118,7 +118,7 @@ _TMP_DIR = None
 
 
 def _prepare_isolated_env(env: dict) -> str:
-    """把冒烟跑在数据库副本上：本脚本会打 /api/history_sync，那是一条写库路径。
+    """把冒烟跑在数据库副本上：本脚本会打 /api/images/sync，那是一条写库路径。
 
     返回说明文字，供开头打印。
     """
@@ -194,7 +194,7 @@ def main() -> int:
             except Exception:
                 comfy_online = False
             print(f"ComfyUI: {'在线' if comfy_online else '离线（相关用例记为 SKIP）'}")
-            code, body = _get(BASE + "/api/history/facets")
+            code, body = _get(BASE + "/api/images/facets")
             try:
                 data = json.loads(body)
                 o = data.get("orientation")
@@ -204,7 +204,7 @@ def main() -> int:
 
             for label in ("竖图", "横图", "方图", "未记录"):
                 q = urllib.parse.quote(label)
-                code, body = _get(BASE + f"/api/history?orientation={q}")
+                code, body = _get(BASE + f"/api/images?orientation={q}")
                 try:
                     total = json.loads(body).get("total")
                 except Exception:
@@ -212,17 +212,17 @@ def main() -> int:
                 checks.append((f"list orientation={label}", code, total))
 
             # HTMX 分支已在 B4 删除：旧的 HTML 片段端点不应再返回页面
-            code, body = _get(BASE + "/api/history/html?page=1&page_size=50&sort=newest")
+            code, body = _get(BASE + "/api/images/html?page=1&page_size=50&sort=newest")
             gone = code in (404, 405, 422)
-            checks.append(("history/html 已下线", 200 if gone else -2, f"HTTP {code}"))
+            checks.append(("images/html 已下线", 200 if gone else -2, f"HTTP {code}"))
 
             # 历史同步（曾因直接调用 list_history 未传全参数、Query 默认值变 FieldInfo 而 500）
-            code, body = _get(BASE + "/api/history_sync?page_size=50")
+            code, body = _get(BASE + "/api/images/sync?page_size=50")
             try:
                 sync_total = json.loads(body).get("total")
             except Exception:
                 sync_total = "PARSE_ERR"
-            checks.append(("history_sync(page_size=50)", code, sync_total))
+            checks.append(("images/sync(page_size=50)", code, sync_total))
 
             # 静态资源：必须校验内容，否则 404 会被 SPA 回退成 index.html(200) 造成假通过。
             # 资源在 /assets 下、文件名带 hash，要从 index.html 里解析真实文件名。
@@ -247,9 +247,9 @@ def main() -> int:
                                 "未找到构建产物，跳过前端资源断言（先 npm run build）"))
             miss = "__definitely_missing__.png"
             for label, url in (
-                ("缩略图(缺失)→占位图", f"/api/thumbnail?filename={miss}&subfolder=&type=output&size=600"),
-                ("原图(缺失)→占位图", f"/api/image?filename={miss}&subfolder=&type=output"),
-                ("fs/thumb(缺失)→占位图", "/api/fs/thumb?path=" + urllib.parse.quote("F:/__nope__/x.png")),
+                ("缩略图(缺失)→占位图", f"/api/media/thumbnail?filename={miss}&subfolder=&type=output&size=600"),
+                ("原图(缺失)→占位图", f"/api/media/image?filename={miss}&subfolder=&type=output"),
+                ("browser/thumb(缺失)→占位图", "/api/browser/thumb?path=" + urllib.parse.quote("F:/__nope__/x.png")),
             ):
                 code, body = _get(BASE + url)
                 ok = code == 200 and b"<svg" in body
@@ -257,7 +257,7 @@ def main() -> int:
                                f"bytes={len(body)}" if ok else "未返回占位图"))
 
             # 同步不再为「文件已被删除」的历史条目建记录
-            code, body = _get(BASE + "/api/history_sync?page_size=1")
+            code, body = _get(BASE + "/api/images/sync?page_size=1")
             time.sleep(0.5)
             try:
                 log_txt = open(LOG_PATH, encoding="utf-8", errors="replace").read()
@@ -267,11 +267,11 @@ def main() -> int:
             # 用 utf-8 读会变乱码，所以这里只匹配 ASCII 的 "[sync]" 前缀。
             skipped_ok = "[sync]" in log_txt
             if skipped_ok:
-                checks.append(("history_sync 跳过缺失文件", code, "日志已确认跳过"))
+                checks.append(("images/sync 跳过缺失文件", code, "日志已确认跳过"))
             elif not comfy_online:
-                checks.append(("history_sync 跳过缺失文件", -3, "ComfyUI 离线，无法验证"))
+                checks.append(("images/sync 跳过缺失文件", -3, "ComfyUI 离线，无法验证"))
             else:
-                checks.append(("history_sync 跳过缺失文件", -3, "本次没有「文件已缺失」的历史条目"))
+                checks.append(("images/sync 跳过缺失文件", -3, "本次没有「文件已缺失」的历史条目"))
 
             code, body = _get(BASE + "/api/jobs?active=1")
             checks.append(("jobs?active=1", code, ""))

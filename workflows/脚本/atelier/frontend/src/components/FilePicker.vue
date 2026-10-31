@@ -10,7 +10,7 @@ import JustifiedGrid from './JustifiedGrid.vue'
  * 磁盘选图：在任意文件夹里挑图，交给换脸这类需要"主图 / 参考图"的场景。
  *
  * 素材来源有两条路：画廊（已出图）与磁盘任意目录（还没进 ComfyUI 的原图）。
- * 磁盘这条只能靠文件系统浏览 —— 后端 `/api/fs/list` 直接列目录内容，
+ * 磁盘这条只能靠文件系统浏览 —— 后端 `/api/browser/list` 直接列目录内容，
  * 不做目录树递归（深目录会卡），改成"逐级进入"的平铺导航。
  */
 const props = defineProps<{
@@ -44,7 +44,7 @@ const dir = ref('')
 
 const { data, isFetching } = useQuery<FsListing>({
   queryKey: computed(() => ['fs-list', dir.value]),
-  queryFn: () => apiGet('/api/fs/list', { path: dir.value }),
+  queryFn: () => apiGet('/api/browser/list', { path: dir.value }),
   enabled: computed(() => props.open),
 })
 
@@ -97,11 +97,11 @@ function confirm() {
 }
 
 function imageUrl(path: string): string {
-  return `/api/fs/image?path=` + encodeURIComponent(path)
+  return `/api/browser/image?path=` + encodeURIComponent(path)
 }
 
 function thumbUrl(path: string): string {
-  return `/api/fs/thumb?path=${encodeURIComponent(path)}&size=240`
+  return `/api/browser/thumb?path=${encodeURIComponent(path)}&size=240`
 }
 /** 磁盘文件没有宽高，图片 onload 后记下真实比例，再重排一次。 */
 const ratios = ref<Record<string, number>>({})

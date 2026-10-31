@@ -56,7 +56,7 @@ def test_category_image_count_excludes_soft_deleted(api, seed_history):
     gone = seed_history(filename="gone.png")
     ImageCategory.create(image=live.id, category=cid)
     ImageCategory.create(image=gone.id, category=cid)
-    api.delete(f"/api/history/{gone.id}")
+    api.delete(f"/api/images/{gone.id}")
 
     tree = api.get("/api/categories?tree=true&count_scope=image").json()["categories"]
     node = next(c for c in tree if c["id"] == cid)
@@ -120,7 +120,7 @@ def test_delete_tag_clears_entity_links(api, seed_history):
 
     tid = api.post("/api/tags", json={"name": "待删"}).json()["id"]
     img = seed_history(filename="t.png")
-    api.post(f"/api/history/{img.id}/tags/{tid}")
+    api.post(f"/api/images/{img.id}/tags/{tid}")
 
     assert api.delete(f"/api/tags/{tid}").status_code == 200
     assert EntityTag.select().where(EntityTag.tag == tid).count() == 0
@@ -151,17 +151,17 @@ def test_history_item_actions(api, seed_history):
 
     img = seed_history(filename="act.png")
 
-    assert api.post(f"/api/history/{img.id}/favorite").json()["favorite"] is True
+    assert api.post(f"/api/images/{img.id}/favorite").json()["favorite"] is True
 
     cid = api.post("/api/categories", json={"name": "图片分类"}).json()["id"]
-    assert api.post(f"/api/history/{img.id}/categories/{cid}").status_code == 200
-    assert api.delete(f"/api/history/{img.id}/categories/{cid}").status_code == 200
+    assert api.post(f"/api/images/{img.id}/categories/{cid}").status_code == 200
+    assert api.delete(f"/api/images/{img.id}/categories/{cid}").status_code == 200
 
     tid = api.post("/api/tags", json={"name": "图片标签"}).json()["id"]
-    assert api.post(f"/api/history/{img.id}/tags/{tid}").status_code == 200
-    assert api.delete(f"/api/history/{img.id}/tags/{tid}").status_code == 200
+    assert api.post(f"/api/images/{img.id}/tags/{tid}").status_code == 200
+    assert api.delete(f"/api/images/{img.id}/tags/{tid}").status_code == 200
 
-    assert api.delete(f"/api/history/{img.id}").status_code == 200
+    assert api.delete(f"/api/images/{img.id}").status_code == 200
     assert bool(Image.get_by_id(img.id).is_deleted) is True
 
 
@@ -173,7 +173,7 @@ def test_history_batch_delete_keeps_prompt_records(api, seed_history):
     a = seed_history(filename="b1.png", prompt_id=prompt.id)
     b = seed_history(filename="b2.png", prompt_id=prompt.id)
 
-    assert api.post("/api/history/batch_delete", json={"ids": [a.id, b.id]}).status_code == 200
+    assert api.post("/api/images/batch_delete", json={"ids": [a.id, b.id]}).status_code == 200
     assert all(
         bool(Image.get_by_id(i).is_deleted) for i in (a.id, b.id)
     )

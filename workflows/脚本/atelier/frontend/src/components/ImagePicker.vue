@@ -28,7 +28,7 @@ const search = ref('')
 const { data, isFetching } = useQuery<HistoryPage>({
   queryKey: computed(() => ['picker', search.value.trim()]),
   queryFn: () =>
-    apiGet<HistoryPage>('/api/history', {
+    apiGet<HistoryPage>('/api/images', {
       page_size: 100,
       search: search.value.trim(),
       // 缺失的图不能用，直接排除

@@ -18,7 +18,7 @@ vi.mock('../api/client', () => ({
         ],
       }
     }
-    if (path.includes('/api/history/facets')) {
+    if (path.includes('/api/images/facets')) {
       return {
         source: { local: 6, comfyui_sync: 3 },
         date: {},

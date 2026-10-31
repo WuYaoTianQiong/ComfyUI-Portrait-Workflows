@@ -15,7 +15,7 @@
   gen_jobs + 后台 job_monitor_loop  出图完成后自动写入 gen_history（画廊自动可见）
 
 与既有端点的区别：/api/runs/batch 是「多提示词 × 单参考图」，
-/api/history/{id}/process 是「单主图 × 单参考图」，这里补的是「多目标 × 多参考」。
+/api/images/{id}/process 是「单主图 × 单参考图」，这里补的是「多目标 × 多参考」。
 """
 import base64
 import hashlib
@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.models import Image
-from app.routers.fsbrowse import IMAGE_EXT
+from app.routers.media import IMAGE_EXT
 from app.routers.jobs import create_job, update_job_items
 from app.services.comfyui_client import push_prompt
 from app.services.paths import _resolve_if_reparse

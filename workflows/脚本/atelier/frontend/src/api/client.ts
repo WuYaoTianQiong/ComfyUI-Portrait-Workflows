@@ -55,7 +55,7 @@ export function apiDelete<T>(path: string, params: QueryParams = {}): Promise<T>
 /** 图片访问地址（缩略图/原图都走这里，避免各处手拼 query 串）。 */
 export function thumbnailUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 'img_type' | 'id'>, size = 600): string {
   return (
-    '/api/thumbnail' +
+    '/api/media/thumbnail' +
     buildQuery({
       filename: item.filename,
       subfolder: item.subfolder ?? '',
@@ -69,7 +69,7 @@ export function thumbnailUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 
 /** 原图地址 */
 export function viewUrl(item: Pick<HistoryItem, 'filename' | 'subfolder' | 'img_type'>): string {
   return (
-    '/api/image' +
+    '/api/media/image' +
     buildQuery({
       filename: item.filename,
       subfolder: item.subfolder ?? '',

@@ -36,6 +36,11 @@ _ALIASES: list[tuple[str, str, bool]] = [
     ("/batch_generate", "/runs/batch", False),
     ("/progress", "/jobs/progress", False),
     ("/batch_stop", "/jobs/stop_all", False),
+    ("/history", "/images", True),
+    ("/history_sync", "/images/sync", False),
+    ("/image", "/media/image", False),
+    ("/thumbnail", "/media/thumbnail", True),
+    ("/fs", "/browser", True),
 ]
 
 _hits: dict[str, int] = {}

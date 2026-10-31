@@ -193,7 +193,7 @@ const newFragContent = ref('')
 
 /** 清理缩略图缓存（缩略图按 路径+mtime+尺寸 做键，下次访问自动重建）。 */
 const clearThumbs = useMutation({
-  mutationFn: () => apiPost<{ success: boolean; deleted: number }>('/api/thumbnail/clear'),
+  mutationFn: () => apiPost<{ success: boolean; deleted: number }>('/api/media/thumbnail/clear'),
   onSuccess: (result) => {
     toast.success(`已清理 ${result.deleted} 个缩略图缓存文件`)
   },

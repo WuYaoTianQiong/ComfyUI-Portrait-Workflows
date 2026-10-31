@@ -11,7 +11,7 @@ import { sourceLabel } from '../utils/format'
  *
  * 两份数据拼起来：
  * - `/api/system/stats`      —— 总量 + 热门标签
- * - `/api/history/facets` —— 图片的来源/方向/模型分布（复用画廊那套分面统计）
+ * - `/api/images/facets` —— 图片的来源/方向/模型分布（复用画廊那套分面统计）
  */
 interface StatsResponse {
   prompt_count: number
@@ -35,7 +35,7 @@ const { data: stats, isFetching } = useQuery<StatsResponse>({
 
 const { data: facets } = useQuery<Facets>({
   queryKey: ['history', 'facets', 'stats'],
-  queryFn: () => apiGet('/api/history/facets'),
+  queryFn: () => apiGet('/api/images/facets'),
 })
 
 /** 分面计数 → 占比条数据；按数量降序。 */

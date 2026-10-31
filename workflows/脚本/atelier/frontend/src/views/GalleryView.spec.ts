@@ -9,10 +9,10 @@ import { useToast } from '../composables/useToast'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
-    if (path.includes('/api/history/ids')) {
+    if (path.includes('/api/images/ids')) {
       return { ids: [1, 2, 3], total: 3 }
     }
-    if (path.includes('/api/history/facets')) {
+    if (path.includes('/api/images/facets')) {
       return {
         source: { local: 2, comfyui_sync: 0 },
         date: { '2026-10': 2 },
@@ -48,7 +48,7 @@ vi.mock('../api/client', () => ({
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
   thumbnailUrl: () => '/api/thumb?x.png',
-  viewUrl: () => '/api/image?x.png',
+  viewUrl: () => '/api/media/image?x.png',
 }))
 
 /** happy-dom 的 localStorage 不完整，这里补一份最小实现（刷新恢复用例需要）。 */
@@ -97,7 +97,7 @@ describe('GalleryView 清理失效', () => {
 
     expect(apiPost).toHaveBeenCalledTimes(1)
     const [path, body, params] = vi.mocked(apiPost).mock.calls[0]
-    expect(path).toBe('/api/history/cleanup_missing')
+    expect(path).toBe('/api/images/cleanup_missing')
     expect(body).toBeUndefined()
     expect(params).toMatchObject({ dry_run: true })
     expect(params).not.toHaveProperty('confirm')
@@ -134,7 +134,7 @@ describe('GalleryView 清理失效', () => {
 
     const historyCalls = vi
       .mocked(apiGet)
-      .mock.calls.filter((c) => String(c[0]).includes('/api/history') && !String(c[0]).includes('facets'))
+      .mock.calls.filter((c) => String(c[0]).includes('/api/images') && !String(c[0]).includes('facets'))
     const last = historyCalls[historyCalls.length - 1]
     expect((last[1] as Record<string, unknown>)?.source).toBe('local')
   })
@@ -151,7 +151,7 @@ describe('GalleryView 清理失效', () => {
 
     const historyCalls = vi
       .mocked(apiGet)
-      .mock.calls.filter((c) => String(c[0]).includes('/api/history') && !String(c[0]).includes('facets'))
+      .mock.calls.filter((c) => String(c[0]).includes('/api/images') && !String(c[0]).includes('facets'))
     const last = historyCalls[historyCalls.length - 1]
     expect((last[1] as Record<string, unknown>)?.source).toBe('')
   })
@@ -166,7 +166,7 @@ describe('GalleryView 清理失效', () => {
 
     const idsCalls = vi
       .mocked(apiGet)
-      .mock.calls.filter((c) => String(c[0]).includes('/api/history/ids'))
+      .mock.calls.filter((c) => String(c[0]).includes('/api/images/ids'))
     expect(idsCalls.length).toBe(1)
   })
   it('批量弹层提供「继承分类」与「投喂处理」', async () => {
@@ -185,7 +185,7 @@ describe('GalleryView 清理失效', () => {
     expect(wrapper.text()).toContain('投喂处理')
   })
 
-  it('「继承分类」按张调用 /api/history/{id}/inherit', async () => {
+  it('「继承分类」按张调用 /api/images/{id}/inherit', async () => {
     const wrapper = await mountView()
     const picks = wrapper.findAll('.card .pick')
     await picks[0].trigger('click')
@@ -198,8 +198,8 @@ describe('GalleryView 清理失效', () => {
     await flushPromises()
 
     const paths = vi.mocked(apiPost).mock.calls.map((c) => c[0])
-    expect(paths).toContain('/api/history/1/inherit')
-    expect(paths).toContain('/api/history/2/inherit')
+    expect(paths).toContain('/api/images/1/inherit')
+    expect(paths).toContain('/api/images/2/inherit')
   })
 
   it('刷新后按图片 id 恢复上次打开的灯箱', async () => {

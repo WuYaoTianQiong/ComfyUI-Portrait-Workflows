@@ -5,7 +5,7 @@ import CompareModal from './CompareModal.vue'
 import type { HistoryItem } from '../api/types'
 
 vi.mock('../api/client', () => ({
-  viewUrl: (item: { filename: string }) => '/api/image?filename=' + item.filename,
+  viewUrl: (item: { filename: string }) => '/api/media/image?filename=' + item.filename,
   apiPost: vi.fn(),
   apiDelete: vi.fn(),
 }))

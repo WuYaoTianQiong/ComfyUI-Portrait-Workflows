@@ -88,7 +88,7 @@ def test_every_registered_model_is_used_by_frontend():
 def test_history_response_contains_frontend_fields(api, seed_history):
     """实际请求画廊端点，断言前端用到的字段真的在响应里。"""
     seed_history(filename="contract.png")
-    data = api.get("/api/history?page_size=5").json()
+    data = api.get("/api/images?page_size=5").json()
     assert set(data) >= {"items", "total", "page", "page_size"}
     item = data["items"][0]
     required = {

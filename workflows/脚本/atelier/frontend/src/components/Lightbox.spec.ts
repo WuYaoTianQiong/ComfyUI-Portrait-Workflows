@@ -8,7 +8,7 @@ import type { HistoryItem } from '../api/types'
 enableAutoUnmount(afterEach)
 
 vi.mock('../api/client', () => ({
-  viewUrl: (item: { filename: string }) => '/api/image?filename=' + item.filename,
+  viewUrl: (item: { filename: string }) => '/api/media/image?filename=' + item.filename,
   thumbnailUrl: (item: { filename: string }) => '/api/thumb?filename=' + item.filename,
 }))
 

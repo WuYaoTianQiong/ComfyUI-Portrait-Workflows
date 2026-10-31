@@ -1,7 +1,7 @@
 /**
  * 后端 JSON 契约的 TypeScript 镜像。
  *
- * 这些字段来自 `/api/history`、`/api/tags` 等现有端点（契约由
+ * 这些字段来自 `/api/images`、`/api/tags` 等现有端点（契约由
  * tests/test_contract.py + tests/test_endpoints_smoke.py 锁住）。
  * 后端改名会先在测试里炸，前端这边则有编译期提示 —— 两层保护。
  */

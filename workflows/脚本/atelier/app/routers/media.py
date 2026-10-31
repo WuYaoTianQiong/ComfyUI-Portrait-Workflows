@@ -1,12 +1,24 @@
-"""图片与缩略图服务（从 `comfyui.py` 拆出）。
+"""媒体读取 —— 图片/缩略图服务 + 本地文件夹浏览。
 
-`/api/image`、`/api/thumbnail` 服务的是画廊/工作台对**任意历史图片**的读取
-（本地直读 → 代理 ComfyUI → 代理后落盘），与"往 ComfyUI 提交出图任务"无关，
-所以不该待在那个已经 700 行的 `comfyui.py` 里。URL 保持不变。
+两部分都是"把一个媒体文件读出来给前端"，所以同属一个资源文件：
+  · `/api/media/*`    画廊/工作台对**任意历史图片**的读取（本地直读 → 代理 ComfyUI → 落盘）
+  · `/api/browser/*`  磁盘任意目录的列表与缩略图（图像编辑页选素材用）
+
+P3 之前前者是裸动词 `/api/media/image`、`/api/media/thumbnail`，后者是 `/api/browser/*`
+（`routers/fsbrowse.py`，已并入本文件）。
+
+文件浏览只监听 127.0.0.1，供本机使用。按需求不做路径白名单（要能"自由打开想要的
+文件夹"），但所有路径都必须真实存在，异常一律转成 4xx，避免暴露成 500 堆栈。
 """
+from __future__ import annotations
+
+import hashlib
 import mimetypes
+import os
+import re
 import shutil
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 
 import httpx
@@ -15,15 +27,28 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image as PILImage
 
 from app.config import settings
-from app.services.paths import image_base_dir, missing_image_response, resolve_image_path
+from app.services.paths import (
+    _resolve_if_reparse,
+    image_base_dir,
+    missing_image_response,
+    resolve_image_path,
+)
 from app.services.thumbnail import generate_thumbnail
 
-router = APIRouter(tags=["图片与缩略图"])
+router = APIRouter(tags=["媒体与文件浏览"])
 
 COMFYUI_API = settings.comfyui_api
 
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+MAX_ITEMS = 800          # 单个目录最多返回多少个子目录 / 图片，避免超大目录把前端卡死
 
-@router.get("/image")
+
+# ---------------------------------------------------------------------------
+# /api/media/* —— 历史图片与缩略图
+# ---------------------------------------------------------------------------
+
+
+@router.get("/media/image")
 def proxy_image(
     filename: str = Query(...),
     subfolder: str = Query(""),
@@ -105,7 +130,7 @@ def _fetch_remote_image(filename: str, subfolder: str, img_type: str) -> bytes |
         return None
 
 
-@router.get("/thumbnail")
+@router.get("/media/thumbnail")
 def serve_thumbnail(
     filename: str = Query(...),
     subfolder: str = Query(""),
@@ -122,7 +147,7 @@ def serve_thumbnail(
         )
 
     # 本地原图不存在：回退到 ComfyUI 代理取图并即时生成缩略图
-    # （与 /api/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
+    # （与 /api/media/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
     raw = _fetch_remote_image(filename, subfolder, type)
     if raw is None:
         # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404
@@ -144,7 +169,7 @@ def serve_thumbnail(
         return missing_image_response()
 
 
-@router.post("/thumbnail/clear")
+@router.post("/media/thumbnail/clear")
 def clear_thumbnail_cache():
     """清空所有缩略图缓存文件。下次访问时自动按新缓存键重新生成。"""
     td = settings.thumbnail_dir
@@ -154,3 +179,146 @@ def clear_thumbnail_cache():
         shutil.rmtree(td)
         td.mkdir(parents=True, exist_ok=True)
     return {"success": True, "deleted": count}
+
+
+# ---------------------------------------------------------------------------
+# /api/browser/* —— 本地文件夹浏览（原 routers/fsbrowse.py）
+# ---------------------------------------------------------------------------
+
+
+def _natural(name: str):
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+def _list_drives() -> list[str]:
+    try:
+        import ctypes
+
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        return [f"{c}:\\" for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ") if mask & (1 << i)]
+    except Exception:
+        return []
+
+
+def _roots() -> list[dict]:
+    """快速跳转入口：ComfyUI 常用目录 + 项目根 + 用户目录 + 所有盘符"""
+    out: list[dict] = []
+    candidates = [
+        ("ComfyUI/output", settings.comfyui_root / "output"),
+        ("ComfyUI/input", settings.comfyui_root / "input"),
+        ("ComfyUI/temp", settings.comfyui_root / "temp"),
+        ("工作流目录", settings.library_root),
+    ]
+    for name, p in candidates:
+        try:
+            if p.is_dir():
+                out.append({"name": name, "path": str(p)})
+        except OSError:
+            continue
+    home = Path.home()
+    try:
+        if home.is_dir():
+            out.append({"name": "用户目录", "path": str(home)})
+    except OSError:
+        pass
+    for d in _list_drives():
+        out.append({"name": d, "path": d})
+    return out
+
+
+@router.get("/browser/list")
+def browser_list(path: str = Query("")):
+    """列出目录内容。path 为空时返回盘符列表（作为浏览起点）。"""
+    roots = _roots()
+    if not path.strip():
+        return {
+            "path": "", "parent": "", "roots": roots, "truncated": False,
+            "dirs": [{"name": d, "path": d} for d in _list_drives()],
+            "images": [],
+        }
+
+    raw = Path(path)
+    try:
+        base = _resolve_if_reparse(raw) if raw.is_dir() else raw
+    except OSError:
+        base = raw
+    # os.readlink 解析 junction 后返回的是 \\?\F:\... 形式，对用户毫无意义，
+    # 去掉前缀再对外展示（否则路径栏里会显示 \\?\F:\ComfyUI_Migration\input）。
+    base = Path(str(base).replace("\\\\?\\", ""))
+    if not base.is_dir():
+        raise HTTPException(400, f"不是有效目录: {path}")
+
+    dirs: list[dict] = []
+    images: list[dict] = []
+    truncated = False
+    try:
+        with os.scandir(base) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir():
+                        if len(dirs) < MAX_ITEMS:
+                            dirs.append({"name": entry.name,
+                                         "path": os.path.join(str(base), entry.name)})
+                        else:
+                            truncated = True
+                    elif entry.is_file() and Path(entry.name).suffix.lower() in IMAGE_EXT:
+                        if len(images) < MAX_ITEMS:
+                            st = entry.stat()
+                            images.append({"name": entry.name,
+                                           "path": os.path.join(str(base), entry.name),
+                                           "size": st.st_size, "mtime": int(st.st_mtime)})
+                        else:
+                            truncated = True
+                except OSError:
+                    continue
+    except OSError as e:
+        raise HTTPException(400, f"读取目录失败: {e}")
+
+    dirs.sort(key=lambda d: _natural(d["name"]))
+    images.sort(key=lambda i: _natural(i["name"]))
+    return {
+        "path": str(base),
+        "parent": str(base.parent) if base.parent != base else "",
+        "dirs": dirs, "images": images, "roots": roots, "truncated": truncated,
+    }
+
+
+def _thumb_cache_path(p: Path, size: int) -> Path:
+    try:
+        mtime = int(p.stat().st_mtime)
+    except OSError:
+        mtime = 0
+    key = hashlib.md5(f"{p}|{mtime}|{size}".encode("utf-8")).hexdigest()
+    return settings.thumbnail_dir / f"fs_{key}.webp"
+
+
+@router.get("/browser/thumb")
+def browser_thumb(path: str = Query(...), size: int = Query(300)):
+    """任意图片文件的缩略图（带磁盘缓存，按 路径+mtime+尺寸 做键）"""
+    p = Path(path)
+    if not p.is_file():
+        return missing_image_response()
+    size = max(64, min(int(size), 1024))
+    cache = _thumb_cache_path(p, size)
+    if not cache.is_file():
+        try:
+            settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
+            with PILImage.open(p) as im:
+                im.thumbnail((size, size), PILImage.LANCZOS)
+                if im.mode not in ("RGB", "L"):
+                    im = im.convert("RGB")
+                im.save(cache, "WEBP", quality=80)
+        except Exception:
+            # 坏图/不支持格式：给占位图，别让网格里出现裂图
+            return missing_image_response()
+    return FileResponse(str(cache), media_type="image/webp",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/browser/image")
+def browser_image(path: str = Query(...)):
+    """任意图片文件的原图"""
+    p = Path(path)
+    if not p.is_file():
+        return missing_image_response()
+    return FileResponse(str(p), headers={"Cache-Control": "no-cache"})

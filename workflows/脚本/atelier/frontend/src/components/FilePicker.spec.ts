@@ -6,7 +6,7 @@ import FilePicker from './FilePicker.vue'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
-    if (path.includes('/api/fs/list')) {
+    if (path.includes('/api/browser/list')) {
       return {
         path: 'F:\\out',
         parent: 'F:\\',

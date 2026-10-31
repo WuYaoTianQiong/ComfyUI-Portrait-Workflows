@@ -32,7 +32,7 @@ describe('thumbnailUrl / viewUrl', () => {
 
   it('缩略图带上文件名/子目录/类型/尺寸', () => {
     const url = thumbnailUrl(item, 300)
-    expect(url).toContain('/api/thumbnail?')
+    expect(url).toContain('/api/media/thumbnail?')
     expect(url).toContain('filename=abc.png')
     expect(url).toContain('subfolder=sub')
     expect(url).toContain('type=output')
@@ -49,7 +49,7 @@ describe('thumbnailUrl / viewUrl', () => {
 
   it('原图地址不带尺寸', () => {
     const url = viewUrl({ filename: 'a.png', subfolder: '', img_type: 'output' })
-    expect(url).toContain('/api/image?')
+    expect(url).toContain('/api/media/image?')
     expect(url).not.toContain('size=')
   })
 })

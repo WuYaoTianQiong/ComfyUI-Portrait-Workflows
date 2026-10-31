@@ -53,7 +53,7 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
     type: item.type ?? 'output',
     size: '240',
   })
-  return `/api/thumbnail?${search.toString()}`
+  return `/api/media/thumbnail?${search.toString()}`
 }
 </script>
 

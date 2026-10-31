@@ -190,7 +190,7 @@ def test_history_list_envelope(api, seed_history):
     seed_history(filename="a.png")
     seed_history(filename="b.png")
 
-    r = api.get("/api/history?page=1&page_size=50")
+    r = api.get("/api/images?page=1&page_size=50")
     assert r.status_code == 200
     body = r.json()
     assert {"items", "total", "page", "page_size"} <= set(body)
@@ -199,10 +199,10 @@ def test_history_list_envelope(api, seed_history):
 
 def test_history_soft_delete_hides_item(api, seed_history):
     item = seed_history(filename="gone.png")
-    r = api.delete(f"/api/history/{item.id}")
+    r = api.delete(f"/api/images/{item.id}")
     assert r.status_code == 200
 
-    body = api.get("/api/history?page=1&page_size=50").json()
+    body = api.get("/api/images?page=1&page_size=50").json()
     assert body["total"] == 0
     # 物理文件与行都保留，只置软删除标记
     from app.models import Image
@@ -212,15 +212,15 @@ def test_history_soft_delete_hides_item(api, seed_history):
 
 def test_history_html_endpoint_removed(api, seed_history):
     seed_history(filename="h.png")
-    # 路径可能落到 DELETE /history/{item_id} 上（405），只要不是 200 片段即可
-    assert api.get("/api/history/html?page=1&page_size=50&sort=newest").status_code in (404, 405, 422)
+    # 路径可能落到 DELETE /images/{item_id} 上（405），只要不是 200 片段即可
+    assert api.get("/api/images/html?page=1&page_size=50&sort=newest").status_code in (404, 405, 422)
 
 
 def test_history_ids_route(api, seed_history):
     seed_history(filename="i1.png")
     seed_history(filename="i2.png")
 
-    r = api.get("/api/history/ids")
+    r = api.get("/api/images/ids")
     assert r.status_code == 200
     assert len(r.json()["ids"]) == 2
 
@@ -234,10 +234,10 @@ def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
     ImageCategory.create(image=keep.id, category=cat.id)
     EntityTag.create(entity_type="image", entity_id=keep.id, tag=tag.id)
 
-    body = api.get(f"/api/history/ids?category_id={cat.id}").json()
+    body = api.get(f"/api/images/ids?category_id={cat.id}").json()
     assert body["ids"] == [keep.id]
 
-    body = api.get(f"/api/history/ids?tag_ids={tag.id}").json()
+    body = api.get(f"/api/images/ids?tag_ids={tag.id}").json()
     assert body["ids"] == [keep.id]
 
 
@@ -251,14 +251,14 @@ def test_history_missing_filter(api, seed_history):
     kept = seed_history(filename="kept.png")
     Image.update(missing_since=datetime.now()).where(Image.id == gone.id).execute()
 
-    body = api.get("/api/history?missing=1").json()
+    body = api.get("/api/images?missing=1").json()
     assert [it["id"] for it in body["items"]] == [gone.id]
     assert body["items"][0]["missing"] is True
 
     # 不筛选时两条都在 —— 缺失绝不等于删除
-    body = api.get("/api/history").json()
+    body = api.get("/api/images").json()
     assert body["total"] == 2
-    assert api.get("/api/history/ids?missing=1").json()["ids"] == [gone.id]
+    assert api.get("/api/images/ids?missing=1").json()["ids"] == [gone.id]
     kept_row = Image.get_by_id(kept.id)
     assert bool(kept_row.is_deleted) is False
 
@@ -340,9 +340,9 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
     for qs in ("favorite=1", f"category_id={cat.id}", f"tag_ids={tag.id}", "search=aaa"):
         listed = {
             it["id"]
-            for it in api.get(f"/api/history?{qs}&page_size=100").json()["items"]
+            for it in api.get(f"/api/images?{qs}&page_size=100").json()["items"]
         }
-        ids = set(api.get(f"/api/history/ids?{qs}").json()["ids"])
+        ids = set(api.get(f"/api/images/ids?{qs}").json()["ids"])
         assert listed == ids, f"筛选条件 {qs} 下列表与全选结果不一致：{listed} vs {ids}"
 
 
@@ -357,7 +357,7 @@ def test_cleanup_missing_dry_run_does_not_write(api, seed_history):
     seed_history(filename="gone1.png")
     seed_history(filename="gone2.png")
 
-    body = api.post("/api/history/cleanup_missing").json()
+    body = api.post("/api/images/cleanup_missing").json()
     assert body["dry_run"] is True
     assert body["total"] == 2
     assert body["will_clean"] == 2
@@ -369,7 +369,7 @@ def test_cleanup_missing_requires_confirm(api, seed_history):
     """dry_run=false 但没带 confirm=true 时不得执行。"""
     seed_history(filename="gone.png")
 
-    body = api.post("/api/history/cleanup_missing?dry_run=false").json()
+    body = api.post("/api/images/cleanup_missing?dry_run=false").json()
     assert body["success"] is False
     assert "confirm" in body["message"]
     assert _deleted_count() == 0
@@ -380,9 +380,9 @@ def test_cleanup_missing_guard_blocks_mass_delete(api, seed_history):
     for i in range(25):
         seed_history(filename=f"gone_{i}.png")
 
-    assert api.post("/api/history/cleanup_missing").json()["guarded"] is True
+    assert api.post("/api/images/cleanup_missing").json()["guarded"] is True
 
-    body = api.post("/api/history/cleanup_missing?dry_run=false&confirm=true").json()
+    body = api.post("/api/images/cleanup_missing?dry_run=false&confirm=true").json()
     assert body["success"] is False
     assert body["guarded"] is True
     assert _deleted_count() == 0
@@ -398,7 +398,7 @@ def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
     ImageCategory.create(image=inside.id, category=cat.id)
 
     body = api.post(
-        f"/api/history/cleanup_missing?dry_run=false&confirm=true&category_id={cat.id}"
+        f"/api/images/cleanup_missing?dry_run=false&confirm=true&category_id={cat.id}"
     ).json()
     assert body["success"] is True
     assert body["cleaned"] == 1
@@ -410,7 +410,7 @@ def test_history_add_category_endpoint(api, seed_history, seed_taxonomy):
     item = seed_history(filename="cat.png")
     cat, _ = seed_taxonomy()
 
-    r = api.post(f"/api/history/{item.id}/categories/{cat.id}")
+    r = api.post(f"/api/images/{item.id}/categories/{cat.id}")
     assert r.status_code == 200
     assert r.json()["created"] is True
 
@@ -419,7 +419,7 @@ def test_history_add_tag_endpoint(api, seed_history, seed_taxonomy):
     item = seed_history(filename="tag.png")
     _, tag = seed_taxonomy()
 
-    r = api.post(f"/api/history/{item.id}/tags/{tag.id}")
+    r = api.post(f"/api/images/{item.id}/tags/{tag.id}")
     assert r.status_code == 200
     assert r.json()["created"] is True
 
@@ -598,7 +598,7 @@ def test_gallery_sorts_by_captured_at_not_import_time(api, seed_history):
     old_photo = seed_history(filename="old.png", captured_at=datetime(2020, 1, 1, 12, 0, 0))
     new_photo = seed_history(filename="new.png", captured_at=datetime(2024, 6, 1, 12, 0, 0))
 
-    body = api.get("/api/history?page=1&page_size=50").json()
+    body = api.get("/api/images?page=1&page_size=50").json()
     assert [item["filename"] for item in body["items"]][:2] == ["new.png", "old.png"]
     assert body["items"][0]["captured_at"].startswith("2024-06-01")
 
@@ -609,11 +609,11 @@ def test_history_date_facet_uses_captured_at(api, seed_history):
     seed_history(filename="a.png", captured_at=datetime(2020, 1, 1))
     seed_history(filename="b.png", captured_at=datetime(2024, 6, 1))
 
-    facets = api.get("/api/history/facets").json()
+    facets = api.get("/api/images/facets").json()
     assert facets["date"].get("2024-06") == 1
     assert facets["date"].get("2020-01") == 1
 
-    filtered = api.get("/api/history?page=1&page_size=50&date=2024-06").json()
+    filtered = api.get("/api/images?page=1&page_size=50&date=2024-06").json()
     assert filtered["total"] == 1
     assert filtered["items"][0]["filename"] == "b.png"
 
@@ -628,7 +628,7 @@ def test_history_date_falls_back_to_created_at(api, seed_history):
     Image.update(captured_at=None, created_at=datetime(2022, 3, 15, 8, 0, 0)) \
         .where(Image.id == item.id).execute()
 
-    filtered = api.get("/api/history?page=1&page_size=50&date=2022-03").json()
+    filtered = api.get("/api/images?page=1&page_size=50&date=2022-03").json()
     assert filtered["total"] == 1
 
 
@@ -697,7 +697,7 @@ def test_gallery_read_does_not_backfill_into_db(api):
         job_id=job.id, comfyui_prompt_id="pid-1", prompt_params=None, source="local",
     )
 
-    body = api.get("/api/history?page=1&page_size=50").json()
+    body = api.get("/api/images?page=1&page_size=50").json()
     item = next(i for i in body["items"] if i["id"] == photo.id)
     assert item["prompt_params"] and item["prompt_params"]["seed"] == 7
 

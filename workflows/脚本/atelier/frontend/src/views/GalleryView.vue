@@ -164,7 +164,7 @@ const {
   error,
 } = useQuery<HistoryPage>({
   queryKey: historyKey,
-  queryFn: () => apiGet<HistoryPage>('/api/history', historyFilterParams()),
+  queryFn: () => apiGet<HistoryPage>('/api/images', historyFilterParams()),
   // 翻页时保留上一页内容，避免整页闪烁
   placeholderData: (prev) => prev,
 })
@@ -179,7 +179,7 @@ interface Facets {
 /** 分面计数：后端按「当前筛选（不含分面维度自身）」算，避免「数出来的和筛出来的对不上」。 */
 const { data: facets } = useQuery<Facets>({
   queryKey: computed(() => ['facets', facetScope.value]),
-  queryFn: () => apiGet('/api/history/facets', facetScope.value),
+  queryFn: () => apiGet('/api/images/facets', facetScope.value),
   placeholderData: (prev) => prev,
   staleTime: 15_000,
 })
@@ -284,14 +284,14 @@ function toggleSelect(id: number) {
 /**
  * 全选全部：跨页把当前筛选下的所有记录都选上。
  *
- * 后端 `/api/history/ids` 不分页，返回当前筛选下的全部 id —— 旧前端的"全选全部"
+ * 后端 `/api/images/ids` 不分页，返回当前筛选下的全部 id —— 旧前端的"全选全部"
  * 就是这个语义，新前端之前只支持"全选本页"，批量删除时得翻页累加。
  */
 async function selectAllMatching() {
   selectingAll.value = true
   try {
     const data = await apiGet<{ ids: number[]; total: number }>(
-      '/api/history/ids',
+      '/api/images/ids',
       historyFilterParams(),
     )
     selected.value = new Set(data.ids)
@@ -312,7 +312,7 @@ function clearSelection() {
 
 const deleteMutation = useMutation({
   mutationFn: (ids: number[]) =>
-    apiPost<{ success: boolean; deleted: number }>('/api/history/batch_delete', { ids }),
+    apiPost<{ success: boolean; deleted: number }>('/api/images/batch_delete', { ids }),
   onSuccess: () => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['history'] })
@@ -322,7 +322,7 @@ const deleteMutation = useMutation({
 })
 
 const favoriteMutation = useMutation({
-  mutationFn: (id: number) => apiPost<{ success: boolean; favorite: boolean }>(`/api/history/${id}/favorite`),
+  mutationFn: (id: number) => apiPost<{ success: boolean; favorite: boolean }>(`/api/images/${id}/favorite`),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['history'] })
     queryClient.invalidateQueries({ queryKey: ['facets'] })
@@ -347,7 +347,7 @@ function batchDownload() {
   if (!targets.length) return
   // 浏览器对并发下载有限制，逐个触发并留间隔
   targets.forEach((item, i) => {
-    setTimeout(() => window.open(`/api/history/${item.id}/download`, '_blank'), i * 400)
+    setTimeout(() => window.open(`/api/images/${item.id}/download`, '_blank'), i * 400)
   })
 }
 
@@ -432,7 +432,7 @@ const emit = defineEmits<{
 /**
  * 批量给选中的图片打标签 / 分类（旧版 bulkAddTag / bulkAddCategory）。
  *
- * 后端只有单张的关联端点（`/api/history/{id}/tags/{tag_id}`），批量就是循环调用；
+ * 后端只有单张的关联端点（`/api/images/{id}/tags/{tag_id}`），批量就是循环调用；
  * 逐张独立处理，某张失败不影响其它。
  */
 const bulkOpen = ref(false)
@@ -461,14 +461,14 @@ const bulkWf = ref('')
 /**
  * 批量把选中的图片投喂给工作流处理（超分 / 重绘等）。
  *
- * 与灯箱里的单张投喂同一个端点 `/api/history/{id}/process`，只是循环调用。
+ * 与灯箱里的单张投喂同一个端点 `/api/images/{id}/process`，只是循环调用。
  */
 async function applyProcess() {
   if (!bulkWf.value) {
     toast.error('请先选择工作流')
     return
   }
-  await applyBulk('/api/history/{id}/process', '处理', { workflow_path: bulkWf.value })
+  await applyBulk('/api/images/{id}/process', '处理', { workflow_path: bulkWf.value })
 }
 
 /**
@@ -478,7 +478,7 @@ async function applyProcess() {
  * 这种图点了会返回 0，正常。
  */
 async function applyInherit() {
-  await applyBulk('/api/history/{id}/inherit', '继承分类')
+  await applyBulk('/api/images/{id}/inherit', '继承分类')
 }
 
 /** 一次性给全库缺分类/标签的图片补齐。 */
@@ -492,7 +492,7 @@ async function backfillTaxonomy() {
   if (!ok) return
   try {
     const result = await apiPost<{ success: boolean; backfilled: number }>(
-      '/api/history/backfill_taxonomy',
+      '/api/images/backfill_taxonomy',
     )
     toast.success(`已补齐 ${result.backfilled} 张图片的分类/标签`)
     queryClient.invalidateQueries({ queryKey: ['history'] })
@@ -504,12 +504,12 @@ async function backfillTaxonomy() {
 }
 async function applyBulkTag() {
   if (!bulkTagId.value) return
-  await applyBulk(`/api/history/{id}/tags/${bulkTagId.value}`, '标签')
+  await applyBulk(`/api/images/{id}/tags/${bulkTagId.value}`, '标签')
 }
 
 async function applyBulkCat() {
   if (!bulkCatId.value) return
-  await applyBulk(`/api/history/{id}/categories/${bulkCatId.value}`, '分类')
+  await applyBulk(`/api/images/{id}/categories/${bulkCatId.value}`, '分类')
 }
 
 async function applyBulk(pathTemplate: string, label: string, body?: Record<string, unknown>) {
@@ -621,7 +621,7 @@ async function cleanupMissing() {
   cleaning.value = true
   try {
     const preview = await apiPost<CleanupPreview>(
-      '/api/history/cleanup_missing',
+      '/api/images/cleanup_missing',
       undefined,
       { ...cleanupScope(), dry_run: true },
     )
@@ -656,7 +656,7 @@ async function cleanupMissing() {
     if (!ok) return
 
     const data = await apiPost<CleanupPreview & { cleaned: number }>(
-      '/api/history/cleanup_missing',
+      '/api/images/cleanup_missing',
       undefined,
       { ...cleanupScope(), dry_run: false, confirm: true },
     )

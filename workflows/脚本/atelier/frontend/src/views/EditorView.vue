@@ -158,7 +158,7 @@ const {
 const { data: targetBriefs } = useQuery<HistoryPage>({
   queryKey: computed(() => ['fs-target-briefs', groups.value[0].ids.join(',')]),
   queryFn: () =>
-    apiGet<HistoryPage>('/api/history', {
+    apiGet<HistoryPage>('/api/images', {
       ids: groups.value[0].ids.join(','),
       page_size: 200,
     }),
@@ -200,8 +200,8 @@ const targetRows = computed<TargetRow[]>(() => {
     rows.push({
       key: `file:${path}`,
       label: fileName(path),
-      thumb: `/api/fs/thumb?path=${encodeURIComponent(path)}&size=120`,
-      imageUrl: `/api/fs/image?path=${encodeURIComponent(path)}`,
+      thumb: `/api/browser/thumb?path=${encodeURIComponent(path)}&size=120`,
+      imageUrl: `/api/browser/image?path=${encodeURIComponent(path)}`,
     })
   }
   return rows
@@ -263,7 +263,7 @@ function openMaskEditor(row: TargetRow) {
   maskEditorImage.value = row.imageUrl
   const existing = maskEntries.value[row.key]
   maskEditorInitial.value = existing
-    ? `/api/fs/image?path=${encodeURIComponent(existing)}`
+    ? `/api/browser/image?path=${encodeURIComponent(existing)}`
     : ''
   maskEditorOpen.value = true
 }

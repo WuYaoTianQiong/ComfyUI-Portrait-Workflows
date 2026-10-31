@@ -491,7 +491,7 @@ async function toggleFavorite() {
   if (!item.value) return
   busy.value = true
   try {
-    await apiPost(`/api/history/${item.value.id}/favorite`)
+    await apiPost(`/api/images/${item.value.id}/favorite`)
     toast.success(item.value.favorite ? '已取消收藏' : '已收藏')
     emit('changed')
   } catch (e) {
@@ -512,7 +512,7 @@ async function removeItem() {
   if (!ok) return
   busy.value = true
   try {
-    await apiDelete(`/api/history/${item.value.id}`)
+    await apiDelete(`/api/images/${item.value.id}`)
     toast.success('已删除该记录')
     emit('changed')
     emit('close')
@@ -550,7 +550,7 @@ async function feedToWorkflow() {
   }
   busy.value = true
   try {
-    await apiPost(`/api/history/${item.value.id}/process`, { workflow_path: processWf.value })
+    await apiPost(`/api/images/${item.value.id}/process`, { workflow_path: processWf.value })
     toast.success('已提交处理任务，可在「任务」页看进度')
     processOpen.value = false
   } catch (e) {

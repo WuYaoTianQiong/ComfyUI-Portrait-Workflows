@@ -1,7 +1,7 @@
 """全端点冒烟：每个 GET 端点用最小参数打一遍，断言不出现 5xx。
 
 为什么需要这一层：历史事故几乎都是"端点存在、一打就炸"这类问题 ——
-`/api/history/html` 的函数体引用了未传的参数导致 NameError 500、
+`/api/images/html` 的函数体引用了未传的参数导致 NameError 500、
 跨卷 junction 让启动期 WinError 448 直接崩、
 ON CONFLICT 方言不匹配被 `except: pass` 吞掉导致同步从未写入。
 这些静态检查（py_compile）和单点单测都发现不了，只有真的发一次请求才会暴露。
@@ -42,7 +42,7 @@ def _get_endpoints() -> list[str]:
 
 
 def _materialize(path: str) -> str:
-    """把 /api/history/{item_id} 这类路径参数替换成 1。"""
+    """把 /api/images/{item_id} 这类路径参数替换成 1。"""
     return re.sub(r"\{[^}]+\}", "1", path)
 
 

@@ -4,7 +4,7 @@
 - 状态码必须是 308（保留方法与请求体，浏览器会自动重发）；
 - Location 必须带 `/api` 前缀并带上原查询串（漏了 `/api` 会跳到 SPA catch-all，
   变成"旧 URL 返回 index.html 200"，看起来没坏、实际什么都没发生）；
-- 子路径（`/api/history/{id}`）要跟着一起重定向。
+- 子路径（`/api/images/{id}`）要跟着一起重定向。
 """
 import pytest
 

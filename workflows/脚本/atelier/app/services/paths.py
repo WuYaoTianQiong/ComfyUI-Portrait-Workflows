@@ -56,10 +56,10 @@ def resolve_image_path(filename: str, subfolder: str, img_type: str) -> Path | N
 
 
 def build_view_url(filename: str, subfolder: str, img_type: str) -> str:
-    """构建图片访问 URL（始终走 /api/image，确保统一的 Cache-Control 策略，
+    """构建图片访问 URL（始终走 /api/media/image，确保统一的 Cache-Control 策略，
     避免静态文件路径缺失缓存控制导致浏览器旧缓存与新文件内容不一致）"""
     return (
-        f"/api/image"
+        f"/api/media/image"
         f"?filename={quote(filename)}"
         f"&subfolder={quote(subfolder or '')}"
         f"&type={quote(img_type or 'output')}"

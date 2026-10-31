@@ -2,7 +2,7 @@
 
 为什么要有这一层：vitest 只能测纯逻辑与组件，测不到"静态资源 404 了没、
 接口路径拼错没、页面整体白屏没、路由挂载顺序对不对"。这些恰恰是重构期
-最常翻车的地方（历史事故：/api/history/html 的函数体引用了未传参数 → 500；
+最常翻车的地方（历史事故：/api/images/html 的函数体引用了未传参数 → 500；
 直接访问 /gallery 被踢回提示词页）。
 
 跑法：
@@ -111,7 +111,7 @@ def run_browser_checks() -> None:
 
         # ---- 画廊 ----
         cards = page.locator(".card").count()
-        expected = api("/api/history?page_size=200")["total"]
+        expected = api("/api/images?page_size=200")["total"]
         check(cards > 0 and cards <= expected, "画廊渲染出卡片", f"{cards} 张 / 共 {expected}")
 
         tags = page.locator(".sidebar .tag")
