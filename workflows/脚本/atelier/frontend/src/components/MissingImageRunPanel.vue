@@ -36,7 +36,7 @@ interface MissingItem {
 
 const { workflowPath, quality, orientation } = useSettings()
 const { workflows, allWorkflows } = useWorkflows()
-const { caps, params } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
 const { track } = useGenerate()
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -139,7 +139,7 @@ async function submit() {
           v-model:orientation="orientation"
           :workflow-path="workflowPath"
           :caps="caps"
-          :params="params"
+          :quality-options="qualityOptions"
         />
       </div>
 

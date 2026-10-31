@@ -1,11 +1,31 @@
+import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import {
-  DEFAULT_CAPS,
   detectCapsFromContent,
   detectParamsFromContent,
-  qualityOptionsFor,
-} from './workflowCaps'
+  useWorkflowCaps,
+} from './useWorkflowCaps'
+import type { WorkflowCaps, WorkflowParams } from './useWorkflowCaps'
+import type { WorkflowRow } from './useWorkflows'
+
+/**
+ * 档位是模块私有的（`qualityOptionsFor` 不再对外），只能通过 composable 观测：
+ * 给一行"后端已经给出 caps/params"的工作流，取它算出来的档位。
+ */
+const ALL_CAPS: WorkflowCaps = {
+  prompt: true,
+  negative: true,
+  quality: true,
+  orientation: true,
+}
+
+function optionsFor(params: WorkflowParams) {
+  const path = 'wf/a.json'
+  const rows = ref<WorkflowRow[]>([{ path, name: 'a', caps: ALL_CAPS, params }])
+  const { qualityOptions } = useWorkflowCaps(ref(path), rows)
+  return qualityOptions.value
+}
 
 function capsOf(obj: unknown) {
   return detectCapsFromContent(JSON.stringify(obj))
@@ -55,7 +75,7 @@ describe('工作流能力探测', () => {
   })
 
   it('解析失败时保持旧行为（全部可用）', () => {
-    expect(detectCapsFromContent('not json')).toEqual(DEFAULT_CAPS)
+    expect(detectCapsFromContent('not json')).toEqual(ALL_CAPS)
   })
 })
 
@@ -70,7 +90,7 @@ describe('画质参数与真实档位', () => {
     expect(params.base_width).toBe(1128)
     expect(params.base_height).toBe(2008)
 
-    const options = qualityOptionsFor(params)
+    const options = optionsFor(params)
     expect(options.find((o) => o.value === '4K')?.label).toBe('1128×2008')
     expect(options.find((o) => o.value === '6K')?.label).toBe('1410×2510')
     expect(options.find((o) => o.value === '12K')?.label).toBe('2256×4016')
@@ -85,7 +105,7 @@ describe('画质参数与真实档位', () => {
     expect(params.base_megapixels).toBe(1)
     expect(params.orientation_mode).toBe('knob')
 
-    const options = qualityOptionsFor(params)
+    const options = optionsFor(params)
     expect(options.find((o) => o.value === '4K')?.label).toBe('1MP')
     expect(options.find((o) => o.value === '12K')?.label).toBe('4MP')
   })
@@ -95,7 +115,7 @@ describe('画质参数与真实档位', () => {
       1: { class_type: 'SeedVR2VideoUpscaler', inputs: { resolution: 2560 } },
     })
     expect(params.quality_mode).toBe('seedvr')
-    expect(qualityOptionsFor(params).find((o) => o.value === '4K')?.label).toBe(
+    expect(optionsFor(params).find((o) => o.value === '4K')?.label).toBe(
       '4K · 2560×4096',
     )
   })
@@ -103,14 +123,14 @@ describe('画质参数与真实档位', () => {
   it('没有尺寸旋钮的工作流不产生画质档位', () => {
     const params = paramsOf({ 1: { class_type: 'CLIPTextEncode', inputs: {} } })
     expect(params.quality_mode).toBe('none')
-    expect(qualityOptionsFor(params)).toEqual([])
+    expect(optionsFor(params)).toEqual([])
   })
 
   it('clamp 后结果相同的档位只保留一个', () => {
     const params = paramsOf({
       1: { class_type: 'EmptyLatentImage', inputs: { width: 4096, height: 4096 } },
     })
-    const options = qualityOptionsFor(params)
+    const options = optionsFor(params)
     expect(options.map((o) => o.value)).toEqual(['2K', '4K'])
   })
 })

@@ -40,7 +40,7 @@ const workflowPath = composerWorkflowPath
 const { busy: generating, job: activeJob, error: generateError, submitAndTrack } = useGenerate()
 const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
 /** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
-const { caps, params } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
 const router = useRouter()
 const resultOpen = ref(false)
 const resultTab = ref<'canvas' | 'random' | 'job'>('canvas')
@@ -898,7 +898,7 @@ function toggleTag(id: number) {
         v-model:orientation="orientation"
         :workflow-path="workflowPath"
         :caps="caps"
-        :params="params"
+        :quality-options="qualityOptions"
       />
       <button
         class="btn btn-sm"

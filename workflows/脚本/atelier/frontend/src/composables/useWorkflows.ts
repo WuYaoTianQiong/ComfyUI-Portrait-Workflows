@@ -10,7 +10,7 @@ import {
   detectParamsFromContent,
   type WorkflowCaps,
   type WorkflowParams,
-} from '../utils/workflowCaps'
+} from './useWorkflowCaps'
 
 export interface WorkflowRow {
   path: string
@@ -72,7 +72,7 @@ export function customWorkflowContent(path: string): string | undefined {
 }
 
 /**
- * 工作流列表（提示词页 / 组合器 / 管理页共用）。
+ * 工作流列表（提示词页 / 组合器 / 分类与标签页共用）。
  *
  * 三件事合在一起：
  * - 后端磁盘上的工作流（`/api/workflows`）

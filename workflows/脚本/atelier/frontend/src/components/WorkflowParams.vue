@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 
-import { qualityOptionsFor, type WorkflowCaps, type WorkflowParams } from '../utils/workflowCaps'
+import type { QualityOption, WorkflowCaps } from '../composables/useWorkflowCaps'
 
 type Orientation = 'portrait' | 'landscape'
 
@@ -10,11 +10,14 @@ type Orientation = 'portrait' | 'landscape'
  *
  * 档位不是固定的 2K..12K：按工作流的实际作用方式生成（真实分辨率 / 倍率后的像素 / MP），
  * 工作流不支持时直接隐藏，而不是摆一个点了不生效的旋钮。
+ *
+ * 档位由调用方用 `useWorkflowCaps(...).qualityOptions` 算好后传进来 ——
+ * 同一份档位逻辑只实现一次（`命名规范.md` §8.2）。
  */
 const props = defineProps<{
   workflowPath: string
   caps: WorkflowCaps
-  params?: WorkflowParams
+  qualityOptions: QualityOption[]
   quality: string
   orientation: Orientation
 }>()
@@ -24,7 +27,7 @@ const emit = defineEmits<{
   'update:orientation': [value: Orientation]
 }>()
 
-const options = computed(() => qualityOptionsFor(props.params, props.caps))
+const options = computed(() => props.qualityOptions)
 
 /** 换工作流后旧档位可能不在新列表里：退回标准档，避免给后端一个无效值。 */
 watch(

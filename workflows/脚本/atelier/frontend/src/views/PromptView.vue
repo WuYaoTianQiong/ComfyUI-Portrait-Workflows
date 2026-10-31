@@ -247,7 +247,7 @@ const { data: wfValidation } = useWorkflowValidation(workflowPath)
  * 当前工作流的能力与真实档位：不支持画质 / 横竖时隐藏对应控件，
  * 档位按工作流的实际作用方式生成（不是固定的 2K..12K）。
  */
-const { caps, params } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
 
 function generate() {
   if (!draft.value) return
@@ -1232,7 +1232,7 @@ onBeforeUnmount(() => {
               v-model:orientation="orientation"
               :workflow-path="workflowPath"
               :caps="caps"
-              :params="params"
+              :quality-options="qualityOptions"
             />
             <span
               v-if="workflowPath && caps.prompt && !caps.negative"

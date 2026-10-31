@@ -6,7 +6,7 @@ import Modal from './Modal.vue'
 import { apiGet } from '../api/client'
 import { FRAGMENT_TYPES } from '../constants'
 import { parseMarkedSegments, replaceMarkedSegment } from '../utils/segmentation'
-import type { WorkflowCaps } from '../utils/workflowCaps'
+import type { WorkflowCaps } from '../composables/useWorkflowCaps'
 
 /**
  * 批量替换碎片：把提示词里某一类碎片换成同一段内容后出图。
