@@ -273,19 +273,25 @@ def ensure_api_format(workflow: dict) -> dict:
         if isinstance(link, list) and len(link) >= 4:
             link_map[link[0]] = (str(link[1]), int(link[2]))
 
+    api = _nodes_to_api(workflow["nodes"], link_map)
+    return _expand_subgraphs(workflow, api)
+
+
+def _nodes_to_api(nodes: list, link_map: dict[int, tuple[str, int]]) -> dict[str, dict]:
+    """把 UI 格式的 node 列表转成 API 节点；link_map 用于把连线编号还原成 [源节点, 槽位]。"""
     api: dict[str, dict] = {}
-    for node in workflow["nodes"]:
+    for node in nodes:
         node_type = node.get("type", "unknown")
         if node_type in SKIP_NODE_TYPES:
             continue
 
         nid = str(node.get("id", 0))
         # 保留节点标题（_meta 是官方 API 导出格式的标准字段，后端会忽略）：
-        # 双图工作流要靠「主图 / 参考图」这类标题给用户展示节点映射
+        # 多图工作流要靠这些标题给用户展示节点映射
         api[nid] = {"class_type": node_type, "inputs": {},
                     "_meta": {"title": node.get("title") or node_type}}
         raw_inputs = node.get("inputs", [])
-        wv = node.get("widgets_values", [])
+        wv = node.get("widgets_values") or []
 
         # 如果 inputs 已经是 dict 格式，直接使用
         if not isinstance(raw_inputs, list):
@@ -354,6 +360,118 @@ def ensure_api_format(workflow: dict) -> dict:
     return api
 
 
+def _expand_subgraphs(workflow: dict, api: dict) -> dict:
+    """展开 definitions.subgraphs 里的子图实例节点。
+
+    ComfyUI 新版 UI 允许把一组节点存成「子图」，保存的 JSON 里表现为一个
+    type=<子图 uuid> 的节点。前端提交时会展开，但后端直接转 API 格式不会，
+    /prompt 就会报 missing_node_type。这里按子图定义把它内联成真实节点。
+
+    改写规则：
+    · 内部节点 id 加外层节点前缀，避免与主图节点撞号；
+    · 子图输入槽 → 外层实例对应输入端口的上游连线；
+    · 子图输出槽 → 产出该输出的内部节点，并替换所有消费方的引用。
+    """
+    sub_defs = {
+        sg.get("id"): sg
+        for sg in ((workflow.get("definitions") or {}).get("subgraphs") or [])
+        if isinstance(sg, dict) and sg.get("id")
+        and isinstance(sg.get("nodes"), list)
+    }
+    if not sub_defs:
+        return api
+
+    raw_nodes = {str(n.get("id")): n for n in workflow["nodes"]}
+
+    # 支持嵌套子图：每轮展开当前层的实例，最多 8 层（真实工作流远达不到）
+    for _ in range(8):
+        instances = [
+            (nid, node) for nid, node in api.items()
+            if node.get("class_type") in sub_defs
+        ]
+        if not instances:
+            break
+
+        for outer_id, outer_api in instances:
+            sg = sub_defs[outer_api["class_type"]]
+            raw_outer = raw_nodes.get(outer_id) or {}
+
+            inner_links = {
+                link["id"]: (str(link.get("origin_id")), int(link.get("origin_slot", 0)))
+                for link in (sg.get("links") or [])
+                if isinstance(link, dict) and link.get("id") is not None
+            }
+            inner = _nodes_to_api(sg.get("nodes") or [], inner_links)
+
+            prefix = f"{outer_id}_"
+            mapped: dict[str, dict] = {}
+            for inner_id, inner_node in inner.items():
+                mapped[prefix + inner_id] = {
+                    "class_type": inner_node["class_type"],
+                    "inputs": dict(inner_node["inputs"]),
+                    "_meta": dict(inner_node.get("_meta") or {}),
+                }
+
+            # 子图输入槽（-10 的 origin_slot）→ 外层实例输入端的连线。
+            # 必须读 api 里已经转换过的值：若上游也是子图，它可能已被改写为内部节点 id，
+            # 再用原始 link id 回查会得到已经删除的实例 id。
+            slot_source: dict[int, object] = {}
+            for slot, inp in enumerate(raw_outer.get("inputs") or []):
+                if not isinstance(inp, dict):
+                    continue
+                name = inp.get("name")
+                value = (outer_api.get("inputs") or {}).get(name)
+                if isinstance(value, list) and len(value) == 2:
+                    slot_source[slot] = (str(value[0]), int(value[1]))
+                elif value is not None:
+                    slot_source[slot] = value
+
+            for node in mapped.values():
+                for name, value in list(node["inputs"].items()):
+                    if not (isinstance(value, list) and len(value) == 2):
+                        continue
+                    src, slot = str(value[0]), int(value[1])
+                    if src == "-10":
+                        outer_src = slot_source.get(slot)
+                        if isinstance(outer_src, tuple):
+                            node["inputs"][name] = [outer_src[0], outer_src[1]]
+                        elif outer_src is not None:
+                            node["inputs"][name] = outer_src
+                        else:
+                            node["inputs"].pop(name)
+                    elif src == "-20":
+                        node["inputs"].pop(name)
+                    else:
+                        node["inputs"][name] = [prefix + src, slot]
+
+            # 子图输出槽（-20 的 target_slot）→ 内部产出节点
+            output_producers: dict[int, tuple[str, int]] = {}
+            for link in sg.get("links") or []:
+                if isinstance(link, dict) and link.get("target_id") == -20:
+                    output_producers[int(link.get("target_slot", 0))] = (
+                        prefix + str(link.get("origin_id")),
+                        int(link.get("origin_slot", 0)),
+                    )
+
+            # 替换所有消费该子图输出的连线（主图节点 + 之前展开的节点）
+            for node in api.values():
+                for name, value in list((node.get("inputs") or {}).items()):
+                    if not (isinstance(value, list) and len(value) == 2):
+                        continue
+                    if str(value[0]) != outer_id:
+                        continue
+                    producer = output_producers.get(int(value[1]))
+                    if producer:
+                        node["inputs"][name] = [producer[0], producer[1]]
+                    else:
+                        node["inputs"].pop(name)
+
+            del api[outer_id]
+            api.update(mapped)
+
+    return api
+
+
 def load_workflow(workflow_path: str, workflow_content: str | None = None) -> dict:
     """加载并解析工作流 JSON，返回 API 格式的 dict"""
     if workflow_content:
@@ -397,6 +515,117 @@ def _inject_sampler_params(node: dict, prompt_data: dict):
         scheduler = prompt_data.get("scheduler")
         if scheduler:
             inputs["scheduler"] = str(scheduler)
+
+
+def detect_workflow_caps(api_workflow: dict) -> dict[str, bool]:
+    """探测工作流能接受哪些注入项。
+
+    判定规则与 `inject_prompt` 完全一致：只标记真正会被改到的项。
+    否则前端会显示一个点了也不生效的"横竖/画质"旋钮
+    （例如视频工作流没有 EmptyLatentImage，超分工作流没有横竖比旋钮）。
+    """
+    text_nodes = [
+        node for node in api_workflow.values()
+        if isinstance(node, dict)
+        and node.get("class_type") in _TEXT_ENCODE_NODES
+        and node.get("inputs", {}).get("clip") is not None
+    ]
+    caps = {
+        "prompt": bool(text_nodes),
+        "negative": False,
+        "quality": False,
+        "orientation": False,
+    }
+    if text_nodes:
+        spec = _TEXT_ENCODE_NODES[text_nodes[0].get("class_type")]
+        caps["negative"] = bool(spec[1]) or len(text_nodes) >= 2
+
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        cls = node.get("class_type")
+        if cls == "SeedVR2VideoUpscaler":
+            caps["quality"] = True  # 4a：超分分辨率
+        if cls != "EmptyLatentImage":
+            continue
+        inputs = node.get("inputs") or {}
+        w = _as_int(inputs.get("width"))
+        h = _as_int(inputs.get("height"))
+        if w is not None and h is not None:
+            caps["quality"] = True  # 4b：按比例缩放字面量尺寸
+            # 方图没有横竖可分，inject_prompt 也只是交换 w/h，换不出方向
+            caps["orientation"] = w != h
+            continue
+        # 尺寸由上游节点计算：改横竖比旋钮 / megapixels
+        src = _linked_node(api_workflow, inputs.get("width")) or \
+            _linked_node(api_workflow, inputs.get("height"))
+        if not isinstance(src, dict):
+            continue
+        src_inputs = src.get("inputs") or {}
+        if any(isinstance(src_inputs.get(key), str) for key, _ in _ORIENTATION_KNOBS):
+            caps["orientation"] = True
+        mp = src_inputs.get("megapixels")
+        if isinstance(mp, (int, float)) and not isinstance(mp, bool):
+            caps["quality"] = True
+    return caps
+
+
+def detect_workflow_params(api_workflow: dict) -> dict:
+    """探测画质 / 方向旋钮的实际作用方式，供前端生成"真实档位"。
+
+    quality_mode:
+      - seedvr：SeedVR 超分，档位直接对应真实输出分辨率
+      - scale：EmptyLatentImage 有字面宽高，注入时按倍率缩放
+      - megapixels：尺寸由上游节点算，注入时按 megapixels 面积缩放
+      - none：没有可调尺寸
+    orientation_mode:
+      - swap：字面宽高交换
+      - knob：改上游节点的比例旋钮
+      - none：方图 / 没有可切换的旋钮
+
+    判定范围与 `inject_prompt` 保持一致：只描述真正会被改到的位置。
+    """
+    params = {
+        "quality_mode": "none",
+        "base_width": None,
+        "base_height": None,
+        "base_megapixels": None,
+        "orientation_mode": "none",
+    }
+    has_seedvr = any(
+        isinstance(n, dict) and n.get("class_type") == "SeedVR2VideoUpscaler"
+        for n in api_workflow.values()
+    )
+    if has_seedvr:
+        params["quality_mode"] = "seedvr"
+
+    for node in api_workflow.values():
+        if not isinstance(node, dict) or node.get("class_type") != "EmptyLatentImage":
+            continue
+        inputs = node.get("inputs") or {}
+        w = _as_int(inputs.get("width"))
+        h = _as_int(inputs.get("height"))
+        if w is not None and h is not None:
+            if not has_seedvr:
+                params["quality_mode"] = "scale"
+                params["base_width"] = w
+                params["base_height"] = h
+            params["orientation_mode"] = "swap" if w != h else "none"
+            break
+
+        src = _linked_node(api_workflow, inputs.get("width")) or \
+            _linked_node(api_workflow, inputs.get("height"))
+        if not isinstance(src, dict):
+            break
+        src_inputs = src.get("inputs") or {}
+        if any(isinstance(src_inputs.get(key), str) for key, _ in _ORIENTATION_KNOBS):
+            params["orientation_mode"] = "knob"
+        mp = src_inputs.get("megapixels")
+        if not has_seedvr and isinstance(mp, (int, float)) and not isinstance(mp, bool):
+            params["quality_mode"] = "megapixels"
+            params["base_megapixels"] = round(float(mp), 3)
+        break
+    return params
 
 
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
@@ -579,16 +808,47 @@ def set_output_prefix(api_workflow: dict, prefix: str) -> int:
 
 
 def find_loadimage_nodes(api_workflow: dict) -> list[tuple[str, str]]:
-    """返回工作流里的 LoadImage 节点 [(node_id, 标题)]，按节点创建顺序。
-
-    多图工作流（主图 + 参考图）靠这个顺序做默认映射：第一个=主图，第二个=参考图。
-    """
+    """返回工作流里的 LoadImage 节点 [(node_id, 标题)]，按节点创建顺序。"""
     out: list[tuple[str, str]] = []
     for node_id, node in api_workflow.items():
         if isinstance(node, dict) and node.get("class_type") == "LoadImage":
             title = (node.get("_meta") or {}).get("title") or "LoadImage"
             out.append((str(node_id), str(title)))
     return out
+
+
+def find_size_source_loadimage(api_workflow: dict) -> str | None:
+    """找出决定输出尺寸的 LoadImage（多图工作流里的「目标图」）。
+
+    多图参考类工作流通常由 GetImageSize → EmptyLatent/Scheduler 决定输出尺寸，
+    而这个尺寸来源不一定是节点顺序上的第一个 LoadImage。从 GetImageSize 的
+    image 输入向上游回溯，命中的第一个 LoadImage 就是尺寸基准。
+    找不到时返回 None，调用方退回节点顺序。
+    """
+
+    def walk(node_id: str, seen: set[str]) -> str | None:
+        node = api_workflow.get(node_id)
+        if not isinstance(node, dict) or node_id in seen:
+            return None
+        if node.get("class_type") == "LoadImage":
+            return node_id
+        seen.add(node_id)
+        for value in (node.get("inputs") or {}).values():
+            if isinstance(value, (list, tuple)) and len(value) == 2 and isinstance(value[0], str):
+                found = walk(value[0], seen)
+                if found:
+                    return found
+        return None
+
+    for node_id, node in api_workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") != "GetImageSize":
+            continue
+        image = (node.get("inputs") or {}).get("image")
+        if isinstance(image, (list, tuple)) and len(image) == 2 and isinstance(image[0], str):
+            found = walk(image[0], set())
+            if found:
+                return found
+    return None
 
 
 def inject_input_image(

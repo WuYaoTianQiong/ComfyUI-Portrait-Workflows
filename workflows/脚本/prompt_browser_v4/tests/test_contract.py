@@ -13,6 +13,117 @@ import pytest
 # 基础与提示词
 # ---------------------------------------------------------------------------
 
+def test_workflow_params_describe_real_quality_semantics():
+    """画质 / 方向档位必须能描述"实际怎么改"，而不是让前端摆一排固定 K 值。"""
+    from services.workflow_parser import detect_workflow_params
+
+    scale = detect_workflow_params({
+        "1": {"class_type": "EmptyLatentImage", "inputs": {"width": 1128, "height": 2008}},
+    })
+    assert scale["quality_mode"] == "scale"
+    assert (scale["base_width"], scale["base_height"]) == (1128, 2008)
+    assert scale["orientation_mode"] == "swap"
+
+    megapixels = detect_workflow_params({
+        "2": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": ["9", 0], "height": ["9", 1]}},
+        "9": {"class_type": "ResolutionSelector",
+              "inputs": {"aspect_ratio": "9:16", "megapixels": 1}},
+    })
+    assert megapixels["quality_mode"] == "megapixels"
+    assert megapixels["base_megapixels"] == 1
+    assert megapixels["orientation_mode"] == "knob"
+
+    seedvr = detect_workflow_params({
+        "1": {"class_type": "SeedVR2VideoUpscaler", "inputs": {"resolution": 2560}},
+    })
+    assert seedvr["quality_mode"] == "seedvr"
+    assert seedvr["orientation_mode"] == "none"
+
+    video = detect_workflow_params({
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 1]}},
+    })
+    assert video["quality_mode"] == "none"
+
+
+def test_prompts_full_returns_complete_text_under_filters(api, seed_prompt, seed_taxonomy):
+    """批量替换要拿完整正文；列表接口只有 60 字预览，不能复用。"""
+    from models import EntityTag
+
+    long_text = "【人物身材】" + "很长的碎片内容" * 20
+    hit = seed_prompt(name="命中", prompt=long_text)
+    seed_prompt(name="别的", prompt="【人物面部】短")
+
+    body = api.get("/api/prompts/full?search=人物身材").json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == hit.id
+    assert body["items"][0]["prompt"] == long_text
+    assert len(body["items"][0]["prompt"]) > 60
+
+    _, tag = seed_taxonomy()
+    EntityTag.create(entity_type="prompt", entity_id=hit.id, tag=tag.id)
+    tagged = api.get(f"/api/prompts/full?tag_ids={tag.id}").json()
+    assert [it["id"] for it in tagged["items"]] == [hit.id]
+
+    # 按 ids 取：勾选项可能跨页/跨筛选，不能再被筛选条件过滤掉
+    by_ids = api.get(f"/api/prompts/full?ids={hit.id}").json()
+    assert by_ids["total"] == 1
+    assert by_ids["items"][0]["prompt"] == long_text
+
+
+def test_composer_fragments_can_filter_one_type(api, seed_prompt):
+    """批量替换的候选来自"提示词里出现过的碎片"，不能只查碎片库。"""
+    seed_prompt(prompt="【人物面部】脸\n\n【人物身材】旧身材")
+
+    body = api.get("/api/composer/fragments?fragment_type=人物身材").json()
+    assert set(body["grouped"]) == {"人物身材"}
+    assert body["fragment_count"] >= 1
+    assert all(it["type"] == "人物身材" for it in body["grouped"]["人物身材"])
+
+    searched = api.get("/api/composer/fragments?fragment_type=人物身材&search=旧").json()
+    assert len(searched["grouped"]["人物身材"]) == 1
+
+
+def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
+    """批量替换只覆盖本次注入的正文，提示词库里的原文不动。"""
+    from routers import comfyui as comfy_router
+
+    p = seed_prompt(name="原提示词", prompt="【人物身材】旧\n\n【场景环境】街道")
+
+    captured = {}
+    monkeypatch.setattr(comfy_router, "load_workflow", lambda *a, **k: {})
+    monkeypatch.setattr(comfy_router, "inject_prompt", lambda wf, data: captured.update(data))
+    monkeypatch.setattr(comfy_router, "push_prompt", lambda wf: {"prompt_id": "pid-1"})
+
+    r = api.post("/api/batch_generate", json={
+        "items": [{
+            "prompt_id": p.id,
+            "seed": p.seed or 0,
+            "prompt_override": "【人物身材】新\n\n【场景环境】街道",
+        }],
+        "workflow_path": "F:/wf.json",
+    })
+    assert r.status_code == 200
+    assert "新" in captured["prompt"]
+    assert "旧" not in captured["prompt"]
+    assert "街道" in captured["prompt"]
+    # 原文未被写回
+    assert api.get(f"/api/prompts/{p.id}").json()["prompt"].startswith("【人物身材】旧")
+
+
+def test_workflows_api_exposes_params(api):
+    """/api/workflows 必须带上 params，否则前端只能退回固定的 2K..12K 死档位。"""
+    rows = api.get("/api/workflows").json()["workflows"]
+    assert rows, "工作流列表不应为空"
+    params = rows[0]["params"]
+    assert {"quality_mode", "orientation_mode"} <= set(params)
+    # 本机根目录里的常用文生图工作流基准是 megapixels（2.16 / 2.4 MP），必须探测出来
+    usable = [r for r in rows if r["params"]["quality_mode"] != "none"]
+    assert usable, "至少应有一个可调画质的工作流"
+    mp_rows = [r for r in usable if r["params"]["quality_mode"] == "megapixels"]
+    assert mp_rows and mp_rows[0]["params"]["base_megapixels"] > 0
+
+
 def test_status_ok(api):
     r = api.get("/api/status")
     assert r.status_code == 200

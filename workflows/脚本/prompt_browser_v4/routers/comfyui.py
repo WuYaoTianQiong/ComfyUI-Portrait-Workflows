@@ -20,7 +20,12 @@ from models import Prompt, PromptCategory, Category
 from services.helpers import _resolve_if_reparse, missing_image_response
 from services.composition import strip_headers
 from services.thumbnail import generate_thumbnail
-from services.workflow_parser import load_workflow, inject_prompt
+from services.workflow_parser import (
+    load_workflow,
+    inject_prompt,
+    detect_workflow_caps,
+    detect_workflow_params,
+)
 from services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
 from routers.jobs import create_job, update_job_items
 from state import batch_stop_flag
@@ -46,6 +51,30 @@ def _is_valid_workflow(filepath: Path) -> bool:
         )
     except Exception:
         return False
+
+
+# 工作流能力探测缓存：路径 → (mtime, caps, params)。文件没改动就不重复解析。
+_workflow_meta_cache: dict[str, tuple[float, dict[str, bool], dict]] = {}
+
+
+def _workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
+    """返回某工作流的注入能力与参数描述；解析失败时返回空 dict（schema 默认全 True）。"""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}, {}
+    cached = _workflow_meta_cache.get(str(path))
+    if cached and cached[0] == mtime:
+        return cached[1], cached[2]
+    try:
+        wf = load_workflow(str(path))
+        caps = detect_workflow_caps(wf)
+        params = detect_workflow_params(wf)
+    except Exception as exc:
+        logger.debug("探测工作流能力失败 %s：%s", path.name, exc)
+        caps, params = {}, {}
+    _workflow_meta_cache[str(path)] = (mtime, caps, params)
+    return caps, params
 
 
 def _find_default_workflow() -> str:
@@ -92,6 +121,8 @@ class RunTextRequest(BaseModel):
 class BatchItem(BaseModel):
     prompt_id: int
     seed: int = 0
+    # 批量替换碎片用：只替换本次注入的文本，不写回提示词库
+    prompt_override: str | None = None
 
 
 class BatchRequest(BaseModel):
@@ -321,10 +352,13 @@ def list_workflows(sort: str = Query("mtime")):
             fp = str(f)
             if fp not in seen:
                 seen.add(fp)
+                caps, params = _workflow_meta(f)
                 results.append({
                     "path": fp,
                     "name": f.name,
                     "mtime": f.stat().st_mtime,
+                    "caps": caps,
+                    "params": params,
                 })
 
     if sort == "mtime":
@@ -517,8 +551,15 @@ def batch_generate(req: BatchRequest):
 
         try:
             api_wf = load_workflow(workflow_path, req.workflow_content)
+            # 有 override 时用替换后的文本出图，其余参数仍取原提示词；
+            # strip_headers 与普通批量出图保持一致（【类型】标题不注入模型）。
+            prompt_text = (
+                strip_headers(item.prompt_override)
+                if item.prompt_override
+                else strip_headers(p.prompt)
+            )
             prompt_data = {
-                "prompt": strip_headers(p.prompt),
+                "prompt": prompt_text,
                 "negative_prompt": p.negative_prompt or "",
                 "seed": p.seed or 0,
                 "seed_override": item.seed,
@@ -534,7 +575,9 @@ def batch_generate(req: BatchRequest):
             comfy_pid = result.get("prompt_id", "")
             items_raw[i]["comfyui_prompt_id"] = comfy_pid
             items_raw[i]["status"] = "pending"
-            items_raw[i]["prompt_preview"] = (p.name or p.prompt or "")[:40]
+            items_raw[i]["prompt_preview"] = (
+                item.prompt_override or p.name or p.prompt or ""
+            )[:40]
             results.append({"index": i, "prompt_id": pid, "comfyui_prompt_id": comfy_pid})
         except Exception as e:
             traceback.print_exc()

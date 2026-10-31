@@ -235,9 +235,33 @@ class StatsResponse(BaseModel):
     top_tags: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class WorkflowCaps(BaseModel):
+    """工作流能接受哪些注入项；前端据此隐藏无效旋钮。
+
+    默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。
+    """
+
+    prompt: bool = True
+    negative: bool = True
+    quality: bool = True
+    orientation: bool = True
+
+
+class WorkflowParams(BaseModel):
+    """画质 / 方向参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。"""
+
+    quality_mode: str = "none"  # seedvr / scale / megapixels / none
+    base_width: int | None = None
+    base_height: int | None = None
+    base_megapixels: float | None = None
+    orientation_mode: str = "none"  # swap / knob / none
+
+
 class WorkflowRow(BaseModel):
     path: str
     name: str
+    caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
+    params: WorkflowParams | None = None
 
 
 class WorkflowListResponse(BaseModel):

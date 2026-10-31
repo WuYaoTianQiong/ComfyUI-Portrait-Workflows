@@ -5,10 +5,20 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet } from '../api/client'
 import { useSettings } from './useSettings'
+import {
+  detectCapsFromContent,
+  detectParamsFromContent,
+  type WorkflowCaps,
+  type WorkflowParams,
+} from '../utils/workflowCaps'
 
 export interface WorkflowRow {
   path: string
   name: string
+  /** 后端探测的注入能力；自定义工作流由前端本地探测 */
+  caps?: WorkflowCaps
+  /** 画质/方向参数的作用方式；自定义工作流由前端本地探测 */
+  params?: WorkflowParams
   /** 自定义上传的工作流（内容存在本地，不在后端磁盘上） */
   custom?: boolean
 }
@@ -69,8 +79,10 @@ export function customWorkflowContent(path: string): string | undefined {
  * - 本地自定义上传的（localStorage，出图时带 `workflow_content`）
  * - 隐藏与排序（都是本地状态 —— 不该写进数据库，那是"这台机器的偏好"）
  */
-export function useWorkflows() {
+export function useWorkflows(defaultTarget?: Ref<string>) {
   const { workflowPath } = useSettings()
+  // 工作流按页独立后，默认值要写到调用方自己的那份，而不是固定写提示词页
+  const target = defaultTarget ?? workflowPath
 
   const { data } = useQuery<{ workflows: WorkflowRow[]; default: string }>({
     queryKey: ['workflows'],
@@ -81,7 +93,7 @@ export function useWorkflows() {
   watch(
     () => data.value?.default,
     (fallback) => {
-      if (!workflowPath.value && fallback) workflowPath.value = fallback
+      if (!target.value && fallback) target.value = fallback
     },
     { immediate: true },
   )
@@ -93,7 +105,16 @@ export function useWorkflows() {
     for (const w of [...(data.value?.workflows ?? []), ...customWorkflows.value]) {
       if (seen.has(w.path)) continue
       seen.add(w.path)
-      merged.push(w)
+      // 自定义工作流的内容只存在本地，能力只能在这里算；磁盘工作流用后端 caps
+      merged.push({
+        path: w.path,
+        name: w.name,
+        custom: w.custom,
+        caps: w.caps ?? ('content' in w ? detectCapsFromContent(String(w.content)) : undefined),
+        params:
+          w.params ??
+          ('content' in w ? detectParamsFromContent(String(w.content)) : undefined),
+      })
     }
     return merged
   })
@@ -196,7 +217,8 @@ export function useWorkflowValidation(path: Ref<string>) {
   return useQuery<WorkflowValidation>({
     queryKey: computed(() => ['validate-workflow', path.value]),
     queryFn: () => apiGet('/api/validate_workflow', { path: path.value }),
-    enabled: computed(() => !!path.value),
+    // 自定义工作流不在后端磁盘上，校验必然报"文件不存在"；出图时内容会随请求带上
+    enabled: computed(() => !!path.value && !path.value.startsWith('custom://')),
     staleTime: 30_000,
   })
 }
