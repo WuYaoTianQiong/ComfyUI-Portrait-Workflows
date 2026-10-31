@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
@@ -7,6 +7,9 @@ import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { FRAGMENT_TYPES } from '../constants'
 import { useWorkflows } from '../composables/useWorkflows'
+import { readSession, writeSession } from '../composables/useSessionState'
+import { flattenCategories } from '../utils/categories'
+import { confirmDialog } from '../utils/naive'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
@@ -23,24 +26,31 @@ const COLORS = [
 ]
 
 type Panel = 'category' | 'tag' | 'fragment' | 'workflow'
-const panel = ref<Panel>('category')
+
+/** 会话状态：回到管理页时停在上次的页签与筛选。 */
+interface ManageSession {
+  panel: Panel
+  fragSearch: string
+  fragTypeFilter: string
+  onlyUnused: boolean
+}
+
+const SESSION_KEY = 'pb.session.manage'
+const savedSession = readSession<ManageSession>(SESSION_KEY, {
+  panel: 'category',
+  fragSearch: '',
+  fragTypeFilter: '',
+  onlyUnused: false,
+})
+
+const panel = ref<Panel>(savedSession.panel)
 
 const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
   queryKey: ['categories', 'manage'],
   queryFn: () => apiGet('/api/categories', { tree: true, count_scope: 'prompt' }),
 })
 
-const flatCats = computed(() => {
-  const out: Array<CategoryNode & { depth: number }> = []
-  const walk = (nodes: CategoryNode[], depth: number) => {
-    nodes.forEach((node) => {
-      out.push({ ...node, depth })
-      if (node.children?.length) walk(node.children, depth + 1)
-    })
-  }
-  walk(catData.value?.categories ?? [], 0)
-  return out
-})
+const flatCats = computed(() => flattenCategories(catData.value?.categories))
 
 const visibleTags = computed(() => {
   const list = tagData.value?.tags ?? []
@@ -54,7 +64,7 @@ const { data: tagData, refetch: refetchTags } = useQuery<{ tags: TagRow[] }>({
 
 const newName = ref('')
 /** 只看没被任何提示词用到的标签 —— 库里有 80 多个孤儿标签，清它们时用得上。 */
-const onlyUnused = ref(false)
+const onlyUnused = ref(savedSession.onlyUnused)
 const newColor = ref(COLORS[0])
 
 async function createItem() {
@@ -123,8 +133,14 @@ const autoClassifyMutation = useMutation({
   },
 })
 
-function autoClassifyAll() {
-  if (!confirm('将对所有提示词重新计算类型分类（组合 / 单项 / 零散），继续？')) return
+async function autoClassifyAll() {
+  const ok = await confirmDialog({
+    title: '自动分类',
+    content: '将对所有提示词重新计算类型分类（组合 / 单项 / 零散），继续？',
+    positiveText: '开始',
+    negativeText: '取消',
+  })
+  if (!ok) return
   autoClassifyMutation.mutate()
 }
 
@@ -139,8 +155,20 @@ interface FragmentRow {
   usage_count: number
 }
 
-const fragSearch = ref('')
-const fragTypeFilter = ref('')
+const fragSearch = ref(savedSession.fragSearch)
+const fragTypeFilter = ref(savedSession.fragTypeFilter)
+
+watch(
+  () => [panel.value, fragSearch.value, fragTypeFilter.value, onlyUnused.value].join('|'),
+  () => {
+    writeSession(SESSION_KEY, {
+      panel: panel.value,
+      fragSearch: fragSearch.value,
+      fragTypeFilter: fragTypeFilter.value,
+      onlyUnused: onlyUnused.value,
+    })
+  },
+)
 
 const { data: fragData, refetch: refetchFrags } = useQuery<{
   items: FragmentRow[]
@@ -218,7 +246,13 @@ async function saveFrag() {
 }
 
 async function removeFragment(id: number, label: string) {
-  if (!confirm(`确定删除碎片「${label}」吗？`)) return
+  const ok = await confirmDialog({
+    title: '删除碎片',
+    content: `确定删除碎片「${label}」吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+  })
+  if (!ok) return
   try {
     await apiDelete(`/api/fragments/${id}`)
     refetchFrags()
@@ -258,13 +292,25 @@ async function uploadWorkflow(event: Event) {
 }
 
 async function removeWorkflow(path: string, name: string) {
-  if (!confirm(`删除自定义工作流「${name}」吗？`)) return
+  const ok = await confirmDialog({
+    title: '删除工作流',
+    content: `删除自定义工作流「${name}」吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+  })
+  if (!ok) return
   removeCustomWorkflow(path)
   toast.success('已删除')
 }
 async function removeItem(kind: Panel, id: number, name: string) {
   const extra = kind === 'category' ? '，并会解除它与所有提示词的关联' : ''
-  if (!confirm(`确定删除「${name}」吗${extra}？`)) return
+  const ok = await confirmDialog({
+    title: '删除条目',
+    content: `确定删除「${name}」吗${extra}？`,
+    positiveText: '删除',
+    negativeText: '取消',
+  })
+  if (!ok) return
   try {
     if (kind === 'category') {
       await apiDelete(`/api/categories/${id}`)

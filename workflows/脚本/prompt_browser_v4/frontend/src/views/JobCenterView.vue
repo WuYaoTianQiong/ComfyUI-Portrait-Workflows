@@ -7,6 +7,8 @@ import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import type { JobSnapshot } from '../api/types'
 import { statusLabel } from '../utils/format'
+import { confirmDialog } from '../utils/naive'
+import { readSession, writeSession } from '../composables/useSessionState'
 
 /**
  * 任务中心：进行中 / 历史任务的实时视图。
@@ -43,12 +45,67 @@ const stopAll = useMutation({
   },
 })
 
-function stopAllRunning() {
-  if (!confirm('停止所有进行中的任务？已排队但还没开始的也会被取消。')) return
+async function stopAllRunning() {
+  const ok = await confirmDialog({
+    title: '停止全部任务',
+    content: '停止所有进行中的任务？已排队但还没开始的也会被取消。',
+    positiveText: '停止',
+    negativeText: '取消',
+  })
+  if (!ok) return
   stopAll.mutate()
 }
-const onlyActive = ref(false)
-const expanded = ref<Set<number>>(new Set())
+/** 会话状态：筛选与展开的任务、滚动位置。 */
+interface JobsSession {
+  onlyActive: boolean
+  expanded: number[]
+  scrollTop: number
+}
+
+const SESSION_KEY = 'pb.session.jobs'
+const savedSession = readSession<JobsSession>(SESSION_KEY, {
+  onlyActive: false,
+  expanded: [],
+  scrollTop: 0,
+})
+
+const onlyActive = ref(savedSession.onlyActive)
+const expanded = ref<Set<number>>(new Set(savedSession.expanded))
+
+const listEl = ref<HTMLElement | null>(null)
+let scrollSaveTimer: number | undefined
+
+function saveSession() {
+  writeSession(SESSION_KEY, {
+    onlyActive: onlyActive.value,
+    expanded: Array.from(expanded.value),
+    scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
+  })
+}
+
+watch(
+  [onlyActive, expanded],
+  saveSession,
+  { deep: true },
+)
+
+/** 滚动很频繁，节流后再写。 */
+function onListScroll() {
+  if (scrollSaveTimer) return
+  scrollSaveTimer = window.setTimeout(() => {
+    scrollSaveTimer = undefined
+    saveSession()
+  }, 300)
+}
+
+/** 任务列表是异步到的，数据到位后再恢复滚动位置。 */
+let scrollRestored = false
+watch(jobs, async () => {
+  if (scrollRestored || !savedSession.scrollTop) return
+  scrollRestored = true
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  if (listEl.value) listEl.value.scrollTop = savedSession.scrollTop
+})
 
 const visible = computed(() =>
   onlyActive.value
@@ -81,6 +138,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   source?.close()
   source = null
+  if (scrollSaveTimer) window.clearTimeout(scrollSaveTimer)
+  saveSession()
 })
 
 function toggle(id: number) {
@@ -93,12 +152,18 @@ function toggle(id: number) {
 const cancelling = ref<number | null>(null)
 
 async function cancel(id: number) {
-  if (!confirm('确定取消这个任务吗？已提交到 ComfyUI 的部分会继续跑完。')) return
+  const ok = await confirmDialog({
+    title: '取消任务',
+    content: '确定取消这个任务吗？已提交到 ComfyUI 的部分会继续跑完。',
+    positiveText: '取消任务',
+    negativeText: '返回',
+  })
+  if (!ok) return
   cancelling.value = id
   try {
     await apiPost(`/api/jobs/${id}/cancel`)
   } catch (e) {
-    alert(`取消失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`取消失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
     cancelling.value = null
   }
@@ -129,7 +194,7 @@ function elapsed(job: JobSnapshot): string {
 const TYPE_LABEL: Record<string, string> = {
   single: '单图',
   batch: '批量',
-  faceswap: '换脸',
+  faceswap: '图像编辑',
 }
 
 function thumbUrl(item: { filename: string; subfolder?: string; type?: string }): string {
@@ -164,7 +229,7 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
       </label>
     </div>
 
-    <div class="list">
+    <div ref="listEl" class="list" @scroll.passive="onListScroll">
       <article v-for="job in visible" :key="job.id" class="job">
         <header class="job-head" @click="toggle(job.id)">
           <span class="arrow">{{ expanded.has(job.id) ? '▾' : '▸' }}</span>
@@ -208,7 +273,7 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
         </div>
       </article>
 
-      <EmptyState v-if="!visible.length" text="{{ onlyActive ? '没有进行中的任务' : '还没有任务记录' }}" />
+      <EmptyState v-if="!visible.length" :text="onlyActive ? '没有进行中的任务' : '还没有任务记录'" />
     </div>
   </div>
 </template>
@@ -263,6 +328,8 @@ function thumbUrl(item: { filename: string; subfolder?: string; type?: string })
 }
 
 .job {
+  /* 关键：flex 容器里的子项默认可收缩，146 条任务会把每条压成几像素高的横线 */
+  flex: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
