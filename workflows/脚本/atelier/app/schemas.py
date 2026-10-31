@@ -71,7 +71,8 @@ class HistoryItem(BaseModel):
     img_type: Optional[str] = None
     # 后端可能给 None（没有可拼的地址）—— 如实反映，别让前端以为一定是字符串
     view_url: Optional[str] = None
-    favorite: bool = False
+    # 与 ORM 字段同名（DB 列仍是 favorite，见 models.Image）
+    is_favorite: bool = False
     # 文件缺失（派生状态，可自愈）：只影响展示与筛选，不代表记录被删除
     missing: bool = False
     width: Optional[int] = None

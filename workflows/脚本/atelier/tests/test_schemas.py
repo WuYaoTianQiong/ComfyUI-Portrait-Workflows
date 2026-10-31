@@ -92,7 +92,7 @@ def test_history_response_contains_frontend_fields(api, seed_history):
     assert set(data) >= {"items", "total", "page", "page_size"}
     item = data["items"][0]
     required = {
-        "id", "filename", "view_url", "favorite", "missing",
+        "id", "filename", "view_url", "is_favorite", "missing",
         "created_at", "captured_at", "source", "prompt_name",
         "categories", "tags",
     }

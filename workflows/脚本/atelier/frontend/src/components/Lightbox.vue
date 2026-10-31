@@ -492,7 +492,7 @@ async function toggleFavorite() {
   busy.value = true
   try {
     await apiPost(`/api/images/${item.value.id}/favorite`)
-    toast.success(item.value.favorite ? '已取消收藏' : '已收藏')
+    toast.success(item.value.is_favorite ? '已取消收藏' : '已收藏')
     emit('changed')
   } catch (e) {
     toast.error(`操作失败：${e instanceof Error ? e.message : String(e)}`)
@@ -911,8 +911,8 @@ function onKey(event: KeyboardEvent) {
       >
         ↗
       </button>
-      <button class="tool" :title="item.favorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
-        {{ item.favorite ? '★' : '☆' }}
+      <button class="tool" :title="item.is_favorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
+        {{ item.is_favorite ? '★' : '☆' }}
       </button>
       <button class="tool" title="水平翻转 (F)" @click="flip">⇋</button>
       <button class="tool" title="旋转 90° (R)" @click="rotate90">⟳</button>

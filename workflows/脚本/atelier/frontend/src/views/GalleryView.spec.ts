@@ -28,8 +28,8 @@ vi.mock('../api/client', () => ({
     }
     return {
       items: [
-        { id: 1, filename: 'a.png', subfolder: '', img_type: 'output', view_url: '', favorite: false, missing: false, created_at: '', captured_at: '', source: 'local', prompt_name: '', prompt_params: null, categories: [], tags: [] },
-        { id: 2, filename: 'b.png', subfolder: '', img_type: 'output', view_url: '', favorite: false, missing: false, created_at: '', captured_at: '', source: 'local', prompt_name: '', prompt_params: null, categories: [], tags: [] },
+        { id: 1, filename: 'a.png', subfolder: '', img_type: 'output', view_url: '', is_favorite: false, missing: false, created_at: '', captured_at: '', source: 'local', prompt_name: '', prompt_params: null, categories: [], tags: [] },
+        { id: 2, filename: 'b.png', subfolder: '', img_type: 'output', view_url: '', is_favorite: false, missing: false, created_at: '', captured_at: '', source: 'local', prompt_name: '', prompt_params: null, categories: [], tags: [] },
       ],
       total: 2,
       page: 1,

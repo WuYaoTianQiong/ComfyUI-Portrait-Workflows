@@ -34,7 +34,7 @@ function item(id: number, filename: string): HistoryItem {
     subfolder: '',
     img_type: 'output',
     view_url: '',
-    favorite: false,
+    is_favorite: false,
     missing: false,
     created_at: '2026-10-30 10:00:00',
     captured_at: '2026-10-30 10:00:00',

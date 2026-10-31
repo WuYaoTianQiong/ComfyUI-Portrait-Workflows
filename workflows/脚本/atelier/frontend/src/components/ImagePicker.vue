@@ -83,7 +83,7 @@ function clear() {
         <template #default="{ item, height }">
           <button
             class="cell"
-            :class="{ picked: orderOf(item.id) > 0, fav: item.favorite }"
+            :class="{ picked: orderOf(item.id) > 0, fav: item.is_favorite }"
             :title="item.filename"
             @click="toggle(item.id)"
           >

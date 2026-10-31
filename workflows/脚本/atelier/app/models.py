@@ -113,7 +113,9 @@ class Image(BaseModel):
     view_url = TextField(null=True)
     preview = TextField(null=True)
     prompt_params = TextField(null=True)  # JSON: 出图参数（steps, cfg, sampler, seed, model, width, height 等）
-    favorite = BooleanField(default=False)
+    # 列名仍是 favorite（§7.1：表名/列名物理迁移的风险远大于命名收益），
+    # 代码侧统一 is_favorite，与提示词侧对齐（§7.2）。
+    is_favorite = BooleanField(column_name="favorite", default=False)
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
     # 真实出图时间（文件 mtime）。created_at 是"入库时间"，同步/扫描进来的图
     # 会全部落在导入那一天，导致画廊"最新"排序不可信。

@@ -28,7 +28,7 @@ export interface HistoryItem {
   img_type: string | null
   /** 后端可能给 null（没有可拼的地址） */
   view_url: string | null
-  favorite: boolean
+  is_favorite: boolean
   /** 文件缺失（派生状态，可自愈）：只影响展示与筛选，不代表记录被删除 */
   missing: boolean
   /** 后端可能给 null（没记录宽高），类型要如实反映，否则调用方要到处判空 */

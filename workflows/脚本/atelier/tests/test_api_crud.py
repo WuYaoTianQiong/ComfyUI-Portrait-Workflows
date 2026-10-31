@@ -151,7 +151,7 @@ def test_history_item_actions(api, seed_history):
 
     img = seed_history(filename="act.png")
 
-    assert api.post(f"/api/images/{img.id}/favorite").json()["favorite"] is True
+    assert api.post(f"/api/images/{img.id}/favorite").json()["is_favorite"] is True
 
     cid = api.post("/api/categories", json={"name": "图片分类"}).json()["id"]
     assert api.post(f"/api/images/{img.id}/categories/{cid}").status_code == 200

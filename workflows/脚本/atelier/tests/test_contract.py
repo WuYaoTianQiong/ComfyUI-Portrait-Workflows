@@ -331,8 +331,8 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
     """
     from app.models import EntityTag, ImageCategory
 
-    hit = seed_history(filename="aaa.png", favorite=True)
-    seed_history(filename="bbb.png", favorite=False)
+    hit = seed_history(filename="aaa.png", is_favorite=True)
+    seed_history(filename="bbb.png", is_favorite=False)
     cat, tag = seed_taxonomy()
     ImageCategory.create(image=hit.id, category=cat.id)
     EntityTag.create(entity_type="image", entity_id=hit.id, tag=tag.id)

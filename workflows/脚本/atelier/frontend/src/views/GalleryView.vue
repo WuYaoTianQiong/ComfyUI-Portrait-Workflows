@@ -322,7 +322,7 @@ const deleteMutation = useMutation({
 })
 
 const favoriteMutation = useMutation({
-  mutationFn: (id: number) => apiPost<{ success: boolean; favorite: boolean }>(`/api/images/${id}/favorite`),
+  mutationFn: (id: number) => apiPost<{ success: boolean; is_favorite: boolean }>(`/api/images/${id}/favorite`),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['history'] })
     queryClient.invalidateQueries({ queryKey: ['facets'] })
@@ -870,11 +870,11 @@ function clearFilters() {
 
           <button
             class="fav"
-            :class="{ on: item.favorite }"
+            :class="{ on: item.is_favorite }"
             title="收藏"
             @click.stop="favoriteMutation.mutate(item.id)"
           >
-            {{ item.favorite ? '★' : '☆' }}
+            {{ item.is_favorite ? '★' : '☆' }}
           </button>
 
           <span v-if="item.missing" class="badge-missing">🚫 文件缺失</span>

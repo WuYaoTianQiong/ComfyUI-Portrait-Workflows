@@ -85,7 +85,7 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
         "img_type": r.img_type,
         "view_url": r.view_url,
         "preview": r.preview,
-        "favorite": bool(r.favorite),
+        "is_favorite": bool(r.is_favorite),
         "prompt_params": prompt_params,
         "created_at": str(r.created_at) if r.created_at else "",
         "captured_at": str(r.captured_at) if r.captured_at else "",
@@ -189,7 +189,7 @@ def _sync_comfyui_history() -> int:
                             "view_url": build_view_url(filename, subfolder, img_type),
                             "preview": "",
                             "prompt_params": pp,
-                            "favorite": False,
+                            "is_favorite": False,
                             "captured_at": captured,
                             "source": "comfyui_sync",
                         },
@@ -342,7 +342,7 @@ def _sync_disk_orphans() -> int:
                     view_url=build_view_url(fname, "", "output"),
                     preview="",
                     prompt_params=pp,
-                    favorite=False,
+                    is_favorite=False,
                     captured_at=captured,
                     source="disk_scan",
                 ).execute()
@@ -520,7 +520,7 @@ def _filtered_history_query(
     """
     q = Image.select().where(Image.is_deleted == False)
     if favorite is not None:
-        q = q.where(Image.favorite == favorite)
+        q = q.where(Image.is_favorite == favorite)
     if missing is not None:
         q = q.where(Image.missing_since.is_null(not missing))
     if search:
@@ -827,9 +827,9 @@ def toggle_favorite(item_id: int):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
         raise HTTPException(404, "历史记录不存在")
-    new_val = not bool(r.favorite)
-    Image.update(favorite=new_val).where(Image.id == item_id).execute()
-    return {"success": True, "favorite": new_val}
+    new_val = not bool(r.is_favorite)
+    Image.update(is_favorite=new_val).where(Image.id == item_id).execute()
+    return {"success": True, "is_favorite": new_val}
 
 
 # ---------------------------------------------------------------------------
