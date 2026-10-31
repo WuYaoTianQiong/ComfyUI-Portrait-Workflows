@@ -154,3 +154,59 @@ export function renderSegmented(segments: Record<string, string>): string {
   if (!keys.length) return ''
   return keys.map((t) => `【${t}】\n${segments[t]}`).join('\n\n')
 }
+
+/**
+ * 把已有【类型】标记的提示词拆成「已标记块 / 未标记文字」。
+ *
+ * 智能分段必须只在未标记部分上跑，否则对已经是分段格式的提示词再点一次，
+ * 会把标题也当成正文重新归类，越分越乱。旧版 static/prompt.js 的
+ * `_segmentParse` 就是这个作用，重构成 Vue 时漏掉了。
+ */
+export function parseMarkedSegments(text: string): {
+  marked: Record<string, string>
+  leftover: string
+} {
+  const marked: Record<string, string> = {}
+  const leftoverBlocks: string[] = []
+  const blocks = (text || '').split(/\n\s*\n/)
+  for (const block of blocks) {
+    const match = block.match(/^\s*【([^】]+)】\s*([\s\S]*)$/)
+    if (match) {
+      marked[match[1].trim()] = (match[2] || '').trim()
+    } else if (block.trim()) {
+      leftoverBlocks.push(block.trim())
+    }
+  }
+  return { marked, leftover: leftoverBlocks.join('\n\n').trim() }
+}
+
+/**
+ * 只替换指定【类型】块的内容，其他块原样保留。
+ *
+ * 找不到该类型时返回 null —— 批量替换要据此跳过"本来就没有这一片"的提示词，
+ * 而不是凭空给它加一段。
+ */
+export function replaceMarkedSegment(
+  text: string,
+  type: string,
+  content: string,
+): string | null {
+  let replaced = false
+  const blocks = (text || '').split(/\n\s*\n/)
+  const next = blocks.map((block) => {
+    const match = block.match(/^\s*【([^】]+)】\s*([\s\S]*)$/)
+    if (!match || match[1].trim() !== type) return block
+    replaced = true
+    return `【${type}】\n${content}`
+  })
+  if (!replaced) return null
+  return next.join('\n\n').trim()
+}
+
+/** 渲染任意类型键（包括库里自定义的碎片名），不会像 renderSegmented 那样过滤。 */
+export function renderAllSegments(segments: Record<string, string>): string {
+  return Object.entries(segments)
+    .filter(([, content]) => content)
+    .map(([type, content]) => `【${type}】\n${content}`)
+    .join('\n\n')
+}

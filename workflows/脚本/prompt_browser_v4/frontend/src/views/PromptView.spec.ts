@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PromptView from './PromptView.vue'
-import { apiDelete, apiPost } from '../api/client'
+import { apiDelete, apiGet, apiPost } from '../api/client'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
@@ -77,6 +77,15 @@ async function mountView() {
   return wrapper
 }
 
+async function mountWithSelect(selectId: number) {
+  const wrapper = mount(PromptView, {
+    props: { selectId },
+    global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+  })
+  await flushPromises()
+  return wrapper
+}
+
 describe('PromptView 分类关联', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
@@ -135,5 +144,73 @@ describe('PromptView 分类关联', () => {
 
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(vi.mocked(apiPost).mock.calls[0][0]).toBe('/api/categories/auto-classify/1')
+  })
+})
+
+describe('PromptView 外部跳转与草稿恢复', () => {
+  // happy-dom 的 localStorage 只提供 getItem/setItem，这里补一个完整实现
+  const store = new Map<string, string>()
+
+  beforeEach(() => {
+    vi.mocked(apiGet).mockClear()
+    vi.mocked(apiPost).mockClear()
+    vi.mocked(apiDelete).mockClear()
+    store.clear()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    })
+  })
+
+  it('跳到提示词：直接查询目标 id 而不是列表第一条', async () => {
+    await mountWithSelect(7)
+
+    // 目标 id 不在列表首页里，也必须查询 7
+    expect(vi.mocked(apiGet)).toHaveBeenCalledWith('/api/prompts/7')
+  })
+
+  it('详情到达后恢复本地草稿', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    localStorage.setItem('pb.draft.7', JSON.stringify({ prompt: '草稿内容' }))
+
+    const wrapper = await mountWithSelect(7)
+
+    const editor = wrapper.find('textarea').element as HTMLTextAreaElement
+    expect(editor.value).toBe('草稿内容')
+    confirmSpy.mockRestore()
+    localStorage.removeItem('pb.draft.7')
+  })
+
+  it('放弃恢复时清掉本地草稿', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    localStorage.setItem('pb.draft.7', JSON.stringify({ prompt: '草稿内容' }))
+
+    const wrapper = await mountWithSelect(7)
+
+    const editor = wrapper.find('textarea').element as HTMLTextAreaElement
+    expect(editor.value).toBe('内容')
+    expect(localStorage.getItem('pb.draft.7')).toBeNull()
+    confirmSpy.mockRestore()
+  })
+
+  it('回到提示词页时恢复上次的搜索词', async () => {
+    localStorage.setItem(
+      'pb.session.prompt',
+      JSON.stringify({
+        page: 2,
+        search: '关键词',
+        categoryId: null,
+        tagIds: [],
+        tagMatch: 'all',
+        selectedId: 1,
+        scrollTop: 0,
+      }),
+    )
+
+    const wrapper = await mountView()
+
+    expect((wrapper.find('.search').element as HTMLInputElement).value).toBe('关键词')
   })
 })

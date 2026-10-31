@@ -241,6 +241,48 @@ def list_prompts(
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
 
 
+@router.get("/prompts/full")
+def list_prompts_full(
+    search: str = Query(""),
+    category_id: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+    tag_match: str = Query("all"),
+    ids: str = Query(""),
+):
+    """按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。
+
+    列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全
+    相同的筛选条件，避免"看到的和替换的不是同一批"。
+    `ids` 用于"只替换左侧已勾选的提示词"——勾选可能跨页/跨筛选，不能再套筛选。
+    """
+    if ids:
+        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        query = Prompt.select().where(Prompt.id.in_(id_list)).order_by(Prompt.id)
+    else:
+        query = _build_prompt_query(
+            search, "", category_id, tag_ids, "newest", "desc", tag_match,
+        )
+    rows = list(query)
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "name": r.name or "",
+                "prompt": r.prompt or "",
+                "negative_prompt": r.negative_prompt or "",
+                "seed": r.seed,
+                "steps": r.steps,
+                "cfg_scale": r.cfg_scale,
+                "sampler": r.sampler or "",
+                "model": r.model or "",
+                "tags": r.tags or "",
+            }
+            for r in rows
+        ],
+        "total": len(rows),
+    }
+
+
 @router.get("/prompts/{prompt_id}", response_model=PromptDetail)
 def get_prompt(prompt_id: int):
     """获取单条提示词详情"""
