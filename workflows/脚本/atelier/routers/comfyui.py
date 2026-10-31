@@ -12,13 +12,13 @@ from io import BytesIO
 from fastapi import APIRouter, HTTPException, Query
 from schemas import WorkflowListResponse
 from fastapi.responses import StreamingResponse, FileResponse
-from PIL import Image
+from PIL import Image as PILImage
 from pydantic import BaseModel
 
 from config import settings
 from models import Prompt, PromptCategory, Category
 from services.helpers import _resolve_if_reparse, missing_image_response
-from services.composition import strip_headers
+from services.fragment_syntax import strip_headers
 from services.thumbnail import generate_thumbnail
 from services.workflow_parser import (
     load_workflow,
@@ -282,8 +282,8 @@ def serve_thumbnail(
         # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404
         return missing_image_response()
     try:
-        with Image.open(BytesIO(raw)) as img:
-            img.thumbnail((size, size), Image.LANCZOS)
+        with PILImage.open(BytesIO(raw)) as img:
+            img.thumbnail((size, size), PILImage.LANCZOS)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             buf = BytesIO()
@@ -597,17 +597,17 @@ def batch_generate(req: BatchRequest):
 def _missing_prompt_ids():
     """返回所有「没有生成过图片」的提示词 ID 列表（DB 关联判定）。
 
-    缺图判定：GenHistory 中不存在该 prompt_id 的未删除记录，即视为缺图。
+    缺图判定：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。
     """
-    from models import GenHistory
+    from models import Image
 
     have_ids = {
         r.prompt_id
-        for r in GenHistory
-        .select(GenHistory.prompt_id)
+        for r in Image
+        .select(Image.prompt_id)
         .where(
-            (GenHistory.is_deleted == False)
-            & (GenHistory.prompt_id.is_null(False))
+            (Image.is_deleted == False)
+            & (Image.prompt_id.is_null(False))
         )
         .distinct()
     }
@@ -664,7 +664,7 @@ def generate_missing_list():
 def generate_missing(req: GenerateMissingRequest):
     """为所有「没有生成过图片」的提示词统一批量出图。
 
-    缺图判定（DB 关联）：GenHistory 中不存在该 prompt_id 的未删除记录，即视为缺图。
+    缺图判定（DB 关联）：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。
     每条提示词使用其自身保存的参数（steps/cfg/sampler/seed/分辨率），
     实际出图逻辑完全复用 batch_generate。
     """

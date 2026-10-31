@@ -30,7 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from config import settings
-from models import GenHistory as Gh
+from models import Image
 from routers.fsbrowse import IMAGE_EXT
 from routers.jobs import create_job, update_job_items
 from services.comfyui_client import push_prompt
@@ -112,7 +112,7 @@ def _collect_sources(ids: list[int], paths: list[str], label: str) -> list[dict]
     """
     out: list[dict] = []
     for i in ids:
-        r = Gh.get_or_none(Gh.id == i)
+        r = Image.get_or_none(Image.id == i)
         if r is None:
             raise HTTPException(404, f"历史记录不存在: {i}")
         src = _row_src_path(r)
@@ -195,12 +195,12 @@ def _compose_masked_target(target_path: Path, mask_path: Path, dest_dir: Path) -
     · 否则按亮度 → 白色 = 要改（兼容最常见的黑白遮罩图）
     其余区域 alpha=255，工作流的归约链会原样保留这些像素。
     """
-    from PIL import Image, ImageOps
+    from PIL import Image as PILImage, ImageOps
 
-    with Image.open(target_path) as raw:
+    with PILImage.open(target_path) as raw:
         image = ImageOps.exif_transpose(raw).convert("RGB")
 
-    with Image.open(mask_path) as raw_mask:
+    with PILImage.open(mask_path) as raw_mask:
         mask = ImageOps.exif_transpose(raw_mask)
         alpha = mask.convert("RGBA").getchannel("A")
         if alpha.getextrema()[0] < 255:
@@ -209,7 +209,7 @@ def _compose_masked_target(target_path: Path, mask_path: Path, dest_dir: Path) -
         else:
             # 没有真正的透明区域：按亮度取白色区域
             repaint = mask.convert("L")
-        repaint = repaint.resize(image.size, Image.Resampling.BILINEAR)
+        repaint = repaint.resize(image.size, PILImage.Resampling.BILINEAR)
 
     output = image.convert("RGBA")
     output.putalpha(ImageOps.invert(repaint))
@@ -288,10 +288,10 @@ def faceswap_save_mask(req: MaskSaveRequest):
     except Exception:
         raise HTTPException(400, "遮罩数据解析失败")
 
-    from PIL import Image
+    from PIL import Image as PILImage
 
     try:
-        with Image.open(io.BytesIO(raw)) as image:
+        with PILImage.open(io.BytesIO(raw)) as image:
             if image.format != "PNG":
                 raise ValueError("不是 PNG")
             image.verify()

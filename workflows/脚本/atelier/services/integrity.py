@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from models import GenHistory as Gh
+from models import Image
 from services.thumbnail import _get_image_path
 
 logger = logging.getLogger("atelier.integrity")
@@ -38,9 +38,9 @@ def scan_missing(batch: int = _DEFAULT_BATCH) -> dict:
 
     while True:
         rows = list(
-            Gh.select(Gh.id, Gh.filename, Gh.subfolder, Gh.img_type, Gh.missing_since)
-            .where((Gh.is_deleted == False) & (Gh.id > last_id))
-            .order_by(Gh.id)
+            Image.select(Image.id, Image.filename, Image.subfolder, Image.img_type, Image.missing_since)
+            .where((Image.is_deleted == False) & (Image.id > last_id))
+            .order_by(Image.id)
             .limit(batch)
         )
         if not rows:
@@ -59,11 +59,11 @@ def scan_missing(batch: int = _DEFAULT_BATCH) -> dict:
 
         # 每批落库一次：整库一次事务会在几千行时把写锁占住好几百毫秒
         if mark_ids:
-            Gh.update(missing_since=now).where(Gh.id.in_(mark_ids)).execute()
+            Image.update(missing_since=now).where(Image.id.in_(mark_ids)).execute()
             marked += len(mark_ids)
             mark_ids = []
         if clear_ids:
-            Gh.update(missing_since=None).where(Gh.id.in_(clear_ids)).execute()
+            Image.update(missing_since=None).where(Image.id.in_(clear_ids)).execute()
             cleared += len(clear_ids)
             clear_ids = []
 

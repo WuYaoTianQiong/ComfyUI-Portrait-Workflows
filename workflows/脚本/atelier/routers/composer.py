@@ -12,7 +12,7 @@ from services.workflow_parser import load_workflow, inject_prompt
 from services.comfyui_client import push_prompt
 from routers.jobs import create_job, update_job_items
 from config import settings
-from services.composition import FRAGMENT_TYPES, parse
+from services.fragment_syntax import FRAGMENT_TYPES, parse
 
 router = APIRouter(tags=["组合创作"])
 

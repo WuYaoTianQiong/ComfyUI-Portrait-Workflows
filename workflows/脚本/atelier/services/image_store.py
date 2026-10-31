@@ -19,14 +19,14 @@ from __future__ import annotations
 
 from peewee import SQL
 
-from models import GenHistory
+from models import Image
 
 # 与 models._migrate_genhistory_unique_constraint 创建的部分唯一索引一一对应
 LIVE_ONLY_FILTER = SQL("is_deleted=0")
-CONFLICT_TARGET = (GenHistory.filename, GenHistory.subfolder, GenHistory.img_type)
+CONFLICT_TARGET = (Image.filename, Image.subfolder, Image.img_type)
 
 
-def upsert_history(
+def upsert_image(
     insert_values: dict,
     update_values: dict,
     only_when_job_null: bool = False,
@@ -43,5 +43,5 @@ def upsert_history(
         "update": update_values,
     }
     if only_when_job_null:
-        conflict_kwargs["where"] = GenHistory.job_id.is_null()
-    GenHistory.insert(**insert_values).on_conflict(**conflict_kwargs).execute()
+        conflict_kwargs["where"] = Image.job_id.is_null()
+    Image.insert(**insert_values).on_conflict(**conflict_kwargs).execute()

@@ -109,8 +109,8 @@ def get_image_metadata(filename: str, subfolder: str, img_type: str) -> dict:
         if not img_path.exists():
             return {}
         file_size = img_path.stat().st_size
-        from PIL import Image
-        with Image.open(img_path) as img:
+        from PIL import Image as PILImage
+        with PILImage.open(img_path) as img:
             width, height = img.size
         return {"width": width, "height": height, "file_size": file_size}
     except Exception:
@@ -164,8 +164,8 @@ def get_image_metadata_fast(filename: str, subfolder: str, img_type: str,
     # ---- 回退：PIL 打开读取 ----
     if not width or not height:
         try:
-            from PIL import Image
-            with Image.open(img_path) as img:
+            from PIL import Image as PILImage
+            with PILImage.open(img_path) as img:
                 width, height = img.size
         except Exception:
             pass
@@ -261,8 +261,8 @@ def extract_model_name(filename: str, subfolder: str, img_type: str) -> str | No
         img_path = base_dir / (subfolder or "") / filename if subfolder else base_dir / filename
         if not img_path.exists():
             return None
-        from PIL import Image
-        with Image.open(img_path) as img:
+        from PIL import Image as PILImage
+        with PILImage.open(img_path) as img:
             info = dict(img.info)
         for key in ("workflow", "prompt"):
             raw = info.get(key)

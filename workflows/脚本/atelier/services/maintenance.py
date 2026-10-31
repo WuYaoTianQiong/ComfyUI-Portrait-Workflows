@@ -20,7 +20,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from models import GenHistory as Gh, ImageCategory, ImageTag, db
+from models import Image, ImageCategory, ImageTag, db
 from config import settings
 
 logger = logging.getLogger("atelier.maintenance")
@@ -115,12 +115,12 @@ def purge_tombstones(keep_days: int = TOMBSTONE_KEEP_DAYS, dry_run: bool = True)
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     deadline = now_utc - timedelta(days=keep_days)
 
-    tombstones = Gh.select().where(Gh.is_deleted == True).count()
+    tombstones = Image.select().where(Image.is_deleted == True).count()
     ids = [
         r.id
-        for r in Gh.select(Gh.id).where(
-            (Gh.is_deleted == True)
-            & ((Gh.created_at.is_null(True)) | (Gh.created_at < deadline))
+        for r in Image.select(Image.id).where(
+            (Image.is_deleted == True)
+            & ((Image.created_at.is_null(True)) | (Image.created_at < deadline))
         )
     ]
     result = {"tombstones": tombstones, "eligible": len(ids), "deleted": 0, "relations": 0}
@@ -132,7 +132,7 @@ def purge_tombstones(keep_days: int = TOMBSTONE_KEEP_DAYS, dry_run: bool = True)
             ImageTag.delete().where(ImageTag.image.in_(ids)).execute()
             + ImageCategory.delete().where(ImageCategory.image.in_(ids)).execute()
         )
-        result["deleted"] = Gh.delete().where(Gh.id.in_(ids)).execute()
+        result["deleted"] = Image.delete().where(Image.id.in_(ids)).execute()
     return result
 
 

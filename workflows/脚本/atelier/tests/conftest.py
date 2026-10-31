@@ -97,14 +97,14 @@ def seed_prompt():
 
 @pytest.fixture()
 def seed_history():
-    from models import GenHistory
+    from models import Image
 
     def _make(**kw):
         kw.setdefault("filename", "test_00001_.png")
         kw.setdefault("subfolder", "")
         kw.setdefault("img_type", "output")
         kw.setdefault("source", "local")
-        return GenHistory.create(**kw)
+        return Image.create(**kw)
 
     return _make
 

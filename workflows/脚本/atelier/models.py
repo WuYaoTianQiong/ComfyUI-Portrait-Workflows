@@ -102,7 +102,7 @@ class GenJob(BaseModel):
         table_name = "gen_jobs"
 
 
-class GenHistory(BaseModel):
+class Image(BaseModel):
     id = AutoField()
     job_id = IntegerField(null=True)
     prompt_id = IntegerField(null=True)
@@ -160,7 +160,7 @@ class PromptTag(BaseModel):
 # ======== Phase 5: 图片分类 / 标签（复用提示词同一套分类法）========
 class ImageCategory(BaseModel):
     """图片-分类 多对多关系表（快照拷贝，独立于提示词）"""
-    image = ForeignKeyField(GenHistory, backref="image_categories")
+    image = ForeignKeyField(Image, backref="image_categories")
     category = ForeignKeyField(Category, backref="images")
 
     class Meta:
@@ -172,7 +172,7 @@ class ImageCategory(BaseModel):
 
 class ImageTag(BaseModel):
     """图片-标签 多对多关系表（快照拷贝，独立于提示词）"""
-    image = ForeignKeyField(GenHistory, backref="image_tags")
+    image = ForeignKeyField(Image, backref="image_tags")
     tag = ForeignKeyField(Tag, backref="images")
 
     class Meta:
@@ -205,7 +205,7 @@ def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
     """将来源提示词【当前】的分类/标签【快照拷贝】到图片。
     仅新增、绝不删除（尊重用户后续手动调整）。
     force=False 时若图片已有任意分类/标签则跳过（避免每次轮询重复写）。"""
-    gh = GenHistory.get_or_none(GenHistory.id == history_id)
+    gh = Image.get_or_none(Image.id == history_id)
     if gh is None or not gh.prompt_id:
         return 0
     if not force:
@@ -236,7 +236,7 @@ def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
 def backfill_image_taxonomy() -> int:
     """为所有带 prompt_id 且尚未分类的图片补齐来源提示词的分类/标签。"""
     done = 0
-    for gh in GenHistory.select().where(GenHistory.prompt_id.is_null(False), GenHistory.is_deleted == False):
+    for gh in Image.select().where(Image.prompt_id.is_null(False), Image.is_deleted == False):
         if inherit_prompt_taxonomy(gh.id):
             done += 1
     return done
@@ -310,8 +310,8 @@ def _backfill_captured_at() -> int:
     from services.thumbnail import _get_image_path
 
     rows = list(
-        GenHistory.select(GenHistory.id, GenHistory.filename, GenHistory.subfolder, GenHistory.img_type)
-        .where(GenHistory.captured_at.is_null(True))
+        Image.select(Image.id, Image.filename, Image.subfolder, Image.img_type)
+        .where(Image.captured_at.is_null(True))
     )
     updated = 0
     for row in rows:
@@ -322,7 +322,7 @@ def _backfill_captured_at() -> int:
             captured = datetime.fromtimestamp(path.stat().st_mtime)
         except OSError:
             continue
-        GenHistory.update(captured_at=captured).where(GenHistory.id == row.id).execute()
+        Image.update(captured_at=captured).where(Image.id == row.id).execute()
         updated += 1
     return updated
 
@@ -351,12 +351,12 @@ def _clear_auto_type_categories(prompt_id: int):
 
 
 def classify_prompt_text(prompt_text: str) -> str | None:
-    """根据提示词文本检测类型（解析逻辑见 services.composition.classify）：
+    """根据提示词文本检测类型（解析逻辑见 services.fragment_syntax.classify）：
     'composite'  ≥4种碎片
     'single'     1-3种碎片
     'scattered'  无【】标记
     """
-    from services.composition import classify
+    from services.fragment_syntax import classify
 
     return classify(prompt_text)
 
@@ -431,7 +431,7 @@ def _ensure_tables():
     建表不进迁移：新增模型表不需要写一条新迁移，`safe=True` 会静默跳过已存在的表。
     顺序按外键依赖：Prompt/Category 必须先于各自的关联表。
     """
-    db.create_tables([Prompt, GenJob, GenHistory], safe=True)
+    db.create_tables([Prompt, GenJob, Image], safe=True)
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
     db.create_tables([ImageCategory, ImageTag, EntityTag], safe=True)
     db.create_tables([Template, TemplateFragment], safe=True)
@@ -468,10 +468,10 @@ def _migrate_v1_baseline(database):
     # 之后 create_tables(safe=True) 又会静默跳过，导致新库永久缺少这个部分唯一索引，
     # 所有 ON CONFLICT 写入（任务出图 / ComfyUI 同步）都会抛
     # "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint" 并被 except 吞掉。
-    # GenHistory.Meta.indexes 为空，peewee 不会创建任何旧索引，因此挪到建表之后是安全的。
+    # Image.Meta.indexes 为空，peewee 不会创建任何旧索引，因此挪到建表之后是安全的。
     _migrate_genhistory_unique_constraint(database)
 
-    # 迁移 GenHistory 新列
+    # 迁移 Image 新列
     _migrate_column(database, "gen_history", "prompt_params", "prompt_params TEXT")
     _migrate_column(database, "gen_history", "favorite",
                     "favorite BOOLEAN NOT NULL DEFAULT 0")
@@ -518,7 +518,7 @@ def _migrate_v2_entity_tags(database):
 
     只写 entity_tags，不动旧表与 prompts.tags 文本，随时可以整体回退。
     """
-    from services.taxonomy import recalc_usage_counts, sync_prompt_tags
+    from services.tagging import recalc_usage_counts, sync_prompt_tags
 
     database.execute_sql(
         "INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id) "

@@ -119,7 +119,7 @@ app.add_middleware(RequestLogMiddleware)
 # 注册路由
 from routers.prompts import router as prompts_router
 from routers.jobs import router as jobs_router
-from routers.history import router as history_router
+from routers.images import router as images_router
 from routers.comfyui import router as comfyui_router
 from routers.categories import router as categories_router
 from routers.tags import router as tags_router
@@ -132,7 +132,7 @@ from routers.fsbrowse import router as fsbrowse_router
 
 app.include_router(prompts_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
-app.include_router(history_router, prefix="/api")
+app.include_router(images_router, prefix="/api")
 app.include_router(comfyui_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(tags_router, prefix="/api")

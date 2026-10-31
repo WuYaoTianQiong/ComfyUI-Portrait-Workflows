@@ -1,6 +1,6 @@
-"""services.composition 的单元测试 —— 提示词解析的唯一实现。"""
+"""services.fragment_syntax 的单元测试 —— 提示词解析的唯一实现。"""
 
-from services.composition import (
+from services.fragment_syntax import (
     FRAGMENT_TYPES,
     classify,
     extract,

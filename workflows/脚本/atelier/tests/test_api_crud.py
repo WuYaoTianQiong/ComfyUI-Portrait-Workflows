@@ -147,7 +147,7 @@ def test_prompt_flag_endpoints(api):
 # ---------------------------------------------------------------------------
 
 def test_history_item_actions(api, seed_history):
-    from models import GenHistory
+    from models import Image
 
     img = seed_history(filename="act.png")
 
@@ -162,12 +162,12 @@ def test_history_item_actions(api, seed_history):
     assert api.delete(f"/api/history/{img.id}/tags/{tid}").status_code == 200
 
     assert api.delete(f"/api/history/{img.id}").status_code == 200
-    assert bool(GenHistory.get_by_id(img.id).is_deleted) is True
+    assert bool(Image.get_by_id(img.id).is_deleted) is True
 
 
 def test_history_batch_delete_keeps_prompt_records(api, seed_history):
     """批量删图只软删，不碰提示词。"""
-    from models import GenHistory, Prompt
+    from models import Image, Prompt
 
     prompt = Prompt.create(name="保留", prompt="x")
     a = seed_history(filename="b1.png", prompt_id=prompt.id)
@@ -175,14 +175,14 @@ def test_history_batch_delete_keeps_prompt_records(api, seed_history):
 
     assert api.post("/api/history/batch_delete", json={"ids": [a.id, b.id]}).status_code == 200
     assert all(
-        bool(GenHistory.get_by_id(i).is_deleted) for i in (a.id, b.id)
+        bool(Image.get_by_id(i).is_deleted) for i in (a.id, b.id)
     )
     assert Prompt.get_or_none(Prompt.id == prompt.id) is not None
 
 
 def test_batch_delete_prompts_detaches_history(api, seed_history):
     """批量删提示词只解除关联，不能把画廊里的图片记录一起删掉。"""
-    from models import GenHistory, Prompt
+    from models import Image, Prompt
 
     prompt = Prompt.create(name="批量删", prompt="x")
     img = seed_history(filename="detach.png", prompt_id=prompt.id)
@@ -190,6 +190,6 @@ def test_batch_delete_prompts_detaches_history(api, seed_history):
     resp = api.post("/api/prompts/batch_delete", json={"ids": [prompt.id]})
     assert resp.status_code == 200
 
-    row = GenHistory.get_by_id(img.id)
+    row = Image.get_by_id(img.id)
     assert row.prompt_id is None
     assert bool(row.is_deleted) is False

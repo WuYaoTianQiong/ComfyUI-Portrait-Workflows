@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from models import Template, TemplateFragment, Prompt, Category, db
-from services.composition import extract
+from services.fragment_syntax import extract
 
 router = APIRouter(tags=["模板"])
 

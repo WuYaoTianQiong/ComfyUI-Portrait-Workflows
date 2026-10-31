@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from PIL import Image
+from PIL import Image as PILImage
 
 from config import settings
 from services.helpers import _resolve_if_reparse, missing_image_response
@@ -141,8 +141,8 @@ def fs_thumb(path: str = Query(...), size: int = Query(300)):
     if not cache.is_file():
         try:
             settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
-            with Image.open(p) as im:
-                im.thumbnail((size, size), Image.LANCZOS)
+            with PILImage.open(p) as im:
+                im.thumbnail((size, size), PILImage.LANCZOS)
                 if im.mode not in ("RGB", "L"):
                     im = im.convert("RGB")
                 im.save(cache, "WEBP", quality=80)

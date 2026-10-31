@@ -1,7 +1,7 @@
 """统计 API —— 数据看板"""
 from fastapi import APIRouter
 from schemas import StatsResponse
-from models import Prompt, GenHistory, GenJob, Tag, Fragment
+from models import Prompt, Image, GenJob, Tag, Fragment
 from peewee import fn
 
 router = APIRouter(tags=["统计"])
@@ -11,7 +11,7 @@ router = APIRouter(tags=["统计"])
 def get_stats():
     """返回项目整体统计数据"""
     prompt_count = Prompt.select().count()
-    history_count = GenHistory.select().where(GenHistory.is_deleted == False).count()
+    history_count = Image.select().where(Image.is_deleted == False).count()
     job_count = GenJob.select().count()
     fragment_count = Fragment.select().count()
 

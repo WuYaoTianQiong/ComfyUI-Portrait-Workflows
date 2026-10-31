@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 
 from models import Fragment, db
-from services.composition import FRAGMENT_TYPES
+from services.fragment_syntax import FRAGMENT_TYPES
 
 router = APIRouter(tags=["碎片库"])
 

@@ -1,11 +1,11 @@
-"""标签管理 API（读写都走 entity_tags，由 services.taxonomy 统一维护）"""
+"""标签管理 API（读写都走 entity_tags，由 services.tagging 统一维护）"""
 from fastapi import APIRouter, HTTPException, Query
 from schemas import TagListResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from models import EntityTag, Tag, Prompt
-from services.taxonomy import (
+from services.tagging import (
     add_prompt_tag_by_name,
     remove_prompt_tag_by_name,
     tag_image_counts,
@@ -30,7 +30,7 @@ class TagUpdate(BaseModel):
 def _tag_to_dict(t, count_scope: str = "prompt", counts_map: dict = None) -> dict:
     """count_scope=prompt 返回挂了这个标签的提示词数，image 返回去重图片数。
 
-    两种计数都由 services.taxonomy 一次性批量算出（136 个标签不做 136 次聚合）。
+    两种计数都由 services.tagging 一次性批量算出（136 个标签不做 136 次聚合）。
     """
     return {
         "id": t.id,

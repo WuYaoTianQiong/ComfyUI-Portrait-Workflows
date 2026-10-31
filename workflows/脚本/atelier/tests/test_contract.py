@@ -205,9 +205,9 @@ def test_history_soft_delete_hides_item(api, seed_history):
     body = api.get("/api/history?page=1&page_size=50").json()
     assert body["total"] == 0
     # 物理文件与行都保留，只置软删除标记
-    from models import GenHistory
+    from models import Image
 
-    assert GenHistory.get_by_id(item.id).is_deleted is True
+    assert Image.get_by_id(item.id).is_deleted is True
 
 
 def test_history_html_endpoint_removed(api, seed_history):
@@ -245,11 +245,11 @@ def test_history_missing_filter(api, seed_history):
     """「仅失效」按 missing_since 派生列筛选；文件缺失只是标记，记录本身仍保留。"""
     from datetime import datetime
 
-    from models import GenHistory
+    from models import Image
 
     gone = seed_history(filename="gone.png")
     kept = seed_history(filename="kept.png")
-    GenHistory.update(missing_since=datetime.now()).where(GenHistory.id == gone.id).execute()
+    Image.update(missing_since=datetime.now()).where(Image.id == gone.id).execute()
 
     body = api.get("/api/history?missing=1").json()
     assert [it["id"] for it in body["items"]] == [gone.id]
@@ -259,19 +259,19 @@ def test_history_missing_filter(api, seed_history):
     body = api.get("/api/history").json()
     assert body["total"] == 2
     assert api.get("/api/history/ids?missing=1").json()["ids"] == [gone.id]
-    kept_row = GenHistory.get_by_id(kept.id)
+    kept_row = Image.get_by_id(kept.id)
     assert bool(kept_row.is_deleted) is False
 
 
 def test_scan_missing_marks_and_heals(api, seed_history):
     """巡检只维护派生列：第一次标记缺失，文件出现后再次巡检应清除标记。"""
-    from models import GenHistory
+    from models import Image
     from services.integrity import scan_missing
 
     item = seed_history(filename="probe.png")
 
     scan_missing()
-    assert GenHistory.get_by_id(item.id).missing_since is not None
+    assert Image.get_by_id(item.id).missing_since is not None
 
     # 把文件补到隔离的 output 目录，再巡检一次应自愈
     from config import settings
@@ -280,7 +280,7 @@ def test_scan_missing_marks_and_heals(api, seed_history):
     try:
         result = scan_missing()
         assert result["cleared"] >= 1
-        assert GenHistory.get_by_id(item.id).missing_since is None
+        assert Image.get_by_id(item.id).missing_since is None
     finally:
         (settings.comfyui_root / "output" / "probe.png").unlink(missing_ok=True)
 
@@ -292,20 +292,20 @@ def test_disk_scan_job_index_invalidates_after_new_job(api, seed_prompt):
     全部匹配不到 prompt_id。
     """
     from config import settings
-    from models import GenHistory, GenJob
-    from routers import history as history_router
+    from models import Image, GenJob
+    from routers import images
 
     prompt = seed_prompt(name="索引提示词")
     target = settings.comfyui_root / "output" / "poll_me.png"
     target.write_bytes(b"x")
     try:
-        history_router._job_index_version = None
-        history_router._sync_disk_orphans()
-        row = GenHistory.get_or_none(GenHistory.filename == "poll_me.png")
+        images._job_index_version = None
+        images._sync_disk_orphans()
+        row = Image.get_or_none(Image.filename == "poll_me.png")
         assert row is not None and row.prompt_id is None
 
         # 模拟"任务后建、同名文件重新出现"：清掉记录后建一个已完成任务
-        GenHistory.delete().where(GenHistory.filename == "poll_me.png").execute()
+        Image.delete().where(Image.filename == "poll_me.png").execute()
         GenJob.create(
             job_type="single", status="done", title="已完成的活", total=1,
             done_count=1,
@@ -315,8 +315,8 @@ def test_disk_scan_job_index_invalidates_after_new_job(api, seed_prompt):
             ),
         )
 
-        history_router._sync_disk_orphans()
-        row = GenHistory.get_or_none(GenHistory.filename == "poll_me.png")
+        images._sync_disk_orphans()
+        row = Image.get_or_none(Image.filename == "poll_me.png")
         assert row is not None
         assert row.prompt_id == prompt.id, "job 索引没有随新任务失效，新图匹配不到提示词"
     finally:
@@ -347,9 +347,9 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
 
 
 def _deleted_count():
-    from models import GenHistory
+    from models import Image
 
-    return GenHistory.select().where(GenHistory.is_deleted == True).count()
+    return Image.select().where(Image.is_deleted == True).count()
 
 
 def test_cleanup_missing_dry_run_does_not_write(api, seed_history):
@@ -390,7 +390,7 @@ def test_cleanup_missing_guard_blocks_mass_delete(api, seed_history):
 
 def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
     """只清理当前筛选范围内的记录，范围外的一条都不能动。"""
-    from models import GenHistory, ImageCategory
+    from models import Image, ImageCategory
 
     inside = seed_history(filename="in_cat.png")
     outside = seed_history(filename="out_cat.png")
@@ -402,8 +402,8 @@ def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
     ).json()
     assert body["success"] is True
     assert body["cleaned"] == 1
-    assert bool(GenHistory.get_by_id(inside.id).is_deleted) is True
-    assert bool(GenHistory.get_by_id(outside.id).is_deleted) is False
+    assert bool(Image.get_by_id(inside.id).is_deleted) is True
+    assert bool(Image.get_by_id(outside.id).is_deleted) is False
 
 
 def test_history_add_category_endpoint(api, seed_history, seed_taxonomy):
@@ -622,11 +622,11 @@ def test_history_date_falls_back_to_created_at(api, seed_history):
     """老数据没有 captured_at 时，日期筛选仍要能命中（COALESCE 回退）。"""
     from datetime import datetime
 
-    from models import GenHistory
+    from models import Image
 
     item = seed_history(filename="legacy.png")
-    GenHistory.update(captured_at=None, created_at=datetime(2022, 3, 15, 8, 0, 0)) \
-        .where(GenHistory.id == item.id).execute()
+    Image.update(captured_at=None, created_at=datetime(2022, 3, 15, 8, 0, 0)) \
+        .where(Image.id == item.id).execute()
 
     filtered = api.get("/api/history?page=1&page_size=50&date=2022-03").json()
     assert filtered["total"] == 1
@@ -662,10 +662,10 @@ def test_template_batch_import_keeps_all_fragments(api, seed_prompt):
 
 def test_delete_prompt_keeps_history_but_detaches(api, seed_prompt):
     """删提示词只解除关联，不再删掉它的出图记录（文件还在磁盘，删了会反复重建）。"""
-    from models import GenHistory
+    from models import Image
 
     p = seed_prompt(name="要删的")
-    photo = GenHistory.create(
+    photo = Image.create(
         filename="keep_me.png", subfolder="", img_type="output",
         prompt_id=p.id, source="local",
     )
@@ -675,14 +675,14 @@ def test_delete_prompt_keeps_history_but_detaches(api, seed_prompt):
     assert r.json()["gen_history_detached"] == 1
 
     assert api.get(f"/api/prompts/{p.id}").status_code == 404
-    kept = GenHistory.get_or_none(GenHistory.id == photo.id)
+    kept = Image.get_or_none(Image.id == photo.id)
     assert kept is not None, "出图记录不应被删除"
     assert kept.prompt_id is None, "应只解除与提示词的关联"
 
 
 def test_gallery_read_does_not_backfill_into_db(api):
     """列表读取时从任务 items 取回缺失参数只用于展示，不得写库。"""
-    from models import GenHistory, GenJob
+    from models import Image, GenJob
 
     params = json.dumps({"prompt": "【人物面部】x", "seed": 7}, ensure_ascii=False)
     job = GenJob.create(
@@ -692,7 +692,7 @@ def test_gallery_read_does_not_backfill_into_db(api):
             "prompt_params": params, "status": "done",
         }], ensure_ascii=False),
     )
-    photo = GenHistory.create(
+    photo = Image.create(
         filename="noparams.png", subfolder="", img_type="output",
         job_id=job.id, comfyui_prompt_id="pid-1", prompt_params=None, source="local",
     )
@@ -701,5 +701,5 @@ def test_gallery_read_does_not_backfill_into_db(api):
     item = next(i for i in body["items"] if i["id"] == photo.id)
     assert item["prompt_params"] and item["prompt_params"]["seed"] == 7
 
-    row = GenHistory.get_by_id(photo.id)
+    row = Image.get_by_id(photo.id)
     assert row.prompt_params is None, "读取接口不允许回写 prompt_params"

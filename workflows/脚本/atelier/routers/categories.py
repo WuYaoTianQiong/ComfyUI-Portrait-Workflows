@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from models import (
-    Category, PromptCategory, Prompt, db, ImageCategory, GenHistory,
+    Category, PromptCategory, Prompt, db, ImageCategory, Image,
     classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
     auto_classify_prompt,
 )
@@ -19,10 +19,10 @@ def _image_count(category_id: int) -> int:
     """
     return (
         ImageCategory.select()
-        .join(GenHistory, on=(ImageCategory.image == GenHistory.id))
+        .join(Image, on=(ImageCategory.image == Image.id))
         .where(
             (ImageCategory.category == category_id)
-            & (GenHistory.is_deleted == False)
+            & (Image.is_deleted == False)
         )
         .count()
     )

@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image
+from PIL import Image as PILImage
 
 from config import settings
 from services.helpers import _resolve_if_reparse
@@ -59,8 +59,8 @@ def generate_thumbnail(
         return thumb_path
 
     try:
-        with Image.open(img_path) as img:
-            img.thumbnail((size, size), Image.LANCZOS)
+        with PILImage.open(img_path) as img:
+            img.thumbnail((size, size), PILImage.LANCZOS)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             img.save(str(thumb_path), "WEBP", quality=80)

@@ -10,11 +10,11 @@ from typing import Optional
 from datetime import datetime
 
 from models import (
-    Prompt, GenHistory, db, Category, Tag, EntityTag,
+    Prompt, Image, db, Category, Tag, EntityTag,
     PromptCategory, PromptTag, auto_classify_prompt,
 )
 from services.helpers import get_image_metadata
-from services.taxonomy import sync_prompt_tags
+from services.tagging import sync_prompt_tags
 
 router = APIRouter(tags=["提示词"])
 
@@ -450,7 +450,7 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
 def delete_prompt(prompt_id: int):
     """删除提示词（清理关联的分类/标签，但保留生成历史）。
 
-    以前这里会 `GenHistory.delete()`：删一条提示词，它名下所有出图记录一起消失，
+    以前这里会 `Image.delete()`：删一条提示词，它名下所有出图记录一起消失，
     而磁盘文件还在 —— 下次同步又把图扫回来，表现为"删不干净 + 记录反复重建"。
     现在改为只解除关联（prompt_id 置空），图片仍留在画廊。
     """
@@ -466,7 +466,7 @@ def delete_prompt(prompt_id: int):
             EntityTag.delete().where(
                 (EntityTag.entity_type == "prompt") & (EntityTag.entity_id == prompt_id)
             ).execute()
-            gh = GenHistory.update(prompt_id=None).where(GenHistory.prompt_id == prompt_id).execute()
+            gh = Image.update(prompt_id=None).where(Image.prompt_id == prompt_id).execute()
             r.delete_instance()
         return {
             "success": True,
@@ -486,13 +486,13 @@ def get_prompt_history(prompt_id: int, limit: int = Query(20)):
         raise HTTPException(404, "提示词不存在")
 
     rows = (
-        GenHistory
+        Image
         .select()
         .where(
-            (GenHistory.prompt_id == prompt_id) &
-            (GenHistory.is_deleted == False)
+            (Image.prompt_id == prompt_id) &
+            (Image.is_deleted == False)
         )
-        .order_by(GenHistory.id.desc())
+        .order_by(Image.id.desc())
         .limit(limit)
     )
     items = []
@@ -565,9 +565,9 @@ def batch_delete_prompts(data: BatchIdsRequest):
         EntityTag.delete().where(
             (EntityTag.entity_type == "prompt") & (EntityTag.entity_id.in_(ids))
         ).execute()
-        # 与单条删除保持一致：只解除关联，不删出图记录（旧实现这里 GenHistory.delete()，
+        # 与单条删除保持一致：只解除关联，不删出图记录（旧实现这里 Image.delete()，
         # 批量删提示词会把画廊里对应的图片记录一起抹掉）
-        GenHistory.update(prompt_id=None).where(GenHistory.prompt_id.in_(ids)).execute()
+        Image.update(prompt_id=None).where(Image.prompt_id.in_(ids)).execute()
         deleted = Prompt.delete().where(Prompt.id.in_(ids)).execute()
     return {"success": True, "deleted": deleted}
 

@@ -23,8 +23,8 @@ import time
 from datetime import datetime, timezone
 
 from config import settings
-from models import GenHistory, GenJob, db, inherit_prompt_taxonomy
-from services.history_store import upsert_history
+from models import Image, GenJob, db, inherit_prompt_taxonomy
+from services.image_store import upsert_image
 from services.comfyui_client import (
     delete_queue_items,
     get_history,
@@ -453,21 +453,21 @@ def _insert_history_for_item(
                 img["filename"], img.get("subfolder", ""), img.get("type", "output")
             )
             update_fields = {
-                GenHistory.comfyui_prompt_id: comfy_pid,
-                GenHistory.job_id: job_id,
-                GenHistory.prompt_id: prompt_id,
-                GenHistory.view_url: build_view_url(
+                Image.comfyui_prompt_id: comfy_pid,
+                Image.job_id: job_id,
+                Image.prompt_id: prompt_id,
+                Image.view_url: build_view_url(
                     img["filename"], img.get("subfolder", ""), img.get("type", "output")
                 ),
-                GenHistory.prompt_params: prompt_params_json,
-                GenHistory.source: "local",
-                GenHistory.is_deleted: False,
+                Image.prompt_params: prompt_params_json,
+                Image.source: "local",
+                Image.is_deleted: False,
             }
             if captured is not None:
-                update_fields[GenHistory.captured_at] = captured
+                update_fields[Image.captured_at] = captured
 
             with db.atomic():
-                upsert_history(
+                upsert_image(
                     {
                         "job_id": job_id,
                         "prompt_id": prompt_id,
@@ -486,11 +486,11 @@ def _insert_history_for_item(
                     update_fields,
                 )
 
-                nh = GenHistory.get_or_none(
-                    (GenHistory.comfyui_prompt_id == comfy_pid)
-                    & (GenHistory.filename == img["filename"])
-                    & (GenHistory.subfolder == img.get("subfolder", ""))
-                    & (GenHistory.img_type == img.get("type", "output"))
+                nh = Image.get_or_none(
+                    (Image.comfyui_prompt_id == comfy_pid)
+                    & (Image.filename == img["filename"])
+                    & (Image.subfolder == img.get("subfolder", ""))
+                    & (Image.img_type == img.get("type", "output"))
                 )
                 if nh:
                     # 入库 + 继承分类同一事务：避免"图进了库、分类没继承"的半截状态
@@ -652,7 +652,7 @@ def writer_loop(stop_event: threading.Event, interval: float = 1.0,
         if now - last_sync >= sync_interval:
             last_sync = now
             try:
-                from routers.history import _sync_comfyui_history, _sync_disk_orphans
+                from routers.images import _sync_comfyui_history, _sync_disk_orphans
 
                 _sync_comfyui_history()
                 _sync_disk_orphans()
