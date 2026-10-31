@@ -1,33 +1,114 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import Lightbox from '../components/Lightbox.vue'
 import CompareModal from '../components/CompareModal.vue'
+import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Modal from '../components/Modal.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
+import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
 import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
+import { flattenCategories } from '../utils/categories'
+import { imageAspect } from '../utils/image'
+import { confirmDialog } from '../utils/naive'
+import { readSession, writeSession } from '../composables/useSessionState'
 
-const pageSize = ref(60)
-const sortBy = ref('newest')
-const page = ref(1)
-const search = ref('')
-const selectedTags = ref<number[]>([])
-const tagMatch = ref<'all' | 'any'>('all')
-const onlyMissing = ref(false)
+/**
+ * 会话状态：筛选 / 排序 / 页码 / 滚动位置。
+ *
+ * 切页或刷新后回到上次看到的那一屏；`pb.gallerySidebar` 只管侧栏开合。
+ */
+interface GallerySession {
+  page: number
+  pageSize: number
+  sortBy: string
+  search: string
+  selectedTags: number[]
+  tagMatch: 'all' | 'any'
+  onlyMissing: boolean
+  source: string
+  dateFacet: string
+  model: string
+  orientation: string
+  scrollTop: number
+  /** 刷新后要恢复的灯箱图片 id（null = 灯箱当时没开）。 */
+  viewerId?: number | null
+}
+
+const SESSION_KEY = 'pb.session.gallery'
+const savedSession = readSession<GallerySession>(SESSION_KEY, {
+  page: 1,
+  pageSize: 60,
+  sortBy: 'newest',
+  search: '',
+  selectedTags: [],
+  tagMatch: 'all',
+  onlyMissing: false,
+  source: '',
+  dateFacet: '',
+  model: '',
+  orientation: '',
+  scrollTop: 0,
+  viewerId: null,
+})
+
+const pageSize = ref(savedSession.pageSize)
+const sortBy = ref(savedSession.sortBy)
+const page = ref(savedSession.page)
+const search = ref(savedSession.search)
+const selectedTags = ref<number[]>(savedSession.selectedTags)
+const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
+const onlyMissing = ref(savedSession.onlyMissing)
 
 // 分面筛选（来源 / 年月 / 模型 / 方向）—— 每个维度单选，再点一次取消
-const source = ref('')
-const dateFacet = ref('')
-const model = ref('')
-const orientation = ref('')
+const source = ref(savedSession.source)
+const dateFacet = ref(savedSession.dateFacet)
+const model = ref(savedSession.model)
+const orientation = ref(savedSession.orientation)
+
+/** 侧栏折叠：低频分面不该常驻吃掉 240px，折叠状态记在本机。 */
+const SIDEBAR_KEY = 'pb.gallerySidebar'
+const sidebarOpen = ref(true)
+try {
+  sidebarOpen.value = localStorage.getItem(SIDEBAR_KEY) !== '0'
+} catch {
+  /* 隐私模式下保持默认展开 */
+}
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+  try {
+    localStorage.setItem(SIDEBAR_KEY, sidebarOpen.value ? '1' : '0')
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 每个分面组可折叠，默认展开。 */
+const facetCollapsed = ref<Record<string, boolean>>({})
+function toggleFacetGroup(key: string) {
+  facetCollapsed.value = { ...facetCollapsed.value, [key]: !facetCollapsed.value[key] }
+}
+
+/** 当前生效的筛选数量（折叠侧栏时提示用户"还有筛选在生效"）。 */
+const filterBadge = computed(
+  () =>
+    (selectedTags.value.length ? 1 : 0) +
+    (source.value ? 1 : 0) +
+    (dateFacet.value ? 1 : 0) +
+    (model.value ? 1 : 0) +
+    (orientation.value ? 1 : 0) +
+    (onlyMissing.value ? 1 : 0) +
+    (search.value.trim() ? 1 : 0),
+)
 
 const queryClient = useQueryClient()
 
@@ -110,7 +191,82 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
 const total = computed(() => history.value?.total ?? 0)
+
+function imageKey(item: HistoryItem) {
+  return item.id
+}
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+const gridEl = ref<HTMLElement | null>(null)
+let scrollSaveTimer: number | undefined
+
+function saveSession() {
+  writeSession(SESSION_KEY, {
+    page: page.value,
+    pageSize: pageSize.value,
+    sortBy: sortBy.value,
+    search: search.value,
+    selectedTags: selectedTags.value,
+    tagMatch: tagMatch.value,
+    onlyMissing: onlyMissing.value,
+    source: source.value,
+    dateFacet: dateFacet.value,
+    model: model.value,
+    orientation: orientation.value,
+    scrollTop: gridEl.value?.scrollTop ?? savedSession.scrollTop,
+    viewerId:
+      lightboxIndex.value !== null ? (items.value[lightboxIndex.value]?.id ?? null) : null,
+  })
+}
+
+watch(
+  () =>
+    [
+      page.value,
+      pageSize.value,
+      sortBy.value,
+      search.value,
+      selectedTags.value.join(','),
+      tagMatch.value,
+      onlyMissing.value,
+      source.value,
+      dateFacet.value,
+      model.value,
+      orientation.value,
+    ].join('|'),
+  saveSession,
+)
+
+/** 滚动很频繁，节流后再写。 */
+function onGridScroll() {
+  if (scrollSaveTimer) return
+  scrollSaveTimer = window.setTimeout(() => {
+    scrollSaveTimer = undefined
+    saveSession()
+  }, 300)
+}
+
+/** 图片加载完成前网格高度还会变，恢复要等这一页数据到位。 */
+let scrollRestored = false
+let viewerRestored = false
+watch(items, async () => {
+  // 刷新后回到上次打开的那张图（按 id 找，不依赖页码下标）
+  if (!viewerRestored && savedSession.viewerId) {
+    viewerRestored = true
+    const idx = items.value.findIndex((it) => it.id === savedSession.viewerId)
+    if (idx >= 0) lightboxIndex.value = idx
+    else saveSession()
+  }
+  if (scrollRestored || !savedSession.scrollTop) return
+  scrollRestored = true
+  await nextTick()
+  if (gridEl.value) gridEl.value.scrollTop = savedSession.scrollTop
+})
+
+onBeforeUnmount(() => {
+  if (scrollSaveTimer) window.clearTimeout(scrollSaveTimer)
+  saveSession()
+})
 
 // ---------------- 选择与批量操作 ----------------
 
@@ -160,18 +316,29 @@ const deleteMutation = useMutation({
   onSuccess: () => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['history'] })
+    // 删除后分面计数会变，不刷的话侧栏数字停在旧值
+    queryClient.invalidateQueries({ queryKey: ['facets'] })
   },
 })
 
 const favoriteMutation = useMutation({
   mutationFn: (id: number) => apiPost<{ success: boolean; favorite: boolean }>(`/api/history/${id}/favorite`),
-  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['history'] }),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+    queryClient.invalidateQueries({ queryKey: ['facets'] })
+  },
 })
 
-function batchDelete() {
+async function batchDelete() {
   const ids = Array.from(selected.value)
   if (!ids.length) return
-  if (!confirm(`确定删除选中的 ${ids.length} 张图片记录吗？（只标记删除，不动磁盘文件）`)) return
+  const ok = await confirmDialog({
+    title: '删除图片记录',
+    content: `确定删除选中的 ${ids.length} 张图片记录吗？（只标记删除，不动磁盘文件）`,
+    positiveText: '删除',
+    negativeText: '取消',
+  })
+  if (!ok) return
   deleteMutation.mutate(ids)
 }
 
@@ -217,7 +384,7 @@ function openCompare() {
  * 进度照旧用 SSE 跟踪。
  */
 const { workflowPath, quality, orientation: outOrientation } = useSettings()
-const { run, runText } = useGenerate()
+const { run, runText, busy: regenerating, error: generateError } = useGenerate()
 
 /**
  * 用这张图的记录重新出图。
@@ -228,28 +395,34 @@ const { run, runText } = useGenerate()
  *   `/api/run_text`。记录里参数是全的（prompt / seed / model / 宽高），所以
  *   「拿这张图再出一版」不需要先有提示词记录。
  */
-function regenerate(target: HistoryItem) {
+async function regenerate(target: HistoryItem) {
   const params = (target.prompt_params ?? {}) as Record<string, unknown>
-  if (target.prompt_id) {
-    run(target.prompt_id, {
-      workflowPath: workflowPath.value,
-      quality: quality.value,
-      orientation: outOrientation.value,
-    })
-  } else if (typeof params.prompt === 'string' && params.prompt.trim()) {
-    runText({
-      prompt: params.prompt,
-      negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
-      seed: Number(params.seed ?? 0) || 0,
-      workflowPath: workflowPath.value,
-      quality: quality.value,
-      orientation: outOrientation.value,
-    })
-  } else {
-    toast.error('这张图没有可复用的出图参数')
-    return
+  try {
+    if (target.prompt_id) {
+      await run(target.prompt_id, {
+        workflowPath: workflowPath.value,
+        quality: caps.value.quality ? quality.value : '4K',
+        orientation: caps.value.orientation ? outOrientation.value : 'keep',
+      })
+    } else if (typeof params.prompt === 'string' && params.prompt.trim()) {
+      await runText({
+        prompt: params.prompt,
+        negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
+        seed: Number(params.seed ?? 0) || 0,
+        workflowPath: workflowPath.value,
+        quality: caps.value.quality ? quality.value : '4K',
+        orientation: caps.value.orientation ? outOrientation.value : 'keep',
+      })
+    } else {
+      toast.error('这张图没有可复用的出图参数')
+      return
+    }
+    // 提交完才关灯箱：期间按钮转圈，关掉后也有 toast，不会出现"点了没反应"
+    if (generateError.value) toast.error(`提交失败：${generateError.value}`)
+    else toast.success('已提交重新出图，可在「任务」页看进度')
+  } finally {
+    lightboxIndex.value = null
   }
-  lightboxIndex.value = null
 }
 /** 画廊向上层抛的事件：跨页跳转（跳到提示词）。 */
 const emit = defineEmits<{
@@ -279,17 +452,7 @@ const { data: bulkCats } = useQuery<{ categories: CategoryNode[] }>({
   enabled: computed(() => bulkOpen.value),
 })
 
-const bulkCatList = computed(() => {
-  const out: CategoryNode[] = []
-  const walk = (nodes: CategoryNode[]) => {
-    for (const n of nodes) {
-      out.push(n)
-      if (n.children?.length) walk(n.children)
-    }
-  }
-  walk(bulkCats.value?.categories ?? [])
-  return out
-})
+const bulkCatList = computed(() => flattenCategories(bulkCats.value?.categories))
 
 
 /** 批量投喂工作流用：要套哪个工作流。 */
@@ -320,7 +483,13 @@ async function applyInherit() {
 
 /** 一次性给全库缺分类/标签的图片补齐。 */
 async function backfillTaxonomy() {
-  if (!confirm('为所有缺少分类/标签的图片补齐（一次性全库操作，可能要跑一会儿）。继续？')) return
+  const ok = await confirmDialog({
+    title: '补齐分类 / 标签',
+    content: '为所有缺少分类/标签的图片补齐（一次性全库操作，可能要跑一会儿）。继续？',
+    positiveText: '开始',
+    negativeText: '取消',
+  })
+  if (!ok) return
   try {
     const result = await apiPost<{ success: boolean; backfilled: number }>(
       '/api/history/backfill_taxonomy',
@@ -368,9 +537,13 @@ async function applyBulk(pathTemplate: string, label: string, body?: Record<stri
   queryClient.invalidateQueries({ queryKey: ['history'] })
 }
 const lightboxIndex = ref<number | null>(null)
+// 打开/关闭灯箱都写进会话，刷新后按 id 恢复
+watch(lightboxIndex, saveSession)
 
 /** 灯箱里要能直接选工作流（投喂给工作流处理）。 */
-const { workflows } = useWorkflows()
+const { workflows, allWorkflows } = useWorkflows()
+/** 重跑用的是提示词页的工作流；不支持画质/横竖时不发无效参数。 */
+const { caps } = useWorkflowCaps(workflowPath, allWorkflows)
 const lightboxOpen = computed(() => lightboxIndex.value !== null)
 
 function openLightbox(index: number) {
@@ -400,6 +573,16 @@ function toggleMissing() {
 // ---------------- 清理失效 ----------------
 
 const toast = useToast()
+
+/** 图片文件名点击复制。 */
+async function copyFilename(name: string) {
+  try {
+    await navigator.clipboard.writeText(name)
+    toast.success('已复制文件名')
+  } catch {
+    toast.error('复制失败（浏览器拒绝了剪贴板访问）')
+  }
+}
 const cleaning = ref(false)
 
 interface CleanupPreview {
@@ -461,11 +644,15 @@ async function cleanupMissing() {
       ? '\n\n⚠ 当前筛选下的记录会【全部】失效，请先确认 ComfyUI output 目录可正常访问。'
       : ''
 
-    const ok = confirm(
-      `扫描 ${preview.total} 条记录，其中 ${preview.will_clean} 条的文件已不存在：\n\n` +
+    const ok = await confirmDialog({
+      title: '清理失效记录',
+      content:
+        `扫描 ${preview.total} 条记录，其中 ${preview.will_clean} 条的文件已不存在：\n\n` +
         `${samples}${more}${warn}` +
         '\n\n这一步只把记录标记为已删除，不动磁盘文件。确认继续？',
-    )
+      positiveText: '清理',
+      negativeText: '取消',
+    })
     if (!ok) return
 
     const data = await apiPost<CleanupPreview & { cleaned: number }>(
@@ -524,7 +711,7 @@ function clearFilters() {
 
 <template>
   <div class="gallery">
-    <aside class="sidebar">
+    <aside v-if="sidebarOpen" class="sidebar">
       <section class="group">
         <div class="group-head">
           <span>标签</span>
@@ -548,8 +735,11 @@ function clearFilters() {
       </section>
 
       <section v-for="dim in facetDimDefs" :key="dim.key" class="group">
-        <div class="group-head"><span>{{ dim.label }}</span></div>
-        <div class="chips">
+        <button class="group-head" @click="toggleFacetGroup(dim.key)">
+          <span>{{ facetCollapsed[dim.key] ? '▸' : '▾' }} {{ dim.label }}</span>
+          <span v-if="facetValue(dim.key)" class="facet-on">{{ facetLabel(facetValue(dim.key)) }}</span>
+        </button>
+        <div v-if="!facetCollapsed[dim.key]" class="chips">
           <button
             v-for="(count, name) in facets?.[dim.key] ?? {}"
             :key="name"
@@ -574,6 +764,14 @@ function clearFilters() {
 
     <section class="main">
       <div class="toolbar">
+        <button
+          class="btn btn-sm"
+          :class="{ on: sidebarOpen }"
+          :title="sidebarOpen ? '收起筛选侧栏' : '展开筛选侧栏'"
+          @click="toggleSidebar"
+        >
+          ☰ 筛选<span v-if="!sidebarOpen && filterBadge"> · {{ filterBadge }}</span>
+        </button>
         <input
           v-model="search"
           class="search"
@@ -642,16 +840,24 @@ function clearFilters() {
 
       <div v-if="isError" class="error">加载失败：{{ error?.message }}</div>
 
-      <div v-else class="grid">
-        <article
-          v-for="(item, idx) in items"
-          :key="item.id"
-          class="card"
-          :class="{ missing: item.missing, picked: selected.has(item.id) }"
-          :title="item.missing ? '磁盘上找不到这个文件（勾选「只看文件缺失」可批量清理记录）' : item.filename"
-          @click="openLightbox(idx)"
+      <div v-else ref="gridEl" class="grid" @scroll.passive="onGridScroll">
+        <JustifiedGrid
+          v-if="items.length"
+          :items="items"
+          :ratio="imageAspect"
+          :key-of="imageKey"
+          :target-row-height="260"
+          :gap="12"
         >
-          <img :src="thumbnailUrl(item)" :alt="item.filename" loading="lazy" />
+          <template #default="{ item, index, height }">
+            <article
+              class="card"
+              :class="{ missing: item.missing, picked: selected.has(item.id) }"
+              :title="item.missing ? '磁盘上找不到这个文件（勾选「只看文件缺失」可批量清理记录）' : item.filename"
+              @click="openLightbox(index)"
+            >
+              <div class="thumb" :style="{ height: `${height}px` }">
+                <img :src="thumbnailUrl(item)" :alt="item.filename" loading="lazy" />
 
           <button
             class="pick"
@@ -673,12 +879,22 @@ function clearFilters() {
 
           <span v-if="item.missing" class="badge-missing">🚫 文件缺失</span>
 
-          <div class="meta">
-            <span>{{ resolution(item) }}</span>
-            <span>{{ formatSize(item.file_size) }}</span>
+              </div>
+
+              <div class="caption">
+                <span
+                  class="filename"
+                  title="点击复制文件名"
+                  @click.stop="copyFilename(item.filename)"
+                >
+                  {{ item.filename }}
+                </span>
+                <span class="dim">{{ resolution(item) }} · {{ formatSize(item.file_size) }}</span>
           </div>
-          <div class="filename">{{ item.filename }}</div>
-        </article>
+
+            </article>
+          </template>
+        </JustifiedGrid>
 
         <EmptyState v-if="!items.length && !isFetching" size="big" text="没有符合条件的图片" />
       </div>
@@ -689,6 +905,7 @@ function clearFilters() {
       :items="items"
       :index="lightboxIndex!"
       :workflows="workflows"
+      :regenerating="regenerating"
       @update:index="lightboxIndex = $event"
       @close="lightboxIndex = null"
       @regenerate="regenerate"
@@ -775,9 +992,28 @@ function clearFilters() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
   font-size: var(--fs-sm);
   color: var(--muted);
   margin-bottom: var(--gap-sm);
+}
+
+.group-head:hover {
+  color: var(--text);
+}
+
+.facet-on {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--primary);
+  font-size: var(--fs-xs);
 }
 
 .clear {
@@ -882,6 +1118,10 @@ function clearFilters() {
   border-bottom: 1px solid var(--border);
 }
 
+.toolbar .on {
+  color: var(--primary);
+}
+
 .search {
   width: 260px;
 }
@@ -944,43 +1184,39 @@ function clearFilters() {
   flex: 1;
   overflow-y: auto;
   padding: var(--gap-lg);
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--gap);
-  align-content: start;
 }
 
 .card {
-  position: relative;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  transition: 0.15s;
+  width: 100%;
   cursor: pointer;
 }
 
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
-  border-color: var(--border-strong);
+.thumb {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--panel-3);
+  transition: 0.15s;
 }
 
-.card.picked {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
-}
-
-.card img {
+.thumb img {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 4;
-  /* contain 而非 cover：这是看图工具，裁掉画面比留黑边严重得多 */
+  height: 100%;
+  /* 容器宽高比已按原图算好，contain 是兜底：绝不裁画面 */
   object-fit: contain;
-  background: var(--panel-3);
 }
 
-.card.missing img {
+.card:hover .thumb {
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--border-strong);
+}
+
+.card.picked .thumb {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.card.missing .thumb img {
   opacity: 0.35;
   filter: grayscale(1);
 }
@@ -998,7 +1234,7 @@ function clearFilters() {
   background: rgba(22, 27, 34, 0.8);
   color: transparent;
   font-size: var(--fs-xs);
-  opacity: 0;
+  opacity: 0.45;
   transition: 0.12s;
 }
 
@@ -1050,23 +1286,30 @@ function clearFilters() {
   white-space: nowrap;
 }
 
-.meta {
-  position: absolute;
-  bottom: 26px;
-  left: 0;
-  right: 0;
+.caption {
   display: flex;
-  gap: var(--gap-sm);
-  padding: 2px 8px;
-  font-size: var(--fs-xs);
-  color: #dbe3ea;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 2px 0;
 }
 
 .filename {
-  padding: 4px 8px;
   font-size: var(--fs-xs);
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: copy;
+}
+
+.filename:hover {
+  color: var(--primary);
+}
+
+.dim {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

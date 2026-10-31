@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GalleryView from './GalleryView.vue'
+import Lightbox from '../components/Lightbox.vue'
 import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
 
@@ -47,7 +48,20 @@ vi.mock('../api/client', () => ({
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
   thumbnailUrl: () => '/api/thumb?x.png',
+  viewUrl: () => '/api/image?x.png',
 }))
+
+/** happy-dom 的 localStorage 不完整，这里补一份最小实现（刷新恢复用例需要）。 */
+const store = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  getItem: (key: string) => store.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    store.set(key, value)
+  },
+  removeItem: (key: string) => {
+    store.delete(key)
+  },
+})
 
 /** VTU 不支持 Playwright 的 has-text 选择器，只能 findAll + 过滤。 */
 function cleanupButton(wrapper: ReturnType<typeof mount>) {
@@ -60,6 +74,8 @@ describe('GalleryView 清理失效', () => {
     vi.mocked(apiPost).mockClear()
     // toast 是模块级单例，测试之间要清干净
     useToast().toasts.value = []
+    // 会话状态会跨用例保留，先清空再断言默认行为
+    store.clear()
   })
 
   async function mountView() {
@@ -184,5 +200,15 @@ describe('GalleryView 清理失效', () => {
     const paths = vi.mocked(apiPost).mock.calls.map((c) => c[0])
     expect(paths).toContain('/api/history/1/inherit')
     expect(paths).toContain('/api/history/2/inherit')
+  })
+
+  it('刷新后按图片 id 恢复上次打开的灯箱', async () => {
+    localStorage.setItem('pb.session.gallery', JSON.stringify({ viewerId: 2 }))
+    const wrapper = await mountView()
+    await flushPromises()
+
+    // mock 数据里 id=2 是第二张（下标 1）
+    expect(wrapper.findComponent(Lightbox).props('index')).toBe(1)
+    localStorage.setItem('pb.session.gallery', JSON.stringify({ viewerId: null }))
   })
 })
