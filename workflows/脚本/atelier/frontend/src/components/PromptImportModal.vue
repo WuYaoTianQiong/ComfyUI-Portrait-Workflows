@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import { apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
-import { renderSegmented, smartSegmentText } from '../utils/segmentation'
+import { fragmentsInOrder, renderSegments, smartSegmentText } from '../utils/segmentation'
 import Modal from './Modal.vue'
 
 /**
@@ -28,6 +28,14 @@ interface ImportItem {
   negative_prompt: string
   selected: boolean
 }
+
+/** 解析中间态：正文还没渲染成 `【类型】` 文本 */
+interface ImportDraft {
+  name: string
+  body: string
+  negative_prompt: string
+  selected: boolean
+}
 const items = ref<ImportItem[]>([])
 
 watch(
@@ -42,7 +50,7 @@ watch(
 
 const selectedCount = computed(() => items.value.filter((i) => i.selected).length)
 
-function parse() {
+async function parse() {
   const blocks = raw.value
     .split(/\n\s*\n+/)
     .map((b) => b.trim())
@@ -52,7 +60,8 @@ function parse() {
     return
   }
 
-  const parsed: ImportItem[] = []
+  const drafts: ImportDraft[] = []
+  const bodies: string[] = []
   for (const block of blocks) {
     const lines = block.split(/\r?\n/)
     let name = ''
@@ -75,17 +84,27 @@ function parse() {
     }
 
     const body = posLines.join('\n').trim()
-    const segments = smartSegmentText(body)
-    const prompt = renderSegmented(segments) || body
-    parsed.push({
-      name: name || `未命名 ${parsed.length + 1}`,
-      prompt,
+    bodies.push(body)
+    drafts.push({
+      name: name || `未命名 ${drafts.length + 1}`,
+      body,
       negative_prompt: negative,
       selected: true,
     })
   }
-  items.value = parsed
-  toast.success(`解析完成 ${parsed.length} 条`)
+
+  // 渲染统一走后端（`【类型】` 格式只有一份实现），一次往返渲染全部条目
+  const groups = bodies.map((body) => fragmentsInOrder(smartSegmentText(body)))
+  const rendered = await renderSegments(groups)
+
+  items.value = drafts.map((draft, i) => ({
+    name: draft.name,
+    // 没分出类型时原样保留正文，总比把内容弄丢强
+    prompt: rendered[i] || draft.body,
+    negative_prompt: draft.negative_prompt,
+    selected: draft.selected,
+  }))
+  toast.success(`解析完成 ${items.value.length} 条`)
 }
 
 async function submit() {

@@ -1,15 +1,27 @@
+import { apiPost } from '../api/client'
 import { FRAGMENT_TYPES } from '../constants'
 
 /**
- * 智能分段：把一段扁平提示词拆成【类型】结构。
+ * 智能分段 + `【类型】` 文本的读写。
  *
- * 旧版（static/prompt.js 的 smartSegmentText / FRAGMENT_SEGMENT_DICT）就有这个
- * 能力，重构时漏了 —— 它的价值在于：库里很多提示词是「一整段话」，
- * 拆成【人物面部】【人物服饰】… 之后才能直接喂给组合器。
- *
- * 做法：先按换行 / 中英文逗号顿号分号切成 token，再用关键词字典归类；
- * 一个 token 命中多类时按 `_SEG_PRIORITY` 的顺序取最具体的那类。
+ * 分层（命名规范 §9）：
+ * · **语法** —— `【类型】\n内容`、块之间空行分隔、渲染顺序 —— 只有后端一份实现
+ *   （`app/services/fragment_syntax.py`）。这里的 `parseMarkedSegments` /
+ *   `renderSegments` / `batchReplaceSegments` 都只是 `POST /api/composition/*`
+ *   的薄封装，前端不再自带第二份正则。
+ * · **启发式** —— `smartSegmentText` 按关键词把一整段话归类。后端没有对应实现，
+ *   它属于纯前端的"猜测"，猜错了用户还能手改，所以留在这里。
  */
+
+/** 一条 `【类型】` 碎片（与后端 `Fragment` 同形）。 */
+export interface FragmentItem {
+  type: string
+  content: string
+}
+
+// ---------------------------------------------------------------------------
+// 关键词分段（纯前端启发式）
+// ---------------------------------------------------------------------------
 
 /** 关键词字典：类型 → 命中即归入该类的关键词。 */
 export const FRAGMENT_SEGMENT_DICT: Record<string, string[]> = {
@@ -144,69 +156,83 @@ export function smartSegmentText(text: string): Record<string, string> {
   return result
 }
 
-/**
- * 分段结果渲染成【类型】格式的文本（与组合器的输出格式一致）。
- *
- * 没有命中任何类型的碎片会原样返回 —— 总比把内容弄丢强。
- */
-export function renderSegmented(segments: Record<string, string>): string {
-  const keys = FRAGMENT_TYPES.filter((t) => segments[t])
-  if (!keys.length) return ''
-  return keys.map((t) => `【${t}】\n${segments[t]}`).join('\n\n')
-}
+// ---------------------------------------------------------------------------
+// `【类型】` 语法：全部打后端（POST /api/composition/*）
+// ---------------------------------------------------------------------------
 
-/**
- * 把已有【类型】标记的提示词拆成「已标记块 / 未标记文字」。
- *
- * 智能分段必须只在未标记部分上跑，否则对已经是分段格式的提示词再点一次，
- * 会把标题也当成正文重新归类，越分越乱。旧版 static/prompt.js 的
- * `_segmentParse` 就是这个作用，重构成 Vue 时漏掉了。
- */
-export function parseMarkedSegments(text: string): {
-  marked: Record<string, string>
+interface ParseResponse {
+  fragments: FragmentItem[]
   leftover: string
-} {
-  const marked: Record<string, string> = {}
-  const leftoverBlocks: string[] = []
-  const blocks = (text || '').split(/\n\s*\n/)
-  for (const block of blocks) {
-    const match = block.match(/^\s*【([^】]+)】\s*([\s\S]*)$/)
-    if (match) {
-      marked[match[1].trim()] = (match[2] || '').trim()
-    } else if (block.trim()) {
-      leftoverBlocks.push(block.trim())
-    }
-  }
-  return { marked, leftover: leftoverBlocks.join('\n\n').trim() }
 }
 
-/**
- * 只替换指定【类型】块的内容，其他块原样保留。
- *
- * 找不到该类型时返回 null —— 批量替换要据此跳过"本来就没有这一片"的提示词，
- * 而不是凭空给它加一段。
- */
-export function replaceMarkedSegment(
+interface ReplaceOutcome {
+  oldContent: string
+  /** 该类型不存在时为 null —— 调用方据此跳过，不要凭空补一段 */
+  replaced: string | null
+}
+
+/** 解析一段提示词：已标记块（type → content）+ 未标记残留文字。 */
+export async function parseMarkedSegments(
   text: string,
-  type: string,
-  content: string,
-): string | null {
-  let replaced = false
-  const blocks = (text || '').split(/\n\s*\n/)
-  const next = blocks.map((block) => {
-    const match = block.match(/^\s*【([^】]+)】\s*([\s\S]*)$/)
-    if (!match || match[1].trim() !== type) return block
-    replaced = true
-    return `【${type}】\n${content}`
-  })
-  if (!replaced) return null
-  return next.join('\n\n').trim()
+): Promise<{ marked: Record<string, string>; leftover: string }> {
+  const data = await apiPost<ParseResponse>('/api/composition/parse', { text })
+  const marked: Record<string, string> = {}
+  for (const fragment of data.fragments) marked[fragment.type] = fragment.content
+  return { marked, leftover: data.leftover }
+}
+
+/** 批量渲染：每组碎片渲染成一段文本（一次往返，N 组）。 */
+export async function renderSegments(groups: FragmentItem[][]): Promise<string[]> {
+  if (!groups.length) return []
+  const data = await apiPost<{ texts: string[] }>('/api/composition/render', { items: groups })
+  return data.texts
+}
+
+/** 「类型→内容」按对象键顺序转成碎片列表。 */
+export function toFragments(segments: Record<string, string>): FragmentItem[] {
+  return Object.entries(segments)
+    .filter(([, content]) => content)
+    .map(([type, content]) => ({ type, content }))
+}
+
+/** 「类型→内容」按 `types` 给定顺序转成碎片列表（`types` 之外的键被丢弃）。 */
+export function fragmentsInOrder(
+  segments: Record<string, string>,
+  types: readonly string[] = FRAGMENT_TYPES,
+): FragmentItem[] {
+  return types
+    .filter((t) => segments[t])
+    .map((t) => ({ type: t, content: segments[t] }))
+}
+
+/** 渲染成【类型】格式的文本（只保留内置 8 类，与组合器输出格式一致）。 */
+export function renderSegmented(segments: Record<string, string>): Promise<string> {
+  return renderSegments([fragmentsInOrder(segments)]).then((texts) => texts[0] ?? '')
 }
 
 /** 渲染任意类型键（包括库里自定义的碎片名），不会像 renderSegmented 那样过滤。 */
-export function renderAllSegments(segments: Record<string, string>): string {
-  return Object.entries(segments)
-    .filter(([, content]) => content)
-    .map(([type, content]) => `【${type}】\n${content}`)
-    .join('\n\n')
+export function renderAllSegments(segments: Record<string, string>): Promise<string> {
+  return renderSegments([toFragments(segments)]).then((texts) => texts[0] ?? '')
+}
+
+/**
+ * 批量替换指定类型的正文：返回 id → { 替换前内容, 替换后全文 }。
+ *
+ * 全文替换在后端做（`replace_type`），其他块原样保留 —— 前端不重排用户库里的
+ * 换行格式，也不自己拼 `【类型】` 串。
+ */
+export async function batchReplaceSegments(
+  texts: Array<{ id: number; text: string }>,
+  type: string,
+  content: string,
+): Promise<Map<number, ReplaceOutcome>> {
+  const out = new Map<number, ReplaceOutcome>()
+  if (!texts.length || !type) return out
+  const data = await apiPost<{
+    items: Array<{ id: number; old_content: string; replaced: string | null }>
+  }>('/api/composition/batch_replace', { texts, type, content })
+  for (const item of data.items) {
+    out.set(item.id, { oldContent: item.old_content, replaced: item.replaced })
+  }
+  return out
 }

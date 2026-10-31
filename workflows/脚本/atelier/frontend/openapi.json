@@ -178,6 +178,49 @@
         "title": "BatchRandomRunRequest",
         "type": "object"
       },
+      "BatchReplaceRequest": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "texts": {
+            "items": {
+              "$ref": "#/components/schemas/ReplaceText"
+            },
+            "title": "Texts",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "BatchReplaceRequest",
+        "type": "object"
+      },
+      "BatchReplaceResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReplaceResult"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "title": "BatchReplaceResponse",
+        "type": "object"
+      },
       "BatchRequest": {
         "properties": {
           "items": {
@@ -608,6 +651,24 @@
           }
         },
         "title": "FacetsResponse",
+        "type": "object"
+      },
+      "Fragment": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "Fragment",
         "type": "object"
       },
       "FragmentCreate": {
@@ -1326,6 +1387,49 @@
         "title": "NodesRequest",
         "type": "object"
       },
+      "ParseRequest": {
+        "properties": {
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "ParseRequest",
+        "type": "object"
+      },
+      "ParseResponse": {
+        "properties": {
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/Fragment"
+            },
+            "title": "Fragments",
+            "type": "array"
+          },
+          "leftover": {
+            "default": "",
+            "title": "Leftover",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "title": "ParseResponse",
+        "type": "object"
+      },
       "ProcessImageRequest": {
         "properties": {
           "orientation": {
@@ -1917,6 +2021,82 @@
           }
         },
         "title": "PromptUpdate",
+        "type": "object"
+      },
+      "RenderRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/Fragment"
+              },
+              "type": "array"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "RenderRequest",
+        "type": "object"
+      },
+      "RenderResponse": {
+        "properties": {
+          "texts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Texts",
+            "type": "array"
+          }
+        },
+        "title": "RenderResponse",
+        "type": "object"
+      },
+      "ReplaceResult": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "old_content": {
+            "default": "",
+            "title": "Old Content",
+            "type": "string"
+          },
+          "replaced": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaced"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ReplaceResult",
+        "type": "object"
+      },
+      "ReplaceText": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ReplaceText",
         "type": "object"
       },
       "RunRequest": {
@@ -3096,6 +3276,132 @@
         "summary": "Composer Run",
         "tags": [
           "组合创作"
+        ]
+      }
+    },
+    "/api/composition/batch_replace": {
+      "post": {
+        "description": "批量替换指定类型的正文，返回替换前内容与替换后全文。",
+        "operationId": "batch_replace_composition_api_composition_batch_replace_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchReplaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchReplaceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Replace Composition",
+        "tags": [
+          "组合结果"
+        ]
+      }
+    },
+    "/api/composition/parse": {
+      "post": {
+        "description": "解析一段提示词：已标记碎片 + 未标记残留 + 语法问题。",
+        "operationId": "parse_composition_api_composition_parse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Parse Composition",
+        "tags": [
+          "组合结果"
+        ]
+      }
+    },
+    "/api/composition/render": {
+      "post": {
+        "description": "把碎片列表渲染回 `【类型】` 标准文本（空内容自动跳过）。",
+        "operationId": "render_composition_api_composition_render_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Render Composition",
+        "tags": [
+          "组合结果"
         ]
       }
     },

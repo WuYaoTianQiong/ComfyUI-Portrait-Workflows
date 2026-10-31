@@ -47,6 +47,38 @@ const CANDIDATES = [
   },
 ]
 
+/**
+ * `/api/composition/batch_replace` 的替身：按后端的语义（空行分块、只换目标块、
+ * 其余块原样保留、没有该块时 replaced=null）算一遍。组件本身已经不解析文本了，
+ * 所以这里必须模拟后端，而不是复用前端代码。
+ */
+function fakeBatchReplace(body: {
+  texts: Array<{ id: number; text: string }>
+  type: string
+  content: string
+}) {
+  const items = body.texts.map((t) => {
+    let oldContent = ''
+    let hit = false
+    const blocks = String(t.text).split(/\n\s*\n/)
+    const out = blocks.map((block) => {
+      const matched = block.match(/^\s*【([^】]+)】\s*([\s\S]*)$/)
+      if (matched && matched[1].trim() === body.type) {
+        oldContent = matched[2].trim()
+        hit = true
+        return `【${body.type}】\n${body.content}`
+      }
+      return block
+    })
+    return {
+      id: t.id,
+      old_content: oldContent,
+      replaced: hit ? out.join('\n\n').trim() : null,
+    }
+  })
+  return { items, skipped: items.filter((i) => i.replaced === null).length }
+}
+
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string, params?: Record<string, unknown>) => {
     if (path.includes('/api/prompts/full')) {
@@ -61,7 +93,12 @@ vi.mock('../api/client', () => ({
     }
     return {}
   }),
-  apiPost: vi.fn(),
+  apiPost: vi.fn(async (path: string, body?: unknown) => {
+    if (path === '/api/composition/batch_replace') {
+      return fakeBatchReplace(body as Parameters<typeof fakeBatchReplace>[0])
+    }
+    return {}
+  }),
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
 }))
@@ -91,11 +128,12 @@ async function mountModal(selectedIds: number[] = []) {
 
 type Wrapper = Awaited<ReturnType<typeof mountModal>>
 
-/** 选类型 + 从候选列表点一条，进入可预览状态。 */
+/** 选类型 + 从候选列表点一条，进入可预览状态（预览要等后端的批量替换返回）。 */
 async function prepare(wrapper: Wrapper) {
   await wrapper.find('.type-select').setValue('人物身材')
   await flushPromises()
   await wrapper.find('.cand-row').trigger('click')
+  await flushPromises()
   await flushPromises()
 }
 

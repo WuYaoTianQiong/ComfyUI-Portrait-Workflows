@@ -123,6 +123,7 @@ from app.routers.media import router as media_router
 from app.routers.categories import router as categories_router
 from app.routers.tags import router as tags_router
 from app.routers.composer import router as composer_router
+from app.routers.composition import router as composition_router
 from app.routers.templates import router as templates_router
 from app.routers.fragments import router as fragments_router
 from app.routers.system import router as system_router
@@ -136,6 +137,7 @@ app.include_router(media_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(tags_router, prefix="/api")
 app.include_router(composer_router, prefix="/api")
+app.include_router(composition_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(fragments_router, prefix="/api")
 app.include_router(system_router, prefix="/api")

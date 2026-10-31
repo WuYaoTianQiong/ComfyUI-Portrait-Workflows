@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 import Modal from './Modal.vue'
 import { apiGet } from '../api/client'
 import { FRAGMENT_TYPES } from '../constants'
-import { parseMarkedSegments, replaceMarkedSegment } from '../utils/segmentation'
+import { batchReplaceSegments } from '../utils/segmentation'
 import type { WorkflowCaps } from '../composables/useWorkflowCaps'
 
 /**
@@ -145,23 +145,53 @@ interface MatchedRow {
   replaced: string
 }
 
-/** 只列出"本来就有这一片"的提示词；其余计入跳过数。 */
-const matchedAll = computed<MatchedRow[]>(() => {
-  const type = targetType.value
-  const text = replacement.value.trim()
-  if (!type || !text) return []
-  return (fullData.value?.items ?? []).flatMap((p) => {
-    const replaced = replaceMarkedSegment(p.prompt, type, text)
-    if (replaced === null) return []
-    return [{
-      id: p.id,
-      name: p.name || `#${p.id}`,
-      seed: p.seed ?? 0,
-      oldContent: parseMarkedSegments(p.prompt).marked[type] ?? '',
-      replaced,
-    }]
-  })
-})
+/**
+ * 只列出"本来就有这一片"的提示词；其余计入跳过数。
+ *
+ * 预览由后端算（`POST /api/composition/batch_replace`）—— `【类型】` 语法只有
+ * 后端一份实现，替换也保持"其他块原样保留"的语义。一次往返算完整个范围。
+ * 用递增序号丢弃过期响应：用户连续修改内容时，先发的请求可能后到。
+ */
+const previewRows = ref<MatchedRow[]>([])
+let previewSeq = 0
+
+watch(
+  [targetType, replacement, () => fullData.value?.items],
+  async () => {
+    const type = targetType.value
+    const text = replacement.value.trim()
+    const items = fullData.value?.items ?? []
+    if (!props.open || !type || !text || !items.length) {
+      previewRows.value = []
+      return
+    }
+    const seq = ++previewSeq
+    try {
+      const outcomes = await batchReplaceSegments(
+        items.map((p) => ({ id: p.id, text: p.prompt })),
+        type,
+        text,
+      )
+      if (seq !== previewSeq) return
+      previewRows.value = items.flatMap((p) => {
+        const hit = outcomes.get(p.id)
+        if (!hit || hit.replaced === null) return []
+        return [{
+          id: p.id,
+          name: p.name || `#${p.id}`,
+          seed: p.seed ?? 0,
+          oldContent: hit.oldContent,
+          replaced: hit.replaced,
+        }]
+      })
+    } catch {
+      if (seq === previewSeq) previewRows.value = []
+    }
+  },
+  { immediate: true },
+)
+
+const matchedAll = computed<MatchedRow[]>(() => previewRows.value)
 
 /** 列表内的检索只影响"看/批量勾选"，不影响已经选中的其他条目。 */
 const visibleRows = computed<MatchedRow[]>(() => {

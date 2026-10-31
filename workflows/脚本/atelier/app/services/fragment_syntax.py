@@ -78,6 +78,64 @@ def render(fragments: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+# 分块：空行分隔（与库里的存量写法一致；允许行尾空白）
+_BLOCK_SEP_RE = re.compile(r"\n\s*\n")
+# 块首标题：`【类型】` 紧跟正文（正文可跨行）
+_BLOCK_START_RE = re.compile(r"^\s*【([^】]+)】\s*([\s\S]*)$")
+
+
+def split_marked(text: str | None) -> tuple[list[dict], str]:
+    """把文本拆成「已标记块」与「未标记残留」。
+
+    与 `parse()` 的区别：`parse()` 按标题切全文，认「任意位置的行首标题」；
+    这里按**空行分块**，只有块首是 `【类型】` 才算已标记，其余整块算残留正文。
+    页面上的「智能分段」必须先知道哪部分还没被标记（否则会把已有的类型标题
+    当正文重新归类，越分越乱）。
+
+    返回 (fragments, leftover)。fragments 形如 [{"type", "content"}]。
+    """
+    fragments: list[dict] = []
+    leftovers: list[str] = []
+    for block in _BLOCK_SEP_RE.split(text or ""):
+        matched = _BLOCK_START_RE.match(block)
+        if matched:
+            ftype = matched.group(1).strip()
+            content = matched.group(2).strip()
+            if ftype:
+                fragments.append({"type": ftype, "content": content})
+            continue
+        stripped = block.strip()
+        if stripped:
+            leftovers.append(stripped)
+    return fragments, "\n\n".join(leftovers).strip()
+
+
+def replace_type(text: str | None, fragment_type: str, content: str | None) -> str | None:
+    """只替换指定类型的块正文，其他块**原样保留**（含原有的行内/inline 写法）。
+
+    找不到该类型时返回 None —— 批量替换要据此跳过"本来就没有这一片"的提示词，
+    而不是凭空给它加一段。
+
+    刻意不做「解析→重建」：那会把 `【人物面部】黑色长发` 统一改写成
+    `【人物面部】\\n黑色长发`，用户库里的格式会被无声重排。
+    """
+    if not text or not fragment_type:
+        return None
+    blocks = _BLOCK_SEP_RE.split(text)
+    replaced = False
+    out: list[str] = []
+    for block in blocks:
+        matched = _BLOCK_START_RE.match(block)
+        if matched and matched.group(1).strip() == fragment_type:
+            out.append(f"【{fragment_type}】\n{content or ''}")
+            replaced = True
+        else:
+            out.append(block)
+    if not replaced:
+        return None
+    return "\n\n".join(out).strip()
+
+
 def classify(text: str | None) -> str | None:
     """按类型数量分档：>=4 组合 / 1-3 单项 / 0 零散。与旧版 models.classify_prompt_text 等价。"""
     if not text:

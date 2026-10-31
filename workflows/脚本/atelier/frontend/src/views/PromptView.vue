@@ -556,7 +556,7 @@ async function smartSegment() {
     toast.error('提示词是空的')
     return
   }
-  const { marked, leftover } = parseMarkedSegments(text)
+  const { marked, leftover } = await parseMarkedSegments(text)
   if (!leftover.trim() && Object.keys(marked).length) {
     toast.info('这条提示词已经是【类型】分段格式，无需再次分段')
     return
@@ -570,7 +570,7 @@ async function smartSegment() {
     toast.error('没能分出类型（文本里没命中任何关键词）')
     return
   }
-  const rendered = renderAllSegments(merged)
+  const rendered = await renderAllSegments(merged)
   if (!rendered) {
     toast.error('分段结果为空')
     return

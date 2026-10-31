@@ -237,6 +237,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/composition/batch_replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Replace Composition
+         * @description 批量替换指定类型的正文，返回替换前内容与替换后全文。
+         */
+        post: operations["batch_replace_composition_api_composition_batch_replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composition/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse Composition
+         * @description 解析一段提示词：已标记碎片 + 未标记残留 + 语法问题。
+         */
+        post: operations["parse_composition_api_composition_parse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composition/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Composition
+         * @description 把碎片列表渲染回 `【类型】` 标准文本（空内容自动跳过）。
+         */
+        post: operations["render_composition_api_composition_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/editor/faceswap/batch": {
         parameters: {
             query?: never;
@@ -1572,6 +1632,28 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** BatchReplaceRequest */
+        BatchReplaceRequest: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Texts */
+            texts?: components["schemas"]["ReplaceText"][];
+            /** Type */
+            type: string;
+        };
+        /** BatchReplaceResponse */
+        BatchReplaceResponse: {
+            /** Items */
+            items?: components["schemas"]["ReplaceResult"][];
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+        };
         /** BatchRequest */
         BatchRequest: {
             /** Items */
@@ -1785,6 +1867,16 @@ export interface components {
             source?: {
                 [key: string]: number;
             };
+        };
+        /** Fragment */
+        Fragment: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Type */
+            type: string;
         };
         /** FragmentCreate */
         FragmentCreate: {
@@ -2113,6 +2205,28 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** ParseRequest */
+        ParseRequest: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** ParseResponse */
+        ParseResponse: {
+            /** Fragments */
+            fragments?: components["schemas"]["Fragment"][];
+            /**
+             * Leftover
+             * @default
+             */
+            leftover: string;
+            /** Problems */
+            problems?: string[];
+            /** Types */
+            types?: string[];
+        };
         /** ProcessImageRequest */
         ProcessImageRequest: {
             /**
@@ -2387,6 +2501,38 @@ export interface components {
             tags?: string | null;
             /** Width */
             width?: number | null;
+        };
+        /** RenderRequest */
+        RenderRequest: {
+            /** Items */
+            items?: components["schemas"]["Fragment"][][];
+        };
+        /** RenderResponse */
+        RenderResponse: {
+            /** Texts */
+            texts?: string[];
+        };
+        /** ReplaceResult */
+        ReplaceResult: {
+            /** Id */
+            id: number;
+            /**
+             * Old Content
+             * @default
+             */
+            old_content: string;
+            /** Replaced */
+            replaced?: string | null;
+        };
+        /** ReplaceText */
+        ReplaceText: {
+            /** Id */
+            id: number;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /** RunRequest */
         RunRequest: {
@@ -3078,6 +3224,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_replace_composition_api_composition_batch_replace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReplaceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    parse_composition_api_composition_parse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_composition_api_composition_render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderResponse"];
                 };
             };
             /** @description Validation Error */

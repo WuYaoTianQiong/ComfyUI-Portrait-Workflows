@@ -7,6 +7,8 @@ from app.services.fragment_syntax import (
     is_structured,
     parse,
     render,
+    replace_type,
+    split_marked,
     strip_headers,
     types_in,
     validate,
@@ -78,3 +80,40 @@ def test_validate_reports_duplicate_and_unknown_type():
     assert any("重复" in p for p in problems)
     assert any("标准 8 类" in p for p in problems)
     assert validate(SAMPLE) == []
+
+
+# ---------------------------------------------------------------------------
+# split_marked / replace_type —— 前端"智能分段"与"批量替换"依赖的语义
+# ---------------------------------------------------------------------------
+
+
+def test_split_marked_separates_marked_and_leftover():
+    text = "【人物面部】\n黑色长发\n\n一个站在窗边的女孩"
+    fragments, leftover = split_marked(text)
+    assert fragments == [{"type": "人物面部", "content": "黑色长发"}]
+    assert leftover == "一个站在窗边的女孩"
+
+
+def test_split_marked_all_marked_leaves_no_leftover():
+    fragments, leftover = split_marked("【人物面部】\n黑色长发\n\n【人物服饰】\n白色连衣裙")
+    assert [f["type"] for f in fragments] == ["人物面部", "人物服饰"]
+    assert leftover == ""
+
+
+def test_split_marked_flat_text_is_all_leftover():
+    fragments, leftover = split_marked("一整段没有分块的提示词")
+    assert fragments == []
+    assert leftover == "一整段没有分块的提示词"
+
+
+def test_replace_type_keeps_other_blocks_verbatim():
+    text = "【人物面部】黑色长发\n\n【人物身材】旧身材\n\n【场景环境】街道"
+    replaced = replace_type(text, "人物身材", "统一身材")
+    assert replaced == "【人物面部】黑色长发\n\n【人物身材】\n统一身材\n\n【场景环境】街道"
+    assert "旧身材" not in replaced
+
+
+def test_replace_type_returns_none_when_type_absent():
+    assert replace_type("【人物面部】黑色长发", "人物身材", "新身材") is None
+    assert replace_type("一整段没有分块的提示词", "人物身材", "新身材") is None
+    assert replace_type("", "人物身材", "新身材") is None
