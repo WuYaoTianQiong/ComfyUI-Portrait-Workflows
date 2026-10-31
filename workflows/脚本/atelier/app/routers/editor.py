@@ -277,7 +277,7 @@ def _resolve_input_nodes(
 
 # ---------- routes ----------
 
-@router.post("/faceswap/mask")
+@router.post("/editor/faceswap/mask")
 def faceswap_save_mask(req: MaskSaveRequest):
     """保存前端涂抹出来的遮罩 PNG（白=重绘，黑=保留），返回可供注入的绝对路径。"""
     prefix = "data:image/png;base64,"
@@ -306,7 +306,7 @@ def faceswap_save_mask(req: MaskSaveRequest):
     return {"path": str(path), "size": len(raw)}
 
 
-@router.post("/faceswap/nodes")
+@router.post("/editor/faceswap/nodes")
 def faceswap_nodes(req: NodesRequest):
     """探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2」映射"""
     if not req.workflow_path and not req.workflow_content:
@@ -332,7 +332,7 @@ def faceswap_nodes(req: NodesRequest):
     }
 
 
-@router.post("/faceswap/batch")
+@router.post("/editor/faceswap/batch")
 def faceswap_batch(req: FaceswapRequest):
     """批量图像编辑：目标图 × 参考图 → 逐条推送 ComfyUI"""
     if not (req.main_ids or req.main_paths):

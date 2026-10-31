@@ -12,8 +12,8 @@
     - /api/images?orientation=... 按方向筛选
     - /api/images/html?...        已下线，断言 404
     - /api/workflows               工作流列表（界面格式工作流也应列出）
-    - /api/faceswap/nodes          双图工作流的 LoadImage 节点探测
-    - /api/faceswap/batch          批量换脸（dry_run，不占显存）
+    - /api/editor/faceswap/nodes          双图工作流的 LoadImage 节点探测
+    - /api/editor/faceswap/batch          批量换脸（dry_run，不占显存）
     - /*.js / *.css / index.html   前端静态资源（带内容断言）
 
 - 启动前先清理占用该端口的残留实例，避免结果混淆

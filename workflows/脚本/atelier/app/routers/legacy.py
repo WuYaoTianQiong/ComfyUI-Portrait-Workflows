@@ -41,6 +41,7 @@ _ALIASES: list[tuple[str, str, bool]] = [
     ("/image", "/media/image", False),
     ("/thumbnail", "/media/thumbnail", True),
     ("/fs", "/browser", True),
+    ("/faceswap", "/editor/faceswap", True),
 ]
 
 _hits: dict[str, int] = {}

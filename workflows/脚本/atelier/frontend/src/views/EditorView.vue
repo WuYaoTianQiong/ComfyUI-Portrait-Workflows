@@ -149,7 +149,7 @@ const {
   isFetching: probing,
 } = useQuery<NodeInfo>({
   queryKey: computed(() => ['fs-nodes', workflowPath.value]),
-  queryFn: () => apiPost<NodeInfo>('/api/faceswap/nodes', { workflow_path: workflowPath.value }),
+  queryFn: () => apiPost<NodeInfo>('/api/editor/faceswap/nodes', { workflow_path: workflowPath.value }),
   enabled: computed(() => !!workflowPath.value),
   retry: false,
 })
@@ -277,7 +277,7 @@ async function onMaskSaved(payload: { dataUrl: string | null }) {
   }
   maskSaving.value = true
   try {
-    const result = await apiPost<{ path: string }>('/api/faceswap/mask', {
+    const result = await apiPost<{ path: string }>('/api/editor/faceswap/mask', {
       data_url: payload.dataUrl,
     })
     maskEntries.value = { ...maskEntries.value, [key]: result.path }
@@ -374,7 +374,7 @@ async function submit() {
       job_id: number
       total: number
       submitted: number
-    }>('/api/faceswap/batch', {
+    }>('/api/editor/faceswap/batch', {
       main_ids: target.ids,
       main_paths: target.paths,
       ref_ids: columnCount.value >= 2 ? ref1.ids : [],
