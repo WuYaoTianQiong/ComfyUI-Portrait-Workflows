@@ -13,7 +13,7 @@ import { confirmDialog } from '../utils/naive'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
- * 分类 / 标签管理。
+ * 分类与标签。
  *
  * 这两件事结构一样（列表 + 新建 + 改名 + 删除 + 配色），合并到一个页面里，
  * 用页签切换 —— 旧前端把它们散在三个弹窗里，找入口要翻半天。
@@ -27,16 +27,17 @@ const COLORS = [
 
 type Panel = 'category' | 'tag' | 'fragment' | 'workflow'
 
-/** 会话状态：回到管理页时停在上次的页签与筛选。 */
-interface ManageSession {
+/** 会话状态：回到分类与标签页时停在上次的页签与筛选。 */
+interface TaxonomySession {
   panel: Panel
   fragSearch: string
   fragTypeFilter: string
   onlyUnused: boolean
 }
 
+/** 键名仍是旧页名：改字符串会让用户已存的页签选择丢失，存储键不进命名规范。 */
 const SESSION_KEY = 'pb.session.manage'
-const savedSession = readSession<ManageSession>(SESSION_KEY, {
+const savedSession = readSession<TaxonomySession>(SESSION_KEY, {
   panel: 'category',
   fragSearch: '',
   fragTypeFilter: '',
@@ -46,7 +47,7 @@ const savedSession = readSession<ManageSession>(SESSION_KEY, {
 const panel = ref<Panel>(savedSession.panel)
 
 const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
-  queryKey: ['categories', 'manage'],
+  queryKey: ['categories', 'taxonomy'],
   queryFn: () => apiGet('/api/categories', { tree: true, count_scope: 'prompt' }),
 })
 
@@ -58,7 +59,7 @@ const visibleTags = computed(() => {
 })
 
 const { data: tagData, refetch: refetchTags } = useQuery<{ tags: TagRow[] }>({
-  queryKey: ['tags', 'manage'],
+  queryKey: ['tags', 'taxonomy'],
   queryFn: () => apiGet('/api/tags', { count_scope: 'prompt' }),
 })
 
@@ -326,7 +327,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 }
 </script>
 <template>
-  <div class="manage">
+  <div class="taxonomy">
     <div class="tabs">
       <button class="btn btn-sm" :class="{ active: panel === 'category' }" @click="panel = 'category'">
         分类
@@ -510,7 +511,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
   </div>
 </template>
 <style scoped>
-.manage {
+.taxonomy {
   display: flex;
   flex-direction: column;
   height: 100%;

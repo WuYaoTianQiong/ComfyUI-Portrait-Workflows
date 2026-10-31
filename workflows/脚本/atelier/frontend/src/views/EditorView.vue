@@ -15,7 +15,7 @@ import { useToast } from '../composables/useToast'
 import { readSession, writeSession } from '../composables/useSessionState'
 import type { HistoryItem, HistoryPage } from '../api/types'
 
-/** 与后端 `faceswap.DEFAULT_PROMPT` 保持一致；留空提交时后端也会用这句。 */
+/** 与后端 `editor.DEFAULT_PROMPT` 保持一致；留空提交时后端也会用这句。 */
 const DEFAULT_PROMPT =
   '只修改提示词中描述的部分，其余人物相貌、姿势、构图、服装、背景与光线保持与目标图一致，自然真实，高清细节'
 

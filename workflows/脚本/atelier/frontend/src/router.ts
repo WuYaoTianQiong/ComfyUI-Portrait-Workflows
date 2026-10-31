@@ -3,9 +3,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
-import FaceswapView from './views/FaceswapView.vue'
+import EditorView from './views/EditorView.vue'
 import JobCenterView from './views/JobCenterView.vue'
-import ManageView from './views/ManageView.vue'
+import TaxonomyView from './views/TaxonomyView.vue'
 import StatsView from './views/StatsView.vue'
 import DesignView from './views/DesignView.vue'
 
@@ -14,6 +14,11 @@ import DesignView from './views/DesignView.vue'
  *
  * 之前用内存 `ref` 切页，刷新回画廊、返回无效、不能分享链接。
  * 路由参数让「跳到提示词」变成可深链的 `/prompt/123`。
+ *
+ * 路由段 / 视图名 / 导航文案三者同名（`命名规范.md` §8）：
+ * `/gallery` ↔ `GalleryView` ↔ "画廊"、`/editor` ↔ `EditorView` ↔ "图像编辑"、
+ * `/taxonomy` ↔ `TaxonomyView` ↔ "分类与标签"。旧路径 `/faceswap`、`/manage`
+ * 保留 redirect，书签不失效。设计令牌预览是开发用页面，只在 `/dev/design`。
  */
 export const router = createRouter({
   history: createWebHistory(),
@@ -29,11 +34,14 @@ export const router = createRouter({
       }),
     },
     { path: '/composer', name: 'composer', component: ComposerView },
-    { path: '/faceswap', name: 'faceswap', component: FaceswapView },
+    { path: '/editor', name: 'editor', component: EditorView },
+    { path: '/taxonomy', name: 'taxonomy', component: TaxonomyView },
     { path: '/jobs', name: 'jobs', component: JobCenterView },
-    { path: '/manage', name: 'manage', component: ManageView },
     { path: '/stats', name: 'stats', component: StatsView },
-    { path: '/design', name: 'design', component: DesignView },
+    { path: '/dev/design', name: 'dev-design', component: DesignView },
+    // 旧路径：P2c 改名后留一版 redirect，书签与外链不断
+    { path: '/faceswap', redirect: '/editor' },
+    { path: '/manage', redirect: '/taxonomy' },
     { path: '/:pathMatch(.*)*', redirect: '/gallery' },
   ],
 })

@@ -83,19 +83,18 @@ function jumpToPrompt(promptId: number) {
         </button>
         <button
           class="btn btn-sm"
-          :class="{ active: activeKey === 'faceswap' }"
-          @click="go('faceswap')"
+          :class="{ active: activeKey === 'editor' }"
+          @click="go('editor')"
         >
           图像编辑
         </button>
         <button
           class="btn btn-sm"
-          :class="{ active: activeKey === 'manage' }"
-          @click="go('manage')"
+          :class="{ active: activeKey === 'taxonomy' }"
+          @click="go('taxonomy')"
         >
-          管理
+          分类与标签
         </button>
-
         <button
           class="btn btn-sm"
           :class="{ active: activeKey === 'jobs' }"
@@ -110,13 +109,6 @@ function jumpToPrompt(promptId: number) {
           @click="go('stats')"
         >
           统计
-        </button>
-        <button
-          class="btn btn-sm"
-          :class="{ active: activeKey === 'design' }"
-          @click="go('design')"
-        >
-          设计
         </button>
       </nav>
 

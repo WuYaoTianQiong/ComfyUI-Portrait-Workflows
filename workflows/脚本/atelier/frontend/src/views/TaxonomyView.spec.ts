@@ -2,7 +2,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import ManageView from './ManageView.vue'
+import TaxonomyView from './TaxonomyView.vue'
 import { apiPost } from '../api/client'
 
 vi.mock('../api/client', () => ({
@@ -38,14 +38,14 @@ vi.mock('../api/client', () => ({
 }))
 
 async function mountView() {
-  const wrapper = mount(ManageView, {
+  const wrapper = mount(TaxonomyView, {
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
   })
   await flushPromises()
   return wrapper
 }
 
-describe('ManageView 分类/标签管理', () => {
+describe('TaxonomyView 分类与标签', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
     // 组件里用了 confirm 二次确认，测试环境默认没有
