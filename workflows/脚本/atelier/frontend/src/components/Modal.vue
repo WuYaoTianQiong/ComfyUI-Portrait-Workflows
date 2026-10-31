@@ -4,7 +4,7 @@ import { onBeforeUnmount, onMounted } from 'vue'
 /**
  * 统一弹层。
  *
- * 之前 MissingRunPanel 与 FilePicker 各写了一份 overlay + panel + head + foot，
+ * 之前 MissingImageRunPanel 与 FilePicker 各写了一份 overlay + panel + head + foot，
  * 结构几乎一样、样式各写一遍。抽出来之后：
  * · 遮罩、圆角、阴影、ESC 关闭只有一处实现
  * · Teleport 到 body，避免被父容器的 overflow / transform 裁掉

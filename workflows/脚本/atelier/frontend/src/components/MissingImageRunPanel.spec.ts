@@ -2,7 +2,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import MissingRunPanel from './MissingRunPanel.vue'
+import MissingImageRunPanel from './MissingImageRunPanel.vue'
 import { apiPost } from '../api/client'
 
 vi.mock('../api/client', () => ({
@@ -26,7 +26,7 @@ vi.mock('../api/client', () => ({
 }))
 
 async function mountPanel() {
-  const wrapper = mount(MissingRunPanel, {
+  const wrapper = mount(MissingImageRunPanel, {
     props: { open: true },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
@@ -38,7 +38,7 @@ async function mountPanel() {
   return wrapper
 }
 
-describe('MissingRunPanel 批量补跑', () => {
+describe('MissingImageRunPanel 缺图批量补跑', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
   })

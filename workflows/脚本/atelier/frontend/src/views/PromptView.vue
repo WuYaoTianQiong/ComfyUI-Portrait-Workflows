@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
-import MissingRunPanel from '../components/MissingRunPanel.vue'
-import TrialPanel from '../components/TrialPanel.vue'
+import MissingImageRunPanel from '../components/MissingImageRunPanel.vue'
+import PromptTrialPanel from '../components/PromptTrialPanel.vue'
 import PromptCreateModal from '../components/PromptCreateModal.vue'
 import PromptImportModal from '../components/PromptImportModal.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
@@ -1508,8 +1508,8 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <MissingRunPanel :open="missingOpen" @close="missingOpen = false" />
-    <TrialPanel
+    <MissingImageRunPanel :open="missingOpen" @close="missingOpen = false" />
+    <PromptTrialPanel
       :open="trialOpen"
       :prompt="draft?.prompt ?? ''"
       :negative-prompt="draft?.negative_prompt ?? ''"

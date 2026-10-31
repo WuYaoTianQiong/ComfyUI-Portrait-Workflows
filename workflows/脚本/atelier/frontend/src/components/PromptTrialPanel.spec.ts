@@ -2,7 +2,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import TrialPanel from './TrialPanel.vue'
+import PromptTrialPanel from './PromptTrialPanel.vue'
 import { apiPost } from '../api/client'
 import { useSettings } from '../composables/useSettings'
 
@@ -26,7 +26,7 @@ function stubStorage() {
 }
 
 async function mountPanel() {
-  const wrapper = mount(TrialPanel, {
+  const wrapper = mount(PromptTrialPanel, {
     props: {
       open: true,
       prompt: '一张测试图片的提示词',
@@ -42,7 +42,7 @@ async function mountPanel() {
   return wrapper
 }
 
-describe('TrialPanel 试跑 / 变体', () => {
+describe('PromptTrialPanel 提示词试跑 / 变体', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
     stubStorage()

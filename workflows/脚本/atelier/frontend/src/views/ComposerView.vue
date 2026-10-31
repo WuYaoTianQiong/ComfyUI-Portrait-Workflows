@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import { useRouter } from 'vue-router'
 import TagCloud from '../components/TagCloud.vue'
-import ComposerResultModal from '../components/ComposerResultModal.vue'
+import ComposerResultCenterModal from '../components/ComposerResultCenterModal.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 import FragmentDetailModal from '../components/FragmentDetailModal.vue'
 import { flattenCategories } from '../utils/categories'
@@ -295,7 +295,7 @@ async function saveCustomToLibrary() {
       tags: '',
     })
     toast.success(`已存进碎片库（${type}）`)
-    // 管理页的碎片列表是另一个缓存根，两边都要刷
+    // 分类与标签页的碎片列表是另一个缓存根，两边都要刷
     queryClient.invalidateQueries({ queryKey: ['composer-fragments'] })
     queryClient.invalidateQueries({ queryKey: ['fragments'] })
   } catch (e) {
@@ -1107,7 +1107,7 @@ function toggleTag(id: number) {
       </template>
     </Modal>
 
-    <ComposerResultModal
+    <ComposerResultCenterModal
       :open="resultOpen"
       :tab="resultTab"
       :composed="composedPrompt"
