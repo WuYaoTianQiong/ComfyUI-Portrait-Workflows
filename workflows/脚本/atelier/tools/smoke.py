@@ -123,7 +123,7 @@ def _prepare_isolated_env(env: dict) -> str:
     返回说明文字，供开头打印。
     """
     global _TMP_DIR
-    from config import settings
+    from app.config import settings
 
     _TMP_DIR = tempfile.mkdtemp(prefix="atelier_smoke_")
     db_copy = os.path.join(_TMP_DIR, "smoke.db")

@@ -1,10 +1,10 @@
 """分类管理 API"""
 from fastapi import APIRouter, HTTPException, Query
-from schemas import CategoryTreeResponse
+from app.schemas import CategoryTreeResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
-from models import (
+from app.models import (
     Category, PromptCategory, Prompt, db, ImageCategory, Image,
     classify_prompt_text, ensure_auto_categories, AUTO_CATEGORIES,
     auto_classify_prompt,
@@ -235,7 +235,7 @@ def auto_classify_one(prompt_id: int):
     """为单条提示词自动分类"""
     ensure_auto_categories()
 
-    from models import auto_classify_prompt
+    from app.models import auto_classify_prompt
     auto_classify_prompt(prompt_id)
 
     return {"success": True}

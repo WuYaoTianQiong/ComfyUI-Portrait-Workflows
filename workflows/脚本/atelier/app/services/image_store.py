@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from peewee import SQL
 
-from models import Image
+from app.models import Image
 
 # 与 models._migrate_genhistory_unique_constraint 创建的部分唯一索引一一对应
 LIVE_ONLY_FILTER = SQL("is_deleted=0")

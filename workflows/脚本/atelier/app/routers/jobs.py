@@ -10,12 +10,12 @@ import json
 import queue
 
 from fastapi import APIRouter, HTTPException, Query
-from schemas import JobListResponse
+from app.schemas import JobListResponse
 from fastapi.responses import StreamingResponse
 
-from services import job_state
-from services.comfyui_client import get_history_for_prompt
-from services.batch_control import batch_stop_flag
+from app.services import job_state
+from app.services.comfyui_client import get_history_for_prompt
+from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["任务"])
 

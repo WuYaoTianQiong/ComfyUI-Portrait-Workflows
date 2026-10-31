@@ -3,11 +3,14 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
-def _resolve_project_root(script_dir: Path) -> Path:
-    """自适应 project_root：无论项目放在 workflows/ 还是 workflows/脚本/ 下都能正确解析"""
-    if script_dir.parent.name == "脚本":
-        return script_dir.parent.parent  # workflows/脚本/atelier → workflows/
-    return script_dir.parent  # workflows/atelier → workflows/
+def _resolve_library_root(app_root: Path) -> Path:
+    """ComfyUI 工作流库根：*.json 工作流、文档/提示词收藏.db、thumbnails 都在这一层。
+
+    atelier 通常放在 <库>/脚本/ 下，需要跳过一层「脚本」；若直接放在 <库>/ 下则上一层即是。
+    """
+    if app_root.parent.name == "脚本":
+        return app_root.parent.parent
+    return app_root.parent
 
 
 def _safe_is_dir(p: Path) -> bool:
@@ -30,10 +33,10 @@ def _safe_is_dir(p: Path) -> bool:
         return False
 
 
-def _resolve_comfyui_root(project_root: Path, env_override: str | None = None) -> Path:
-    """自适应 ComfyUI 安装目录：从 project_root 向上逐级查找首个含 output 子目录的根。
+def _resolve_comfyui_root(library_root: Path, env_override: str | None = None) -> Path:
+    """自适应 ComfyUI 安装目录：从 library_root 向上逐级查找首个含 output 子目录的根。
 
-    覆盖项目位于 workflows/脚本/atelier 等深层目录、而 ComfyUI 根在更上层的情况
+    覆盖项目位于 <库>/脚本/atelier 等深层目录、而 ComfyUI 根在更上层的情况
     （如 ComfyUI-aki-v3/ComfyUI）。旧逻辑仅检查固定两层，会误选不存在的目录，导致
     get_image_metadata / 缩略图 / 模型提取全部定位失败。
     """
@@ -42,7 +45,7 @@ def _resolve_comfyui_root(project_root: Path, env_override: str | None = None) -
         if _safe_is_dir(p):
             return p
 
-    cur = project_root
+    cur = library_root
     for _ in range(8):
         # 当前层直接是 ComfyUI 根（含 output）
         if _safe_is_dir(cur / "output"):
@@ -57,7 +60,7 @@ def _resolve_comfyui_root(project_root: Path, env_override: str | None = None) -
         cur = parent
 
     # 兜底：保持旧行为（即使不存在）
-    return project_root.parent / "ComfyUI"
+    return library_root.parent / "ComfyUI"
 
 
 class Settings(BaseSettings):
@@ -67,17 +70,18 @@ class Settings(BaseSettings):
     comfyui_api: str = "http://127.0.0.1:8188"
     comfyui_root_env: str | None = None  # 手动覆盖用
 
-    # 路径
-    script_dir: Path = Path(__file__).absolute().parent
-    project_root: Path = _resolve_project_root(script_dir)
-    comfyui_root: Path = _resolve_comfyui_root(project_root, comfyui_root_env)
-    thumbnail_dir: Path = project_root / "thumbnails"
+    # 路径（两个根，语义不同，别再混用）
+    package_dir: Path = Path(__file__).absolute().parent        # <库>/脚本/atelier/app
+    app_root: Path = package_dir.parent                        # <库>/脚本/atelier  ← 代码项目根
+    library_root: Path = _resolve_library_root(app_root)       # <库>                ← 工作流库根
+    comfyui_root: Path = _resolve_comfyui_root(library_root, comfyui_root_env)
+    thumbnail_dir: Path = library_root / "thumbnails"
 
     # 数据库
-    db_path: Path = project_root / "文档" / "提示词收藏.db"
+    db_path: Path = library_root / "文档" / "提示词收藏.db"
 
     # 前端构建产物目录（vite build 输出，需含 index.html 与 assets/）
-    web_dir: Path = script_dir / "web"
+    web_dir: Path = app_root / "web"
 
     model_config = {"env_prefix": "ATELIER_", "extra": "ignore"}
 

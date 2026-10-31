@@ -20,8 +20,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from models import Image, ImageCategory, ImageTag, db
-from config import settings
+from app.models import Image, ImageCategory, ImageTag, db
+from app.config import settings
 
 logger = logging.getLogger("atelier.maintenance")
 
@@ -34,7 +34,7 @@ def _is_production_db() -> bool:
     import os
 
     db = Path(settings.db_path)
-    expected = Path(settings.project_root) / "文档" / db.name
+    expected = Path(settings.library_root) / "文档" / db.name
     try:
         return os.path.normcase(os.path.abspath(db)) == os.path.normcase(os.path.abspath(expected))
     except OSError:
@@ -46,7 +46,7 @@ def _is_production_db() -> bool:
 # ---------------------------------------------------------------------------
 
 def backup_dir() -> Path:
-    d = Path(settings.project_root) / "文档" / "backups"
+    d = Path(settings.library_root) / "文档" / "backups"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -78,7 +78,7 @@ def rotate_backups(keep: int = BACKUP_KEEP) -> dict:
     历史遗留的备份进 legacy/ 且不参与轮转 —— 那是过去手工打的快照，可能对应某次
     事故的恢复点，不值得为了省几十 MB 删掉；轮转只作用于本次重构之后自动生成的备份。
     """
-    doc_dir = Path(settings.project_root) / "文档"
+    doc_dir = Path(settings.library_root) / "文档"
     target_dir = backup_dir() / "legacy"
     target_dir.mkdir(parents=True, exist_ok=True)
 

@@ -5,15 +5,15 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from schemas import FacetsResponse, HistoryIdsResponse, HistoryListResponse
+from app.schemas import FacetsResponse, HistoryIdsResponse, HistoryListResponse
 from fastapi.responses import FileResponse
 from peewee import fn
 from pydantic import BaseModel
 
-from config import settings
-from models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
-from services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
-from services.thumbnail import _get_image_path
+from app.config import settings
+from app.models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from app.services.helpers import build_view_url, get_image_metadata, get_image_metadata_fast, _resolve_if_reparse, extract_model_from_comfy_prompt, compute_orientation
+from app.services.thumbnail import _get_image_path
 
 router = APIRouter(tags=["历史"])
 
@@ -136,7 +136,7 @@ def _sync_comfyui_history() -> int:
         return 0
 
     # 用于判断"文件是否还在磁盘上"（ComfyUI 的 /history 会长期保留已删除图片的条目）
-    from services.thumbnail import _get_image_path
+    from app.services.thumbnail import _get_image_path
 
     added = 0
     skipped = 0
@@ -705,7 +705,7 @@ def cleanup_missing_files(
 
     筛选参数与画廊一致，避免"看着筛过的列表点清理，却清掉了范围外的记录"。
     """
-    from services.thumbnail import _get_image_path
+    from app.services.thumbnail import _get_image_path
 
     q = _filtered_history_query(favorite, search, category_id, tag_ids, tag_match=tag_match)
     q = _apply_facet_filters(q, source, date, model, orientation)
@@ -895,10 +895,10 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
 
     # 1. 定位源图片
     from pathlib import Path
-    from config import settings
-    from services.workflow_parser import load_workflow, inject_prompt, inject_input_image
-    from services.comfyui_client import push_prompt
-    from routers.jobs import create_job, update_job_items
+    from app.config import settings
+    from app.services.workflow_parser import load_workflow, inject_prompt, inject_input_image
+    from app.services.comfyui_client import push_prompt
+    from app.routers.jobs import create_job, update_job_items
 
     if r.img_type == "input":
         src_dir = settings.comfyui_root / "input"

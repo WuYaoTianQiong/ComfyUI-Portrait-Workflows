@@ -15,7 +15,7 @@ import pytest
 
 def test_workflow_params_describe_real_quality_semantics():
     """画质 / 方向档位必须能描述"实际怎么改"，而不是让前端摆一排固定 K 值。"""
-    from services.workflow_parser import detect_workflow_params
+    from app.services.workflow_parser import detect_workflow_params
 
     scale = detect_workflow_params({
         "1": {"class_type": "EmptyLatentImage", "inputs": {"width": 1128, "height": 2008}},
@@ -48,7 +48,7 @@ def test_workflow_params_describe_real_quality_semantics():
 
 def test_prompts_full_returns_complete_text_under_filters(api, seed_prompt, seed_taxonomy):
     """批量替换要拿完整正文；列表接口只有 60 字预览，不能复用。"""
-    from models import EntityTag
+    from app.models import EntityTag
 
     long_text = "【人物身材】" + "很长的碎片内容" * 20
     hit = seed_prompt(name="命中", prompt=long_text)
@@ -86,7 +86,7 @@ def test_composer_fragments_can_filter_one_type(api, seed_prompt):
 
 def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     """批量替换只覆盖本次注入的正文，提示词库里的原文不动。"""
-    from routers import comfyui as comfy_router
+    from app.routers import comfyui as comfy_router
 
     p = seed_prompt(name="原提示词", prompt="【人物身材】旧\n\n【场景环境】街道")
 
@@ -205,7 +205,7 @@ def test_history_soft_delete_hides_item(api, seed_history):
     body = api.get("/api/history?page=1&page_size=50").json()
     assert body["total"] == 0
     # 物理文件与行都保留，只置软删除标记
-    from models import Image
+    from app.models import Image
 
     assert Image.get_by_id(item.id).is_deleted is True
 
@@ -226,7 +226,7 @@ def test_history_ids_route(api, seed_history):
 
 
 def test_history_ids_respects_category(api, seed_history, seed_taxonomy):
-    from models import EntityTag, ImageCategory
+    from app.models import EntityTag, ImageCategory
 
     keep = seed_history(filename="keep.png")
     drop = seed_history(filename="drop.png")
@@ -245,7 +245,7 @@ def test_history_missing_filter(api, seed_history):
     """「仅失效」按 missing_since 派生列筛选；文件缺失只是标记，记录本身仍保留。"""
     from datetime import datetime
 
-    from models import Image
+    from app.models import Image
 
     gone = seed_history(filename="gone.png")
     kept = seed_history(filename="kept.png")
@@ -265,8 +265,8 @@ def test_history_missing_filter(api, seed_history):
 
 def test_scan_missing_marks_and_heals(api, seed_history):
     """巡检只维护派生列：第一次标记缺失，文件出现后再次巡检应清除标记。"""
-    from models import Image
-    from services.integrity import scan_missing
+    from app.models import Image
+    from app.services.integrity import scan_missing
 
     item = seed_history(filename="probe.png")
 
@@ -274,7 +274,7 @@ def test_scan_missing_marks_and_heals(api, seed_history):
     assert Image.get_by_id(item.id).missing_since is not None
 
     # 把文件补到隔离的 output 目录，再巡检一次应自愈
-    from config import settings
+    from app.config import settings
 
     (settings.comfyui_root / "output" / "probe.png").write_bytes(b"not-a-real-png")
     try:
@@ -291,9 +291,9 @@ def test_disk_scan_job_index_invalidates_after_new_job(api, seed_prompt):
     旧实现用布尔标记缓存 job 索引，建一次就永不过期 → 服务启动之后新出的图
     全部匹配不到 prompt_id。
     """
-    from config import settings
-    from models import Image, GenJob
-    from routers import images
+    from app.config import settings
+    from app.models import Image, GenJob
+    from app.routers import images
 
     prompt = seed_prompt(name="索引提示词")
     target = settings.comfyui_root / "output" / "poll_me.png"
@@ -329,7 +329,7 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
     这三处曾经各写一遍过滤逻辑，已经出现过"列表筛了、全选却选到范围外"，
     紧接着的批量删除就是真删。
     """
-    from models import EntityTag, ImageCategory
+    from app.models import EntityTag, ImageCategory
 
     hit = seed_history(filename="aaa.png", favorite=True)
     seed_history(filename="bbb.png", favorite=False)
@@ -347,7 +347,7 @@ def test_history_filters_consistent_between_endpoints(api, seed_history, seed_ta
 
 
 def _deleted_count():
-    from models import Image
+    from app.models import Image
 
     return Image.select().where(Image.is_deleted == True).count()
 
@@ -390,7 +390,7 @@ def test_cleanup_missing_guard_blocks_mass_delete(api, seed_history):
 
 def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
     """只清理当前筛选范围内的记录，范围外的一条都不能动。"""
-    from models import Image, ImageCategory
+    from app.models import Image, ImageCategory
 
     inside = seed_history(filename="in_cat.png")
     outside = seed_history(filename="out_cat.png")
@@ -448,7 +448,7 @@ def test_job_detail_404(api):
 
 def test_job_snapshot_survives_offline_comfyui(api):
     """ComfyUI 不可达时，任务详情必须返回 200 而不是 500。"""
-    from models import GenJob
+    from app.models import GenJob
 
     job = GenJob.create(
         job_type="single", status="pending", title="离线", total=0,
@@ -465,7 +465,7 @@ def test_job_snapshot_survives_offline_comfyui(api):
 
 def test_job_get_is_read_only(api):
     """GET /api/jobs/{id} 不允许再写库（旧实现每次轮询都反推并落库）。"""
-    from models import GenJob
+    from app.models import GenJob
 
     job = GenJob.create(
         job_type="single", status="pending", title="只读", total=1,
@@ -483,7 +483,7 @@ def test_job_get_is_read_only(api):
 
 
 def test_job_cancel_marks_stopped_and_items_cancelled(api):
-    from models import GenJob
+    from app.models import GenJob
 
     items = [
         {"prompt_id": 1, "status": "done", "comfyui_prompt_id": "p1"},
@@ -507,8 +507,8 @@ def test_job_cancel_marks_stopped_and_items_cancelled(api):
 def test_refresh_never_persists_unknown(api):
     """pid 在队列和历史里都查不到时，保留原状态而不是写 unknown。
     unknown 一旦落库就再没有代码会重新选中它（旧库里因此卡了 56 个 item）。"""
-    from models import GenJob
-    from services import job_state
+    from app.models import GenJob
+    from app.services import job_state
 
     job = GenJob.create(
         job_type="single", status="pending", title="待判定", total=1,
@@ -528,8 +528,8 @@ def test_refresh_never_persists_unknown(api):
 def test_refresh_keeps_no_pid_items_pending_during_submission(api):
     """提交窗口内（create_job 后、update_job_items 前）条目还没有 prompt_id，
     写者不能把它判成失败——批量 160 张的提交循环可能持续几分钟。"""
-    from models import GenJob
-    from services import job_state
+    from app.models import GenJob
+    from app.services import job_state
 
     job = GenJob.create(
         job_type="batch", status="pending", title="提交中", total=1,
@@ -548,8 +548,8 @@ def test_refresh_keeps_pids_written_during_slow_compute(api, monkeypatch):
     真实故障：批量换脸提交 50 组耗时数分钟，写者用陈旧 items 整体覆盖，
     所有 pid 丢失 → 宽限期后被判「提交失败」，而图其实已经生成（job 110）。
     """
-    from models import GenJob
-    from services import job_state
+    from app.models import GenJob
+    from app.services import job_state
 
     job = GenJob.create(
         job_type="faceswap", status="pending", title="批量换脸 1×2", total=2,
@@ -575,7 +575,7 @@ def test_refresh_keeps_pids_written_during_slow_compute(api, monkeypatch):
 
 
 def test_jobs_list_items_are_arrays(api):
-    from models import GenJob
+    from app.models import GenJob
 
     GenJob.create(
         job_type="batch", status="running", title="列表", total=1,
@@ -622,7 +622,7 @@ def test_history_date_falls_back_to_created_at(api, seed_history):
     """老数据没有 captured_at 时，日期筛选仍要能命中（COALESCE 回退）。"""
     from datetime import datetime
 
-    from models import Image
+    from app.models import Image
 
     item = seed_history(filename="legacy.png")
     Image.update(captured_at=None, created_at=datetime(2022, 3, 15, 8, 0, 0)) \
@@ -662,7 +662,7 @@ def test_template_batch_import_keeps_all_fragments(api, seed_prompt):
 
 def test_delete_prompt_keeps_history_but_detaches(api, seed_prompt):
     """删提示词只解除关联，不再删掉它的出图记录（文件还在磁盘，删了会反复重建）。"""
-    from models import Image
+    from app.models import Image
 
     p = seed_prompt(name="要删的")
     photo = Image.create(
@@ -682,7 +682,7 @@ def test_delete_prompt_keeps_history_but_detaches(api, seed_prompt):
 
 def test_gallery_read_does_not_backfill_into_db(api):
     """列表读取时从任务 items 取回缺失参数只用于展示，不得写库。"""
-    from models import Image, GenJob
+    from app.models import Image, GenJob
 
     params = json.dumps({"prompt": "【人物面部】x", "seed": 7}, ensure_ascii=False)
     job = GenJob.create(

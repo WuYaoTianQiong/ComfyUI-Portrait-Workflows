@@ -30,8 +30,8 @@ os.environ["ATELIER_COMFYUI_API"] = "http://127.0.0.1:9"
 
 import pytest  # noqa: E402
 
-from config import settings  # noqa: E402
-from models import db, init_db  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.models import db, init_db  # noqa: E402
 
 # 硬断言：库必须落在临时目录里，否则立即中止，避免测试写坏生产库
 assert str(settings.db_path).startswith(str(_TMP)), f"测试库未隔离: {settings.db_path}"
@@ -85,7 +85,7 @@ def api():
 
 @pytest.fixture()
 def seed_prompt():
-    from models import Prompt
+    from app.models import Prompt
 
     def _make(**kw):
         kw.setdefault("name", "测试提示词")
@@ -97,7 +97,7 @@ def seed_prompt():
 
 @pytest.fixture()
 def seed_history():
-    from models import Image
+    from app.models import Image
 
     def _make(**kw):
         kw.setdefault("filename", "test_00001_.png")
@@ -111,7 +111,7 @@ def seed_history():
 
 @pytest.fixture()
 def seed_taxonomy():
-    from models import Category, Tag
+    from app.models import Category, Tag
 
     def _make():
         cat = Category.create(name="测试分类", color="#123456")

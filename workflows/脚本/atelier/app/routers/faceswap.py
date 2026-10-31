@@ -29,13 +29,13 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from config import settings
-from models import Image
-from routers.fsbrowse import IMAGE_EXT
-from routers.jobs import create_job, update_job_items
-from services.comfyui_client import push_prompt
-from services.helpers import _resolve_if_reparse
-from services.workflow_parser import (
+from app.config import settings
+from app.models import Image
+from app.routers.fsbrowse import IMAGE_EXT
+from app.routers.jobs import create_job, update_job_items
+from app.services.comfyui_client import push_prompt
+from app.services.helpers import _resolve_if_reparse
+from app.services.workflow_parser import (
     find_loadimage_nodes,
     find_size_source_loadimage,
     inject_input_image,
@@ -43,7 +43,7 @@ from services.workflow_parser import (
     load_workflow,
     set_output_prefix,
 )
-from services.batch_control import batch_stop_flag
+from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["批量图像编辑"])
 
@@ -299,7 +299,7 @@ def faceswap_save_mask(req: MaskSaveRequest):
         raise HTTPException(400, "遮罩不是有效的 PNG")
 
     digest = hashlib.sha1(raw).hexdigest()[:16]
-    mask_dir = settings.project_root / "painted_masks"
+    mask_dir = settings.library_root / "painted_masks"
     mask_dir.mkdir(parents=True, exist_ok=True)
     path = mask_dir / f"mask_{digest}.png"
     path.write_bytes(raw)

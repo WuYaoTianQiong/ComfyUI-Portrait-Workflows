@@ -3,18 +3,18 @@ import io
 import json
 import traceback
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File
-from schemas import PromptDetail, PromptListResponse
+from app.schemas import PromptDetail, PromptListResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
-from models import (
+from app.models import (
     Prompt, Image, db, Category, Tag, EntityTag,
     PromptCategory, PromptTag, auto_classify_prompt,
 )
-from services.helpers import get_image_metadata
-from services.tagging import sync_prompt_tags
+from app.services.helpers import get_image_metadata
+from app.services.tagging import sync_prompt_tags
 
 router = APIRouter(tags=["提示词"])
 

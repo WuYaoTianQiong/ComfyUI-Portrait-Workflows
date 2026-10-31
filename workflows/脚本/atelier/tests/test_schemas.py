@@ -18,7 +18,7 @@
 import re
 from pathlib import Path
 
-import schemas
+import app.schemas as schemas
 
 V4 = Path(__file__).resolve().parents[1]
 TYPES_TS = V4 / "frontend" / "src" / "api" / "types.ts"

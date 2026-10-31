@@ -25,8 +25,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from config import settings  # noqa: E402
-from services.maintenance import backup_database, purge_tombstones  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.services.maintenance import backup_database, purge_tombstones  # noqa: E402
 
 
 def _vacuum() -> None:

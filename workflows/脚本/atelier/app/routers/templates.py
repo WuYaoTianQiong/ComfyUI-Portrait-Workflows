@@ -5,8 +5,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from models import Template, TemplateFragment, Prompt, Category, db
-from services.fragment_syntax import extract
+from app.models import Template, TemplateFragment, Prompt, Category, db
+from app.services.fragment_syntax import extract
 
 router = APIRouter(tags=["模板"])
 

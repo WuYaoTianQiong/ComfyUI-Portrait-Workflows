@@ -5,18 +5,18 @@
 画廊永远没有新图"，而界面上没有任何报错。
 """
 
-from services.image_store import upsert_image
+from app.services.image_store import upsert_image
 
 
 def _count(filename="dup.png"):
-    from models import Image
+    from app.models import Image
 
     return Image.select().where(Image.filename == filename).count()
 
 
 def test_insert_then_upsert_updates_same_row(api):
     """同名文件重复 upsert 只保留一行，字段被更新而不是新增。"""
-    from models import Image
+    from app.models import Image
 
     values = {
         "filename": "dup.png", "subfolder": "", "img_type": "output",
@@ -35,7 +35,7 @@ def test_insert_then_upsert_updates_same_row(api):
 
 def test_soft_deleted_row_does_not_block_new_insert(api):
     """部分唯一索引只覆盖 is_deleted=0：软删过的同名文件应插入新行，而不是复活墓碑。"""
-    from models import Image
+    from app.models import Image
 
     values = {
         "filename": "dup.png", "subfolder": "", "img_type": "output",
@@ -56,7 +56,7 @@ def test_soft_deleted_row_does_not_block_new_insert(api):
 
 def test_only_when_job_null_does_not_touch_job_rows(api):
     """已被任务写入的行（job_id 非空）不能被较弱的同步数据覆盖。"""
-    from models import Image
+    from app.models import Image
 
     values = {
         "filename": "dup.png", "subfolder": "", "img_type": "output",

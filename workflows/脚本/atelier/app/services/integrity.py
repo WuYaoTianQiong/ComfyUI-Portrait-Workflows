@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from models import Image
-from services.thumbnail import _get_image_path
+from app.models import Image
+from app.services.thumbnail import _get_image_path
 
 logger = logging.getLogger("atelier.integrity")
 

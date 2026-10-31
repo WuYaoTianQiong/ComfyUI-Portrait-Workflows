@@ -4,8 +4,8 @@ from typing import Optional
 
 from PIL import Image as PILImage
 
-from config import settings
-from services.helpers import _resolve_if_reparse
+from app.config import settings
+from app.services.helpers import _resolve_if_reparse
 
 THUMBNAIL_DIR = settings.thumbnail_dir
 

@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.maintenance import backup_database, backup_dir, list_backups  # noqa: E402
+from app.services.maintenance import backup_database, backup_dir, list_backups  # noqa: E402
 
 
 def main() -> int:

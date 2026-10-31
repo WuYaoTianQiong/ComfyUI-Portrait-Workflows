@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 from urllib.parse import quote
 
-from config import settings
+from app.config import settings
 
 
 def _resolve_if_reparse(p: Path) -> Path:
@@ -59,7 +59,7 @@ def captured_at_for_image(filename: str, subfolder: str, img_type: str):
     """
     from datetime import datetime
 
-    from services.thumbnail import _get_image_path
+    from app.services.thumbnail import _get_image_path
 
     path = _get_image_path(filename, subfolder or "", img_type or "output")
     if path is None:

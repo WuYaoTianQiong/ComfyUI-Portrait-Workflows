@@ -1,11 +1,11 @@
 """标签管理 API（读写都走 entity_tags，由 services.tagging 统一维护）"""
 from fastapi import APIRouter, HTTPException, Query
-from schemas import TagListResponse
+from app.schemas import TagListResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from models import EntityTag, Tag, Prompt
-from services.tagging import (
+from app.models import EntityTag, Tag, Prompt
+from app.services.tagging import (
     add_prompt_tag_by_name,
     remove_prompt_tag_by_name,
     tag_image_counts,

@@ -23,7 +23,7 @@ import re
 
 from peewee import IntegrityError
 
-from models import EntityTag, Tag, db
+from app.models import EntityTag, Tag, db
 
 # 逗号（中/英）与分号（中/英）。刻意不含空格：会切坏 "Moody Photography"。
 _TAG_SEP_RE = re.compile(r"[,，;；]")
@@ -115,7 +115,7 @@ def add_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
     文本是唯一事实来源：只写关联表不写文本的话，用户下次编辑提示词触发
     `sync_prompt_tags` 全量重算时，这条关联会被冲掉。
     """
-    from models import Prompt
+    from app.models import Prompt
 
     name = (name or "").strip()
     if not name:
@@ -135,7 +135,7 @@ def add_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
 
 def remove_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
     """从提示词去掉标签（同时改文本与关联表）。返回是否发生变化。"""
-    from models import Prompt
+    from app.models import Prompt
 
     name = (name or "").strip()
     prompt = Prompt.get_or_none(Prompt.id == prompt_id)

@@ -10,30 +10,30 @@ from urllib.parse import quote
 import httpx
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Query
-from schemas import WorkflowListResponse
+from app.schemas import WorkflowListResponse
 from fastapi.responses import StreamingResponse, FileResponse
 from PIL import Image as PILImage
 from pydantic import BaseModel
 
-from config import settings
-from models import Prompt, PromptCategory, Category
-from services.helpers import _resolve_if_reparse, missing_image_response
-from services.fragment_syntax import strip_headers
-from services.thumbnail import generate_thumbnail
-from services.workflow_parser import (
+from app.config import settings
+from app.models import Prompt, PromptCategory, Category
+from app.services.helpers import _resolve_if_reparse, missing_image_response
+from app.services.fragment_syntax import strip_headers
+from app.services.thumbnail import generate_thumbnail
+from app.services.workflow_parser import (
     load_workflow,
     inject_prompt,
     detect_workflow_caps,
     detect_workflow_params,
 )
-from services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
-from routers.jobs import create_job, update_job_items
-from services.batch_control import batch_stop_flag
+from app.services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
+from app.routers.jobs import create_job, update_job_items
+from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["ComfyUI"])
 logger = logging.getLogger(__name__)
 
-DEPRECATED_DIR = settings.project_root / "废弃工作流"
+DEPRECATED_DIR = settings.library_root / "废弃工作流"
 
 
 def _is_valid_workflow(filepath: Path) -> bool:
@@ -79,7 +79,7 @@ def _workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
 
 def _find_default_workflow() -> str:
     candidates = []
-    for d in [settings.project_root, DEPRECATED_DIR]:
+    for d in [settings.library_root, DEPRECATED_DIR]:
         if not d.exists():
             continue
         for f in sorted(d.glob("*.json")):
@@ -301,7 +301,7 @@ def serve_thumbnail(
 @router.post("/thumbnail/clear")
 def clear_thumbnail_cache():
     """清空所有缩略图缓存文件。下次访问时自动按新缓存键重新生成。"""
-    from config import settings
+    from app.config import settings
     import shutil
     import os
 
@@ -343,7 +343,7 @@ def list_workflows(sort: str = Query("mtime")):
     results: list[dict] = []
     seen: set[str] = set()
 
-    for d in [settings.project_root, DEPRECATED_DIR]:
+    for d in [settings.library_root, DEPRECATED_DIR]:
         if not d.exists():
             continue
         for f in d.glob("*.json"):
@@ -599,7 +599,7 @@ def _missing_prompt_ids():
 
     缺图判定：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。
     """
-    from models import Image
+    from app.models import Image
 
     have_ids = {
         r.prompt_id

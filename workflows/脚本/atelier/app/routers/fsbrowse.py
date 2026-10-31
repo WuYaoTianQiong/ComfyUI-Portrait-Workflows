@@ -15,8 +15,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from PIL import Image as PILImage
 
-from config import settings
-from services.helpers import _resolve_if_reparse, missing_image_response
+from app.config import settings
+from app.services.helpers import _resolve_if_reparse, missing_image_response
 
 router = APIRouter(tags=["文件浏览"])
 
@@ -45,7 +45,7 @@ def _roots() -> list[dict]:
         ("ComfyUI/output", settings.comfyui_root / "output"),
         ("ComfyUI/input", settings.comfyui_root / "input"),
         ("ComfyUI/temp", settings.comfyui_root / "temp"),
-        ("工作流目录", settings.project_root),
+        ("工作流目录", settings.library_root),
     ]
     for name, p in candidates:
         try:

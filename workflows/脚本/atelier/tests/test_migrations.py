@@ -6,8 +6,8 @@
 
 import pytest
 
-from models import MIGRATIONS, db
-from services.migrations import applied_versions, apply_migrations
+from app.models import MIGRATIONS, db
+from app.services.migrations import applied_versions, apply_migrations
 
 
 def test_schema_version_recorded():

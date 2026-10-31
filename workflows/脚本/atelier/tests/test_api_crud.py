@@ -36,7 +36,7 @@ def test_category_crud_lifecycle(api, seed_prompt):
 
 def test_delete_category_with_links_does_not_500(api, seed_prompt):
     """删分类时必须连关联一起清掉：外键开启后留下 PromptCategory 会直接 500。"""
-    from models import Category, PromptCategory
+    from app.models import Category, PromptCategory
 
     cid = api.post("/api/categories", json={"name": "带关联"}).json()["id"]
     prompt = seed_prompt(name="p")
@@ -49,7 +49,7 @@ def test_delete_category_with_links_does_not_500(api, seed_prompt):
 
 def test_category_image_count_excludes_soft_deleted(api, seed_history):
     """侧栏分类计数必须和画廊里实际能看到的图一致：软删除的图不能算进去。"""
-    from models import ImageCategory
+    from app.models import ImageCategory
 
     cid = api.post("/api/categories", json={"name": "计数"}).json()["id"]
     live = seed_history(filename="live.png")
@@ -116,7 +116,7 @@ def test_tag_crud(api):
 
 def test_delete_tag_clears_entity_links(api, seed_history):
     """删标签要连带清掉 entity_tags，否则筛选时会查到不存在标签的图片。"""
-    from models import EntityTag
+    from app.models import EntityTag
 
     tid = api.post("/api/tags", json={"name": "待删"}).json()["id"]
     img = seed_history(filename="t.png")
@@ -147,7 +147,7 @@ def test_prompt_flag_endpoints(api):
 # ---------------------------------------------------------------------------
 
 def test_history_item_actions(api, seed_history):
-    from models import Image
+    from app.models import Image
 
     img = seed_history(filename="act.png")
 
@@ -167,7 +167,7 @@ def test_history_item_actions(api, seed_history):
 
 def test_history_batch_delete_keeps_prompt_records(api, seed_history):
     """批量删图只软删，不碰提示词。"""
-    from models import Image, Prompt
+    from app.models import Image, Prompt
 
     prompt = Prompt.create(name="保留", prompt="x")
     a = seed_history(filename="b1.png", prompt_id=prompt.id)
@@ -182,7 +182,7 @@ def test_history_batch_delete_keeps_prompt_records(api, seed_history):
 
 def test_batch_delete_prompts_detaches_history(api, seed_history):
     """批量删提示词只解除关联，不能把画廊里的图片记录一起删掉。"""
-    from models import Image, Prompt
+    from app.models import Image, Prompt
 
     prompt = Prompt.create(name="批量删", prompt="x")
     img = seed_history(filename="detach.png", prompt_id=prompt.id)

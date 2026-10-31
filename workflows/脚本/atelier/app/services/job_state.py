@@ -22,17 +22,17 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from config import settings
-from models import Image, GenJob, db, inherit_prompt_taxonomy
-from services.image_store import upsert_image
-from services.comfyui_client import (
+from app.config import settings
+from app.models import Image, GenJob, db, inherit_prompt_taxonomy
+from app.services.image_store import upsert_image
+from app.services.comfyui_client import (
     delete_queue_items,
     get_history,
     get_progress,
     get_queue,
     interrupt,
 )
-from services.helpers import (
+from app.services.helpers import (
     build_view_url,
     captured_at_for_image,
     compute_orientation,
@@ -254,7 +254,7 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
     miss_pids = {pid for pid in all_pids if pid and pid not in hist}
     if miss_pids and len(miss_pids) <= 10:
         # 未命中的（例如刚提交）逐条精确补查；数量大时放弃，避免拖垮轮询
-        from services.comfyui_client import get_history_for_prompt
+        from app.services.comfyui_client import get_history_for_prompt
 
         for pid in miss_pids:
             single = get_history_for_prompt(pid)
@@ -652,7 +652,7 @@ def writer_loop(stop_event: threading.Event, interval: float = 1.0,
         if now - last_sync >= sync_interval:
             last_sync = now
             try:
-                from routers.images import _sync_comfyui_history, _sync_disk_orphans
+                from app.routers.images import _sync_comfyui_history, _sync_disk_orphans
 
                 _sync_comfyui_history()
                 _sync_disk_orphans()
@@ -662,7 +662,7 @@ def writer_loop(stop_event: threading.Event, interval: float = 1.0,
         if now - last_integrity >= integrity_interval:
             last_integrity = now
             try:
-                from services.integrity import scan_missing
+                from app.services.integrity import scan_missing
 
                 result = scan_missing()
                 if result["marked"] or result["cleared"]:

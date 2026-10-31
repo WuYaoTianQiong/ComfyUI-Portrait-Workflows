@@ -4,7 +4,7 @@ from peewee import (
     FloatField, DateTimeField, BooleanField, SQL, ForeignKeyField,
     DeferredForeignKey
 )
-from config import settings
+from app.config import settings
 
 db = SqliteDatabase(
     str(settings.db_path),
@@ -307,7 +307,7 @@ def _backfill_captured_at() -> int:
     """
     from datetime import datetime
 
-    from services.thumbnail import _get_image_path
+    from app.services.thumbnail import _get_image_path
 
     rows = list(
         Image.select(Image.id, Image.filename, Image.subfolder, Image.img_type)
@@ -356,7 +356,7 @@ def classify_prompt_text(prompt_text: str) -> str | None:
     'single'     1-3种碎片
     'scattered'  无【】标记
     """
-    from services.fragment_syntax import classify
+    from app.services.fragment_syntax import classify
 
     return classify(prompt_text)
 
@@ -518,7 +518,7 @@ def _migrate_v2_entity_tags(database):
 
     只写 entity_tags，不动旧表与 prompts.tags 文本，随时可以整体回退。
     """
-    from services.tagging import recalc_usage_counts, sync_prompt_tags
+    from app.services.tagging import recalc_usage_counts, sync_prompt_tags
 
     database.execute_sql(
         "INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id) "
@@ -573,7 +573,7 @@ MIGRATIONS = [
 
 def init_db():
     """确保表存在，并按版本号执行未应用的迁移。"""
-    from services.migrations import apply_migrations
+    from app.services.migrations import apply_migrations
 
     db.connect()
     _ensure_tables()

@@ -7,12 +7,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from models import Prompt, Fragment, Category, Tag, PromptCategory, EntityTag, db
-from services.workflow_parser import load_workflow, inject_prompt
-from services.comfyui_client import push_prompt
-from routers.jobs import create_job, update_job_items
-from config import settings
-from services.fragment_syntax import FRAGMENT_TYPES, parse
+from app.models import Prompt, Fragment, Category, Tag, PromptCategory, EntityTag, db
+from app.services.workflow_parser import load_workflow, inject_prompt
+from app.services.comfyui_client import push_prompt
+from app.routers.jobs import create_job, update_job_items
+from app.config import settings
+from app.services.fragment_syntax import FRAGMENT_TYPES, parse
 
 router = APIRouter(tags=["组合创作"])
 

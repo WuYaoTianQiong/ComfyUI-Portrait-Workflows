@@ -1,13 +1,13 @@
 """碎片库 API —— 独立碎片 CRUD + 按类型分组（供 Composer 使用）"""
 import traceback
 from fastapi import APIRouter, HTTPException, Query, Request
-from schemas import FragmentListResponse
+from app.schemas import FragmentListResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from models import Fragment, db
-from services.fragment_syntax import FRAGMENT_TYPES
+from app.models import Fragment, db
+from app.services.fragment_syntax import FRAGMENT_TYPES
 
 router = APIRouter(tags=["碎片库"])
 

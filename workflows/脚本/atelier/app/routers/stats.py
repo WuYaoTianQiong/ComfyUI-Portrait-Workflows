@@ -1,7 +1,7 @@
 """统计 API —— 数据看板"""
 from fastapi import APIRouter
-from schemas import StatsResponse
-from models import Prompt, Image, GenJob, Tag, Fragment
+from app.schemas import StatsResponse
+from app.models import Prompt, Image, GenJob, Tag, Fragment
 from peewee import fn
 
 router = APIRouter(tags=["统计"])

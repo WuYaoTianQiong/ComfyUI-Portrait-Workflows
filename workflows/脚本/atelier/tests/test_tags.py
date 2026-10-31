@@ -6,7 +6,7 @@
 
 
 def _prompt_tag_names(prompt_id: int) -> set[str]:
-    from models import EntityTag
+    from app.models import EntityTag
 
     return {
         row.tag.name
@@ -40,7 +40,7 @@ def test_update_prompt_syncs_tags(api):
 
 def test_tag_filter_uses_entity_tags(api):
     """提示词按标签筛选必须查 entity_tags（旧实现 join prompt_tags，恒为空）。"""
-    from models import Tag
+    from app.models import Tag
 
     hit = api.post(
         "/api/prompts", json={"name": "tagged", "prompt": "x", "tags": "夏日"}
@@ -54,7 +54,7 @@ def test_tag_filter_uses_entity_tags(api):
 
 def test_image_inherits_prompt_tags(api, seed_history):
     """图片继承来源提示词的标签后，画廊按标签筛选能命中。"""
-    from models import Tag
+    from app.models import Tag
 
     pid = api.post(
         "/api/prompts", json={"name": "src", "prompt": "x", "tags": "夏日"}
@@ -90,7 +90,7 @@ def test_tag_counts_by_scope(api, seed_history):
 
 def test_history_tag_match_all_vs_any(api, seed_history):
     """多标签：all=交集（同时满足），any=并集（任一满足）。"""
-    from models import EntityTag, Tag
+    from app.models import EntityTag, Tag
 
     tag_a = Tag.create(name="甲")
     tag_b = Tag.create(name="乙")
@@ -113,7 +113,7 @@ def test_history_tag_match_all_vs_any(api, seed_history):
 
 def test_prompt_tag_match_all_vs_any(api):
     """提示词侧的多标签语义与画廊保持一致。"""
-    from models import Tag
+    from app.models import Tag
 
     both = api.post(
         "/api/prompts", json={"name": "both", "prompt": "x", "tags": "甲,乙"}
@@ -135,7 +135,7 @@ def test_prompt_tag_match_all_vs_any(api):
 
 def test_add_and_remove_prompt_tag_endpoint(api):
     """通过标签接口给提示词打/去标签时，文本与关联表必须同时更新。"""
-    from models import Prompt, Tag
+    from app.models import Prompt, Tag
 
     pid = api.post("/api/prompts", json={"name": "D", "prompt": "x", "tags": ""}).json()["id"]
     tag = api.post("/api/tags", json={"name": "手工标签"}).json()["id"]
