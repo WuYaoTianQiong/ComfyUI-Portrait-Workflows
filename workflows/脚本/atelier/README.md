@@ -46,7 +46,7 @@ atelier/
 ├─ frontend/            # Vue3 + TS 源码
 ├─ web/                 # 前端构建产物（不入库）
 ├─ tests/               # pytest 契约/单元测试；tests/e2e 为 Playwright
-├─ tools/               # ci.ps1 / smoke.py / backup_db.py / cleanup_tombstones.py / run_prompts.py
+├─ tools/               # ci.ps1 / smoke.py / gen_api_types.py / backup_db.py / cleanup_tombstones.py / run_prompts.py
 ├─ 启动.bat             # 唯一中文入口（双击即用）
 └─ logs/                # 运行日志（不入库）
 ```
@@ -107,5 +107,7 @@ python tests\e2e\run_e2e.py  # Playwright 过 7 个页签
 - 命名规范见 `../文档/命名规范.md`：术语表、目录/文件/符号/API/数据库/前端六层规则。
 - 一次一批：改名与改行为分开提交，避免回归时无法归因。
 - Windows 坑：项目常通过 junction 访问（跨卷 `SYMLINKD`），`Path.exists()/stat()` 会抛 `WinError 448`，
-  必须走 `app/services/helpers.py::_resolve_if_reparse`。
+  必须走 `app/services/paths.py::_resolve_if_reparse`。
 - 仓库文件是 **CRLF**，写脚本做批量替换时要用 `\r?\n` 兼容，别只匹配 `\n`。
+- 前端 API 类型**不手写**：`schemas.py` → `frontend/openapi.json` → `frontend/src/api/openapi.d.ts` → `types.ts`（别名层）。
+  改了 `schemas.py` 或路由后执行 `python tools/gen_api_types.py`；忘记时 `tests/test_openapi_snapshot.py` 会失败。
