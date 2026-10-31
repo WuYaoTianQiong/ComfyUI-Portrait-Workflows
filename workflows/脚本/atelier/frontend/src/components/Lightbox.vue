@@ -77,6 +77,9 @@ const MAX_SCALE = 20
 
 const stageEl = ref<HTMLElement | null>(null)
 const imgEl = ref<HTMLImageElement | null>(null)
+/** 提示词弹窗的滚动容器：刷新后连滚动位置一起恢复。 */
+const promptTextEl = ref<HTMLPreElement | null>(null)
+const promptSideEl = ref<HTMLElement | null>(null)
 const stageSize = ref({ w: 0, h: 0 })
 /** 图片的自然像素尺寸（scale=1 时的基准）。 */
 const natural = ref({ w: 0, h: 0 })
@@ -197,6 +200,7 @@ function animate() {
       view.cy = view.targetCy
       constrainView()
       applyView()
+      saveViewerState()
       return
     }
     view.scale += ds * LERP
@@ -236,9 +240,18 @@ function syncStageSize() {
 function initFromImage(img: HTMLImageElement) {
   natural.value = { w: img.naturalWidth, h: img.naturalHeight }
   imgLoaded.value = true
-  fitMode.value = true
   syncStageSize()
-  initView()
+  // 刷新恢复：第一次拿到尺寸时套用快照；否则正常适应窗口
+  if (pendingSnapshot && pendingSnapshot.id === item.value?.id) {
+    const snap = pendingSnapshot
+    pendingSnapshot = null
+    applyViewerSnapshot(snap)
+  } else {
+    pendingSnapshot = null
+    fitMode.value = true
+    initView()
+  }
+  saveViewerState()
 }
 
 function onImageLoad(event: Event) {
@@ -295,11 +308,13 @@ function rotate90() {
   rotation.value = (rotation.value + 90) % 360
   fitMode.value = true
   initView()
+  saveViewerState()
 }
 
 function flip() {
   flipped.value = !flipped.value
   applyView()
+  saveViewerState()
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +362,7 @@ function onPanEnd() {
   panning.value = false
   window.removeEventListener('mousemove', onPanMove)
   window.removeEventListener('mouseup', onPanEnd)
+  saveViewerState()
 }
 
 /** 只有点在 stage 本身的空白处才关闭；点图片 / 拖动都不关闭。 */
@@ -386,9 +402,18 @@ onMounted(() => {
         constrainView()
         applyView()
       }
+      saveViewerState()
     })
     observer.observe(stageEl.value)
   }
+
+  // 刷新恢复：先把快照读出来，等图片尺寸到位再套用
+  pendingSnapshot = readViewerSnapshot()
+  const restoredScroll =
+    pendingSnapshot && pendingSnapshot.id === item.value?.id
+      ? { text: pendingSnapshot.promptScroll, side: pendingSnapshot.sideScroll }
+      : null
+
   // 图片可能已经在缓存里，load 事件不会再来一次
   const img = imgEl.value
   if (img && img.complete && img.naturalWidth) initFromImage(img)
@@ -398,8 +423,17 @@ onMounted(() => {
   // 刷新前弹窗是开着的：同一张图 + 有临时提示词时自动恢复
   const savedPromptId = readPromptOpenId()
   if (savedPromptId !== null) {
-    if (item.value?.id === savedPromptId && tempPrompt.value) promptInfoOpen.value = true
-    else savePromptOpen(false)
+    if (item.value?.id === savedPromptId && tempPrompt.value) {
+      promptInfoOpen.value = true
+      if (restoredScroll) {
+        nextTick(() => {
+          if (promptTextEl.value) promptTextEl.value.scrollTop = restoredScroll.text
+          if (promptSideEl.value) promptSideEl.value.scrollTop = restoredScroll.side
+        })
+      }
+    } else {
+      savePromptOpen(false)
+    }
   }
 })
 
@@ -408,8 +442,17 @@ onBeforeUnmount(() => {
   onPanEnd()
   cancelAnim()
   clearInfoTimer()
-  // 主动关掉灯箱时清掉弹窗记录；刷新页面不会走到这里
+  if (stateSaveTimer !== null) {
+    window.clearTimeout(stateSaveTimer)
+    stateSaveTimer = null
+  }
+  // 主动关掉灯箱时清掉记录；刷新页面不会走到这里
   savePromptOpen(false)
+  try {
+    localStorage.removeItem(VIEWER_STATE_KEY)
+  } catch {
+    /* localStorage 不可用时忽略 */
+  }
   observer?.disconnect()
   observer = null
 })
@@ -623,7 +666,106 @@ function savePromptOpen(open: boolean) {
   }
 }
 
-watch(promptInfoOpen, (open) => savePromptOpen(open))
+/**
+ * 弹窗开关变化：记到 storage；并在合适时机保存完整视图快照
+ * （打开瞬间 DOM 还没渲染，滚动位置要等下一帧再存）。
+ */
+watch(promptInfoOpen, async (open) => {
+  savePromptOpen(open)
+  if (!open) {
+    saveViewerState()
+    return
+  }
+  await nextTick()
+  scheduleViewerSave()
+})
+
+// ---------------------------------------------------------------------------
+// 完整视图快照：刷新前后保持一模一样
+// ---------------------------------------------------------------------------
+
+interface ViewerSnapshot {
+  id: number
+  fitMode: boolean
+  scale: number
+  /** 图片中心相对 stage 的坐标（0~1），窗口尺寸变化时也能对准 */
+  fx: number
+  fy: number
+  rotation: number
+  flipped: boolean
+  showInfo: boolean
+  infoFaded: boolean
+  promptScroll: number
+  sideScroll: number
+}
+
+const VIEWER_STATE_KEY = 'pb.viewer.state'
+/** 刷新后第一次拿到图片尺寸时要套用的快照。 */
+let pendingSnapshot: ViewerSnapshot | null = null
+let stateSaveTimer: number | null = null
+
+function readViewerSnapshot(): ViewerSnapshot | null {
+  try {
+    const raw = localStorage.getItem(VIEWER_STATE_KEY)
+    return raw ? (JSON.parse(raw) as ViewerSnapshot) : null
+  } catch {
+    return null
+  }
+}
+
+function saveViewerState() {
+  const it = item.value
+  if (!it || !natural.value.w) return
+  const sw = stageSize.value.w || 1
+  const sh = stageSize.value.h || 1
+  try {
+    const snapshot: ViewerSnapshot = {
+      id: it.id,
+      fitMode: fitMode.value,
+      scale: view.scale,
+      fx: view.cx / sw,
+      fy: view.cy / sh,
+      rotation: rotation.value,
+      flipped: flipped.value,
+      showInfo: showInfo.value,
+      infoFaded: infoFaded.value,
+      promptScroll: promptTextEl.value?.scrollTop ?? 0,
+      sideScroll: promptSideEl.value?.scrollTop ?? 0,
+    }
+    localStorage.setItem(VIEWER_STATE_KEY, JSON.stringify(snapshot))
+  } catch {
+    /* localStorage 不可用时忽略 */
+  }
+}
+
+/** 滚动这类高频事件：200ms 合并写一次。 */
+function scheduleViewerSave() {
+  if (stateSaveTimer !== null) return
+  stateSaveTimer = window.setTimeout(() => {
+    stateSaveTimer = null
+    saveViewerState()
+  }, 200)
+}
+
+function onPromptScroll() {
+  if (promptInfoOpen.value) scheduleViewerSave()
+}
+
+function applyViewerSnapshot(s: ViewerSnapshot) {
+  rotation.value = s.rotation ?? 0
+  flipped.value = !!s.flipped
+  showInfo.value = s.showInfo !== false
+  infoFaded.value = !!s.infoFaded
+  fitMode.value = !!s.fitMode
+  syncStageSize()
+  const fit = computeFit()
+  const scale = fitMode.value ? fit : Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.scale || fit))
+  view.scale = view.targetScale = scale
+  view.cx = view.targetCx = (Number.isFinite(s.fx) ? s.fx : 0.5) * stageSize.value.w
+  view.cy = view.targetCy = (Number.isFinite(s.fy) ? s.fy : 0.5) * stageSize.value.h
+  constrainView()
+  applyView()
+}
 
 // ---------------------------------------------------------------------------
 // 信息卡：默认展示，不在上面时渐渐变淡；拖拽经过不触发唤回
@@ -634,6 +776,21 @@ const INFO_FADE_DELAY_MS = 2000
 let infoTimer: number | null = null
 const infoHovering = ref(false)
 const infoFaded = ref(false)
+
+/**
+ * 在 setup 阶段（首次渲染前）就先套用快照里的显隐/淡出/旋转状态，
+ * 否则刷新后会先显示完整信息卡、再淡出，和刷新前不一致。
+ */
+pendingSnapshot = readViewerSnapshot()
+if (pendingSnapshot && pendingSnapshot.id === item.value?.id) {
+  infoFaded.value = !!pendingSnapshot.infoFaded
+  showInfo.value = pendingSnapshot.showInfo !== false
+  rotation.value = pendingSnapshot.rotation ?? 0
+  flipped.value = !!pendingSnapshot.flipped
+  fitMode.value = !!pendingSnapshot.fitMode
+} else {
+  pendingSnapshot = null
+}
 
 function clearInfoTimer() {
   if (infoTimer !== null) {
@@ -648,12 +805,15 @@ function scheduleInfoFade() {
   infoTimer = window.setTimeout(() => {
     infoFaded.value = true
     infoTimer = null
+    saveViewerState()
   }, INFO_FADE_DELAY_MS)
 }
 
 function restoreInfo() {
+  const wasFaded = infoFaded.value
   clearInfoTimer()
   infoFaded.value = false
+  if (wasFaded) saveViewerState()
 }
 
 function onInfoEnter() {
@@ -681,6 +841,7 @@ function toggleInfo() {
     restoreInfo()
     scheduleInfoFade()
   }
+  saveViewerState()
 }
 
 // ---------------------------------------------------------------------------
@@ -869,11 +1030,19 @@ function onKey(event: KeyboardEvent) {
         <div class="prompt-cols">
           <div class="prompt-main">
             <div class="prompt-box">
-              <pre class="prompt-text main-prompt">{{ tempPrompt || '（出图参数里没有留下提示词正文）' }}</pre>
+              <pre
+                ref="promptTextEl"
+                class="prompt-text main-prompt"
+                @scroll.passive="onPromptScroll"
+              >{{ tempPrompt || '（出图参数里没有留下提示词正文）' }}</pre>
             </div>
           </div>
 
-          <aside class="prompt-side">
+          <aside
+            ref="promptSideEl"
+            class="prompt-side"
+            @scroll.passive="onPromptScroll"
+          >
             <div class="side-head">
               <h3
                 class="side-heading copyable"
