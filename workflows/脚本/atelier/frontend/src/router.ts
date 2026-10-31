@@ -17,8 +17,8 @@ import DesignView from './views/DesignView.vue'
  *
  * 路由段 / 视图名 / 导航文案三者同名（`命名规范.md` §8）：
  * `/gallery` ↔ `GalleryView` ↔ "画廊"、`/editor` ↔ `EditorView` ↔ "图像编辑"、
- * `/taxonomy` ↔ `TaxonomyView` ↔ "分类与标签"。旧路径 `/faceswap`、`/manage`
- * 保留 redirect，书签不失效。设计令牌预览是开发用页面，只在 `/dev/design`。
+ * `/taxonomy` ↔ `TaxonomyView` ↔ "分类与标签"。旧路径 `/faceswap`、`/manage`、`/design`
+ * 各留一条 redirect，书签不失效。设计令牌预览是开发用页面，只在 `/dev/design`，顶栏无入口。
  */
 export const router = createRouter({
   history: createWebHistory(),
@@ -42,6 +42,7 @@ export const router = createRouter({
     // 旧路径：P2c 改名后留一版 redirect，书签与外链不断
     { path: '/faceswap', redirect: '/editor' },
     { path: '/manage', redirect: '/taxonomy' },
+    { path: '/design', redirect: '/dev/design' },
     { path: '/:pathMatch(.*)*', redirect: '/gallery' },
   ],
 })
