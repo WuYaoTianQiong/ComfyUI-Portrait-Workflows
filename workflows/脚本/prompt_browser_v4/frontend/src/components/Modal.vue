@@ -17,14 +17,20 @@ const props = withDefaults(
     width?: string
     /** 固定高度（图片网格这类需要大片区域的面板用） */
     height?: string
+    /** 不要顶部标题栏（由内容自己在右侧放标题/关闭时用） */
+    headless?: boolean
   }>(),
-  { title: '', width: 'min(760px, 92vw)', height: '' },
+  { title: '', width: 'min(760px, 92vw)', height: '', headless: false },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 function onKey(event: KeyboardEvent) {
-  if (event.key === 'Escape' && props.open) emit('close')
+  if (event.key === 'Escape' && props.open) {
+    // 标记已处理：叠在弹层下面的查看器（如 Lightbox）不应再被同一次 Esc 关掉
+    event.preventDefault()
+    emit('close')
+  }
 }
 
 onMounted(() => window.addEventListener('keydown', onKey))
@@ -35,7 +41,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <Teleport to="body">
     <div v-if="open" class="modal-overlay" @click.self="emit('close')">
       <div class="modal-panel" :style="{ width, height }">
-        <header class="modal-head">
+        <header v-if="!headless" class="modal-head">
           <span v-if="title" class="title">{{ title }}</span>
           <slot name="head" />
           <span class="spacer" />
