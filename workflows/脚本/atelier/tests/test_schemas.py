@@ -142,7 +142,7 @@ def test_job_and_stats_responses_contain_frontend_fields(api, seed_history):
     jobs = api.get("/api/jobs?limit=5").json()
     assert set(jobs) >= {"jobs"}
 
-    stats = api.get("/api/stats").json()
+    stats = api.get("/api/system/stats").json()
     required = {"prompt_count", "history_count", "job_count", "fragment_count", "top_tags"}
     assert required <= set(stats), f"统计响应缺字段：{required - set(stats)}"
 

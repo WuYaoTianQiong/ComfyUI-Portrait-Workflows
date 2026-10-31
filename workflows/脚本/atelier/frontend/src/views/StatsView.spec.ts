@@ -6,7 +6,7 @@ import StatsView from './StatsView.vue'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
-    if (path.includes('/api/stats')) {
+    if (path.includes('/api/system/stats')) {
       return {
         prompt_count: 331,
         history_count: 14,

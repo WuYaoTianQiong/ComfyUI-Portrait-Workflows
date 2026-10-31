@@ -29,7 +29,7 @@ const activeCount = computed(() => activeJobs.value?.jobs?.length ?? 0)
 /** ComfyUI 在线状态：离线时不该让用户以为能出图（历史上因此白跑 27 个任务）。 */
 const { data: status } = useQuery<{ comfyui: string }>({
   queryKey: ['status'],
-  queryFn: () => apiGet('/api/status'),
+  queryFn: () => apiGet('/api/system/status'),
   refetchInterval: 10_000,
 })
 

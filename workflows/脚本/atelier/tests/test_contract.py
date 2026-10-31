@@ -95,7 +95,7 @@ def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     monkeypatch.setattr(comfy_router, "inject_prompt", lambda wf, data: captured.update(data))
     monkeypatch.setattr(comfy_router, "push_prompt", lambda wf: {"prompt_id": "pid-1"})
 
-    r = api.post("/api/batch_generate", json={
+    r = api.post("/api/runs/batch", json={
         "items": [{
             "prompt_id": p.id,
             "seed": p.seed or 0,
@@ -125,7 +125,7 @@ def test_workflows_api_exposes_params(api):
 
 
 def test_status_ok(api):
-    r = api.get("/api/status")
+    r = api.get("/api/system/status")
     assert r.status_code == 200
     body = r.json()
     assert "comfyui" in body
@@ -134,7 +134,7 @@ def test_status_ok(api):
 def test_status_reports_offline_when_comfyui_unreachable(api):
     """状态必须是真实探活：曾因 get_queue() 吞异常返回 {}，状态永远是 online，
     导致 ComfyUI 离线时仍允许提交任务（历史 109 个任务里 27 个因此失败）。"""
-    body = api.get("/api/status").json()
+    body = api.get("/api/system/status").json()
     assert body["comfyui"] == "offline"
 
 

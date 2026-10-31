@@ -125,7 +125,7 @@ from app.routers.tags import router as tags_router
 from app.routers.composer import router as composer_router
 from app.routers.templates import router as templates_router
 from app.routers.fragments import router as fragments_router
-from app.routers.stats import router as stats_router
+from app.routers.system import router as system_router
 from app.routers.editor import router as editor_router
 from app.routers.fsbrowse import router as fsbrowse_router
 
@@ -139,9 +139,14 @@ app.include_router(tags_router, prefix="/api")
 app.include_router(composer_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(fragments_router, prefix="/api")
-app.include_router(stats_router, prefix="/api")
+app.include_router(system_router, prefix="/api")
 app.include_router(editor_router, prefix="/api")
 app.include_router(fsbrowse_router, prefix="/api")
+
+# 旧路径 308 别名必须最后注册：注册在前面会抢走新路径的请求。
+from app.routers.legacy import router as legacy_router
+
+app.include_router(legacy_router, prefix="/api")
 
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):

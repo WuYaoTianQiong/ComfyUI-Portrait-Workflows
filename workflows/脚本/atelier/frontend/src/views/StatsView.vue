@@ -10,7 +10,7 @@ import { sourceLabel } from '../utils/format'
  * 统计页：一眼看清库里有什么。
  *
  * 两份数据拼起来：
- * - `/api/stats`      —— 总量 + 热门标签
+ * - `/api/system/stats`      —— 总量 + 热门标签
  * - `/api/history/facets` —— 图片的来源/方向/模型分布（复用画廊那套分面统计）
  */
 interface StatsResponse {
@@ -30,7 +30,7 @@ interface Facets {
 
 const { data: stats, isFetching } = useQuery<StatsResponse>({
   queryKey: ['stats'],
-  queryFn: () => apiGet('/api/stats'),
+  queryFn: () => apiGet('/api/system/stats'),
 })
 
 const { data: facets } = useQuery<Facets>({

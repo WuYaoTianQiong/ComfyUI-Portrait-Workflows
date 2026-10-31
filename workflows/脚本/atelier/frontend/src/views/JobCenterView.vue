@@ -35,7 +35,7 @@ watch(
 const toast = useToast()
 const queryClient = useQueryClient()
 const stopAll = useMutation({
-  mutationFn: () => apiPost<{ success: boolean; stopped: number }>('/api/batch_stop'),
+  mutationFn: () => apiPost<{ success: boolean; stopped: number }>('/api/jobs/stop_all'),
   onSuccess: (result) => {
     toast.success(`已停止 ${result.stopped} 个任务`)
     queryClient.invalidateQueries({ queryKey: ['jobs'] })

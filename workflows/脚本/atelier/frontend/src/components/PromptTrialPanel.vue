@@ -106,7 +106,7 @@ async function runTrial() {
   }
   busy.value = true
   try {
-    const result = await apiPost<{ success: boolean; job_id: number }>('/api/run_text', {
+    const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
       prompt: props.prompt,
       negative_prompt: props.negativePrompt,
       workflow_path: workflowPath.value,
@@ -138,7 +138,7 @@ async function runVariants() {
     Array.from({ length: count }, (_, i) => {
       // 种子为 0 时交给后端随机；指定种子时依次 +1，出来的图才有区别
       const useSeed = seed.value ? seed.value + i : 0
-      return apiPost<{ success: boolean; job_id: number }>('/api/run_text', {
+      return apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
         prompt: props.prompt,
         negative_prompt: props.negativePrompt,
         workflow_path: workflowPath.value,

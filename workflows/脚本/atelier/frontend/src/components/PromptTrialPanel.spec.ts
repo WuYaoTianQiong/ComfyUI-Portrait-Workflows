@@ -51,7 +51,7 @@ describe('PromptTrialPanel 提示词试跑 / 变体', () => {
     useSettings().workflowPath.value = '/wf/a.json'
   })
 
-  it('试跑调 /api/run_text 且带上当前提示词', async () => {
+  it('试跑调 /api/runs/text 且带上当前提示词', async () => {
     const wrapper = await mountPanel()
     const btn = wrapper.findAll('button').find((b) => b.text().includes('试跑一张'))!
     await btn.trigger('click')
@@ -59,7 +59,7 @@ describe('PromptTrialPanel 提示词试跑 / 变体', () => {
 
     expect(apiPost).toHaveBeenCalledTimes(1)
     const [path, body] = vi.mocked(apiPost).mock.calls[0]
-    expect(path).toBe('/api/run_text')
+    expect(path).toBe('/api/runs/text')
     expect((body as Record<string, unknown>).prompt).toBe('一张测试图片的提示词')
   })
 

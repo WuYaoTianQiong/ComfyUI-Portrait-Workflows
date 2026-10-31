@@ -188,7 +188,7 @@ def main() -> int:
             checks = []
 
             # ComfyUI 是否在线：决定部分用例是 FAIL 还是 SKIP（离线属于环境状态，不是回归）
-            code, body = _get(BASE + "/api/status")
+            code, body = _get(BASE + "/api/system/status")
             try:
                 comfy_online = json.loads(body).get("comfyui") == "online"
             except Exception:

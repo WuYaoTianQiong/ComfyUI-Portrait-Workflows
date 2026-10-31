@@ -599,7 +599,7 @@ def cancel_job(job_id: int) -> bool:
 
 
 def stop_all() -> int:
-    """兼容旧 /api/batch_stop：取消所有进行中的任务。"""
+    """兼容旧 /api/jobs/stop_all：取消所有进行中的任务。"""
     ids = [r.id for r in GenJob.select(GenJob.id).where(GenJob.status.in_(["pending", "running"]))]
     for job_id in ids:
         try:

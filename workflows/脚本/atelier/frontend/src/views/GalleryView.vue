@@ -390,9 +390,9 @@ const { run, runText, busy: regenerating, error: generateError } = useGenerate()
  * 用这张图的记录重新出图。
  *
  * 两条路：
- * - 有 `prompt_id` → `/api/run`，出图关联回那条提示词
+ * - 有 `prompt_id` → `/api/runs`，出图关联回那条提示词
  * - 没有 `prompt_id`（同步进来的图）→ 用 `prompt_params` 里存的文本与参数走
- *   `/api/run_text`。记录里参数是全的（prompt / seed / model / 宽高），所以
+ *   `/api/runs/text`。记录里参数是全的（prompt / seed / model / 宽高），所以
  *   「拿这张图再出一版」不需要先有提示词记录。
  */
 async function regenerate(target: HistoryItem) {

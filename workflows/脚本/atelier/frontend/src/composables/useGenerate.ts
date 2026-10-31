@@ -80,7 +80,7 @@ export function useGenerate() {
     }
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/run', {
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs', {
         id: promptId,
         workflow_path: options.workflowPath,
         // 自定义工作流不在后端磁盘上，内容必须一起带过去
@@ -102,7 +102,7 @@ export function useGenerate() {
 
   /**
    * 批量出图：一次提交多条提示词，共用同一个 job 跟踪进度。
-   * 后端 `/api/batch_generate` 是同步提交（逐个入队），条数多时请求本身会持续几秒。
+   * 后端 `/api/runs/batch` 是同步提交（逐个入队），条数多时请求本身会持续几秒。
    */
   async function runBatch(
     promptIds: number[],
@@ -116,7 +116,7 @@ export function useGenerate() {
     if (!promptIds.length) return
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/batch_generate', {
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/batch', {
         items: promptIds.map((id) => ({ prompt_id: id, seed: 0 })),
         workflow_path: options.workflowPath,
         // 自定义工作流不在后端磁盘上，内容必须一起带过去
@@ -150,7 +150,7 @@ export function useGenerate() {
     if (!items.length) return
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/batch_generate', {
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/batch', {
         items: items.map((it) => ({
           prompt_id: it.promptId,
           seed: it.seed,
@@ -192,7 +192,7 @@ export function useGenerate() {
     }
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/run_text', {
+      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
         prompt: options.prompt,
         negative_prompt: options.negative_prompt ?? '',
         workflow_path: options.workflowPath,

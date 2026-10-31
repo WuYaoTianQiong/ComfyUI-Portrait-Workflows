@@ -89,6 +89,29 @@ def list_jobs(active: bool = Query(False), limit: int = Query(50)):
     return {"jobs": job_state.list_snapshots(active=active, limit=limit)}
 
 
+# ---------------------------------------------------------------------------
+# 单条进度查询（保留给旧调用方）
+# 必须注册在 /jobs/{job_id} 之前，否则 "progress" 会被当成 job_id 并报 422
+# ---------------------------------------------------------------------------
+
+@router.get("/jobs/progress")
+def check_progress(prompt_id: str = Query("")):
+    if not prompt_id:
+        raise HTTPException(400, "缺少 prompt_id")
+    try:
+        hist = get_history_for_prompt(prompt_id)
+        done = False
+        images = []
+        if hist and prompt_id in hist:
+            done = True
+            for node_out in hist[prompt_id].get("outputs", {}).values():
+                for img in node_out.get("images", []):
+                    images.append(img)
+        return {"done": done, "images": images, "status": "done" if done else "unknown"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @router.get("/jobs/{job_id}")
 def get_job_detail(job_id: int):
     snapshot = job_state.read_snapshot(job_id)
@@ -108,31 +131,9 @@ def cancel_job(job_id: int):
     return {"success": True, "job_id": job_id}
 
 
-@router.post("/batch_stop")
-def batch_stop():
-    """兼容旧接口：停止所有进行中的任务（定向取消，不再 clear 整个队列）。"""
+@router.post("/jobs/stop_all")
+def stop_all_jobs():
+    """停止所有进行中的任务（定向取消，不再 clear 整个队列）。"""
     batch_stop_flag.set()
     stopped = job_state.stop_all()
     return {"success": True, "stopped": stopped}
-
-
-# ---------------------------------------------------------------------------
-# 单条进度查询（保留给旧调用方）
-# ---------------------------------------------------------------------------
-
-@router.get("/progress")
-def check_progress(prompt_id: str = Query("")):
-    if not prompt_id:
-        raise HTTPException(400, "缺少 prompt_id")
-    try:
-        hist = get_history_for_prompt(prompt_id)
-        done = False
-        images = []
-        if hist and prompt_id in hist:
-            done = True
-            for node_out in hist[prompt_id].get("outputs", {}).values():
-                for img in node_out.get("images", []):
-                    images.append(img)
-        return {"done": done, "images": images, "status": "done" if done else "unknown"}
-    except Exception as e:
-        raise HTTPException(500, str(e))

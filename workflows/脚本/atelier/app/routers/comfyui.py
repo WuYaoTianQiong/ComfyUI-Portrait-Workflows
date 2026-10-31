@@ -1,94 +1,27 @@
-"""ComfyUI 交互 —— 状态 / 工作流列表 / 跑图 / 批量生成 / 缺图补跑。
+"""ComfyUI 交互 —— 工作流列表 / 跑图 / 批量生成 / 缺图补跑。
 
-图片与缩略图服务已拆到 `routers/media.py`（见该模块说明）。
+图片与缩略图服务在 `routers/media.py`；运行状态与配置在 `routers/system.py`
+（P3 路由资源化后，裸动词 `/api/system/status`、`/api/system/config` 已收编到 `/api/system/*`）。
 """
 import json
 import logging
 import os
 import traceback
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from app.schemas import WorkflowListResponse
 from pydantic import BaseModel
 
-from app.config import settings
 from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
-from app.services.workflow_parser import (
-    load_workflow,
-    inject_prompt,
-    detect_workflow_caps,
-    detect_workflow_params,
-)
-from app.services.comfyui_client import push_prompt, get_queue as fetch_queue, is_online
+from app.services.workflow_catalog import find_default_workflow, list_valid_workflows
+from app.services.workflow_parser import load_workflow, inject_prompt
+from app.services.comfyui_client import push_prompt
 from app.routers.jobs import create_job, update_job_items
 from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["ComfyUI"])
 logger = logging.getLogger(__name__)
-
-DEPRECATED_DIR = settings.library_root / "废弃工作流"
-
-
-def _is_valid_workflow(filepath: Path) -> bool:
-    try:
-        content = json.loads(filepath.read_text(encoding="utf-8"))
-        # API 格式：扁平 {节点id: {class_type: ...}}
-        if any(isinstance(v, dict) and "class_type" in v for v in content.values()):
-            return True
-        # 界面格式：{nodes: [...]}。load_workflow/ensure_api_format 能直接转换，
-        # 与 /validate_workflow 的判定保持一致（旧逻辑只认 API 格式，
-        # 导致界面里保存的工作流全部不出现在下拉列表中）。
-        nodes = content.get("nodes")
-        return isinstance(nodes, list) and any(
-            isinstance(n, dict) and n.get("type") for n in nodes
-        )
-    except Exception:
-        return False
-
-
-# 工作流能力探测缓存：路径 → (mtime, caps, params)。文件没改动就不重复解析。
-_workflow_meta_cache: dict[str, tuple[float, dict[str, bool], dict]] = {}
-
-
-def _workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
-    """返回某工作流的注入能力与参数描述；解析失败时返回空 dict（schema 默认全 True）。"""
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return {}, {}
-    cached = _workflow_meta_cache.get(str(path))
-    if cached and cached[0] == mtime:
-        return cached[1], cached[2]
-    try:
-        wf = load_workflow(str(path))
-        caps = detect_workflow_caps(wf)
-        params = detect_workflow_params(wf)
-    except Exception as exc:
-        logger.debug("探测工作流能力失败 %s：%s", path.name, exc)
-        caps, params = {}, {}
-    _workflow_meta_cache[str(path)] = (mtime, caps, params)
-    return caps, params
-
-
-def _find_default_workflow() -> str:
-    candidates = []
-    for d in [settings.library_root, DEPRECATED_DIR]:
-        if not d.exists():
-            continue
-        for f in sorted(d.glob("*.json")):
-            try:
-                if _is_valid_workflow(f):
-                    candidates.append(str(f))
-            except Exception:
-                continue
-    for c in candidates:
-        if "文生图" in c:
-            return c
-    return candidates[0] if candidates else ""
-
-COMFYUI_API = settings.comfyui_api
 
 
 # ---------- Pydantic schemas ----------
@@ -138,21 +71,7 @@ class GenerateMissingRequest(BaseModel):
     prompt_ids: list[int] | None = None  # 可选：仅补全指定提示词（与缺图集合取交集）
 
 
-# ---------- Status ----------
-
-@router.get("/status")
-def check_status():
-    # 不能靠 get_queue() 判断在线：它在任何异常下都返回 {}，于是状态永远是 online，
-    # 前端就会允许在 ComfyUI 离线时提交任务（历史 109 个任务里 27 个因此失败）。
-    if not is_online():
-        return {"comfyui": "offline", "queue_running": 0, "queue_pending": 0}
-    queue = fetch_queue()
-    return {
-        "comfyui": "online",
-        "queue_running": len(queue.get("queue_running", [])),
-        "queue_pending": len(queue.get("queue_pending", [])),
-    }
-
+# ---------- 工作流校验 ----------
 
 @router.get("/validate_workflow")
 def validate_workflow(path: str = Query("")):
@@ -175,54 +94,24 @@ def validate_workflow(path: str = Query("")):
         return {"valid": False, "error": str(e)}
 
 
-# ---------- 工作流列表与配置 ----------
+# ---------- 工作流列表 ----------
 
 @router.get("/workflows", response_model=WorkflowListResponse)
 def list_workflows(sort: str = Query("mtime")):
     """列出所有可用工作流"""
-    results: list[dict] = []
-    seen: set[str] = set()
-
-    for d in [settings.library_root, DEPRECATED_DIR]:
-        if not d.exists():
-            continue
-        for f in d.glob("*.json"):
-            if not _is_valid_workflow(f):
-                continue
-            fp = str(f)
-            if fp not in seen:
-                seen.add(fp)
-                caps, params = _workflow_meta(f)
-                results.append({
-                    "path": fp,
-                    "name": f.name,
-                    "mtime": f.stat().st_mtime,
-                    "caps": caps,
-                    "params": params,
-                })
+    results = list_valid_workflows()
 
     if sort == "mtime":
         results.sort(key=lambda x: x["mtime"], reverse=True)
     else:
         results.sort(key=lambda x: x["name"])
 
-    return {"workflows": results, "default": _find_default_workflow()}
-
-
-@router.get("/config")
-def get_config():
-    """返回默认工作流和数据库路径等配置"""
-    default = _find_default_workflow()
-    return {
-        "workflow_path": default,
-        "workflow_name": Path(default).name if default else "未设置",
-        "db_path": str(settings.db_path),
-    }
+    return {"workflows": results, "default": find_default_workflow()}
 
 
 # ---------- 单图跑图 ----------
 
-@router.post("/run")
+@router.post("/runs")
 def run_prompt(req: RunRequest):
     """单图生成"""
     p = Prompt.get_or_none(Prompt.id == req.id)
@@ -293,7 +182,7 @@ def run_prompt(req: RunRequest):
 
 # ---------- 裸 prompt 跑图（无需 prompt_id） ----------
 
-@router.post("/run_text")
+@router.post("/runs/text")
 def run_text_prompt(req: RunTextRequest):
     """直接提交 prompt 文本生成，无需数据库中已有记录"""
     workflow_path = req.workflow_path or ""
@@ -348,7 +237,7 @@ def run_text_prompt(req: RunTextRequest):
 
 # ---------- 批量生成 ----------
 
-@router.post("/batch_generate")
+@router.post("/runs/batch")
 def batch_generate(req: BatchRequest):
     """批量 / 变体生成"""
     if not req.items:
