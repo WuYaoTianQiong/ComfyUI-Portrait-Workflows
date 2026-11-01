@@ -132,6 +132,11 @@
             ],
             "title": "Fixed Fragments"
           },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
@@ -140,6 +145,11 @@
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "quality": {
@@ -190,6 +200,15 @@
             "title": "Content",
             "type": "string"
           },
+          "missing": {
+            "default": "skip",
+            "enum": [
+              "skip",
+              "append"
+            ],
+            "title": "Missing",
+            "type": "string"
+          },
           "texts": {
             "items": {
               "$ref": "#/components/schemas/ReplaceText"
@@ -210,6 +229,11 @@
       },
       "BatchReplaceResponse": {
         "properties": {
+          "appended": {
+            "default": 0,
+            "title": "Appended",
+            "type": "integer"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ReplaceResult"
@@ -228,6 +252,11 @@
       },
       "BatchRequest": {
         "properties": {
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/BatchItem"
@@ -238,6 +267,11 @@
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "quality": {
@@ -451,6 +485,11 @@
             "title": "Orientation",
             "type": "string"
           },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
+            "type": "string"
+          },
           "prompt": {
             "title": "Prompt",
             "type": "string"
@@ -483,12 +522,35 @@
         "title": "ComposerRunRequest",
         "type": "object"
       },
+      "CreateOutputFolderRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent": {
+            "default": "",
+            "title": "Parent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateOutputFolderRequest",
+        "type": "object"
+      },
       "FaceswapRequest": {
         "properties": {
           "dry_run": {
             "default": false,
             "title": "Dry Run",
             "type": "boolean"
+          },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
           },
           "main_ids": {
             "default": [],
@@ -528,6 +590,11 @@
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "pair_mode": {
@@ -849,9 +916,19 @@
       "GenerateMissingRequest": {
         "description": "为所有「没有生成过图片」的提示词批量出图",
         "properties": {
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "prompt_ids": {
@@ -1234,6 +1311,17 @@
               }
             ],
             "title": "Status"
+          },
+          "submit_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submit State"
           }
         },
         "title": "JobItem",
@@ -1392,6 +1480,19 @@
         "title": "NodesRequest",
         "type": "object"
       },
+      "OpenFolderRequest": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "OpenFolderRequest",
+        "type": "object"
+      },
       "ParseRequest": {
         "properties": {
           "text": {
@@ -1440,6 +1541,11 @@
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "quality": {
@@ -2059,6 +2165,16 @@
       },
       "ReplaceResult": {
         "properties": {
+          "action": {
+            "default": "replaced",
+            "enum": [
+              "replaced",
+              "appended",
+              "skipped"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2104,6 +2220,58 @@
         "title": "ReplaceText",
         "type": "object"
       },
+      "RetryRequest": {
+        "properties": {
+          "indexes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indexes"
+          }
+        },
+        "title": "RetryRequest",
+        "type": "object"
+      },
+      "RevealRequest": {
+        "properties": {
+          "filename": {
+            "default": "",
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "img_type": {
+            "default": "output",
+            "title": "Img Type",
+            "type": "string"
+          },
+          "subfolder": {
+            "default": "",
+            "title": "Subfolder",
+            "type": "string"
+          }
+        },
+        "title": "RevealRequest",
+        "type": "object"
+      },
       "RunRequest": {
         "properties": {
           "id": {
@@ -2113,6 +2281,11 @@
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "quality": {
@@ -2158,6 +2331,11 @@
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
             "type": "string"
           },
           "prompt": {
@@ -2625,7 +2803,7 @@
   "paths": {
     "/api/browser/image": {
       "get": {
-        "description": "任意图片文件的原图",
+        "description": "任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）",
         "operationId": "browser_image_api_browser_image_get",
         "parameters": [
           {
@@ -3286,7 +3464,7 @@
     },
     "/api/composition/batch_replace": {
       "post": {
-        "description": "批量替换指定类型的正文，返回替换前内容与替换后全文。",
+        "description": "批量替换指定类型的正文；可选在缺少该类型时追加到末尾。",
         "operationId": "batch_replace_composition_api_composition_batch_replace_post",
         "requestBody": {
           "content": {
@@ -3835,6 +4013,18 @@
     "/api/images": {
       "delete": {
         "operationId": "clear_history_api_images_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -3843,6 +4033,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Clear History",
@@ -4460,6 +4660,46 @@
         ]
       }
     },
+    "/api/images/reveal": {
+      "post": {
+        "description": "按 id 或 (filename, subfolder, type) 在资源管理器中定位原图。\n\n任务/结果中心里的图可能还没入库（没有 id），所以提供按文件名定位的入口；\n路径仍走 `resolve_image_path`，越界与不存在的文件都会被拒绝。",
+        "operationId": "reveal_image_ref_api_images_reveal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal Image Ref",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
     "/api/images/sync": {
       "get": {
         "operationId": "sync_history_api_images_sync_get",
@@ -4859,6 +5099,47 @@
         ]
       }
     },
+    "/api/images/{item_id}/reveal": {
+      "post": {
+        "description": "在资源管理器中定位这条出图记录对应的原图。",
+        "operationId": "reveal_history_item_api_images__item_id__reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal History Item",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
     "/api/images/{item_id}/tags/{tag_id}": {
       "delete": {
         "operationId": "remove_image_tag_api_images__item_id__tags__tag_id__delete",
@@ -5192,6 +5473,64 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/retry": {
+      "post": {
+        "description": "把失败/取消的条目重提成一个新任务；indexes 为空时自动挑失败项。",
+        "operationId": "retry_job_api_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RetryRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Data"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Job",
+        "tags": [
+          "任务"
+        ]
+      }
+    },
     "/api/media/image": {
       "get": {
         "operationId": "proxy_image_api_media_image_get",
@@ -5459,6 +5798,42 @@
               "title": "Tag Match",
               "type": "string"
             }
+          },
+          {
+            "description": "碎片类型，逗号分隔（如 人物面部,人物服饰）",
+            "in": "query",
+            "name": "fragment_types",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "碎片类型，逗号分隔（如 人物面部,人物服饰）",
+              "title": "Fragment Types",
+              "type": "string"
+            }
+          },
+          {
+            "description": "has=含有所选类型, only=仅含所选类型",
+            "in": "query",
+            "name": "fragment_match",
+            "required": false,
+            "schema": {
+              "default": "has",
+              "description": "has=含有所选类型, only=仅含所选类型",
+              "title": "Fragment Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "关键词需命中碎片正文",
+            "in": "query",
+            "name": "fragment_kw",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "关键词需命中碎片正文",
+              "title": "Fragment Kw",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5641,7 +6016,7 @@
     },
     "/api/prompts/full": {
       "get": {
-        "description": "按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。\n\n列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全\n相同的筛选条件，避免\"看到的和替换的不是同一批\"。\n`ids` 用于\"只替换左侧已勾选的提示词\"——勾选可能跨页/跨筛选，不能再套筛选。",
+        "description": "按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。\n\n列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全\n相同的筛选条件（含碎片筛选），避免\"看到的和替换的不是同一批\"。\n`ids` 用于\"只替换左侧已勾选的提示词\"——勾选可能跨页/跨筛选，不能再套筛选。",
         "operationId": "list_prompts_full_api_prompts_full_get",
         "parameters": [
           {
@@ -5693,6 +6068,36 @@
             "schema": {
               "default": "all",
               "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_types",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Types",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_match",
+            "required": false,
+            "schema": {
+              "default": "has",
+              "title": "Fragment Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_kw",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Kw",
               "type": "string"
             }
           },
@@ -5866,6 +6271,42 @@
             "schema": {
               "default": "all",
               "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "碎片类型，逗号分隔",
+            "in": "query",
+            "name": "fragment_types",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "碎片类型，逗号分隔",
+              "title": "Fragment Types",
+              "type": "string"
+            }
+          },
+          {
+            "description": "has=含有, only=仅含",
+            "in": "query",
+            "name": "fragment_match",
+            "required": false,
+            "schema": {
+              "default": "has",
+              "description": "has=含有, only=仅含",
+              "title": "Fragment Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "关键词需命中碎片正文",
+            "in": "query",
+            "name": "fragment_kw",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "关键词需命中碎片正文",
+              "title": "Fragment Kw",
               "type": "string"
             }
           }
@@ -6412,6 +6853,146 @@
           }
         },
         "summary": "Get System Config",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/system/open-folder": {
+      "post": {
+        "description": "在资源管理器中打开一个已存在的目录（磁盘选图页用）。",
+        "operationId": "open_folder_api_system_open_folder_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Folder",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/system/open-output": {
+      "post": {
+        "description": "在资源管理器中打开当前出图根目录（仅本机 Windows 有意义）。",
+        "operationId": "open_output_dir_api_system_open_output_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Open Output Dir",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/system/output-folders": {
+      "get": {
+        "description": "列出 output 下某一层的子目录（出图位置选择器用，只能看到 output 内）。",
+        "operationId": "list_output_folders_api_system_output_folders_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Output Folders",
+        "tags": [
+          "系统"
+        ]
+      },
+      "post": {
+        "description": "在 output 下新建一级目录；已存在时直接返回。",
+        "operationId": "create_output_folder_api_system_output_folders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOutputFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Output Folder",
         "tags": [
           "系统"
         ]
@@ -7229,7 +7810,7 @@
     },
     "/api/workflows": {
       "get": {
-        "description": "列出所有可用工作流",
+        "description": "列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。",
         "operationId": "list_workflows_api_workflows_get",
         "parameters": [
           {
@@ -7240,6 +7821,18 @@
               "default": "mtime",
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "description": "true=也返回视频工作流（默认隐藏）",
+            "in": "query",
+            "name": "include_video",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "true=也返回视频工作流（默认隐藏）",
+              "title": "Include Video",
+              "type": "boolean"
             }
           }
         ],

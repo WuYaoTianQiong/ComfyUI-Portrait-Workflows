@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Browser Image
-         * @description 任意图片文件的原图
+         * @description 任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）
          */
         get: operations["browser_image_api_browser_image_get"];
         put?: never;
@@ -248,7 +248,7 @@ export interface paths {
         put?: never;
         /**
          * Batch Replace Composition
-         * @description 批量替换指定类型的正文，返回替换前内容与替换后全文。
+         * @description 批量替换指定类型的正文；可选在缺少该类型时追加到末尾。
          */
         post: operations["batch_replace_composition_api_composition_batch_replace_post"];
         delete?: never;
@@ -610,6 +610,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Image Ref
+         * @description 按 id 或 (filename, subfolder, type) 在资源管理器中定位原图。
+         *
+         *     任务/结果中心里的图可能还没入库（没有 id），所以提供按文件名定位的入口；
+         *     路径仍走 `resolve_image_path`，越界与不存在的文件都会被拒绝。
+         */
+        post: operations["reveal_image_ref_api_images_reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/sync": {
         parameters: {
             query?: never;
@@ -734,6 +757,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/{item_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal History Item
+         * @description 在资源管理器中定位这条出图记录对应的原图。
+         */
+        post: operations["reveal_history_item_api_images__item_id__reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/{item_id}/tags/{tag_id}": {
         parameters: {
             query?: never;
@@ -851,6 +894,26 @@ export interface paths {
         put?: never;
         /** Cancel Job */
         post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Job
+         * @description 把失败/取消的条目重提成一个新任务；indexes 为空时自动挑失败项。
+         */
+        post: operations["retry_job_api_jobs__job_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1007,7 +1070,7 @@ export interface paths {
          * @description 按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。
          *
          *     列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全
-         *     相同的筛选条件，避免"看到的和替换的不是同一批"。
+         *     相同的筛选条件（含碎片筛选），避免"看到的和替换的不是同一批"。
          *     `ids` 用于"只替换左侧已勾选的提示词"——勾选可能跨页/跨筛选，不能再套筛选。
          */
         get: operations["list_prompts_full_api_prompts_full_get"];
@@ -1268,6 +1331,70 @@ export interface paths {
         get: operations["get_system_config_api_system_config_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/open-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Folder
+         * @description 在资源管理器中打开一个已存在的目录（磁盘选图页用）。
+         */
+        post: operations["open_folder_api_system_open_folder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/open-output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Output Dir
+         * @description 在资源管理器中打开当前出图根目录（仅本机 Windows 有意义）。
+         */
+        post: operations["open_output_dir_api_system_open_output_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/output-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Output Folders
+         * @description 列出 output 下某一层的子目录（出图位置选择器用，只能看到 output 内）。
+         */
+        get: operations["list_output_folders_api_system_output_folders_get"];
+        put?: never;
+        /**
+         * Create Output Folder
+         * @description 在 output 下新建一级目录；已存在时直接返回。
+         */
+        post: operations["create_output_folder_api_system_output_folders_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1543,7 +1670,7 @@ export interface paths {
         };
         /**
          * List Workflows
-         * @description 列出所有可用工作流
+         * @description 列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。
          */
         get: operations["list_workflows_api_workflows_get"];
         put?: never;
@@ -1608,6 +1735,11 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
+            /**
              * Negative Prompt
              * @default
              */
@@ -1617,6 +1749,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Quality
              * @default 4K
@@ -1644,6 +1781,12 @@ export interface components {
              * @default
              */
             content: string;
+            /**
+             * Missing
+             * @default skip
+             * @enum {string}
+             */
+            missing: "skip" | "append";
             /** Texts */
             texts?: components["schemas"]["ReplaceText"][];
             /** Type */
@@ -1651,6 +1794,11 @@ export interface components {
         };
         /** BatchReplaceResponse */
         BatchReplaceResponse: {
+            /**
+             * Appended
+             * @default 0
+             */
+            appended: number;
             /** Items */
             items?: components["schemas"]["ReplaceResult"][];
             /**
@@ -1661,6 +1809,11 @@ export interface components {
         };
         /** BatchRequest */
         BatchRequest: {
+            /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
             /** Items */
             items: components["schemas"]["BatchItem"][];
             /**
@@ -1668,6 +1821,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Quality
              * @default 4K
@@ -1758,6 +1916,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /** Prompt */
             prompt: string;
             /**
@@ -1773,6 +1936,16 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** CreateOutputFolderRequest */
+        CreateOutputFolderRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Parent
+             * @default
+             */
+            parent: string;
+        };
         /** FaceswapRequest */
         FaceswapRequest: {
             /**
@@ -1780,6 +1953,11 @@ export interface components {
              * @default false
              */
             dry_run: boolean;
+            /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
             /**
              * Main Ids
              * @default []
@@ -1802,6 +1980,11 @@ export interface components {
              * @default
              */
             negative_prompt: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Pair Mode
              * @default cross
@@ -1990,10 +2173,20 @@ export interface components {
          */
         GenerateMissingRequest: {
             /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
+            /**
              * Orientation
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /** Prompt Ids */
             prompt_ids?: number[] | null;
             /**
@@ -2132,6 +2325,8 @@ export interface components {
             seed?: number | null;
             /** Status */
             status?: string | null;
+            /** Submit State */
+            submit_state?: string | null;
         };
         /** JobListResponse */
         JobListResponse: {
@@ -2210,6 +2405,11 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** OpenFolderRequest */
+        OpenFolderRequest: {
+            /** Path */
+            path: string;
+        };
         /** ParseRequest */
         ParseRequest: {
             /**
@@ -2239,6 +2439,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Quality
              * @default 4K
@@ -2519,6 +2724,12 @@ export interface components {
         };
         /** ReplaceResult */
         ReplaceResult: {
+            /**
+             * Action
+             * @default replaced
+             * @enum {string}
+             */
+            action: "replaced" | "appended" | "skipped";
             /** Id */
             id: number;
             /**
@@ -2539,6 +2750,31 @@ export interface components {
              */
             text: string;
         };
+        /** RetryRequest */
+        RetryRequest: {
+            /** Indexes */
+            indexes?: number[] | null;
+        };
+        /** RevealRequest */
+        RevealRequest: {
+            /**
+             * Filename
+             * @default
+             */
+            filename: string;
+            /** Id */
+            id?: number | null;
+            /**
+             * Img Type
+             * @default output
+             */
+            img_type: string;
+            /**
+             * Subfolder
+             * @default
+             */
+            subfolder: string;
+        };
         /** RunRequest */
         RunRequest: {
             /** Id */
@@ -2548,6 +2784,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Quality
              * @default 4K
@@ -2578,6 +2819,11 @@ export interface components {
              * @default portrait
              */
             orientation: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
             /**
              * Prompt
              * @default
@@ -3714,7 +3960,9 @@ export interface operations {
     };
     clear_history_api_images_delete: {
         parameters: {
-            query?: never;
+            query?: {
+                confirm?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3728,6 +3976,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3892,6 +4149,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryIdsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reveal_image_ref_api_images_reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevealRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -4193,6 +4483,37 @@ export interface operations {
             };
         };
     };
+    reveal_history_item_api_images__item_id__reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_image_tag_api_images__item_id__tags__tag_id__post: {
         parameters: {
             query?: never;
@@ -4434,6 +4755,41 @@ export interface operations {
             };
         };
     };
+    retry_job_api_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetryRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     proxy_image_api_media_image_get: {
         parameters: {
             query: {
@@ -4535,6 +4891,12 @@ export interface operations {
                 page_size?: number;
                 /** @description 多标签语义：all=交集, any=并集 */
                 tag_match?: string;
+                /** @description 碎片类型，逗号分隔（如 人物面部,人物服饰） */
+                fragment_types?: string;
+                /** @description has=含有所选类型, only=仅含所选类型 */
+                fragment_match?: string;
+                /** @description 关键词需命中碎片正文 */
+                fragment_kw?: string;
             };
             header?: never;
             path?: never;
@@ -4690,6 +5052,9 @@ export interface operations {
                 category_id?: number | null;
                 tag_ids?: string | null;
                 tag_match?: string;
+                fragment_types?: string;
+                fragment_match?: string;
+                fragment_kw?: string;
                 ids?: string;
             };
             header?: never;
@@ -4762,6 +5127,12 @@ export interface operations {
                 sort?: string;
                 order?: string;
                 tag_match?: string;
+                /** @description 碎片类型，逗号分隔 */
+                fragment_types?: string;
+                /** @description has=含有, only=仅含 */
+                fragment_match?: string;
+                /** @description 关键词需命中碎片正文 */
+                fragment_kw?: string;
             };
             header?: never;
             path?: never;
@@ -5172,6 +5543,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    open_folder_api_system_open_folder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenFolderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_output_dir_api_system_open_output_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_output_folders_api_system_output_folders_get: {
+        parameters: {
+            query?: {
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_output_folder_api_system_output_folders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOutputFolderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5767,6 +6255,8 @@ export interface operations {
         parameters: {
             query?: {
                 sort?: string;
+                /** @description true=也返回视频工作流（默认隐藏） */
+                include_video?: boolean;
             };
             header?: never;
             path?: never;

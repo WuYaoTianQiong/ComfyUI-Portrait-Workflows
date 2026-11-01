@@ -56,7 +56,10 @@ atelier/
 | 名字 | 含义 | 放什么 |
 |---|---|---|
 | `settings.app_root` | 本项目目录 `<库>/脚本/atelier` | `web/`、`logs/` |
-| `settings.library_root` | ComfyUI 工作流库 `<库>`（自动跳过一层「脚本」） | `*.json` 工作流、`文档/提示词收藏.db`、`thumbnails/`、`painted_masks/`、`废弃工作流/` |
+| `settings.library_root` | ComfyUI 工作流库 `<库>`（自动跳过一层「脚本」） | `*.json` 工作流、`文档/提示词收藏.db`、`thumbnails/`、`painted_masks/`、`历史工作流/` |
+
+> 工作流自动扫描**只覆盖库根目录**；`历史工作流/` 或任意磁盘目录的工作流，在
+> 「分类与标签 → 工作流」里上传自定义 JSON 后即可在下拉中选择（内容存在本机 localStorage）。
 
 包化前二者恰好是同一目录，所以历史上混用过一个 `project_root`；现在已彻底拆开。
 
@@ -71,9 +74,37 @@ atelier/
 | `ATELIER_HOST` / `ATELIER_PORT` | `127.0.0.1` / `8656` | 监听地址 |
 | `ATELIER_COMFYUI_API` | `http://127.0.0.1:8188` | ComfyUI 地址 |
 | `ATELIER_COMFYUI_ROOT_ENV` | 自动向上探测 | 手动指定 ComfyUI 根目录 |
+| `ATELIER_COMFYUI_OUTPUT_DIR` | `<comfyui_root>/output` | 出图根目录；ComfyUI 用 `--output-directory` 时指向同一目录 |
 | `ATELIER_DB_PATH` | `<library_root>/文档/提示词收藏.db` | 主库 |
 | `ATELIER_THUMBNAIL_DIR` | `<library_root>/thumbnails` | 缩略图缓存 |
 | `ATELIER_NO_BROWSER` | 未设置 | 设为 `1` 时启动不自动开浏览器（CI 用） |
+
+### 出图归档位置
+
+顶栏「出图：…」按钮可设置**相对 ComfyUI output 的子目录**，留空时保持旧的平铺行为。
+支持变量：`{date}`、`{month}`、`{year}`、`{workflow}`、`{job_id}`、`{quality}`、`{orientation}`，
+例如 `{date}/{workflow}` 会落到 `output/2026-11-01/工作流名/`。「浏览…」可在 output 内逐级选择或新建目录；
+目录由后端校验（拒绝绝对路径、盘符与 `..`），磁盘兜底扫描会递归读取子目录，弹窗里的「打开出图目录」
+直接在资源管理器打开当前根目录。
+
+出图根目录由 ComfyUI 决定（这里只显示、不在这里改）；需要换盘/换根时设置 `ATELIER_COMFYUI_OUTPUT_DIR`，
+并让 ComfyUI 使用同一 output 目录。任意图片所在处（画廊卡片、灯箱、提示词出图历史、任务中心、
+组合结果、对比、图像选择器）都提供「定位」，灯箱信息卡也会显示 `output/子目录/文件名`。
+
+### 替换碎片出图
+
+「替换碎片」不写回提示词库。生成的图片**不挂原提示词**：`prompt_id` 为空，实际替换文本写入
+`prompt_params.prompt`，按「临时提示词」展示，并用 `source_prompt_id/source_prompt_name` 保留来源；
+画廊卡片会标「替换」。单条提示词详情和勾选后的批量栏都有入口。
+
+弹窗会记住上次的碎片类型、替换内容、范围与“缺少时跳过/追加”策略；缺少目标类型时可选「追加」，
+在末尾补一段 `【类型】\n内容`，而不是只能跳过。替换输入框和候选列表按弹窗高度弹性分配。
+
+### 批量提交
+
+提示词批量、组合器随机批量、换脸批量都是**后台队列**：接口只建任务并立即返回 `job_id`，
+由 `job-submitter` 线程串行 push 到 ComfyUI；进度在任务页 / 结果中心看。
+服务重启时尚未提交的条目会标为「提交中断」，可在任务页用「重试」重新入队。
 
 ---
 

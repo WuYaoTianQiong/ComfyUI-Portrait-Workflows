@@ -4,29 +4,30 @@ ComfyUI 写实人像工作流合集，专注于高质量人像生成与提示词
 
 ## 工作流列表
 
-### API 远程生成类
-- **`MoodyZIT_V7_API_图生图_Inpaint手动遮罩_SeedVR2超分.json`** — API 模式，Inpaint + 超分
-- **`MoodyZIT_V7_API_文生图_双程采样_SeedVR2_4K超分_文字渲染.json`** — API 模式，双程采样 + 4K 文字渲染
-- **`Work-Fisher_Qwen-AIO_DWPose提取_图生图_API.json`** — API 模式，DWPose 骨骼控图
-- **`Qwen3VL_API_图生中文提示词.json`** — API 模式，VLM 图生提示词
+> 以 `workflows/` 根目录磁盘为准（当前 **10 个 JSON**，2026-11-01）。
+> 另有 `workflows/历史工作流/`（归档）：Atelier 默认只扫根目录，归档/其他目录需要时
+> 在「分类与标签 → 工作流」手动上传 JSON。
 
-### Visual 编辑器类
-- **`MoodyZIT_V7_Visual_文生图_双程采样_快速预览_文字渲染.json`** — Visual 模式，双程采样 + 文字渲染
-- **`Qwen-2512_OpenPose编辑器_ControlNet_文生图_12G.json`** — OpenPose 编辑器控图
-- **`Qwen-Rapid_OpenPose_文生图_9x16画幅切换.json`** — OpenPose 编辑器 + 画幅切换
-- **`灵犀控骨_VNCCS骨骼控图_一键横竖切换_图生图_Visual.json`** — VNCCS 骨骼控图
+### 文生图
+- **`MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json`** — Krea2 单程 8 步，画质优先
+- **`MoodyZIT_V13_Visual_文生图_双程采样_快速预览_文字渲染.json`** — Z-Image 双程采样，文字渲染
+- **`PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json`** — Krea2V25 单程 8 步 fp8
 
-### 风格化 & 动漫类
-- **`AnimagineXL_3.1_漫画文生图.json`** — AnimagineXL 漫画风格
-- **`Flux1_Dev_漫画文生图.json`** — Flux 漫画风格
-- **`MoodyProMix_中文漫画_文生图.json`** — MoodyProMix 中文漫画
-- **`NoobAI-XL_Vpred_动漫文生图.json`** — NoobAI 动漫风格
-- **`Qwen-Rapid_中文文生图.json`** — Qwen-Rapid 通用文生图
-- **`Anima_2.5D_文生图_基础版.json`** — Anima 2.5D 风格
-- **`Anime_Bushes_EN.json`**  / **`Anime_PearlyToon_EN.json`** — Anime 风格英文版
+### 图像编辑（Flux.2 Klein）
+- **`PornMaster_Flux2Klein9B_单图编辑_可选遮罩.json`** — 单图编辑 + 可选遮罩
+- **`PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json`** — 双图参考换衣
+- **`PornMaster_Flux2Klein9B_三图参考编辑_自动尺寸.json`** — 三图参考编辑
 
-### 超分 & 辅助类
-- **`图片超分_SeedVR2_多分辨率版.json`** — SeedVR2 通用超分
+### 辅助
+- **`Qwen3VL_API_图生中文提示词.json`** — VLM 图生中文提示词
+- **`图片超分_SeedVR2_7B_源图命名_最高4K实测.json`** — SeedVR2 7B 超分
+
+### 视频（Atelier 不收录）
+- **`MiniMax_H3_文生视频_官方原版.json`**
+- **`MiniMax_H3_图生视频_官方原版.json`**
+
+> 这两个工作流含 `SaveVideo`，Atelier 的工作流下拉默认隐藏；请直接在 ComfyUI 里运行。
+> Atelier 的画廊/结果中心只处理图片，视频没有对应归档链路。
 
 ## 快速开始
 
@@ -82,7 +83,8 @@ huggingface-cli download <repo_name>
 ## 文档与工具
 
 - [MoodyZIT 完整指南](workflows/文档/Moody_ZIT_完整指南与踩坑手册.md) - 从安装到出图的完整教程
-- [LoRA 训练规划](workflows/文档/LoRA训练_定制人脸_完整规划.md) - 自定义人脸训练
+- [资产清单](workflows/文档/资产清单.md) - 工作流 / 模型 / 插件 / LoRA 的磁盘实测清单
+- [命名规范](workflows/文档/命名规范.md) - 工作流/目录/代码/API 的命名约定
 - [画室 Atelier](workflows/脚本/atelier/) - 提示词资产 + ComfyUI 出图/组合/换脸工作台
 
 ## 常见问题
@@ -102,4 +104,6 @@ MIT
 
 ## 更新日志
 
+- 2026-11-01: 工作流列表按磁盘实测同步（10 个在用 + 2 个视频工作流标记为 Atelier 不收录）；
+  文档链接清理，补充资产清单与命名规范。
 - 2026-06-14: 初始版本，包含 4 个工作流
