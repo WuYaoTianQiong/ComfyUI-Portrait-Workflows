@@ -43,13 +43,19 @@ async def lifespan(app: FastAPI):
 
     # 任务写者：普通守护线程，不是 async task。
     # 旧实现把同步 HTTP/DB 塞进事件循环，ComfyUI 一慢，所有请求一起卡住。
-    from app.services.job_state import writer_loop
+    from app.services.job_state import recover_queued_submissions, writer_loop
+    from app.services.submission import start_submit_worker, stop_submit_worker
+
+    recovered = recover_queued_submissions()
+    if recovered:
+        logger.info("启动恢复：%s 个任务的未提交条目已标记中断", recovered)
 
     stop_event = threading.Event()
     writer = threading.Thread(
         target=writer_loop, args=(stop_event,), daemon=True, name="job-writer"
     )
     writer.start()
+    start_submit_worker()
 
     # 自动打开浏览器（ATELIER_NO_BROWSER=1 时跳过，供冒烟/测试使用）
     if not settings.no_browser:
@@ -58,6 +64,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # === 关闭 ===
+    stop_submit_worker()
     stop_event.set()
     writer.join(timeout=5)
     db.close()
@@ -77,10 +84,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS：前端与后端同源部署，开发期走 Vite 代理，本来不需要跨域。
+# 保留本机开发来源即可；绝不能用 "*" —— 否则任意网页都能借本机浏览器读接口响应。
+_ALLOWED_ORIGINS = sorted({
+    "http://127.0.0.1:8656",
+    "http://localhost:8656",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    f"http://{settings.host}:{settings.port}",
+})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -176,15 +191,15 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
 # 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
 # 注意：comfyui_root/output 可能是跨卷 junction，未解析时 .exists() 在 Windows
 # “不受信任装入点”上会抛 WinError 448 导致整个服务启动崩溃，必须先解析。
-_output_dir = _resolve_if_reparse(settings.comfyui_root / "output")
+_output_dir = _resolve_if_reparse(settings.output_dir)
 if _output_dir.exists():
     app.mount("/output", StaticFiles(directory=str(_output_dir)), name="output")
     print(f"  [mount] /output -> {_output_dir}")
-_input_dir = _resolve_if_reparse(settings.comfyui_root / "input")
+_input_dir = _resolve_if_reparse(settings.input_dir)
 if _input_dir.exists():
     app.mount("/input", StaticFiles(directory=str(_input_dir)), name="input")
     print(f"  [mount] /input -> {_input_dir}")
-_temp_dir = _resolve_if_reparse(settings.comfyui_root / "temp")
+_temp_dir = _resolve_if_reparse(settings.temp_dir)
 if _temp_dir.exists():
     app.mount("/temp", StaticFiles(directory=str(_temp_dir)), name="temp")
     print(f"  [mount] /temp -> {_temp_dir}")

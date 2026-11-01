@@ -87,13 +87,16 @@ def test_composer_fragments_can_filter_one_type(api, seed_prompt):
 def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     """批量替换只覆盖本次注入的正文，提示词库里的原文不动。"""
     from app.routers import comfyui as comfy_router
+    from app.services import submission
 
     p = seed_prompt(name="原提示词", prompt="【人物身材】旧\n\n【场景环境】街道")
 
     captured = {}
     monkeypatch.setattr(comfy_router, "load_workflow", lambda *a, **k: {})
     monkeypatch.setattr(comfy_router, "inject_prompt", lambda wf, data: captured.update(data))
-    monkeypatch.setattr(comfy_router, "push_prompt", lambda wf: {"prompt_id": "pid-1"})
+    monkeypatch.setattr(submission, "push_prompt", lambda wf: {"prompt_id": "pid-1"})
+    # 测试里同步执行后台任务，避免线程时序
+    monkeypatch.setattr(comfy_router, "enqueue_submission", submission.submit_task)
 
     r = api.post("/api/runs/batch", json={
         "items": [{
@@ -104,6 +107,7 @@ def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
         "workflow_path": "F:/wf.json",
     })
     assert r.status_code == 200
+    assert r.json()["async"] is True
     assert "新" in captured["prompt"]
     assert "旧" not in captured["prompt"]
     assert "街道" in captured["prompt"]

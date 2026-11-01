@@ -17,8 +17,18 @@ from app.services.fragment_syntax import strip_headers
 from app.services.workflow_catalog import find_default_workflow, list_valid_workflows
 from app.services.workflow_parser import load_workflow, inject_prompt
 from app.services.comfyui_client import push_prompt
-from app.routers.jobs import create_job, update_job_items
-from app.services.batch_control import batch_stop_flag
+from app.services.output_location import (
+    OutputLocationError,
+    apply_output_subfolder,
+    expand_subfolder,
+)
+from app.services.submission import SubmitTask, enqueue_submission
+from app.routers.jobs import (
+    build_job_extra,
+    create_job,
+    find_job_by_idempotency,
+    update_job_items,
+)
 
 router = APIRouter(tags=["ComfyUI"])
 logger = logging.getLogger(__name__)
@@ -33,6 +43,7 @@ class RunRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     seed_override: int = 0
+    output_subfolder: str = ""
 
 
 class RunTextRequest(BaseModel):
@@ -44,6 +55,7 @@ class RunTextRequest(BaseModel):
     quality: str = "4K"
     seed: int = 0
     source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
+    output_subfolder: str = ""
 
 
 class BatchItem(BaseModel):
@@ -60,6 +72,8 @@ class BatchRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     title: str = "批量生成"
+    output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 class GenerateMissingRequest(BaseModel):
@@ -69,6 +83,8 @@ class GenerateMissingRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     prompt_ids: list[int] | None = None  # 可选：仅补全指定提示词（与缺图集合取交集）
+    output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 # ---------- 工作流校验 ----------
@@ -97,16 +113,22 @@ def validate_workflow(path: str = Query("")):
 # ---------- 工作流列表 ----------
 
 @router.get("/workflows", response_model=WorkflowListResponse)
-def list_workflows(sort: str = Query("mtime")):
-    """列出所有可用工作流"""
-    results = list_valid_workflows()
+def list_workflows(
+    sort: str = Query("mtime"),
+    include_video: bool = Query(False, description="true=也返回视频工作流（默认隐藏）"),
+):
+    """列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。"""
+    results = list_valid_workflows(include_video=include_video)
 
     if sort == "mtime":
         results.sort(key=lambda x: x["mtime"], reverse=True)
     else:
         results.sort(key=lambda x: x["name"])
 
-    return {"workflows": results, "default": find_default_workflow()}
+    return {
+        "workflows": results,
+        "default": find_default_workflow(include_video=include_video),
+    }
 
 
 # ---------- 单图跑图 ----------
@@ -123,6 +145,12 @@ def run_prompt(req: RunRequest):
         raise HTTPException(400, "缺少工作流路径")
 
     try:
+        # 先校验出图子目录模板，避免建完 job 才报 400
+        expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=req.quality, orientation=req.orientation,
+        )
+
         # 加载并解析工作流
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
@@ -154,9 +182,17 @@ def run_prompt(req: RunRequest):
             "prompt_preview": (p.name or p.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
-        job_id = create_job("single", "单图生成", items, workflow_path, req.orientation, req.quality)
+        job_id = create_job(
+            "single", "单图生成", items, workflow_path, req.orientation, req.quality,
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
+        )
 
         # 推送 ComfyUI
+        subfolder = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+            quality=req.quality, orientation=req.orientation,
+        )
+        apply_output_subfolder(api_wf, subfolder)
         result = push_prompt(api_wf)
         comfy_pid = result.get("prompt_id", "")
         items[0]["comfyui_prompt_id"] = comfy_pid
@@ -170,6 +206,8 @@ def run_prompt(req: RunRequest):
         return {"success": True, "job_id": job_id, "result": result, "dimensions": dims}
 
     except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except OutputLocationError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         logger.exception("跑图失败(prompt=%s, 工作流=%s)", req.id, workflow_path)
@@ -190,6 +228,10 @@ def run_text_prompt(req: RunTextRequest):
         raise HTTPException(400, "缺少工作流路径")
 
     try:
+        expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=req.quality, orientation=req.orientation,
+        )
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
         prompt_data = {
@@ -216,8 +258,16 @@ def run_text_prompt(req: RunTextRequest):
             "prompt_preview": (req.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
-        job_id = create_job("single", "文本跑图", items, workflow_path, req.orientation, req.quality)
+        job_id = create_job(
+            "single", "文本跑图", items, workflow_path, req.orientation, req.quality,
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
+        )
 
+        subfolder = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+            quality=req.quality, orientation=req.orientation,
+        )
+        apply_output_subfolder(api_wf, subfolder)
         result = push_prompt(api_wf)
         comfy_pid = result.get("prompt_id", "")
         items[0]["comfyui_prompt_id"] = comfy_pid
@@ -227,6 +277,8 @@ def run_text_prompt(req: RunTextRequest):
         return {"success": True, "job_id": job_id, "result": result}
 
     except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except OutputLocationError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(500, str(e))
@@ -245,80 +297,145 @@ def batch_generate(req: BatchRequest):
 
     workflow_path = req.workflow_path or ""
 
-    # 创建任务记录
-    items_raw = [{"prompt_id": it.prompt_id, "seed": it.seed} for it in req.items]
-    job_id = create_job(
-        "batch", req.title,
-        items_raw, workflow_path,
-        req.orientation, req.quality,
-    )
+    try:
+        expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=req.quality, orientation=req.orientation,
+        )
+    except OutputLocationError as e:
+        raise HTTPException(400, str(e))
 
-    results = []
-    errors = []
+    existing = find_job_by_idempotency(req.idempotency_key, "runs_batch")
+    if existing is not None:
+        return {
+            "success": True, "job_id": existing["id"], "results": [], "errors": [],
+            "idempotent": True, "async": True, "queued": 0, "total": existing["total"],
+        }
+
+    # 先校验工作流本身，避免整批因文件损坏排到队列里才全失败
+    try:
+        load_workflow(workflow_path, req.workflow_content)
+    except Exception as e:
+        raise HTTPException(400, f"工作流加载失败: {e}")
+
+    # 同步只做"便宜且必须"的校验/参数落库；push_prompt 交给后台提交线程
+    items_raw: list[dict] = []
+    prompts: dict[int, Prompt] = {}
+    indexes: list[int] = []
+    errors: list[dict] = []
 
     for i, item in enumerate(req.items):
-        # 检查停止标志
-        if batch_stop_flag.is_set():
-            items_raw[i]["status"] = "cancelled"
-            items_raw[i]["error"] = "已取消"
-            errors.append({"index": i, "prompt_id": item.prompt_id, "error": "已取消"})
-            continue
-
+        record = {
+            "prompt_id": item.prompt_id,
+            "seed": item.seed,
+            "status": "pending",
+            "submit_state": "queued",
+        }
         pid = item.prompt_id
         if not pid:
-            items_raw[i]["status"] = "error"
-            items_raw[i]["error"] = "缺少 prompt_id"
+            record.update(status="error", submit_state="failed", error="缺少 prompt_id")
             errors.append({"index": i, "error": "缺少 prompt_id"})
+            items_raw.append(record)
             continue
 
         p = Prompt.get_or_none(Prompt.id == pid)
         if p is None:
-            items_raw[i]["status"] = "error"
-            items_raw[i]["error"] = f"提示词 {pid} 不存在"
+            record.update(status="error", submit_state="failed", error=f"提示词 {pid} 不存在")
             errors.append({"index": i, "prompt_id": pid, "error": f"提示词 {pid} 不存在"})
+            items_raw.append(record)
             continue
 
-        try:
-            api_wf = load_workflow(workflow_path, req.workflow_content)
-            # 有 override 时用替换后的文本出图，其余参数仍取原提示词；
-            # strip_headers 与普通批量出图保持一致（【类型】标题不注入模型）。
-            prompt_text = (
-                strip_headers(item.prompt_override)
-                if item.prompt_override
-                else strip_headers(p.prompt)
-            )
-            prompt_data = {
-                "prompt": prompt_text,
+        prompt_text = (
+            strip_headers(item.prompt_override)
+            if item.prompt_override
+            else strip_headers(p.prompt)
+        )
+        record["prompt_preview"] = (item.prompt_override or p.name or p.prompt or "")[:40]
+        if item.prompt_override:
+            # 替换碎片后的图不属于原提示词：解除关联，把实际替换文本存进 prompt_params
+            record["prompt_id"] = None
+            record["source_prompt_id"] = pid
+            record["prompt_params"] = json.dumps({
+                "source": "batch_replace",
+                "prompt": item.prompt_override,
+                "injected_prompt": prompt_text,
                 "negative_prompt": p.negative_prompt or "",
-                "seed": p.seed or 0,
-                "seed_override": item.seed,
+                "seed": item.seed or p.seed or 0,
                 "steps": p.steps,
                 "cfg_scale": p.cfg_scale,
                 "sampler": p.sampler,
-                "orientation": req.orientation,
-                "quality": req.quality,
-            }
-            inject_prompt(api_wf, prompt_data)
+                "model": p.model or "",
+                "width": p.width,
+                "height": p.height,
+                "source_prompt_id": pid,
+                "source_prompt_name": p.name or "",
+            }, ensure_ascii=False)
+        else:
+            record["prompt_params"] = json.dumps({
+                "source": "batch",
+                "prompt": p.prompt or "",
+                "injected_prompt": prompt_text,
+                "negative_prompt": p.negative_prompt or "",
+                "seed": item.seed or p.seed or 0,
+                "steps": p.steps,
+                "cfg_scale": p.cfg_scale,
+                "sampler": p.sampler,
+                "model": p.model or "",
+                "width": p.width,
+                "height": p.height,
+                "source_prompt_id": pid,
+                "source_prompt_name": p.name or "",
+            }, ensure_ascii=False)
+        items_raw.append(record)
+        prompts[i] = p
+        indexes.append(i)
 
-            result = push_prompt(api_wf)
-            comfy_pid = result.get("prompt_id", "")
-            items_raw[i]["comfyui_prompt_id"] = comfy_pid
-            items_raw[i]["status"] = "pending"
-            items_raw[i]["prompt_preview"] = (
-                item.prompt_override or p.name or p.prompt or ""
-            )[:40]
-            results.append({"index": i, "prompt_id": pid, "comfyui_prompt_id": comfy_pid})
-        except Exception as e:
-            traceback.print_exc()
-            items_raw[i]["status"] = "error"
-            items_raw[i]["error"] = str(e)
-            errors.append({"index": i, "prompt_id": pid, "error": str(e)})
+    extra = build_job_extra(workflow_path, req.workflow_content, req.output_subfolder)
+    if req.idempotency_key.strip():
+        extra["idempotency_key"] = req.idempotency_key.strip()
+        extra["idempotency_scope"] = "runs_batch"
+    job_id = create_job(
+        "batch", req.title,
+        items_raw, workflow_path,
+        req.orientation, req.quality,
+        extra=extra,
+    )
+    subfolder = expand_subfolder(
+        req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+        quality=req.quality, orientation=req.orientation,
+    )
 
-    batch_stop_flag.clear()
-    status = "running" if results else "error"
-    update_job_items(job_id, items_raw, status=status)
+    def prepare(index: int) -> dict:
+        item = req.items[index]
+        p = prompts[index]
+        api_wf = load_workflow(workflow_path, req.workflow_content)
+        prompt_text = (
+            strip_headers(item.prompt_override)
+            if item.prompt_override
+            else strip_headers(p.prompt)
+        )
+        inject_prompt(api_wf, {
+            "prompt": prompt_text,
+            "negative_prompt": p.negative_prompt or "",
+            "seed": p.seed or 0,
+            "seed_override": item.seed,
+            "steps": p.steps,
+            "cfg_scale": p.cfg_scale,
+            "sampler": p.sampler,
+            "orientation": req.orientation,
+            "quality": req.quality,
+        })
+        apply_output_subfolder(api_wf, subfolder)
+        return api_wf
 
-    return {"success": len(results) > 0, "job_id": job_id, "results": results, "errors": errors}
+    update_job_items(job_id, items_raw, status="running" if indexes else "error")
+    if indexes:
+        enqueue_submission(SubmitTask(job_id, indexes, prepare))
+
+    return {
+        "success": bool(indexes), "job_id": job_id, "results": [], "errors": errors,
+        "total": len(req.items), "submitted": 0, "queued": len(indexes), "async": True,
+    }
 
 
 # ---------- 补全缺图 ----------
@@ -417,6 +534,8 @@ def generate_missing(req: GenerateMissingRequest):
         orientation=req.orientation,
         quality=req.quality,
         title=f"补全缺图 ({len(missing_ids)} 条)",
+        output_subfolder=req.output_subfolder,
+        idempotency_key=req.idempotency_key,
     )
     result = batch_generate(batch_req)
     result["count"] = len(missing_ids)

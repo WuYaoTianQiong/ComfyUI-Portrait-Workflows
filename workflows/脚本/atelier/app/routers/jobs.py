@@ -12,16 +12,18 @@ import queue
 from fastapi import APIRouter, HTTPException, Query
 from app.schemas import JobListResponse
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.services import job_state
 from app.services.comfyui_client import get_history_for_prompt
-from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["任务"])
 
 # 兼容旧引用：comfyui.py / composer.py / editor.py / images.py 都从本模块导入
 create_job = job_state.create_job
 update_job_items = job_state.update_job_items
+find_job_by_idempotency = job_state.find_job_by_idempotency
+build_job_extra = job_state.build_job_extra
 _row_to_dict = job_state.row_to_dict
 
 
@@ -131,9 +133,25 @@ def cancel_job(job_id: int):
     return {"success": True, "job_id": job_id}
 
 
+class RetryRequest(BaseModel):
+    indexes: list[int] | None = None
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int, data: RetryRequest | None = None):
+    """把失败/取消的条目重提成一个新任务；indexes 为空时自动挑失败项。"""
+    from app.services.job_retry import RetryError, retry_job as run_retry
+
+    try:
+        return run_retry(job_id, data.indexes if data else None)
+    except KeyError:
+        raise HTTPException(404, "任务不存在")
+    except RetryError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/jobs/stop_all")
 def stop_all_jobs():
     """停止所有进行中的任务（定向取消，不再 clear 整个队列）。"""
-    batch_stop_flag.set()
     stopped = job_state.stop_all()
     return {"success": True, "stopped": stopped}

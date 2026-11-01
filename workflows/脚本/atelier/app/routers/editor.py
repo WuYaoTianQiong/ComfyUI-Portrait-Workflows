@@ -23,7 +23,6 @@ import io
 import itertools
 import json
 import random
-import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -32,9 +31,23 @@ from pydantic import BaseModel
 from app.config import settings
 from app.models import Image
 from app.routers.media import IMAGE_EXT
-from app.routers.jobs import create_job, update_job_items
-from app.services.comfyui_client import push_prompt
-from app.services.paths import _resolve_if_reparse
+from app.routers.jobs import (
+    build_job_extra,
+    create_job,
+    find_job_by_idempotency,
+    update_job_items,
+)
+from app.services.image_inputs import (
+    compose_masked_target as _compose_masked_target,
+    dest_name as _dest_name,
+)
+from app.services.output_location import (
+    OutputLocationError,
+    expand_subfolder,
+    with_subfolder,
+)
+from app.services.submission import SubmitTask, enqueue_submission
+from app.services.paths import resolve_image_path
 from app.services.workflow_parser import (
     find_loadimage_nodes,
     find_size_source_loadimage,
@@ -43,7 +56,6 @@ from app.services.workflow_parser import (
     load_workflow,
     set_output_prefix,
 )
-from app.services.batch_control import batch_stop_flag
 
 router = APIRouter(tags=["批量图像编辑"])
 
@@ -94,15 +106,18 @@ class FaceswapRequest(BaseModel):
     ref_node: str | None = None    # 参考图1；留空 = 其余 LoadImage 按节点号排序
     ref2_node: str | None = None   # 参考图2
     dry_run: bool = False
+    output_subfolder: str = ""     # 可选：output 下的相对子目录，空 = 平铺
+    idempotency_key: str = ""
 
 
 # ---------- helpers ----------
 
 def _row_src_path(r) -> Path:
-    """历史记录 → 磁盘源图路径（与 history.py 的取图逻辑一致）"""
-    base = settings.comfyui_root / ("input" if r.img_type == "input" else "output")
-    base = _resolve_if_reparse(base)
-    return base / (r.subfolder or "") / r.filename if r.subfolder else base / r.filename
+    """历史记录 → 磁盘源图路径（与统一路径解析保持一致，含越界校验）。"""
+    path = resolve_image_path(r.filename or "", r.subfolder or "", r.img_type or "output")
+    if path is None:
+        raise HTTPException(404, f"图片文件不存在: {r.filename}")
+    return path
 
 
 def _collect_sources(ids: list[int], paths: list[str], label: str) -> list[dict]:
@@ -145,15 +160,6 @@ def _collect_sources(ids: list[int], paths: list[str], label: str) -> list[dict]
     return out
 
 
-def _dest_name(src: dict) -> str:
-    """拷进 ComfyUI input 目录时用的稳定文件名：同一条素材只拷一份，不同素材不撞名。
-
-    前缀是 `atelier_`（不是历史遗留的 `pb_`）：派生文件也要能一眼看出归属。
-    """
-    h = hashlib.sha1(str(src["path"]).lower().encode("utf-8")).hexdigest()[:10]
-    return f"atelier_fs_{h}_{src['name']}"
-
-
 def output_prefix(job_id, labels: list[str], max_label: int = 24) -> str:
     """出图文件名前缀：平铺在 output 根目录（不带子目录）。
 
@@ -188,41 +194,6 @@ def workflow_supports_mask(api_workflow: dict) -> bool:
         isinstance(node, dict) and node.get("class_type") == "VAEEncodeForInpaint"
         for node in api_workflow.values()
     )
-
-
-def _compose_masked_target(target_path: Path, mask_path: Path, dest_dir: Path) -> Path:
-    """把遮罩烘焙进目标图 alpha 通道，返回可直接注入 LoadImage 的 PNG。
-
-    工作流里 LoadImage 的 MASK = 1 - alpha，因此「要改的区域」alpha 必须为 0。
-    · 遮罩图真的带透明通道 → 透明区 = 要改
-    · 否则按亮度 → 白色 = 要改（兼容最常见的黑白遮罩图）
-    其余区域 alpha=255，工作流的归约链会原样保留这些像素。
-    """
-    from PIL import Image as PILImage, ImageOps
-
-    with PILImage.open(target_path) as raw:
-        image = ImageOps.exif_transpose(raw).convert("RGB")
-
-    with PILImage.open(mask_path) as raw_mask:
-        mask = ImageOps.exif_transpose(raw_mask)
-        alpha = mask.convert("RGBA").getchannel("A")
-        if alpha.getextrema()[0] < 255:
-            # 透明区域 = 要重绘；反相后 255 = 重绘
-            repaint = ImageOps.invert(alpha)
-        else:
-            # 没有真正的透明区域：按亮度取白色区域
-            repaint = mask.convert("L")
-        repaint = repaint.resize(image.size, PILImage.Resampling.BILINEAR)
-
-    output = image.convert("RGBA")
-    output.putalpha(ImageOps.invert(repaint))
-
-    digest = hashlib.sha1(
-        f"{target_path}|{mask_path}|{target_path.stat().st_mtime}|{mask_path.stat().st_mtime}".encode("utf-8")
-    ).hexdigest()[:12]
-    dest = Path(dest_dir) / f"atelier_edit_{digest}.png"
-    output.save(dest, "PNG")
-    return dest
 
 
 def _sort_node_ids(ids: list[str]) -> list[str]:
@@ -349,6 +320,21 @@ def faceswap_batch(req: FaceswapRequest):
     if not workflow_path and not req.workflow_content:
         raise HTTPException(400, "缺少工作流")
 
+    try:
+        subfolder_preview = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=QUALITY, orientation=ORIENTATION,
+        )
+    except OutputLocationError as e:
+        raise HTTPException(400, str(e))
+
+    existing = find_job_by_idempotency(req.idempotency_key, "faceswap")
+    if existing is not None:
+        return {
+            "success": True, "job_id": existing["id"], "total": existing["total"],
+            "submitted": 0, "errors": [], "idempotent": True, "async": True, "queued": 0,
+        }
+
     # 1) 节点映射（先探测一次，dry_run 与实跑共用同一份判断）
     try:
         api_wf = load_workflow(workflow_path, req.workflow_content)
@@ -389,7 +375,7 @@ def faceswap_batch(req: FaceswapRequest):
                 raise HTTPException(404, f"遮罩文件不存在: {mask_path}")
 
     # 有遮罩的目标图：把遮罩烘焙进 alpha 通道，得到一张临时目标图
-    input_dir_path = settings.comfyui_root / "input"
+    input_dir_path = settings.input_dir
     composed_paths: dict[int, Path] = {}
     for i, src in enumerate(targets):
         mask_path = masks[i] if masks else ""
@@ -444,9 +430,9 @@ def faceswap_batch(req: FaceswapRequest):
             "metas": [src["meta"] for src in combo],
             "seed": _resolve_seed(req.seed_mode, req.seed, i),
             "label": " × ".join(labels),
-            # 出图文件名规则（平铺在 output 根目录，不带子目录），dry_run 时可见，
-            # 也用于冒烟测试防回归
-            "prefix": output_prefix("<job_id>", labels),
+            # 出图文件名规则（默认平铺在 output 根目录；填了子目录才分层），
+            # dry_run 时可见，也用于冒烟测试防回归
+            "prefix": with_subfolder(subfolder_preview, output_prefix("<job_id>", labels)),
         })
 
     if req.dry_run:
@@ -477,74 +463,72 @@ def faceswap_batch(req: FaceswapRequest):
             }, ensure_ascii=False),
         })
     counts = "×".join(str(len(group)) for group in source_groups)
+    for item in items:
+        item["status"] = "pending"
+        item["submit_state"] = "queued"
+    extra = build_job_extra(
+        workflow_path, req.workflow_content, req.output_subfolder,
+        nodes=node_info, prompt=prompt_text, seed_mode=req.seed_mode,
+    )
+    if req.idempotency_key.strip():
+        extra["idempotency_key"] = req.idempotency_key.strip()
+        extra["idempotency_scope"] = "faceswap"
     job_id = create_job(
         "faceswap", f"图像编辑 {counts}",
         items, workflow_path, ORIENTATION, QUALITY,
-        extra={"nodes": node_info, "prompt": prompt_text, "seed_mode": req.seed_mode},
+        extra=extra,
+    )
+    subfolder = expand_subfolder(
+        req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+        quality=QUALITY, orientation=ORIENTATION,
     )
 
-    # 5) 逐条构造并入队。push_prompt 只是把任务塞进 ComfyUI 队列，很快，
-    #    用同步循环与既有 batch_generate 一致；真正的执行进度由 gen_jobs + 监控协程跟踪。
-    input_dir = str(settings.comfyui_root / "input")
-    ok = 0
-    errors: list[dict] = []
+    # 5) 构造每条 workflow 的函数交给后台提交线程；请求立即返回 job_id
+    input_dir = str(settings.input_dir)
 
-    for i, combo in enumerate(combos):
-        if batch_stop_flag.is_set():
-            items[i]["status"] = "cancelled"
-            items[i]["error"] = "已取消"
-            errors.append({"index": i, "error": "已取消"})
-            continue
-        try:
-            api_wf = load_workflow(workflow_path, req.workflow_content)
-            inject_prompt(api_wf, {
-                "prompt": prompt_text,
-                "negative_prompt": req.negative_prompt or "",
-                "seed_override": plan[i]["seed"],
-                "orientation": ORIENTATION,
-                "quality": QUALITY,
-            })
-            # 按角色逐个注入 LoadImage；有遮罩的目标图换成 alpha 合成后的副本
-            for role, src in zip(roles, combo):
-                node_id = next(item["id"] for item in inputs if item["role"] == role)
-                source_path = src["path"]
-                dest_name = _dest_name(src)
-                if role == "target":
-                    index = target_index[id(src)]
-                    source_path = composed_paths.get(index, source_path)
-                    mask_path = masks[index] if masks else ""
-                    if mask_path:
-                        # 同一张目标图配不同遮罩时，input 目录里的文件名不能互相覆盖
-                        digest = hashlib.sha1(
-                            f"{src['path']}|{mask_path}".encode("utf-8")
-                        ).hexdigest()[:10]
-                        dest_name = f"atelier_fs_{digest}_{src['name']}"
-                inject_input_image(api_wf, str(source_path), input_dir,
-                                   node_id=node_id, dest_name=dest_name)
-            # 输出名带「任务号 + 组合」，配对关系一眼可查。
-            # 平铺在 output 根目录（不加子目录）：一是与项目里其它出图习惯一致，
-            # 二是磁盘兜底扫描（_sync_disk_orphans）只扫根目录，平铺才能被它捡回来。
-            set_output_prefix(api_wf, output_prefix(job_id, plan[i]["labels"]))
+    def prepare(i: int) -> dict:
+        combo = combos[i]
+        api_wf = load_workflow(workflow_path, req.workflow_content)
+        inject_prompt(api_wf, {
+            "prompt": prompt_text,
+            "negative_prompt": req.negative_prompt or "",
+            "seed_override": plan[i]["seed"],
+            "orientation": ORIENTATION,
+            "quality": QUALITY,
+        })
+        # 按角色逐个注入 LoadImage；有遮罩的目标图换成 alpha 合成后的副本
+        for role, src in zip(roles, combo):
+            node_id = next(item["id"] for item in inputs if item["role"] == role)
+            source_path = src["path"]
+            dest_name = _dest_name(src)
+            if role == "target":
+                index = target_index[id(src)]
+                source_path = composed_paths.get(index, source_path)
+                mask_path = masks[index] if masks else ""
+                if mask_path:
+                    # 同一张目标图配不同遮罩时，input 目录里的文件名不能互相覆盖
+                    digest = hashlib.sha1(
+                        f"{src['path']}|{mask_path}".encode("utf-8")
+                    ).hexdigest()[:10]
+                    dest_name = f"atelier_fs_{digest}_{src['name']}"
+            inject_input_image(api_wf, str(source_path), input_dir,
+                               node_id=node_id, dest_name=dest_name)
+        set_output_prefix(
+            api_wf, with_subfolder(subfolder, output_prefix(job_id, plan[i]["labels"]))
+        )
+        return api_wf
 
-            result = push_prompt(api_wf)
-            items[i]["comfyui_prompt_id"] = result.get("prompt_id", "")
-            items[i]["status"] = "pending"
-            ok += 1
-        except Exception as e:
-            traceback.print_exc()
-            items[i]["status"] = "error"
-            items[i]["error"] = str(e)
-            errors.append({"index": i, "label": plan[i]["label"], "error": str(e)})
-
-    batch_stop_flag.clear()
-    update_job_items(job_id, items, status="running" if ok else "error")
+    update_job_items(job_id, items, status="running")
+    enqueue_submission(SubmitTask(job_id, list(range(len(combos))), prepare))
 
     return {
-        "success": ok > 0,
+        "success": True,
         "job_id": job_id,
         "total": len(combos),
-        "submitted": ok,
-        "errors": errors,
+        "submitted": 0,
+        "queued": len(combos),
+        "errors": [],
+        "async": True,
         "nodes": node_info,
         "plan": plan,
     }

@@ -1,5 +1,4 @@
 """组合创作 API —— 碎片解析 + 碎片跑图"""
-import re
 import json
 import traceback
 import random
@@ -7,10 +6,21 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from app.models import Prompt, Fragment, Category, Tag, PromptCategory, EntityTag, db
+from app.models import Prompt, Category, Tag, PromptCategory, EntityTag, db
 from app.services.workflow_parser import load_workflow, inject_prompt
 from app.services.comfyui_client import push_prompt
-from app.routers.jobs import create_job, update_job_items
+from app.services.output_location import (
+    OutputLocationError,
+    apply_output_subfolder,
+    expand_subfolder,
+)
+from app.services.submission import SubmitTask, enqueue_submission
+from app.routers.jobs import (
+    build_job_extra,
+    create_job,
+    find_job_by_idempotency,
+    update_job_items,
+)
 from app.config import settings
 from app.services.fragment_syntax import FRAGMENT_TYPES, parse, strip_headers
 
@@ -18,7 +28,10 @@ router = APIRouter(tags=["组合创作"])
 
 
 def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=""):
-    """获取碎片数据，按类型分组，供随机组合 / 批量替换使用"""
+    """获取碎片数据，按类型分组，供随机组合 / 批量替换使用。
+
+    α 之后碎片统一从 prompts 解析（单块 prompt 就是碎片），不再读 fragments 表。
+    """
     query = Prompt.select()
 
     if search:
@@ -37,7 +50,6 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
     if tag_ids:
         tag_id_list = [int(t.strip()) for t in tag_ids.split(",") if t.strip()]
         if tag_id_list:
-            # 标签统一查 entity_tags（join 会因多标签产生重复行，用子查询去重）
             query = query.where(
                 Prompt.id
                 << EntityTag.select(EntityTag.entity_id).where(
@@ -49,7 +61,6 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
     rows = list(query.order_by(Prompt.id.desc()))
     keyword = (search or "").strip().lower()
 
-    # 只请求某一类时不要把所有类型的碎片都算一遍（批量替换只需要候选列表）
     only = fragment_type if fragment_type in FRAGMENT_TYPES else ""
     grouped = {only: []} if only else {t: [] for t in FRAGMENT_TYPES}
     seen_content = {}
@@ -63,8 +74,6 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
             ftype = f["type"]
             if ftype not in grouped:
                 continue
-            # 关键词必须命中碎片正文：只命来源提示词的话，用户搜一个词却看到
-            # 该提示词的全部碎片，检索等于没生效
             if keyword and keyword not in (f["content"] or "").lower():
                 continue
             ck = content_key(ftype, f["content"])
@@ -88,35 +97,6 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
                 }
                 seen_content[ck] = entry
                 grouped[ftype].append(entry)
-
-    # 合并碎片库的独立碎片
-    try:
-        if not db.table_exists("fragments"):
-            db.create_tables([Fragment], safe=True)
-        for r in Fragment.select().order_by(Fragment.id.desc()):
-            ft = r.fragment_type
-            if ft not in grouped:
-                continue
-            if keyword and keyword not in (r.content or "").lower() and keyword not in (r.name or "").lower():
-                continue
-            ck = content_key(ft, r.content)
-            if ck in seen_content:
-                continue
-            seen_content[ck] = True
-            grouped[ft].append({
-                "fragment_id": r.id,
-                "prompt_id": None,
-                "prompt_name": r.name or "",
-                "type": ft,
-                "content": r.content,
-                "tags": r.tags or "",
-                "source_preview": "",
-                "source": "library",
-                "dup_count": 1,
-            })
-    except Exception as e:
-        traceback.print_exc()
-        print(f"[composer] 碎片库查询失败: {type(e).__name__}: {e}")
 
     return grouped
 
@@ -145,6 +125,7 @@ class ComposerRunRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    output_subfolder: str = ""
 
 
 @router.post("/composer/run")
@@ -155,6 +136,10 @@ def composer_run(req: ComposerRunRequest):
         raise HTTPException(400, "缺少工作流路径")
 
     try:
+        expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=req.quality, orientation=req.orientation,
+        )
         api_wf = load_workflow(workflow_path, req.workflow_content)
         # 与 comfyui.py 的各出图入口保持一致：【类型】标题只用于组合器里给人看，
         # 不能作为正文注入 CLIP（否则会多出 8 段中文标签文本）。
@@ -182,8 +167,14 @@ def composer_run(req: ComposerRunRequest):
         job_id = create_job(
             "single", "组合创作", items, workflow_path,
             req.orientation, req.quality,
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
         )
 
+        subfolder = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+            quality=req.quality, orientation=req.orientation,
+        )
+        apply_output_subfolder(api_wf, subfolder)
         result = push_prompt(api_wf)
         comfy_pid = result.get("prompt_id", "")
         items[0]["comfyui_prompt_id"] = comfy_pid
@@ -192,6 +183,8 @@ def composer_run(req: ComposerRunRequest):
 
         return {"success": True, "job_id": job_id, "result": result}
     except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except OutputLocationError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(500, str(e))
@@ -212,6 +205,8 @@ class BatchRandomRunRequest(BaseModel):
     tag_ids: str | None = None
     fixed_fragments: dict | None = None  # {类型名: 碎片内容, ...} 固定碎片，不参与随机
     composed_prompts: list[str] | None = None  # 前端预览确认后的组合文本；有则按原样提交
+    output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 @router.post("/composer/batch_random_run")
@@ -223,6 +218,16 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
     count = max(1, min(req.count, 10))  # 限制 1~10
 
     try:
+        expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=req.quality, orientation=req.orientation,
+        )
+        existing = find_job_by_idempotency(req.idempotency_key, "composer_batch")
+        if existing is not None:
+            return {
+                "success": True, "job_id": existing["id"], "results": [],
+                "idempotent": True, "async": True, "queued": 0, "total": existing["total"],
+            }
         # 获取碎片数据
         grouped = _get_fragment_data(req.search, req.category_id, req.tag_ids)
 
@@ -288,7 +293,19 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
                     }, ensure_ascii=False),
                 })
 
-        # 创建任务
+        # 创建任务；真正的 push 交给后台提交线程
+        try:
+            load_workflow(workflow_path, req.workflow_content)
+        except Exception as e:
+            raise HTTPException(400, f"工作流加载失败: {e}")
+        for item in job_items:
+            item["status"] = "pending"
+            item["submit_state"] = "queued"
+
+        extra = build_job_extra(workflow_path, req.workflow_content, req.output_subfolder)
+        if req.idempotency_key.strip():
+            extra["idempotency_key"] = req.idempotency_key.strip()
+            extra["idempotency_scope"] = "composer_batch"
         job_id = create_job(
             "batch" if len(job_items) > 1 else "single",
             f"批量随机组合 ({len(job_items)} 组)",
@@ -296,40 +313,41 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
             workflow_path,
             req.orientation,
             req.quality,
+            extra=extra,
+        )
+        subfolder = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+            quality=req.quality, orientation=req.orientation,
         )
 
-        # 逐组跑图
-        results = []
-        for idx, item in enumerate(job_items):
-            try:
-                api_wf = load_workflow(workflow_path, req.workflow_content)
-                # 使用每个任务独立的种子
-                task_seed = item.get("seed") or random.randint(0, 2**32 - 1)
-                prompt_data = {
-                    # 同一入口同样去掉【类型】标题；prompt_params 里仍保留原文，
-                    # 便于画廊溯源时看到"哪一片来自哪里"。
-                    "prompt": strip_headers(json.loads(item["prompt_params"])["prompt"]),
-                    "negative_prompt": req.negative_prompt,
-                    "seed": task_seed,
-                    "seed_override": task_seed,
-                    "orientation": req.orientation,
-                    "quality": req.quality,
-                }
-                inject_prompt(api_wf, prompt_data)
-                result = push_prompt(api_wf)
-                comfy_pid = result.get("prompt_id", "")
-                item["comfyui_prompt_id"] = comfy_pid
-                item["status"] = "pending"
-                results.append({"index": idx, "comfy_pid": comfy_pid, "success": True})
-            except Exception as e:
-                item["status"] = "error"
-                item["error"] = str(e)
-                results.append({"index": idx, "success": False, "error": str(e)})
+        def prepare(index: int) -> dict:
+            item = job_items[index]
+            api_wf = load_workflow(workflow_path, req.workflow_content)
+            task_seed = item.get("seed") or random.randint(0, 2**32 - 1)
+            prompt_data = {
+                # 同一入口同样去掉【类型】标题；prompt_params 里仍保留原文
+                "prompt": strip_headers(json.loads(item["prompt_params"])["prompt"]),
+                "negative_prompt": req.negative_prompt,
+                "seed": task_seed,
+                "seed_override": task_seed,
+                "orientation": req.orientation,
+                "quality": req.quality,
+            }
+            inject_prompt(api_wf, prompt_data)
+            apply_output_subfolder(api_wf, subfolder)
+            return api_wf
 
         update_job_items(job_id, job_items, status="running")
+        enqueue_submission(SubmitTask(job_id, list(range(len(job_items))), prepare))
 
-        return {"success": True, "job_id": job_id, "results": results}
+        return {
+            "success": True, "job_id": job_id, "results": [],
+            "total": len(job_items), "submitted": 0, "queued": len(job_items),
+            "async": True,
+        }
     except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except OutputLocationError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(500, str(e))

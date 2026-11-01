@@ -199,6 +199,8 @@ class JobItem(BaseModel):
     status: Optional[str] = None
     error: Optional[str] = None
     comfyui_prompt_id: Optional[str] = None
+    #: queued = 还在后台提交队列里，尚未 push 到 ComfyUI
+    submit_state: Optional[str] = None
     images: list[JobImage] = Field(default_factory=list)
 
 
