@@ -33,6 +33,8 @@ OUTPUT_ROOT = _resolve_if_reparse(settings.comfyui_root / "output")
 
 class BatchDeleteRequest(BaseModel):
     ids: list[int]
+    # 默认只软删记录，物理删原图必须由前端显式勾选并传 true
+    delete_files: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +396,23 @@ def _build_prompt_cache(rows) -> dict:
     if not prompt_ids:
         return {}
     return {r.id: r.name for r in Prompt.select(Prompt.id, Prompt.name).where(Prompt.id << prompt_ids)}
+
+
+def _delete_source_file(filename: str, subfolder: str, img_type: str) -> bool:
+    """删除这条记录对应的原图文件；文件不在或删除失败返回 False。
+
+    路径走 `_get_image_path`：它已按 img_type 定位到 output/input/temp 根目录、
+    逐段解析 Windows junction，并且只在文件真实存在时返回路径 —— 因此这里不会
+    因为相对路径串味而删到 ComfyUI 目录之外的东西。
+    """
+    path = _get_image_path(filename or "", subfolder or "", img_type or "output")
+    if path is None:
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
 
 
 def _cleanup_thumbnails(filename: str, subfolder: str, img_type: str):
@@ -794,15 +813,25 @@ def cleanup_missing_files(
 # ---------------------------------------------------------------------------
 
 @router.delete("/images/{item_id}")
-def delete_history_item(item_id: int):
+def delete_history_item(
+    item_id: int,
+    delete_files: bool = Query(False, description="true=同时删除磁盘上的原图文件（不可恢复）"),
+):
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
         raise HTTPException(404, "历史记录不存在")
+    # 先删物理文件再落库标记：即便文件删成功而入库失败，记录也还能靠
+    # /images/cleanup_missing 重新对齐，而不是留下"文件还在、记录已删"的孤儿图。
+    files_deleted = 0
+    if delete_files and _delete_source_file(
+        r.filename or "", r.subfolder or "", r.img_type or "output"
+    ):
+        files_deleted = 1
     # 软删除：标记而非真删，防止 sync 重新导入
     Image.update(is_deleted=True).where(Image.id == item_id).execute()
     # 清理缩略图
     _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
-    return {"success": True}
+    return {"success": True, "files_deleted": files_deleted}
 
 
 # ---------------------------------------------------------------------------
@@ -813,12 +842,19 @@ def delete_history_item(item_id: int):
 def batch_delete_history(body: BatchDeleteRequest):
     ids = body.ids
     if not ids:
-        return {"success": True, "deleted": 0}
+        return {"success": True, "deleted": 0, "files_deleted": 0}
+    # 先取出行快照，避免依赖 update 之后的查询结果
+    rows = list(Image.select().where(Image.id.in_(ids)))
     cnt = Image.update(is_deleted=True).where(Image.id.in_(ids)).execute()
-    # 批量清理缩略图
-    for r in Image.select().where(Image.id.in_(ids)):
+    files_deleted = 0
+    for r in rows:
+        # 批量清理缩略图
         _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
-    return {"success": True, "deleted": cnt}
+        if body.delete_files and _delete_source_file(
+            r.filename or "", r.subfolder or "", r.img_type or "output"
+        ):
+            files_deleted += 1
+    return {"success": True, "deleted": cnt, "files_deleted": files_deleted}
 
 
 # ---------------------------------------------------------------------------
