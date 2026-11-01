@@ -15,6 +15,23 @@ class FakeEventSource {
 }
 vi.stubGlobal('EventSource', FakeEventSource)
 
+/**
+ * 测试环境的 `localStorage` 不是可用的 Storage（node 的 `--localstorage-file`
+ * 只有一个空壳全局），必须补一份最小实现，否则组合器的会话/画布持久化会静默失败，
+ * 「刷新后还在」这类断言也就无从谈起。
+ */
+const store = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  getItem: (key: string) => store.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    store.set(key, value)
+  },
+  removeItem: (key: string) => {
+    store.delete(key)
+  },
+  clear: () => store.clear(),
+})
+
 // 碎片夹具可在单个用例里替换（分批加载需要 > 40 条），避免影响其它用例的随机断言
 const fixture = vi.hoisted(() => ({
   faces: [
@@ -74,6 +91,11 @@ async function mountView() {
 describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
   beforeEach(() => {
     vi.mocked(apiPost).mockClear()
+    // 组合器自己把画布 / 固定列 / 结果中心写进 localStorage，用例之间必须清干净，
+    // 否则上一例留下的"弹窗开着 / 画布有内容"会污染下一例
+    for (const key of ['pb.session.composer', 'pb.composerCanvas', 'pb.composerPinned']) {
+      store.delete(key)
+    }
     // happy-dom 没有剪贴板实现。
     // 注意：不能整个替换 navigator —— happy-dom 的 localStorage 挂在它上面，
     // 换掉之后 localStorage.getItem 就不再是函数了。
@@ -266,5 +288,50 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     } finally {
       fixture.faces = base
     }
+  })
+
+  it('刷新后画布与固定列都还在，并重新高亮选中项', async () => {
+    const first = await mountView()
+    await first.findAll('.reel-body .card').at(0)?.trigger('click')
+    await first.findAll('.reel-head')[0].trigger('click') // 锁定第一列
+    await flushPromises()
+    first.unmount()
+
+    const again = await mountView()
+
+    expect(again.findAll('.card.on').length).toBe(1)
+    expect(again.findAll('.reel-head')[0].classes()).toContain('on')
+    expect(again.find('.reel-picked').text()).toContain('正脸，柔和光线')
+  })
+
+  it('刷新后结果中心仍开着，抽出来的组合还在', async () => {
+    const first = await mountView()
+    await first.findAll('button').find((b) => b.text().includes('预览'))!.trigger('click')
+    await flushPromises()
+    expect(first.findAll('.res-card').length).toBe(1)
+    first.unmount()
+
+    const again = await mountView()
+
+    // 弹窗没有自己关掉，随机组也不是空的
+    expect(again.text()).toContain('结果中心')
+    expect(again.findAll('.res-card').length).toBe(1)
+    expect(again.find('.res-text').text()).toContain('【人物面部】')
+  })
+
+  it('「负面提示词」按钮直接开居中弹窗，而不是角落抽屉', async () => {
+    const wrapper = await mountView()
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('负面提示词'))!
+    await btn.trigger('click')
+    await flushPromises()
+
+    const box = wrapper.find('.neg-text')
+    expect(box.exists()).toBe(true)
+    expect(wrapper.find('.settings-panel').exists()).toBe(false)
+
+    await box.setValue('低清晰度, 水印')
+    await flushPromises()
+    const saved = JSON.parse(localStorage.getItem('pb.session.composer') ?? '{}')
+    expect(saved.negativePrompt).toBe('低清晰度, 水印')
   })
 })

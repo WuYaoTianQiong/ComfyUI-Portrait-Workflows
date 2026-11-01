@@ -8,6 +8,7 @@ import TagCloud from '../components/TagCloud.vue'
 import ComposerResultCenterModal from '../components/ComposerResultCenterModal.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 import FragmentDetailModal from '../components/FragmentDetailModal.vue'
+import Lightbox from '../components/Lightbox.vue'
 import { flattenCategories } from '../utils/categories'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
@@ -19,6 +20,7 @@ import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { FRAGMENT_TYPES } from '../constants'
 import { useToast } from '../composables/useToast'
+import { useImagePreview } from '../composables/useImagePreview'
 import { readSession, writeSession } from '../composables/useSessionState'
 import { confirmDialog, inputDialog } from '../utils/naive'
 import type { CategoryNode, TagRow } from '../api/types'
@@ -42,10 +44,14 @@ const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
 /** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
 const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
 const router = useRouter()
-const resultOpen = ref(false)
-const resultTab = ref<'canvas' | 'random' | 'job'>('canvas')
 
-/** 会话状态：检索条件、负向提示词、随机组数、各列已加载条数。 */
+/**
+ * 会话状态：检索条件、负向提示词、随机组数、各列已加载条数，
+ * 以及**结果中心本身**（开关 / 页签 / 抽出来的几组）。
+ *
+ * 之前把它们留在内存里，刷新就等于「关掉弹窗、丢掉刚抽的组合」——用户
+ * 一遍遍重抽。凡是"刷新后应该还在眼前"的东西，都归这份快照管。
+ */
 interface ComposerSession {
   search: string
   categoryId: number | null
@@ -54,6 +60,10 @@ interface ComposerSession {
   negativePrompt: string
   randomCount: number
   limits: Record<string, number>
+  resultOpen: boolean
+  resultTab: 'canvas' | 'random' | 'job'
+  randomCombos: string[]
+  selectedCombos: number[]
 }
 
 const SESSION_KEY = 'pb.session.composer'
@@ -65,7 +75,17 @@ const savedSession = readSession<ComposerSession>(SESSION_KEY, {
   negativePrompt: '',
   randomCount: 1,
   limits: {},
+  resultOpen: false,
+  resultTab: 'canvas',
+  randomCombos: [],
+  selectedCombos: [],
 })
+
+const resultOpen = ref(savedSession.resultOpen)
+const resultTab = ref<'canvas' | 'random' | 'job'>(savedSession.resultTab)
+const randomCombos = ref<string[]>(savedSession.randomCombos)
+/** 结果中心随机页里勾选的组（下标）；默认全选。 */
+const selectedCombos = ref<number[]>(savedSession.selectedCombos)
 
 /** 检索条常驻在顶部（旧版就是常驻的 25px 条），标签放抽屉。 */
 const search = ref(savedSession.search)
@@ -367,7 +387,20 @@ const negativePrompt = ref(savedSession.negativePrompt)
 const randomCount = ref(savedSession.randomCount)
 
 watch(
-  [search, categoryId, tagIds, tagMatch, negativePrompt, randomCount, limits],
+  [
+    search,
+    categoryId,
+    tagIds,
+    tagMatch,
+    negativePrompt,
+    randomCount,
+    limits,
+    // 结果中心的开关 / 页签 / 抽出来的组合也一起落盘：刷新不该把弹窗关掉
+    resultOpen,
+    resultTab,
+    randomCombos,
+    selectedCombos,
+  ],
   () => {
     writeSession(SESSION_KEY, {
       search: search.value,
@@ -377,6 +410,10 @@ watch(
       negativePrompt: negativePrompt.value,
       randomCount: randomCount.value,
       limits: limits.value,
+      resultOpen: resultOpen.value,
+      resultTab: resultTab.value,
+      randomCombos: randomCombos.value,
+      selectedCombos: selectedCombos.value,
     })
   },
   { deep: true },
@@ -450,6 +487,37 @@ function pickForType(type: string): Picked | null {
   return { content: item.content, promptId: item.prompt_id, source: item.source, index: i }
 }
 
+/**
+ * 刷新后把「已选碎片」摆回列中间。
+ *
+ * 之前只有手动随机才滚动，于是固定列刷新后既不在视野里高亮，选中项若排在
+ * 首批 40 条之后，卡片甚至根本没渲染（`.card.on` 找不到）。
+ * 这里在碎片数据第一次到位时补一次：先把限额提到选中项，再滚到中间。
+ */
+let pickedRestored = false
+watch(
+  [grouped, canvas],
+  async () => {
+    if (pickedRestored || !Object.keys(grouped.value).length) return
+    pickedRestored = true
+    for (const type of FRAGMENT_TYPES) {
+      const slot = canvas.value[type]
+      if (!slot) continue
+      const index = (grouped.value[type] ?? []).findIndex((f) => f.content === slot.content)
+      if (index >= limitOf(type)) {
+        limits.value = { ...limits.value, [type]: index + PAGE_SIZE }
+      }
+    }
+    await nextTick()
+    for (const type of FRAGMENT_TYPES) {
+      const body = reelBodies.get(type)
+      // 刷新时不要平滑动画：那一跳应该已经"本来就在那儿"
+      body?.querySelector<HTMLElement>('.card.on')?.scrollIntoView?.({ block: 'center' })
+    }
+  },
+  { immediate: true },
+)
+
 /** 拼成与后端 `composition.render` 一致的【类型】格式。 */
 function buildCombo(): string {
   const parts: string[] = []
@@ -504,9 +572,6 @@ interface FragmentDetail {
   dupCount: number
 }
 
-const randomCombos = ref<string[]>([])
-/** 结果中心随机页里勾选的组（下标）；默认全选。 */
-const selectedCombos = ref<number[]>([])
 const detailOpen = ref(false)
 const detailFrag = ref<FragmentDetail | null>(null)
 
@@ -859,6 +924,21 @@ function goJobs() {
   router.push('/jobs')
 }
 
+/** 任务结果里的缩略图：点开看原图（复用画廊那次灯箱，不另写查看器）。 */
+const {
+  items: previewItems,
+  readonly: previewReadonly,
+  open: previewOpen,
+  preview: openPreviewImage,
+  close: closePreviewImage,
+} = useImagePreview()
+
+/** 从灯箱跳画廊：按文件名深链，画廊自己去取那条记录。 */
+function openInGallery(filename: string) {
+  closePreviewImage()
+  router.push({ path: '/gallery', query: { image: filename } })
+}
+
 function toggleTag(id: number) {
   const idx = tagIds.value.indexOf(id)
   if (idx >= 0) tagIds.value.splice(idx, 1)
@@ -910,11 +990,11 @@ function toggleTag(id: number) {
       </button>
       <button
         class="btn btn-sm"
-        :class="{ on: settingsOpen }"
-        title="负向提示词"
-        @click="settingsOpen = !settingsOpen"
+        :class="{ on: !!negativePrompt.trim() }"
+        title="编辑负面提示词（出图时使用）"
+        @click="settingsOpen = true"
       >
-        ⚙ 高级
+        🚫 负面提示词
       </button>
       <button class="btn btn-sm" @click="templateOpen = true">
         📚 模板 {{ templates.length }}
@@ -924,7 +1004,6 @@ function toggleTag(id: number) {
       </button>
       <button
         class="btn btn-sm"
-        :disabled="generating"
         :title="pinned.length ? `锁定 ${pinned.length} 列，其余随机` : '预览随机组合，确认后才出图'"
         @click="openRandomPreview"
       >
@@ -944,16 +1023,30 @@ function toggleTag(id: number) {
       </span>
     </div>
 
-    <div v-if="settingsOpen" class="settings-panel">
-      <div class="drawer-head">
-        <span>高级设置</span>
-        <button class="close" @click="settingsOpen = false">✕</button>
+    <Modal
+      :open="settingsOpen"
+      title="负面提示词"
+      width="min(820px, 92vw)"
+      height="min(56vh, 520px)"
+      @close="settingsOpen = false"
+    >
+      <div class="neg-panel">
+        <p class="neg-hint">
+          这些内容不会被画出来。留空 = 不加负面提示词；换行分隔也可以，提交时按原样带上。
+        </p>
+        <textarea
+          v-model="negativePrompt"
+          class="neg-text"
+          spellcheck="false"
+          placeholder="例如：低清晰度、模糊、多余的手指、水印、文字…"
+        />
       </div>
-      <label class="field">
-        <span>负向提示词</span>
-        <textarea v-model="negativePrompt" />
-      </label>
-    </div>
+      <template #footer>
+        <span class="spacer" />
+        <button class="btn btn-sm" @click="negativePrompt = ''">清空</button>
+        <button class="btn btn-sm primary" @click="settingsOpen = false">确定</button>
+      </template>
+    </Modal>
 
     <div v-if="filtersOpen" class="filter-drawer">
       <div class="drawer-head">
@@ -1130,6 +1223,19 @@ function toggleTag(id: number) {
       @copy-canvas="copyText(composedPrompt, '组合结果')"
       @save-prompt="saveAsPrompt"
       @go-jobs="goJobs"
+      @preview-image="openPreviewImage($event)"
+    />
+
+    <Lightbox
+      v-if="previewOpen"
+      :items="previewItems"
+      :index="0"
+      :readonly="previewReadonly"
+      :workflows="workflows"
+      can-open-gallery
+      @close="closePreviewImage"
+      @open-in-gallery="openInGallery"
+      @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
     />
 
     <FragmentDetailModal
@@ -1220,23 +1326,35 @@ function toggleTag(id: number) {
   color: var(--muted);
 }
 
-/* 高级设置浮层：与筛选抽屉同款，但贴右侧 */
-.settings-panel {
-  position: absolute;
-  top: 41px;
-  right: 8px;
-  z-index: 20;
-  width: 320px;
-  max-height: 72vh;
-  overflow-y: auto;
+/* 负面提示词弹窗：整块可用区域都给文本框，不再挤在 320px 的小抽屉里 */
+.neg-panel {
+  height: 100%;
+  box-sizing: border-box;
   padding: var(--gap);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: var(--gap-sm);
+}
+
+.neg-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.neg-text {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font: inherit;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
 }
 
 /* 8 条并列滚筒：每列独立滚动，候选与选中项同列 */
@@ -1379,6 +1497,14 @@ function toggleTag(id: number) {
   padding: 4px;
 }
 
+/* 列尾留白：最后一张卡片也要能滚到列中间。
+   没有这段空白时 scrollIntoView({block:'center'}) 会被容器末端卡住，
+   选中列表末尾那条永远贴在最下面。 */
+.reel-body::after {
+  content: '';
+  flex: 0 0 45%;
+}
+
 .card {
   display: flex;
   flex-direction: column;
@@ -1456,33 +1582,6 @@ function toggleTag(id: number) {
 .card.add {
   color: var(--muted);
   border-style: dashed;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
-
-.field select {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.field textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 44px;
-  max-height: 66px;
-  resize: vertical;
-  font: inherit;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 6px;
 }
 
 .gen-error {
