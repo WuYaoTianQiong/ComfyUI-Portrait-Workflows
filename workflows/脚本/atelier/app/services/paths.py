@@ -6,10 +6,73 @@
 - 图片访问 URL 与「文件缺失」占位图
 """
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
 from app.config import settings
+
+#: 允许经图片接口读取/浏览的扩展名。放在这里而不是 media.py，
+#: 是为了让路径校验和目录浏览共用同一份白名单。
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _relative_parts(raw: str) -> list[str] | None:
+    """把用户提供的相对路径拆成安全片段；含穿越/绝对路径时返回 None。
+
+    不做 realpath：Windows 跨卷 junction 上 realpath/exists 会抛 WinError 448。
+    这里只做词法校验，junction 自身仍由 `_resolve_if_reparse` 逐段解析。
+    """
+    text = (raw or "").replace("\\", "/").strip()
+    if not text:
+        return []
+    if text.startswith("/") or text.startswith("//") or _WINDOWS_DRIVE_RE.match(text):
+        return None
+    parts: list[str] = []
+    for part in text.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            return None
+        if ":" in part or any(ord(ch) < 32 for ch in part):
+            return None
+        parts.append(part)
+    return parts
+
+
+def _safe_filename(filename: str) -> bool:
+    """文件名必须是单段 basename，不能带目录、盘符或 NTFS 备用流。"""
+    if not filename or filename in (".", ".."):
+        return False
+    if "/" in filename or "\\" in filename or ":" in filename:
+        return False
+    if _WINDOWS_DRIVE_RE.match(filename):
+        return False
+    return not any(ord(ch) < 32 for ch in filename)
+
+
+def is_safe_image_ref(filename: str, subfolder: str = "", img_type: str = "output") -> bool:
+    """校验 (filename, subfolder, img_type) 是否只能落在 ComfyUI 的 input/output/temp 内。"""
+    if (img_type or "output") not in {"input", "output", "temp"}:
+        return False
+    if not _safe_filename(filename):
+        return False
+    return _relative_parts(subfolder) is not None
+
+
+def resolve_local_image(path: str) -> Path | None:
+    """浏览器选图用的本地绝对路径：只允许真实存在的图片文件。"""
+    if not path:
+        return None
+    try:
+        p = Path(path)
+        if not p.is_absolute() or p.suffix.lower() not in IMAGE_EXTENSIONS:
+            return None
+        return p if p.is_file() else None
+    except OSError:
+        return None
 
 
 def _resolve_if_reparse(p: Path) -> Path:
@@ -29,25 +92,27 @@ def _resolve_if_reparse(p: Path) -> Path:
 
 
 def image_base_dir(img_type: str) -> Path:
-    """按 img_type 取 ComfyUI 的 input/output 根目录（已解析重解析点）。"""
-    name = "input" if img_type == "input" else "output"
-    return _resolve_if_reparse(settings.comfyui_root / name)
+    """按 img_type 取 ComfyUI 的 input/output/temp 根目录（已解析重解析点）。"""
+    if img_type == "input":
+        base = settings.input_dir
+    elif img_type == "temp":
+        base = settings.temp_dir
+    else:
+        base = settings.output_dir
+    return _resolve_if_reparse(base)
 
 
 def resolve_image_path(filename: str, subfolder: str, img_type: str) -> Path | None:
-    """把 (filename, subfolder, type) 解析成本地真实文件路径；不存在返回 None。
+    """把 (filename, subfolder, type) 解析成本地真实文件路径；不存在或越界返回 None。
 
     subfolder 可能逐层都是 junction（如 image/2026-07-04），必须逐段解析，
     否则跨卷 junction 上的 exists()/stat() 会抛 WinError 448，被误判成"文件缺失"。
     """
-    if not filename:
+    if not is_safe_image_ref(filename, subfolder, img_type):
         return None
     cur = image_base_dir(img_type)
-    if subfolder:
-        for part in subfolder.replace("\\", "/").split("/"):
-            if not part:
-                continue
-            cur = _resolve_if_reparse(cur / part)
+    for part in _relative_parts(subfolder) or []:
+        cur = _resolve_if_reparse(cur / part)
     img_path = cur / filename
     try:
         return img_path if img_path.exists() else None

@@ -1,5 +1,6 @@
 """配置管理 —— pydantic-settings 统一加载"""
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -69,13 +70,35 @@ class Settings(BaseSettings):
     no_browser: bool = False  # ATELIER_NO_BROWSER=1：启动时不自动开浏览器（冒烟/测试用）
     comfyui_api: str = "http://127.0.0.1:8188"
     comfyui_root_env: str | None = None  # 手动覆盖用
+    # 独立指定 ComfyUI 的出图根（ComfyUI 用 --output-directory 或 output 挂到别的盘时）
+    comfyui_output_dir: Path | None = None
 
     # 路径（两个根，语义不同，别再混用）
     package_dir: Path = Path(__file__).absolute().parent        # <库>/脚本/atelier/app
     app_root: Path = package_dir.parent                        # <库>/脚本/atelier  ← 代码项目根
     library_root: Path = _resolve_library_root(app_root)       # <库>                ← 工作流库根
-    comfyui_root: Path = _resolve_comfyui_root(library_root, comfyui_root_env)
+    # 由 model_validator 在 env 解析后计算；不能把 _resolve_comfyui_root(...) 写在这里，
+    # 否则读到的永远是类默认的 comfyui_root_env（None），ATELIER_COMFYUI_ROOT_ENV 形同虚设。
+    comfyui_root: Path = Path()
     thumbnail_dir: Path = library_root / "thumbnails"
+
+    @model_validator(mode="after")
+    def _resolve_comfyui_root_field(self):
+        self.comfyui_root = _resolve_comfyui_root(self.library_root, self.comfyui_root_env)
+        return self
+
+    @property
+    def output_dir(self) -> Path:
+        """出图根：显式配置优先，否则沿用 <comfyui_root>/output。"""
+        return self.comfyui_output_dir or (self.comfyui_root / "output")
+
+    @property
+    def input_dir(self) -> Path:
+        return self.comfyui_root / "input"
+
+    @property
+    def temp_dir(self) -> Path:
+        return self.comfyui_root / "temp"
 
     # 数据库
     db_path: Path = library_root / "文档" / "提示词收藏.db"
@@ -91,5 +114,6 @@ settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
 
 # 启动时打印确认
 print(f"[config] comfyui_root = {settings.comfyui_root}")
-print(f"[config]   output dir exists = {_safe_is_dir(settings.comfyui_root / 'output')}")
+print(f"[config]   output dir = {settings.output_dir}")
+print(f"[config]   output dir exists = {_safe_is_dir(settings.output_dir)}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")

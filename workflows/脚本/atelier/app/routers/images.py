@@ -1,5 +1,10 @@
 """图片（原 `history` 路由）—— 画廊列表 / 分面 / 同步 / 批量操作 / 标签分类关联。"""
 import json
+import os
+import subprocess
+import sys
+import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -18,13 +23,25 @@ from app.services.image_meta import (
     get_image_metadata,
     get_image_metadata_fast,
 )
-from app.services.paths import _resolve_if_reparse, build_view_url
-from app.services.thumbnail import _get_image_path
+from app.services.paths import _resolve_if_reparse, build_view_url, resolve_image_path
+from app.services.output_location import (
+    OutputLocationError,
+    apply_output_subfolder,
+    expand_subfolder,
+)
+from app.services.thumbnail import _get_image_path, clear_thumbnails_for
 
 router = APIRouter(tags=["图片"])
 
 COMFYUI_API = settings.comfyui_api
-OUTPUT_ROOT = _resolve_if_reparse(settings.comfyui_root / "output")
+
+# 历史同步 / 磁盘扫描互斥：HTTP 手动同步与 writer 定时同步可能同时触发。
+# `_job_index` 是模块级缓存，两边同时写会读到半成品，同时入库也可能重复。
+_sync_lock = threading.Lock()
+# 目录 mtime 缓存：未变化的子目录不再逐层 scandir；每 10 分钟强制全量一次。
+_dir_mtimes: dict[str, float] = {}
+_last_full_scan = -1e9
+_FULL_SCAN_INTERVAL = 600.0
 
 
 # ---------------------------------------------------------------------------
@@ -282,18 +299,58 @@ def _build_job_index():
     _job_index_version = signature
 
 
-def _sync_disk_orphans() -> int:
-    """兜底：扫描磁盘 output 目录，将不在 DB 中的 .png 文件插入 gen_history。
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _iter_output_images(root: Path, max_depth: int = 4, force: bool = False):
+    """递归遍历 output 下的图片，产出 (path, 相对 subfolder)。
+
+    限制深度并跳过隐藏目录，避免误扫备份树或深目录；subfolder 始终用 `/`。
+    未变化的子目录默认跳过（目录 mtime 缓存），force=True 时全量重扫。
+    """
+    stack: list[tuple[Path, str, int]] = [(root, "", 0)]
+    while stack:
+        cur, rel, depth = stack.pop()
+        try:
+            with os.scandir(cur) as it:
+                entries = sorted(it, key=lambda e: e.name)
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if depth < max_depth and not entry.name.startswith("."):
+                        try:
+                            mtime = entry.stat(follow_symlinks=False).st_mtime
+                        except OSError:
+                            mtime = 0.0
+                        if not force and _dir_mtimes.get(entry.path) == mtime:
+                            continue
+                        _dir_mtimes[entry.path] = mtime
+                        child_rel = f"{rel}/{entry.name}".strip("/")
+                        stack.append((Path(entry.path), child_rel, depth + 1))
+                elif entry.is_file(follow_symlinks=False):
+                    if Path(entry.name).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                        yield Path(entry.path), rel
+            except OSError:
+                continue
+
+
+def _sync_disk_orphans(force: bool = False) -> int:
+    """兜底：递归扫描 output 目录，将不在 DB 中的图片插入 gen_history。
 
     当 ComfyUI 的 /history API 中 outputs 已被清除（已完成的历史），或 atelier_
     前缀文件因服务重启导致 job poller 丢失追踪时，sync 无法通过 API 发现这些图。
     此函数作为最后兜底，直接扫描磁盘。
 
-    仅处理 output 目录下的直接文件（不递归 subfolder），因为 atelier 出图
-    都在 output 根目录（subfolder=""）。
+    支持 output 下的相对子目录（出图归档后仍然可用）；subfolder 与入库键一致。
     """
     try:
-        output_dir = _resolve_if_reparse(settings.comfyui_root / "output")
+        output_dir = _resolve_if_reparse(settings.output_dir)
         if not output_dir.exists():
             return 0
     except Exception:
@@ -304,13 +361,14 @@ def _sync_disk_orphans() -> int:
     for r in Image.select(Image.filename, Image.subfolder, Image.img_type).where(Image.is_deleted == False).tuples():
         existing.add((r[0], r[1] or "", r[2] or "output"))
 
+    _build_job_index()
     added = 0
     try:
-        for fpath in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime):
-            if not fpath.is_file() or fpath.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
-                continue
+        candidates = list(_iter_output_images(output_dir, force=force))
+        candidates.sort(key=lambda item: _safe_mtime(item[0]))
+        for fpath, subfolder in candidates:
             fname = fpath.name
-            if (fname, "", "output") in existing:
+            if (fname, subfolder, "output") in existing:
                 continue
             try:
                 sz = fpath.stat().st_size
@@ -318,7 +376,6 @@ def _sync_disk_orphans() -> int:
                 job_id = None
                 prompt_id = None
                 prompt_text = ""
-                _build_job_index()
                 match = _job_index.get(fname)
                 if match:
                     job_id, prompt_id, prompt_text = match
@@ -339,15 +396,16 @@ def _sync_disk_orphans() -> int:
                     prompt_id=prompt_id,
                     comfyui_prompt_id="",
                     filename=fname,
-                    subfolder="",
+                    subfolder=subfolder,
                     img_type="output",
-                    view_url=build_view_url(fname, "", "output"),
+                    view_url=build_view_url(fname, subfolder, "output"),
                     preview="",
                     prompt_params=pp,
                     is_favorite=False,
                     captured_at=captured,
                     source="disk_scan",
                 ).execute()
+                existing.add((fname, subfolder, "output"))
                 added += 1
             except Exception:
                 pass
@@ -356,6 +414,27 @@ def _sync_disk_orphans() -> int:
     if added:
         print(f"[sync] disk scan: added {added} orphan images")
     return added
+
+
+def sync_all(force: bool = False) -> int:
+    """同步 ComfyUI 历史 + 磁盘兜底；同一时刻只允许一个执行者。
+
+    HTTP 手动同步与 writer 定时同步共用此入口；拿不到锁说明已有扫描在跑，
+    本次直接返回 0，避免重复入库与 `_job_index` 半成品。
+    """
+    global _last_full_scan
+    now = time.monotonic()
+    force = force or (now - _last_full_scan >= _FULL_SCAN_INTERVAL)
+    if not _sync_lock.acquire(blocking=False):
+        return 0
+    try:
+        added = _sync_comfyui_history()
+        added += _sync_disk_orphans(force=force)
+        if force:
+            _last_full_scan = now
+        return added
+    finally:
+        _sync_lock.release()
 
 
 def _build_prompt_params_from_comfy(data: dict, filename: str = "", subfolder: str = "", img_type: str = "output") -> str | None:
@@ -417,17 +496,7 @@ def _delete_source_file(filename: str, subfolder: str, img_type: str) -> bool:
 
 def _cleanup_thumbnails(filename: str, subfolder: str, img_type: str):
     """清理缩略图：按 (filename, subfolder, img_type) 精确清理，避免误删其他记录的缩略图"""
-    try:
-        thumb_dir = settings.thumbnail_dir
-        safe_filename = filename.replace("/", "_").replace("\\", "_").replace(":", "_")
-        safe_subfolder = (subfolder or "").replace("/", "_").replace("\\", "_").replace(":", "_")
-        safe_type = (img_type or "output").replace("/", "_").replace("\\", "_").replace(":", "_")
-        # 匹配模式：{filename}_{subfolder}_{img_type}_*
-        prefix = f"{safe_filename}_{safe_subfolder}_{safe_type}_"
-        for f in thumb_dir.glob(f"{prefix}*"):
-            f.unlink()
-    except Exception:
-        pass
+    clear_thumbnails_for(filename, subfolder, img_type)
 
 
 # ---------------------------------------------------------------------------
@@ -465,12 +534,43 @@ def list_history(
             q = q.where(Image.id.in_(wanted))
 
     total = q.count()
-
     offset = (page - 1) * page_size
-    # 按"真实出图时间"排序：captured_at 优先，老数据回退 created_at。
-    # 只按 created_at 排会变成按"导入批次"排（同步/扫描进来的图全部落在同一天）。
-    q = q.order_by(_captured_at_expr().desc(), Image.id.desc()).offset(offset).limit(page_size)
-    rows = list(q)
+
+    def _page_meta(row) -> dict:
+        # 性能优化：优先从 prompt_params JSON 取宽高（同步/入库时已写入），
+        # file_size 用 os.stat 秒读，仅缺失时回退 PIL 打开
+        return (
+            get_image_metadata_fast(
+                row.filename, row.subfolder or "", row.img_type or "output",
+                prompt_params=row.prompt_params,
+            )
+            or {}
+        )
+
+    # 排序必须发生在分页之前：旧实现先 offset/limit 再在内存里排，
+    # size/res/oldest 只能排当前页，跨页顺序是错的。
+    if sort in ("size_asc", "size_desc", "res_asc", "res_desc"):
+        all_rows = list(q.order_by(_captured_at_expr().desc(), Image.id.desc()))
+        all_meta = {r.id: _page_meta(r) for r in all_rows}
+        if sort.startswith("size_"):
+            key = lambda r: (all_meta[r.id].get("file_size", 0) or 0, r.id)
+        else:
+            key = lambda r: (all_meta[r.id].get("width", 0) or 0, r.id)
+        all_rows.sort(key=key, reverse=sort.endswith("_desc"))
+        rows = all_rows[offset:offset + page_size]
+        meta_cache = {r.id: all_meta[r.id] for r in rows}
+        missing_meta = sum(1 for meta in all_meta.values() if not meta)
+    else:
+        # newest / oldest 可以直接下推 SQL；按“真实出图时间”排序：
+        # captured_at 优先，老数据回退 created_at。
+        if sort == "oldest":
+            order = (_captured_at_expr().asc(), Image.id.asc())
+        else:
+            order = (_captured_at_expr().desc(), Image.id.desc())
+        rows = list(q.order_by(*order).offset(offset).limit(page_size))
+        meta_cache = {r.id: _page_meta(r) for r in rows}
+        missing_meta = sum(1 for meta in meta_cache.values() if not meta)
+
     ids = [r.id for r in rows]
 
     # 批量预取 tags / categories，避免逐图 N+1 子查询
@@ -483,37 +583,11 @@ def list_history(
     for c in ImageCategory.select().where(ImageCategory.image.in_(ids)):
         cats_map.setdefault(c.image_id, []).append(c)
 
-    alive = []
-    meta_cache = {}
-    missing_meta_ids = []
-    for r in rows:
-        # 性能优化：优先从 prompt_params JSON 取宽高（同步/入库时已写入），
-        # file_size 用 os.stat 秒读，仅缺失时回退 PIL 打开
-        meta = get_image_metadata_fast(
-            r.filename, r.subfolder or "", r.img_type or "output",
-            prompt_params=r.prompt_params,
-        )
-        if not meta:
-            meta = {}
-            missing_meta_ids.append(r.id)
-        meta_cache[r.id] = meta
-        alive.append(r)
-
-    if missing_meta_ids:
-        print(f"[history] 警告: {len(missing_meta_ids)} 张图的元数据读取失败（文件可能暂不可读），"
+    if missing_meta:
+        print(f"[history] 警告: {missing_meta} 张图的元数据读取失败（文件可能暂不可读），"
               f"已保留记录未删除")
 
-    if sort == "oldest":
-        alive.sort(key=lambda r: (r.captured_at or r.created_at, r.id))
-    elif sort == "size_asc":
-        alive.sort(key=lambda r: meta_cache[r.id].get("file_size", 0) or 0)
-    elif sort == "size_desc":
-        alive.sort(key=lambda r: meta_cache[r.id].get("file_size", 0) or 0, reverse=True)
-    elif sort == "res_asc":
-        alive.sort(key=lambda r: (meta_cache[r.id].get("width", 0) or 0))
-    elif sort == "res_desc":
-        alive.sort(key=lambda r: (meta_cache[r.id].get("width", 0) or 0), reverse=True)
-
+    alive = rows
     cache = _build_prompt_cache(alive)
     result = [
         _enrich_item(r, cache, meta_cache.get(r.id, {}), cats_map.get(r.id), tags_map.get(r.id))
@@ -688,8 +762,7 @@ def history_ids(
 @router.get("/images/sync")
 @router.post("/images/sync")
 def sync_history(page_size: int = Query(500)):
-    added = _sync_comfyui_history()
-    added += _sync_disk_orphans()
+    added = sync_all(force=True)
     # 注意：list_history 是 FastAPI 路由函数，直接 Python 调用时未显式传入的参数
     # 会拿到 Query(...) 默认对象（FieldInfo）而非真正的 None/""，
     # 会导致 `if category_id is not None` / `tag_ids.split` 等分支误触发并 500。
@@ -881,8 +954,10 @@ def download_history_item(item_id: int):
     if r is None:
         raise HTTPException(404, "历史记录不存在")
 
-    img_path = OUTPUT_ROOT / (r.subfolder or "") / r.filename
-    if not img_path.exists():
+    img_path = resolve_image_path(
+        r.filename or "", r.subfolder or "", r.img_type or "output"
+    )
+    if img_path is None:
         raise HTTPException(404, "图片文件不存在")
 
     # 推断 media_type
@@ -898,12 +973,67 @@ def download_history_item(item_id: int):
     )
 
 
+class RevealRequest(BaseModel):
+    id: int | None = None
+    filename: str = ""
+    subfolder: str = ""
+    img_type: str = "output"
+
+
+def _reveal_path(img_path: Path) -> dict:
+    if sys.platform != "win32":
+        return {"success": False, "path": str(img_path), "message": "仅支持 Windows"}
+    subprocess.Popen(["explorer", "/select,", str(img_path)])
+    return {"success": True, "path": str(img_path)}
+
+
+@router.post("/images/reveal")
+def reveal_image_ref(req: RevealRequest):
+    """按 id 或 (filename, subfolder, type) 在资源管理器中定位原图。
+
+    任务/结果中心里的图可能还没入库（没有 id），所以提供按文件名定位的入口；
+    路径仍走 `resolve_image_path`，越界与不存在的文件都会被拒绝。
+    """
+    if req.id is not None:
+        r = Image.get_or_none(Image.id == req.id)
+        if r is None:
+            raise HTTPException(404, "历史记录不存在")
+        filename, subfolder, img_type = r.filename or "", r.subfolder or "", r.img_type or "output"
+    else:
+        filename, subfolder, img_type = req.filename, req.subfolder, req.img_type or "output"
+    img_path = resolve_image_path(filename, subfolder, img_type)
+    if img_path is None:
+        raise HTTPException(404, "图片文件不存在")
+    return _reveal_path(img_path)
+
+
+@router.post("/images/{item_id}/reveal")
+def reveal_history_item(item_id: int):
+    """在资源管理器中定位这条出图记录对应的原图。"""
+    r = Image.get_or_none(Image.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+    img_path = resolve_image_path(
+        r.filename or "", r.subfolder or "", r.img_type or "output"
+    )
+    if img_path is None:
+        raise HTTPException(404, "图片文件不存在")
+    return _reveal_path(img_path)
+
+
 # ---------------------------------------------------------------------------
 # 清空
 # ---------------------------------------------------------------------------
 
 @router.delete("/images")
-def clear_history():
+def clear_history(confirm: bool = Query(False)):
+    live = Image.select().where(Image.is_deleted == False).count()
+    if not confirm:
+        return {
+            "success": False,
+            "total": live,
+            "message": "未执行：这是全库软删除，必须显式传 confirm=true",
+        }
     Image.update(is_deleted=True).execute()
     # 清理全部缩略图
     try:
@@ -914,7 +1044,7 @@ def clear_history():
             td.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-    return {"success": True}
+    return {"success": True, "total": live}
 
 
 @router.post("/images/backfill_taxonomy")
@@ -929,6 +1059,7 @@ class ProcessImageRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    output_subfolder: str = ""
 
 
 @router.post("/images/{item_id}/process")
@@ -943,29 +1074,32 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     from app.config import settings
     from app.services.workflow_parser import load_workflow, inject_prompt, inject_input_image
     from app.services.comfyui_client import push_prompt
-    from app.routers.jobs import create_job, update_job_items
+    from app.routers.jobs import build_job_extra, create_job, update_job_items
 
-    if r.img_type == "input":
-        src_dir = settings.comfyui_root / "input"
-    else:
-        src_dir = settings.comfyui_root / "output"
-    src_dir = _resolve_if_reparse(src_dir)
-    src_path = src_dir / (r.subfolder or "") / r.filename if r.subfolder else src_dir / r.filename
-
-    if not src_path.exists():
-        raise HTTPException(404, f"图片文件不存在: {src_path}")
+    src_path = resolve_image_path(
+        r.filename or "", r.subfolder or "", r.img_type or "output"
+    )
+    if src_path is None:
+        raise HTTPException(404, "图片文件不存在")
 
     # 2. 加载工作流
     workflow_path = data.workflow_path or ""
     if not workflow_path:
         raise HTTPException(400, "缺少工作流路径")
     try:
+        expand_subfolder(
+            data.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=data.quality, orientation=data.orientation,
+        )
+    except OutputLocationError as e:
+        raise HTTPException(400, str(e))
+    try:
         api_wf = load_workflow(workflow_path, data.workflow_content)
     except Exception as e:
         raise HTTPException(400, f"工作流加载失败: {e}")
 
     # 3. 注入图片到 LoadImage 节点
-    input_dir = settings.comfyui_root / "input"
+    input_dir = settings.input_dir
     try:
         img_name = inject_input_image(api_wf, str(src_path), str(input_dir))
     except Exception as e:
@@ -993,7 +1127,16 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     job_id = create_job(
         "single", f"图片处理: {r.filename[:30]}", items,
         workflow_path, data.orientation, data.quality,
+        extra=build_job_extra(
+            workflow_path, data.workflow_content, data.output_subfolder,
+            source="history_process",
+        ),
     )
+    subfolder = expand_subfolder(
+        data.output_subfolder, workflow_path=workflow_path, job_id=job_id,
+        quality=data.quality, orientation=data.orientation,
+    )
+    apply_output_subfolder(api_wf, subfolder)
 
     # 6. 推送 ComfyUI
     try:

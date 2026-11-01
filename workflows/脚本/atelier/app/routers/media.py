@@ -28,10 +28,13 @@ from PIL import Image as PILImage
 
 from app.config import settings
 from app.services.paths import (
+    IMAGE_EXTENSIONS,
     _resolve_if_reparse,
     image_base_dir,
+    is_safe_image_ref,
     missing_image_response,
     resolve_image_path,
+    resolve_local_image,
 )
 from app.services.thumbnail import generate_thumbnail
 
@@ -39,7 +42,7 @@ router = APIRouter(tags=["媒体与文件浏览"])
 
 COMFYUI_API = settings.comfyui_api
 
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+IMAGE_EXT = IMAGE_EXTENSIONS
 MAX_ITEMS = 800          # 单个目录最多返回多少个子目录 / 图片，避免超大目录把前端卡死
 
 
@@ -54,6 +57,8 @@ def proxy_image(
     subfolder: str = Query(""),
     type: str = Query("output"),
 ):
+    if not is_safe_image_ref(filename, subfolder, type):
+        raise HTTPException(400, "非法的图片路径")
     # 优先读本地文件（ComfyUI 离线也能用）
     local = resolve_image_path(filename, subfolder, type)
     if local:
@@ -100,6 +105,8 @@ def proxy_image(
 
 def _cache_proxied_image(filename: str, subfolder: str, img_type: str, content: bytes) -> None:
     """将代理获取到的图片保存到 ComfyUI 本地目录，便于后续直接读取。"""
+    if not is_safe_image_ref(filename, subfolder, img_type):
+        return
     try:
         target_dir = image_base_dir(img_type) / (subfolder or "")
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -138,6 +145,8 @@ def serve_thumbnail(
     size: int = Query(300),
     v: str = Query(None),  # cache-busting 版本号，仅用于生成不同 URL，不参与处理逻辑
 ):
+    if not is_safe_image_ref(filename, subfolder, type):
+        raise HTTPException(400, "非法的图片路径")
     thumb_path = generate_thumbnail(filename, subfolder, type, size)
     if thumb_path is not None:
         return FileResponse(
@@ -204,9 +213,9 @@ def _roots() -> list[dict]:
     """快速跳转入口：ComfyUI 常用目录 + 项目根 + 用户目录 + 所有盘符"""
     out: list[dict] = []
     candidates = [
-        ("ComfyUI/output", settings.comfyui_root / "output"),
-        ("ComfyUI/input", settings.comfyui_root / "input"),
-        ("ComfyUI/temp", settings.comfyui_root / "temp"),
+        ("ComfyUI/output", settings.output_dir),
+        ("ComfyUI/input", settings.input_dir),
+        ("ComfyUI/temp", settings.temp_dir),
         ("工作流目录", settings.library_root),
     ]
     for name, p in candidates:
@@ -295,8 +304,8 @@ def _thumb_cache_path(p: Path, size: int) -> Path:
 @router.get("/browser/thumb")
 def browser_thumb(path: str = Query(...), size: int = Query(300)):
     """任意图片文件的缩略图（带磁盘缓存，按 路径+mtime+尺寸 做键）"""
-    p = Path(path)
-    if not p.is_file():
+    p = resolve_local_image(path)
+    if p is None:
         return missing_image_response()
     size = max(64, min(int(size), 1024))
     cache = _thumb_cache_path(p, size)
@@ -317,8 +326,8 @@ def browser_thumb(path: str = Query(...), size: int = Query(300)):
 
 @router.get("/browser/image")
 def browser_image(path: str = Query(...)):
-    """任意图片文件的原图"""
-    p = Path(path)
-    if not p.is_file():
+    """任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）"""
+    p = resolve_local_image(path)
+    if p is None:
         return missing_image_response()
     return FileResponse(str(p), headers={"Cache-Control": "no-cache"})
