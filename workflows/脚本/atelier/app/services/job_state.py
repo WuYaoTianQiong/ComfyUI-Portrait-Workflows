@@ -20,7 +20,10 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from peewee import fn
 
 from app.config import settings
 from app.models import Image, GenJob, db, inherit_prompt_taxonomy
@@ -38,7 +41,7 @@ from app.services.image_meta import (
     extract_model_name,
     get_image_metadata,
 )
-from app.services.paths import build_view_url
+from app.services.paths import build_view_url, resolve_image_path
 
 logger = logging.getLogger("atelier.jobs")
 
@@ -116,6 +119,11 @@ def _parse_items(raw) -> list[dict]:
         return value if isinstance(value, list) else []
     except (TypeError, ValueError):
         return []
+
+
+def parse_items(raw) -> list[dict]:
+    """公开只读解析：后台提交线程需要检查条目状态。"""
+    return _parse_items(raw)
 
 
 def normalize(job: dict) -> dict:
@@ -230,14 +238,158 @@ def update_job_items(job_id: int, items: list[dict], status: str | None = None):
         publish(snap)
 
 
+def _overall_status(items: list[dict], fallback: str = "running") -> str:
+    """按条目状态推进总状态；仍存在 pending/running 时保持 running。"""
+    if not items:
+        return fallback
+    statuses = [str(i.get("status") or "pending") for i in items]
+    if not all(s in TERMINAL for s in statuses):
+        return "running"
+    if all(s == "done" for s in statuses):
+        return "done"
+    if all(s in ("cancelled", "stopped") for s in statuses):
+        return "stopped"
+    return "error"
+
+
+def update_job_item(
+    job_id: int, index: int, fields: dict, status: str | None = None,
+) -> dict | None:
+    """只更新一条 item（后台提交线程用），避免整批读改写覆盖其它条目的并发变化。"""
+    with _lock:
+        row = GenJob.get_or_none(GenJob.id == job_id)
+        if row is None:
+            return None
+        items = _parse_items(row.items)
+        if index < 0 or index >= len(items):
+            return None
+        item = items[index]
+        # 取消/终态优先：提交线程不能把用户刚取消的条目标回 pending
+        if item.get("status") in TERMINAL:
+            return normalize(row_to_dict(row))
+        item.update(fields)
+        done = sum(1 for i in items if i.get("status") == "done")
+        errors = sum(1 for i in items if i.get("status") in ("error", "cancelled"))
+        overall = status or _overall_status(items, row.status)
+        GenJob.update(
+            status=overall,
+            done_count=done,
+            error_count=errors,
+            items=json.dumps(items, ensure_ascii=False),
+            updated_at=datetime.now(),
+        ).where(GenJob.id == job_id).execute()
+    snap = read_snapshot(job_id)
+    if snap:
+        publish(snap)
+    return snap
+
+
+def finish_submission(job_id: int, reason: str = "提交队列中断，请重试") -> dict | None:
+    """后台提交线程结束（或重启恢复）时，把仍未提交的 queued 条目标成错误。"""
+    with _lock:
+        row = GenJob.get_or_none(GenJob.id == job_id)
+        if row is None:
+            return None
+        items = _parse_items(row.items)
+        changed = False
+        for item in items:
+            if item.get("submit_state") == "queued" and item.get("status") not in TERMINAL:
+                item["status"] = "error"
+                item["error"] = reason
+                item["submit_state"] = "failed"
+                changed = True
+        done = sum(1 for i in items if i.get("status") == "done")
+        errors = sum(1 for i in items if i.get("status") in ("error", "cancelled"))
+        overall = _overall_status(items, row.status)
+        if changed or row.status in ("pending", "running"):
+            GenJob.update(
+                status=overall,
+                done_count=done,
+                error_count=errors,
+                items=json.dumps(items, ensure_ascii=False),
+                updated_at=datetime.now(),
+            ).where(GenJob.id == job_id).execute()
+    snap = read_snapshot(job_id)
+    if snap:
+        publish(snap)
+    return snap
+
+
+def recover_queued_submissions(reason: str = "服务重启，提交中断，请重试") -> int:
+    """启动时清理上次进程遗留的 queued 条目（任务队列在内存里，重启即丢）。"""
+    recovered = 0
+    rows = (
+        GenJob.select()
+        .where(GenJob.status.in_(["pending", "running"]))
+    )
+    for row in rows:
+        items = _parse_items(row.items)
+        if any(i.get("submit_state") == "queued" for i in items):
+            finish_submission(row.id, reason)
+            recovered += 1
+    return recovered
+
+
+def build_job_extra(
+    workflow_path: str,
+    workflow_content: str | None,
+    output_subfolder: str = "",
+    **extra,
+) -> dict:
+    """统一的 gen_jobs.extra：记录出图子目录 / 自定义工作流内容，供重试复用。"""
+    data = {"output_subfolder": output_subfolder or ""}
+    if str(workflow_path or "").startswith("custom://") and workflow_content:
+        data["workflow_content"] = workflow_content
+    data.update(extra)
+    return data
+
+
+def find_job_by_idempotency(key: str, scope: str) -> dict | None:
+    """按「幂等键 + 入口范围」找已经创建过的任务；空键直接返回 None。
+
+    键存在 `gen_jobs.extra` JSON 里，不额外加列；任务量很小，json_extract 足够。
+    """
+    clean = (key or "").strip()
+    if not clean:
+        return None
+    try:
+        row = (
+            GenJob.select()
+            .where(
+                (fn.json_extract(GenJob.extra, "$.idempotency_key") == clean)
+                & (fn.json_extract(GenJob.extra, "$.idempotency_scope") == scope)
+            )
+            .order_by(GenJob.id.desc())
+            .first()
+        )
+    except Exception:
+        logger.exception("幂等键查询失败: %s", clean)
+        return None
+    return normalize(row_to_dict(row)) if row else None
+
+
 # ---------------------------------------------------------------------------
 # 写：状态推进（唯一写者）
 # ---------------------------------------------------------------------------
 
-def _compute(job: dict) -> tuple[dict, list[dict]]:
-    """根据 ComfyUI 队列/历史计算一次状态。纯计算，不写库。"""
-    items = job["items"]
+@dataclass(frozen=True)
+class ComfySnapshot:
+    """一次 writer 周期内共享的 ComfyUI 视图。"""
 
+    queue: dict
+    history: dict
+    running: set[str]
+    pending: set[str]
+    progress: dict | None
+    current_pid: str | None
+
+
+def fetch_comfy_snapshot() -> ComfySnapshot:
+    """采集一次 ComfyUI 队列/历史/进度。
+
+    旧实现每个活跃任务各拉一遍 queue/history/progress；20 个任务就是 40-60 req/s。
+    writer 每轮只取一次，再分发给所有任务。
+    """
     qdata = get_queue() or {}
     running: set[str] = set()
     pending: set[str] = set()
@@ -247,19 +399,6 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
     for entry in qdata.get("queue_pending", []):
         if isinstance(entry, list) and len(entry) > 1:
             pending.add(str(entry[1]))
-
-    hist = get_history(max_items=500) or {}
-
-    all_pids = {item.get("comfyui_prompt_id") for item in items if item.get("comfyui_prompt_id")}
-    miss_pids = {pid for pid in all_pids if pid and pid not in hist}
-    if miss_pids and len(miss_pids) <= 10:
-        # 未命中的（例如刚提交）逐条精确补查；数量大时放弃，避免拖垮轮询
-        from app.services.comfyui_client import get_history_for_prompt
-
-        for pid in miss_pids:
-            single = get_history_for_prompt(pid)
-            if single and pid in single:
-                hist[pid] = single[pid]
 
     progress_data = None
     current_pid = None
@@ -274,6 +413,39 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
                     "max": prog.get("max", 0),
                     "current_node": prog.get("current_node", ""),
                 }
+
+    return ComfySnapshot(
+        queue=qdata,
+        history=get_history(max_items=500) or {},
+        running=running,
+        pending=pending,
+        progress=progress_data,
+        current_pid=current_pid,
+    )
+
+
+def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, list[dict]]:
+    """根据 ComfyUI 队列/历史计算一次状态。纯计算，不写库。"""
+    items = job["items"]
+    snap = snapshot or fetch_comfy_snapshot()
+    running = snap.running
+    pending = snap.pending
+    # 每个任务可能补查自己的 miss pid，复制一份避免污染共享快照
+    hist = dict(snap.history)
+
+    all_pids = {item.get("comfyui_prompt_id") for item in items if item.get("comfyui_prompt_id")}
+    miss_pids = {pid for pid in all_pids if pid and pid not in hist}
+    if miss_pids and len(miss_pids) <= 10:
+        # 未命中的（例如刚提交）逐条精确补查；数量大时放弃，避免拖垮轮询
+        from app.services.comfyui_client import get_history_for_prompt
+
+        for pid in miss_pids:
+            single = get_history_for_prompt(pid)
+            if single and pid in single:
+                hist[pid] = single[pid]
+
+    progress_data = snap.progress
+    current_pid = snap.current_pid
 
     newly_done: list[dict] = []
     done_count = 0
@@ -294,12 +466,15 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
             # 过滤掉磁盘上已不存在的图片（ComfyUI 会长期保留已删文件的 history 条目）
             valid = []
             for img in images:
-                base = settings.comfyui_root / (img.get("type", "output"))
-                path = base / (img.get("subfolder", "") or "") / img["filename"]
-                if path.exists():
+                path = resolve_image_path(
+                    img.get("filename", ""),
+                    img.get("subfolder", "") or "",
+                    img.get("type", "output"),
+                )
+                if path is not None:
                     valid.append(img)
                 else:
-                    logger.debug("跳过已删除的图片: %s", img["filename"])
+                    logger.debug("跳过已删除的图片: %s", img.get("filename", ""))
             item["images"] = valid
             done_count += 1
             if prev_status != "done":
@@ -317,7 +492,10 @@ def _compute(job: dict) -> tuple[dict, list[dict]]:
             else:
                 error_count += 1
         elif not pid:
-            if _job_age_seconds(job) < _SUBMIT_GRACE_SECONDS:
+            if item.get("submit_state") == "queued":
+                # 后台提交队列还没轮到这条：不要用宽限期判失败
+                status = "pending"
+            elif _job_age_seconds(job) < _SUBMIT_GRACE_SECONDS:
                 # 还在提交窗口里：create_job 之后、update_job_items 之前，pid 还没写回
                 status = "pending"
             else:
@@ -379,6 +557,8 @@ def _merge_items(computed: list[dict], fresh: list[dict]) -> list[dict]:
                 base["comfyui_prompt_id"] = old["comfyui_prompt_id"]
             if not base.get("error") and old.get("error"):
                 base["error"] = old["error"]
+            if old.get("submit_state"):
+                base["submit_state"] = old["submit_state"]
             if not base.get("images") and old.get("images"):
                 base["images"] = old["images"]
             # 提交阶段写回的终态（done/error/cancelled）比基于陈旧队列的推断可信
@@ -499,8 +679,11 @@ def _insert_history_for_item(
             logger.exception("写入历史失败: %s", img.get("filename"))
 
 
-def refresh_job(job_id: int) -> dict | None:
-    """推进一个任务。只允许 writer_loop 调用（测试可直接调用）。"""
+def refresh_job(job_id: int, snapshot: ComfySnapshot | None = None) -> dict | None:
+    """推进一个任务。只允许 writer_loop 调用（测试可直接调用）。
+
+    `snapshot` 由 `refresh_active_jobs` 每轮采集一次后共享；单独调用时自行采集。
+    """
     row = GenJob.get_or_none(GenJob.id == job_id)
     if row is None:
         return None
@@ -508,8 +691,12 @@ def refresh_job(job_id: int) -> dict | None:
     if job["status"] in TERMINAL:
         return job
 
-    # 网络查询放在锁外，避免阻塞 cancel / 其它 job 的短写入
-    snapshot, newly_done = _compute(job)
+    # 网络查询放在锁外，避免阻塞 cancel / 其它 job 的短写入。
+    # 仅在共享快照存在时传第二参：保留旧的 `_compute(job)` 单参猴子补丁兼容性。
+    if snapshot is None:
+        computed, newly_done = _compute(job)
+    else:
+        computed, newly_done = _compute(job, snapshot)
 
     with _lock:
         current = GenJob.get_or_none(GenJob.id == job_id)
@@ -521,8 +708,8 @@ def refresh_job(job_id: int) -> dict | None:
 
         # 提交阶段写回的 pid / 错误不能丢：_compute 基于锁外读到的陈旧 items，
         # 整体覆盖会让"已出图"的任务永远看不到 prompt_id。
-        merged = _merge_items(snapshot["items"], _parse_items(current.items))
-        done, errors, overall = _counts_and_status(merged, snapshot["status"], current.status)
+        merged = _merge_items(computed["items"], _parse_items(current.items))
+        done, errors, overall = _counts_and_status(merged, computed["status"], current.status)
 
         for item in newly_done:
             logger.info("任务 %s 完成一张：pid=%s images=%d",
@@ -620,9 +807,14 @@ def refresh_active_jobs(limit: int = 20) -> int:
         .order_by(GenJob.id.desc())
         .limit(limit)
     ]
+    if not ids:
+        return 0
+
+    # 一轮只采集一次 ComfyUI 快照，所有活跃任务共用；无活跃任务时不外呼。
+    snapshot = fetch_comfy_snapshot()
     for job_id in ids:
         try:
-            refresh_job(job_id)
+            refresh_job(job_id, snapshot)
         except Exception:
             logger.exception("刷新任务 %s 失败", job_id)
     return len(ids)
@@ -652,10 +844,9 @@ def writer_loop(stop_event: threading.Event, interval: float = 1.0,
         if now - last_sync >= sync_interval:
             last_sync = now
             try:
-                from app.routers.images import _sync_comfyui_history, _sync_disk_orphans
+                from app.routers.images import sync_all
 
-                _sync_comfyui_history()
-                _sync_disk_orphans()
+                sync_all()
             except Exception:
                 logger.exception("同步 ComfyUI 历史失败")
 

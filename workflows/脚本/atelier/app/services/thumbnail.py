@@ -5,31 +5,30 @@ from typing import Optional
 from PIL import Image as PILImage
 
 from app.config import settings
-from app.services.paths import _resolve_if_reparse
+from app.services.paths import resolve_image_path
 
 THUMBNAIL_DIR = settings.thumbnail_dir
 
 
 def _get_image_path(filename: str, subfolder: str, img_type: str) -> Optional[Path]:
-    if not filename:
-        return None
-    if img_type == "input":
-        base_dir = settings.comfyui_root / "input"
-    elif img_type == "temp":
-        base_dir = settings.comfyui_root / "temp"
-    else:
-        base_dir = settings.comfyui_root / "output"
-    base_dir = _resolve_if_reparse(base_dir)
-    # 子目录本身也可能是 junction，逐段解析避免 WinError 448 误判为文件缺失
-    cur = base_dir
-    if subfolder:
-        for part in subfolder.replace("\\", "/").split("/"):
-            if not part:
-                continue
-            cur = cur / part
-            cur = _resolve_if_reparse(cur)
-    img_path = cur / filename
-    return img_path if img_path.exists() else None
+    """兼容入口：统一走 `paths.resolve_image_path`（含越界校验与 temp 口径）。"""
+    return resolve_image_path(filename, subfolder, img_type)
+
+
+def clear_thumbnails_for(filename: str, subfolder: str = "", img_type: str = "output") -> int:
+    """删除某张图的缩略图缓存；返回删除数量。"""
+    safe_filename = (filename or "").replace("/", "_").replace("\\", "_").replace(":", "_")
+    safe_subfolder = (subfolder or "").replace("/", "_").replace("\\", "_").replace(":", "_")
+    safe_type = (img_type or "output").replace("/", "_").replace("\\", "_").replace(":", "_")
+    prefix = f"{safe_filename}_{safe_subfolder}_{safe_type}_"
+    deleted = 0
+    try:
+        for path in THUMBNAIL_DIR.glob(prefix + "*"):
+            path.unlink(missing_ok=True)
+            deleted += 1
+    except OSError:
+        pass
+    return deleted
 
 
 def generate_thumbnail(

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.workflow_parser import (
+    is_video_workflow,
     load_workflow,
     detect_workflow_caps,
     detect_workflow_params,
@@ -18,16 +19,22 @@ from app.services.workflow_parser import (
 
 logger = logging.getLogger(__name__)
 
-#: 已废弃但仍在磁盘上的工作流目录（也参与列表与默认值挑选）
-DEPRECATED_DIR = settings.library_root / "废弃工作流"
+#: 历史归档目录：**不参与自动扫描**；用户可在「分类与标签 → 工作流」手动上传任意目录的 JSON。
+ARCHIVE_DIR = settings.library_root / "历史工作流"
+# 兼容旧引用
+DEPRECATED_DIR = ARCHIVE_DIR
 
-#: 能力探测缓存：路径 → (mtime, caps, params)。文件没改动就不重复解析。
-_meta_cache: dict[str, tuple[float, dict[str, bool], dict]] = {}
+#: 探测缓存：路径 → (mtime, caps, params, media_kind)。文件没改动就不重复解析。
+_meta_cache: dict[str, tuple[float, dict[str, bool], dict, str]] = {}
 
 
 def search_dirs() -> list[Path]:
-    """参与扫描的目录：库根 → 废弃目录。"""
-    return [settings.library_root, DEPRECATED_DIR]
+    """自动扫描目录：只扫库根目录。
+
+    其他位置（历史工作流 / 任意磁盘目录）走前端「上传自定义工作流」，
+    内容存在本机 localStorage，出图时随请求带给后端。
+    """
+    return [settings.library_root]
 
 
 def is_valid_workflow(filepath: Path) -> bool:
@@ -47,46 +54,53 @@ def is_valid_workflow(filepath: Path) -> bool:
         return False
 
 
-def get_workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
-    """返回某工作流的注入能力与参数描述；解析失败时返回空 dict（schema 默认全 True）。"""
+def _load_meta(path: Path) -> tuple[float, dict[str, bool], dict, str]:
     try:
         mtime = path.stat().st_mtime
     except OSError:
-        return {}, {}
+        return 0.0, {}, {}, "image"
     cached = _meta_cache.get(str(path))
     if cached and cached[0] == mtime:
-        return cached[1], cached[2]
+        return cached
     try:
         workflow = load_workflow(str(path))
         caps = detect_workflow_caps(workflow)
         params = detect_workflow_params(workflow)
+        media_kind = "video" if is_video_workflow(workflow) else "image"
     except Exception as exc:
         logger.debug("探测工作流能力失败 %s：%s", path.name, exc)
-        caps, params = {}, {}
-    _meta_cache[str(path)] = (mtime, caps, params)
+        caps, params, media_kind = {}, {}, "image"
+    _meta_cache[str(path)] = (mtime, caps, params, media_kind)
+    return _meta_cache[str(path)]
+
+
+def get_workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
+    """返回某工作流的注入能力与参数描述；解析失败时返回空 dict（schema 默认全 True）。"""
+    _, caps, params, _ = _load_meta(path)
     return caps, params
 
 
-def find_default_workflow() -> str:
+def get_workflow_media_kind(path: Path) -> str:
+    """返回 `image` / `video`；视频工作流默认不进入 Atelier 工作流下拉。"""
+    return _load_meta(path)[3]
+
+
+def find_default_workflow(include_video: bool = False) -> str:
     """默认工作流：优先文件名带「文生图」，否则第一个可用工作流。"""
-    candidates: list[str] = []
-    for directory in search_dirs():
-        if not directory.exists():
-            continue
-        for file in sorted(directory.glob("*.json")):
-            try:
-                if is_valid_workflow(file):
-                    candidates.append(str(file))
-            except Exception:
-                continue
+    candidates = [w["path"] for w in list_valid_workflows(include_video=include_video)]
     for candidate in candidates:
         if "文生图" in candidate:
             return candidate
     return candidates[0] if candidates else ""
 
 
-def list_valid_workflows() -> list[dict]:
-    """扫描全部可用工作流，附 caps/params 与 mtime。"""
+def list_valid_workflows(include_video: bool = False) -> list[dict]:
+    """扫描库根目录的可用工作流，附 caps/params/media_kind 与 mtime。
+
+    `include_video=False`（默认）时跳过含 SaveVideo / VideoCombine 的工作流：
+    画廊只处理图片，视频工作流请直接在 ComfyUI 里跑。
+    历史工作流/其他目录不自动扫描，走前端手动上传。
+    """
     results: list[dict] = []
     seen: set[str] = set()
     for directory in search_dirs():
@@ -99,12 +113,15 @@ def list_valid_workflows() -> list[dict]:
             if path in seen:
                 continue
             seen.add(path)
-            caps, params = get_workflow_meta(file)
+            mtime, caps, params, media_kind = _load_meta(file)
+            if media_kind == "video" and not include_video:
+                continue
             results.append({
                 "path": path,
                 "name": file.name,
-                "mtime": file.stat().st_mtime,
+                "mtime": mtime,
                 "caps": caps,
                 "params": params,
+                "media_kind": media_kind,
             })
     return results

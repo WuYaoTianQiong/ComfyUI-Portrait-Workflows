@@ -247,6 +247,43 @@ def _get_widget_order(node_type: str) -> list[tuple[str, int]]:
     return entries
 
 
+def _fill_required_defaults(api: dict) -> None:
+    """按 ComfyUI object_info 给缺失的必填输入补默认值。
+
+    工作流是 UI 里存的，某些自定义节点升级后新增了必填项（例如
+    ResolutionPresetPicker.base_name），UI 会自动填默认值但不会写回旧 JSON；
+    转成 API 后这些字段缺失，/prompt 会直接 400。这里只补 object_info 明确给出
+    default 的必填项，不猜链接输入。
+    """
+    info = get_object_info()
+    if not info:
+        return
+    for node in api.values():
+        spec = info.get(node.get("class_type", ""))
+        if not isinstance(spec, dict):
+            continue
+        required = (spec.get("input") or {}).get("required") or {}
+        for name, desc in required.items():
+            if name in node["inputs"] or not isinstance(desc, list) or not desc:
+                continue
+            first = desc[0]
+            cfg = desc[1] if len(desc) >= 2 and isinstance(desc[1], dict) else {}
+            # 链接输入（[["MODEL"]] 之类）没有 default，跳过；
+            # COMBO 的 first 是选项数组，通常带 default。
+            if isinstance(first, list):
+                if "default" in cfg:
+                    node["inputs"][name] = cfg["default"]
+                continue
+            if first == "COMBO":
+                if "default" in cfg:
+                    node["inputs"][name] = cfg["default"]
+                elif isinstance(desc[1], list) and desc[1]:
+                    node["inputs"][name] = desc[1][0]
+                continue
+            if "default" in cfg:
+                node["inputs"][name] = cfg["default"]
+
+
 def ensure_api_format(workflow: dict) -> dict:
     """将 ComfyUI 内部格式（nodes + links 数组）转为 API 格式（dict keyed by node id）"""
     if "nodes" not in workflow or not isinstance(workflow["nodes"], list):
@@ -259,15 +296,73 @@ def ensure_api_format(workflow: dict) -> dict:
             link_map[link[0]] = (str(link[1]), int(link[2]))
 
     api = _nodes_to_api(workflow["nodes"], link_map)
-    return _expand_subgraphs(workflow, api)
+    api = _expand_subgraphs(workflow, api)
+    _fill_required_defaults(api)
+    return api
+
+
+def _build_link_resolver(nodes: list, link_map: dict[int, tuple[str, int]]):
+    """把 UI 的 bypass/mute 语义带到 API 连线解析里。
+
+    ComfyUI 的 `mode=4`（bypass）和 `mode=2`（mute）只存在于 UI 格式；API 格式
+    没有 mode 字段。旧实现直接把被 bypass 的节点也塞进 /prompt，导致「第二程已
+    bypass」的单程工作流实际仍会执行第二程（Krea2 的 8+4 就是这样被跑出来的）。
+
+    bypass 的语义是「把同类型输入直通到输出」，因此这里沿输出槽类型找到第一个
+    同类型输入，递归解析它的上游连线；mute/never 直接丢弃。
+    """
+    node_by_id = {
+        str(node.get("id")): node
+        for node in nodes
+        if isinstance(node, dict) and node.get("id") is not None
+    }
+
+    def resolve(link_id, depth: int = 0):
+        if link_id is None or depth > 16:
+            return None
+        src = link_map.get(link_id)
+        if not src:
+            return None
+        src_id, src_slot = src
+        node = node_by_id.get(src_id)
+        if node is None:
+            return src
+        mode = node.get("mode", 0)
+        if mode == 2:  # mute
+            return None
+        if mode != 4:  # active
+            return src
+
+        outputs = node.get("outputs") or []
+        out_type = None
+        if isinstance(outputs, list) and 0 <= src_slot < len(outputs):
+            out = outputs[src_slot]
+            if isinstance(out, dict):
+                out_type = out.get("type")
+
+        for inp in node.get("inputs") or []:
+            if not isinstance(inp, dict) or inp.get("link") is None:
+                continue
+            inp_type = inp.get("type")
+            if out_type is None or inp_type in (out_type, "*"):
+                return resolve(inp["link"], depth + 1)
+
+        # 找不到同类型输入：断掉这条线，而不是把 bypass 节点本身提交执行
+        return None
+
+    return resolve
 
 
 def _nodes_to_api(nodes: list, link_map: dict[int, tuple[str, int]]) -> dict[str, dict]:
     """把 UI 格式的 node 列表转成 API 节点；link_map 用于把连线编号还原成 [源节点, 槽位]。"""
+    resolve_link = _build_link_resolver(nodes, link_map)
     api: dict[str, dict] = {}
     for node in nodes:
         node_type = node.get("type", "unknown")
         if node_type in SKIP_NODE_TYPES:
+            continue
+        if node.get("mode", 0) in (2, 4):
+            # mute/bypass 的节点不进入 API；下游连线已由 resolve_link 直通或断开
             continue
 
         nid = str(node.get("id", 0))
@@ -301,7 +396,7 @@ def _nodes_to_api(nodes: list, link_map: dict[int, tuple[str, int]]) -> dict[str
             if not consumes_wv:
                 # 纯连接输入（IMAGE, MODEL, VAE 等）
                 if link_id is not None:
-                    src = link_map.get(link_id)
+                    src = resolve_link(link_id)
                     if src:
                         api[nid]["inputs"][name] = [src[0], src[1]]
                 continue
@@ -312,7 +407,7 @@ def _nodes_to_api(nodes: list, link_map: dict[int, tuple[str, int]]) -> dict[str
 
             if link_id is not None:
                 # 有连线的 widget 类型输入：使用 link 值，但仍消耗位置
-                src = link_map.get(link_id)
+                src = resolve_link(link_id)
                 if src:
                     api[nid]["inputs"][name] = [src[0], src[1]]
                 wv_idx += 1
@@ -500,6 +595,21 @@ def _inject_sampler_params(node: dict, prompt_data: dict):
         scheduler = prompt_data.get("scheduler")
         if scheduler:
             inputs["scheduler"] = str(scheduler)
+
+
+def is_video_workflow(api_workflow: dict) -> bool:
+    """是否包含视频保存节点（SaveVideo / *VideoCombine*）。
+
+    Atelier 的结果中心/画廊只处理图片，视频工作流默认不进入工作流下拉；
+    需要视频时直接去 ComfyUI 跑。
+    """
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        cls = str(node.get("class_type", ""))
+        if cls == "SaveVideo" or "VideoCombine" in cls or "SaveVideo" in cls:
+            return True
+    return False
 
 
 def detect_workflow_caps(api_workflow: dict) -> dict[str, bool]:
@@ -788,6 +898,30 @@ def set_output_prefix(api_workflow: dict, prefix: str) -> int:
         cls = node.get("class_type", "")
         if cls in _SAVE_NODE_TYPES or "Save" in cls or "Export" in cls or "Output" in cls:
             inputs["filename_prefix"] = prefix
+            n += 1
+    return n
+
+
+def prepend_output_subfolder(api_workflow: dict, subfolder: str) -> int:
+    """给所有保存节点的 filename_prefix 加一层相对子目录，返回改动节点数。
+
+    与 `set_output_prefix` 的区别：这里保留工作流原前缀和 `inject_prompt`
+    追加的唯一后缀，只在最前面加目录。subfolder 为空时完全不动。
+    """
+    prefix = (subfolder or "").strip().strip("/")
+    if not prefix:
+        return 0
+    n = 0
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or "filename_prefix" not in inputs:
+            continue
+        cls = node.get("class_type", "")
+        if cls in _SAVE_NODE_TYPES or "Save" in cls or "Export" in cls or "Output" in cls:
+            original = inputs.get("filename_prefix") or ""
+            inputs["filename_prefix"] = f"{prefix}/{original}" if original else prefix
             n += 1
     return n
 

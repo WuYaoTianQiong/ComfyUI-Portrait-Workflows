@@ -20,8 +20,10 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.models import Image, ImageCategory, ImageTag, db
+from app.models import EntityTag, Image, ImageCategory, ImageTag, db
 from app.config import settings
+from app.services.tagging import recalc_usage_counts
+from app.services.thumbnail import clear_thumbnails_for
 
 logger = logging.getLogger("atelier.maintenance")
 
@@ -116,14 +118,17 @@ def purge_tombstones(keep_days: int = TOMBSTONE_KEEP_DAYS, dry_run: bool = True)
     deadline = now_utc - timedelta(days=keep_days)
 
     tombstones = Image.select().where(Image.is_deleted == True).count()
-    ids = [
-        r.id
-        for r in Image.select(Image.id).where(
+    rows = list(
+        Image.select(Image.id, Image.filename, Image.subfolder, Image.img_type).where(
             (Image.is_deleted == True)
             & ((Image.created_at.is_null(True)) | (Image.created_at < deadline))
         )
-    ]
-    result = {"tombstones": tombstones, "eligible": len(ids), "deleted": 0, "relations": 0}
+    )
+    ids = [r.id for r in rows]
+    result = {
+        "tombstones": tombstones, "eligible": len(ids), "deleted": 0,
+        "relations": 0, "thumbnails": 0,
+    }
     if dry_run or not ids:
         return result
 
@@ -131,8 +136,20 @@ def purge_tombstones(keep_days: int = TOMBSTONE_KEEP_DAYS, dry_run: bool = True)
         result["relations"] = (
             ImageTag.delete().where(ImageTag.image.in_(ids)).execute()
             + ImageCategory.delete().where(ImageCategory.image.in_(ids)).execute()
+            + EntityTag.delete().where(
+                (EntityTag.entity_type == "image") & (EntityTag.entity_id.in_(ids))
+            ).execute()
         )
         result["deleted"] = Image.delete().where(Image.id.in_(ids)).execute()
+
+    for row in rows:
+        result["thumbnails"] += clear_thumbnails_for(
+            row.filename or "", row.subfolder or "", row.img_type or "output"
+        )
+    try:
+        recalc_usage_counts()
+    except Exception:
+        logger.exception("墓碑回收后重算标签计数失败")
     return result
 
 
