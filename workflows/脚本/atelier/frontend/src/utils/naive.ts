@@ -1,5 +1,12 @@
 import { defineComponent, h, ref } from 'vue'
-import { createDiscreteApi, darkTheme, NInput, type DialogApi, type MessageApi } from 'naive-ui'
+import {
+  createDiscreteApi,
+  darkTheme,
+  NCheckbox,
+  NInput,
+  type DialogApi,
+  type MessageApi,
+} from 'naive-ui'
 
 /**
  * Naive UI 适配层。
@@ -69,6 +76,79 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
     open({
       title: options.title ?? '请确认',
       content: options.content,
+      positiveText: options.positiveText ?? '确定',
+      negativeText: options.negativeText ?? '取消',
+      onPositiveClick: () => finish(true),
+      onNegativeClick: () => finish(false),
+      onClose: () => finish(false),
+      onMaskClick: () => finish(false),
+    })
+  })
+}
+
+export interface ConfirmCheckboxOptions extends ConfirmOptions {
+  /** 勾选框文案，例如「同时删除磁盘上的原图文件」 */
+  checkboxLabel: string
+  /** 勾选框初始状态，默认不勾选（破坏性操作不预勾） */
+  defaultChecked?: boolean
+}
+
+export interface ConfirmCheckboxResult {
+  confirmed: boolean
+  checked: boolean
+}
+
+/**
+ * 带一个勾选框的确认框。
+ *
+ * 用于「删除记录时是否连磁盘文件一起删」这类需要用户显式表态的破坏性操作：
+ * 确认按钮的语义始终是主操作，勾选框只决定额外范围，默认不勾。
+ * 未初始化（测试环境）时退回原生 confirm，勾选态直接用默认值。
+ */
+export function confirmDialogWithCheckbox(
+  options: ConfirmCheckboxOptions,
+): Promise<ConfirmCheckboxResult> {
+  const checked = ref(options.defaultChecked ?? false)
+  if (!dialogApi) {
+    const confirmed =
+      typeof window !== 'undefined'
+        ? window.confirm(
+            `${options.content}\n\n${checked.value ? '☑' : '☐'} ${options.checkboxLabel}`,
+          )
+        : false
+    return Promise.resolve({ confirmed, checked: checked.value })
+  }
+  // 用组件包一层：Dialog 的 content 渲染函数只执行一次，直接读 ref 不会跟着勾选刷新
+  const ContentRenderer = defineComponent({
+    setup() {
+      return () =>
+        h('div', null, [
+          h('div', { style: 'margin-bottom:12px;white-space:pre-line' }, options.content),
+          h(
+            NCheckbox,
+            {
+              checked: checked.value,
+              'onUpdate:checked': (next: boolean) => {
+                checked.value = next
+              },
+            },
+            { default: () => options.checkboxLabel },
+          ),
+        ])
+    },
+  })
+  return new Promise<ConfirmCheckboxResult>((resolve) => {
+    let settled = false
+    const finish = (confirmed: boolean) => {
+      if (settled) return
+      settled = true
+      resolve({ confirmed, checked: confirmed ? checked.value : false })
+    }
+    const api = dialogApi!
+    const open = options.type === 'info' ? api.info : api.warning
+    open({
+      title: options.title ?? '请确认',
+      content: () => h(ContentRenderer),
       positiveText: options.positiveText ?? '确定',
       negativeText: options.negativeText ?? '取消',
       onPositiveClick: () => finish(true),
