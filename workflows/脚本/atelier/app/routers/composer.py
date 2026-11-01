@@ -12,7 +12,7 @@ from app.services.workflow_parser import load_workflow, inject_prompt
 from app.services.comfyui_client import push_prompt
 from app.routers.jobs import create_job, update_job_items
 from app.config import settings
-from app.services.fragment_syntax import FRAGMENT_TYPES, parse
+from app.services.fragment_syntax import FRAGMENT_TYPES, parse, strip_headers
 
 router = APIRouter(tags=["组合创作"])
 
@@ -156,8 +156,10 @@ def composer_run(req: ComposerRunRequest):
 
     try:
         api_wf = load_workflow(workflow_path, req.workflow_content)
+        # 与 comfyui.py 的各出图入口保持一致：【类型】标题只用于组合器里给人看，
+        # 不能作为正文注入 CLIP（否则会多出 8 段中文标签文本）。
         prompt_data = {
-            "prompt": req.prompt,
+            "prompt": strip_headers(req.prompt),
             "negative_prompt": req.negative_prompt,
             "seed": 0,
             "seed_override": 0,
@@ -304,7 +306,9 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
                 # 使用每个任务独立的种子
                 task_seed = item.get("seed") or random.randint(0, 2**32 - 1)
                 prompt_data = {
-                    "prompt": json.loads(item["prompt_params"])["prompt"],
+                    # 同一入口同样去掉【类型】标题；prompt_params 里仍保留原文，
+                    # 便于画廊溯源时看到"哪一片来自哪里"。
+                    "prompt": strip_headers(json.loads(item["prompt_params"])["prompt"]),
                     "negative_prompt": req.negative_prompt,
                     "seed": task_seed,
                     "seed_override": task_seed,
