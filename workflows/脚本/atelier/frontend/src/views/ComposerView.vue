@@ -5,11 +5,11 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import { useRouter } from 'vue-router'
 import TagCloud from '../components/TagCloud.vue'
+import CategoryFilter from '../components/CategoryFilter.vue'
 import ComposerResultCenterModal from '../components/ComposerResultCenterModal.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 import FragmentDetailModal from '../components/FragmentDetailModal.vue'
 import Lightbox from '../components/Lightbox.vue'
-import { flattenCategories } from '../utils/categories'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
@@ -21,6 +21,7 @@ import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows
 import { FRAGMENT_TYPES } from '../constants'
 import { useToast } from '../composables/useToast'
 import { useImagePreview } from '../composables/useImagePreview'
+import { useComposerCanvas, type CanvasSlot } from '../composables/useComposerCanvas'
 import { readSession, writeSession } from '../composables/useSessionState'
 import { confirmDialog, inputDialog } from '../utils/naive'
 import type { CategoryNode, TagRow } from '../api/types'
@@ -32,7 +33,7 @@ interface FragmentItem {
   type: string
   content: string
   tags: string
-  source: 'prompt' | 'library'
+  source: 'prompt' | 'library' | 'custom'
   dup_count: number
 }
 
@@ -145,8 +146,6 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
   queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'prompt' }),
 })
 
-const flatCats = computed(() => flattenCategories(catData.value?.categories))
-
 /**
  * 每列分批加载：首屏 40 个，滚到列底自动再加载 40 个。
  *
@@ -228,60 +227,18 @@ onBeforeUnmount(() => {
 
 // ---------------- 画布 ----------------
 
-/** 画布槽位：除了内容还要记住来源，保存模板时要用 prompt_id 建立引用关系。 */
-interface CanvasSlot {
-  content: string
-  promptId: number | null
-  source: 'prompt' | 'library' | 'custom'
-}
-
-/** 每个类型一列；同类型只能有一个碎片（这是【类型】格式的约束）。 */
-const CANVAS_KEY = 'pb.composerCanvas'
-
-function readCanvas(): Record<string, CanvasSlot> {
-  try {
-    const raw = localStorage.getItem(CANVAS_KEY)
-    const parsed = raw ? (JSON.parse(raw) as Record<string, CanvasSlot>) : {}
-    if (!parsed || typeof parsed !== 'object') return {}
-    const out: Record<string, CanvasSlot> = {}
-    for (const [type, slot] of Object.entries(parsed)) {
-      if ((FRAGMENT_TYPES as readonly string[]).includes(type) && slot?.content) out[type] = slot
-    }
-    return out
-  } catch {
-    return {}
-  }
-}
-
-const canvas = ref<Record<string, CanvasSlot>>(readCanvas())
-
-// 刷新/切页不再丢画布（旧版把选中状态存进 UiState，重构时漏了）
-watch(
+const {
   canvas,
-  (value: Record<string, CanvasSlot>) => {
-    try {
-      localStorage.setItem(CANVAS_KEY, JSON.stringify(value))
-    } catch {
-      /* 隐私模式下忽略 */
-    }
-  },
-  { deep: true },
-)
-
-const canvasTypes = computed(() => FRAGMENT_TYPES.filter((t) => canvas.value[t]))
-const canvasCount = computed(() => canvasTypes.value.length)
-
-/** 渲染成标准文本：与后端 `composition.render` 完全一致的格式。 */
-const composedPrompt = computed(() =>
-  canvasTypes.value.map((t) => `【${t}】\n${canvas.value[t].content}`).join('\n\n'),
-)
-
-function pick(item: FragmentItem) {
-  canvas.value = {
-    ...canvas.value,
-    [item.type]: { content: item.content, promptId: item.prompt_id, source: item.source },
-  }
-}
+  pinned,
+  canvasTypes,
+  canvasCount,
+  composedPrompt,
+  setSlot,
+  removeSlot,
+  setCanvas,
+  pick,
+  togglePin,
+} = useComposerCanvas()
 
 // ---------------- 自定义碎片 / 复制 / 存为提示词 ----------------
 
@@ -306,29 +263,24 @@ function openCustom(type: string) {
 function applyCustom() {
   const text = customText.value.trim()
   if (!text || !customType.value) return
-  canvas.value = {
-    ...canvas.value,
-    [customType.value]: { content: text, promptId: null, source: 'custom' },
-  }
+  setSlot(customType.value, { content: text, promptId: null, source: 'custom' })
   customOpen.value = false
 }
 
-/** 把槽位里的自定义碎片存进碎片库（之后就能像别的碎片一样用）。 */
+/** 把槽位里的自定义碎片存成单块 prompt（α 之后碎片 = 带【类型】的 prompt）。 */
 async function saveCustomToLibrary() {
   const type = customType.value
   const text = customText.value.trim()
   if (!text || !type) return
   try {
-    await apiPost('/api/fragments', {
+    await apiPost('/api/prompts', {
       name: '',
-      fragment_type: type,
-      content: text,
-      tags: '',
+      prompt: `【${type}】\n${text}`,
     })
-    toast.success(`已存进碎片库（${type}）`)
-    // 分类与标签页的碎片列表是另一个缓存根，两边都要刷
+    toast.success(`已存为「${type}」碎片`)
+    // 组合器和提示词页是两个缓存根，两边都要刷
     queryClient.invalidateQueries({ queryKey: ['composer-fragments'] })
-    queryClient.invalidateQueries({ queryKey: ['fragments'] })
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
   } catch (e) {
     toast.error(`存库失败：${e instanceof Error ? e.message : String(e)}`)
   }
@@ -385,9 +337,7 @@ async function saveAsPrompt() {
 }
 
 function unpick(type: string) {
-  const next = { ...canvas.value }
-  delete next[type]
-  canvas.value = next
+  removeSlot(type)
 }
 
 const negativePrompt = ref(savedSession.negativePrompt)
@@ -436,29 +386,6 @@ watch(
  * 与旧版 `_composerFixed` 等价；只把**固定且有内容**的列发给后端，
  * 未固定的列即使画布里有内容也会被随机替换 —— 这正是"随机"的语义。
  */
-const PIN_KEY = 'pb.composerPinned'
-const pinned = ref<string[]>([])
-
-try {
-  const raw = localStorage.getItem(PIN_KEY)
-  const parsed = raw ? (JSON.parse(raw) as string[]) : []
-  pinned.value = Array.isArray(parsed)
-    ? parsed.filter((t) => (FRAGMENT_TYPES as readonly string[]).includes(t))
-    : []
-} catch {
-  pinned.value = []
-}
-
-function togglePin(type: string) {
-  pinned.value = pinned.value.includes(type)
-    ? pinned.value.filter((t) => t !== type)
-    : [...pinned.value, type]
-  try {
-    localStorage.setItem(PIN_KEY, JSON.stringify(pinned.value))
-  } catch {
-    /* 忽略 */
-  }
-}
 
 /** 每列滚动容器：随机后把选中卡片滚到可视区中间。 */
 const reelBodies = new Map<string, HTMLElement>()
@@ -559,7 +486,7 @@ async function rollOne() {
       limits.value = { ...limits.value, [type]: picked.index + PAGE_SIZE }
     }
   }
-  canvas.value = next
+  setCanvas(next)
   await nextTick()
   for (const type of FRAGMENT_TYPES) {
     const body = reelBodies.get(type)
@@ -577,7 +504,7 @@ async function rollOne() {
 interface FragmentDetail {
   type: string
   content: string
-  source: 'prompt' | 'library' | 'custom'
+  source: 'prompt' | 'custom'
   promptId: number | null
   promptName: string
   dupCount: number
@@ -634,7 +561,7 @@ function openDetail(item: FragmentItem) {
   detailFrag.value = {
     type: item.type,
     content: item.content,
-    source: item.source,
+    source: item.source === 'custom' ? 'custom' : 'prompt',
     promptId: item.prompt_id,
     promptName: item.prompt_name,
     dupCount: item.dup_count,
@@ -645,10 +572,7 @@ function openDetail(item: FragmentItem) {
 function pickFromDetail() {
   if (!detailFrag.value) return
   const f = detailFrag.value
-  canvas.value = {
-    ...canvas.value,
-    [f.type]: { content: f.content, promptId: f.promptId, source: f.source },
-  }
+  setSlot(f.type, { content: f.content, promptId: f.promptId, source: f.source })
   detailOpen.value = false
 }
 
@@ -757,7 +681,7 @@ async function applyTemplate() {
         source: fragment.prompt_id ? 'prompt' : 'library',
       }
     }
-    canvas.value = next
+    setCanvas(next)
   } catch (e) {
     toast.error(`套用失败：${e instanceof Error ? e.message : String(e)}`)
   }
@@ -895,6 +819,10 @@ async function confirmRandomRun() {
       success: boolean
       job_id: number
       results?: Array<{ index: number; success: boolean; error?: string }>
+      idempotent?: boolean
+      async?: boolean
+      queued?: number
+      total?: number
     }>('/api/composer/batch_random_run', {
       count: chosen.length,
       // 用户已经在预览里确认过每一组文本，后端按原样提交，不再二次随机
@@ -906,11 +834,18 @@ async function confirmRandomRun() {
       negative_prompt: negativePrompt.value,
     })
     if (!result.success) return
-    const failed = (result.results ?? []).filter((r) => !r.success)
-    const submitted = (result.results ?? []).length - failed.length
-    // submitAndTrack 已在提交成功后订阅进度，这里只切页签
     resultTab.value = 'job'
     resultOpen.value = true
+    if (result.idempotent) {
+      toast.info('该请求已提交过，已接回原任务')
+      return
+    }
+    if (result.async) {
+      toast.success(`已加入提交队列（${result.queued ?? result.total ?? 0} 组）`)
+      return
+    }
+    const failed = (result.results ?? []).filter((r) => !r.success)
+    const submitted = (result.results ?? []).length - failed.length
     if (failed.length && !submitted) {
       toast.error(`全部提交失败：${failed[0]?.error ?? '未知错误'}`)
     } else if (failed.length) {
@@ -971,18 +906,14 @@ function toggleTag(id: number) {
         type="search"
         placeholder="检索碎片内容…"
       />
-      <select v-model="categoryId" class="bar-select" title="按分类筛选碎片">
-        <option :value="null">全部分类</option>
-        <option v-for="cat in flatCats" :key="cat.id" :value="cat.id">
-          {{ '　'.repeat(cat.depth) + cat.name }}
-        </option>
-      </select>
       <button
         class="btn btn-sm"
-        :class="{ on: filtersOpen || tagIds.length }"
+        :class="{ on: filtersOpen || tagIds.length || categoryId !== null }"
         @click="filtersOpen = !filtersOpen"
       >
-        标签{{ tagIds.length ? ` · ${tagIds.length}` : '' }}
+        筛选<template v-if="tagIds.length + (categoryId !== null ? 1 : 0)">
+          · {{ tagIds.length + (categoryId !== null ? 1 : 0) }}
+        </template>
       </button>
       <span class="count">
         碎片 {{ fragmentTotal }}<span v-if="isFetching"> · 加载中</span>
@@ -1075,9 +1006,15 @@ function toggleTag(id: number) {
 
     <div v-if="filtersOpen" class="filter-drawer">
       <div class="drawer-head">
-        <span>标签筛选</span>
+        <span>分类 / 标签筛选</span>
         <button class="close" @click="filtersOpen = false">✕</button>
       </div>
+      <CategoryFilter
+        :categories="catData?.categories"
+        v-model="categoryId"
+        all-label="全部分类"
+        show-count
+      />
       <section class="group">
         <TagCloud
           :tags="tagData?.tags ?? []"
@@ -1143,7 +1080,7 @@ function toggleTag(id: number) {
               >{{ part.text }}</span>
             </span>
             <span class="card-meta">
-              {{ item.source === 'library' ? '碎片库' : item.prompt_name || '提示词' }}
+              {{ item.prompt_name || '提示词' }}
               <i v-if="item.dup_count > 1">×{{ item.dup_count }}</i>
             </span>
           </button>
@@ -1182,10 +1119,10 @@ function toggleTag(id: number) {
         <button
           class="btn btn-sm"
           :disabled="!customText.trim()"
-          title="把这段存进碎片库，之后可以像别的碎片一样用"
+          title="把这段存成一块【类型】提示词，之后可以像别的碎片一样用"
           @click="saveCustomToLibrary"
         >
-          存进碎片库
+          存为碎片
         </button>
         <button class="btn btn-sm primary" :disabled="!customText.trim()" @click="applyCustom">
           填入画布
@@ -1269,7 +1206,7 @@ function toggleTag(id: number) {
       :fragment="detailFrag"
       @close="detailOpen = false"
       @pick="pickFromDetail"
-      @jump="(id) => { detailOpen = false; router.push(`/prompt/${id}`) }"
+      @jump="(id, fragType) => { detailOpen = false; router.push({ path: `/prompt/${id}`, query: { frag_type: fragType } }) }"
     />
   </div>
 </template>

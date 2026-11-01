@@ -115,6 +115,9 @@ onBeforeUnmount(() => {
         </button>
         <span v-if="!filtered.length" class="wf-empty">没有匹配的工作流</span>
       </div>
+      <div class="wf-hint">
+        其他目录的工作流请到「分类与标签 → 工作流」上传自定义 JSON
+      </div>
     </div>
   </div>
 </template>
@@ -219,5 +222,13 @@ onBeforeUnmount(() => {
   text-align: center;
   color: var(--muted);
   font-size: var(--fs-sm);
+}
+
+.wf-hint {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 </style>

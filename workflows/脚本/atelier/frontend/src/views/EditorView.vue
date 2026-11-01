@@ -8,6 +8,7 @@ import MaskEditorModal from '../components/MaskEditorModal.vue'
 import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
+import { useImageLocation } from '../composables/useImageLocation'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { statusLabel } from '../utils/format'
 import { confirmDialog } from '../utils/naive'
@@ -58,6 +59,7 @@ const PROMPT_PRESETS: Array<{ label: string; text: string }> = [
 const { faceswapWorkflowPath: workflowPath } = useSettings()
 const { workflows } = useWorkflows()
 const { busy: generating, job: activeJob, error: generateError, submitAndTrack } = useGenerate()
+const { revealImage } = useImageLocation()
 const toast = useToast()
 
 /** 会话状态：三组素材、组合方式、种子、提示词。 */
@@ -374,6 +376,8 @@ async function submit() {
       job_id: number
       total: number
       submitted: number
+      async?: boolean
+      queued?: number
     }>('/api/editor/faceswap/batch', {
       main_ids: target.ids,
       main_paths: target.paths,
@@ -392,6 +396,7 @@ async function submit() {
       pair_mode: pairMode.value,
     })
     if (!result.success) toast.error('提交失败')
+    else if (result.async) toast.success(`已加入提交队列（${result.queued ?? result.total} 组）`)
   } catch (e) {
     toast.error(`提交失败：${e instanceof Error ? e.message : String(e)}`)
   }
@@ -476,6 +481,14 @@ async function submit() {
               </div>
               <button class="btn btn-sm" :disabled="!row.imageUrl || maskSaving" title="在目标图上涂抹遮罩" @click="openMaskEditor(row)">
                 涂抹
+              </button>
+              <button
+                v-if="row.key.startsWith('id:')"
+                class="btn btn-sm"
+                title="在资源管理器中定位原图"
+                @click="revealImage({ id: Number(row.key.slice(3)) })"
+              >
+                定位
               </button>
               <button class="btn btn-sm" @click="pickMask(row.key)">
                 {{ maskEntries[row.key] ? '换' : '导入' }}

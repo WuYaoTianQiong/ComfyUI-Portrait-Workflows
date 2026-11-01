@@ -3,6 +3,8 @@ import { useQueryClient } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
 import { customWorkflowContent } from './useWorkflows'
+import { useJobStream } from './useJobStream'
+import { useSettings } from './useSettings'
 import type { JobSnapshot } from '../api/types'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
@@ -32,6 +34,7 @@ const QUEUE_LIMIT = 12
 export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) {
   const queueMode = options.queue === true
   const queryClient = useQueryClient()
+  const { outputSubfolder } = useSettings()
 
   const storeKey = sessionKey ? `${LAST_JOB_PREFIX}.${sessionKey}` : ''
   const queueKey = storeKey ? `${storeKey}.ids` : ''
@@ -41,7 +44,6 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
   const queue = ref<JobSnapshot[]>([])
   const activeCount = computed(() => queue.value.filter((j) => !TERMINAL.has(j.status)).length)
   const error = ref('')
-  let source: EventSource | null = null
   /** 队列模式下"结果中心展示哪个"：最近一次提交的 id。 */
   let latestId = 0
   /** 队列模式下要订阅的 id 集合（只增不减，同一会话内不重建连接以外的东西）。 */
@@ -138,17 +140,25 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     }
     queue.value = alive.slice().sort((a, b) => b.id - a.id)
     job.value = queue.value[0]
-    if (queue.value.some((j) => !TERMINAL.has(j.status))) openStream(Array.from(tracked))
+    if (queue.value.some((j) => !TERMINAL.has(j.status))) stream.open(Array.from(tracked))
   }
 
   onMounted(restoreLastJob)
   onBeforeUnmount(closeStream)
 
+  const stream = useJobStream(applySnapshot, {
+    closeOnError: !queueMode,
+    onError: () => {
+      // 服务端在终态后会主动关闭单任务订阅，这里只在仍在提交时标记失败
+      if (busy.value) {
+        error.value = '进度连接中断，可刷新页面查看结果'
+        busy.value = false
+      }
+    },
+  })
+
   function closeStream() {
-    if (source) {
-      source.close()
-      source = null
-    }
+    stream.close()
   }
 
   /** SSE 帧统一入口：首帧 `snapshot` 与后续 `job` 结构一致，都走这里。 */
@@ -175,40 +185,11 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     }
   }
 
-  function parseFrame(event: Event) {
-    try {
-      applySnapshot(JSON.parse((event as MessageEvent).data) as JobSnapshot)
-    } catch {
-      /* 心跳/异常帧忽略 */
-    }
-  }
-
-  function openStream(ids: number[]) {
-    closeStream()
-    if (!ids.length) return
-    const es = new EventSource(`/api/jobs/events?ids=${ids.join(',')}`)
-    source = es
-
-    // 后端连上会先推一帧当前状态（旧前端只监听 job，白白等了一个写者周期）
-    es.addEventListener('snapshot', parseFrame)
-    es.addEventListener('job', parseFrame)
-
-    es.onerror = () => {
-      // 服务端在终态后会主动关闭单任务订阅，这里只在仍在提交时标记失败
-      if (busy.value) {
-        error.value = '进度连接中断，可刷新页面查看结果'
-        busy.value = false
-      }
-      if (!queueMode) closeStream()
-      // 队列模式保留连接：浏览器会自己重连并由首帧快照补齐进度
-    }
-  }
-
   function subscribe(jobId: number) {
     rememberJob(jobId)
     // 等待首帧也算在飞行中：提交后到第一次进度之间不该出现"可再次点击"的空窗
     busy.value = true
-    openStream([jobId])
+    stream.open([jobId])
   }
 
   /** 队列模式：登记一个新提交的任务并订阅它的进度（不阻塞后续提交）。 */
@@ -240,7 +221,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     )
     job.value = placeholder
 
-    openStream(Array.from(tracked))
+    stream.open(Array.from(tracked))
   }
 
   async function run(
@@ -261,6 +242,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
+        output_subfolder: outputSubfolder.value,
       })
       if (!result.success) {
         error.value = '提交失败'
@@ -298,6 +280,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         quality: options.quality,
         orientation: options.orientation,
         title: options.title ?? `批量生成 ${promptIds.length} 条`,
+        output_subfolder: outputSubfolder.value,
       })
       subscribe(result.job_id)
     } catch (e) {
@@ -334,6 +317,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         quality: options.quality,
         orientation: options.orientation,
         title: options.title ?? `批量替换碎片 ${items.length} 条`,
+        output_subfolder: outputSubfolder.value,
       })
       subscribe(result.job_id)
     } catch (e) {
@@ -374,6 +358,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         orientation: options.orientation,
         quality: options.quality,
         seed: options.seed ?? 0,
+        output_subfolder: outputSubfolder.value,
       })
       subscribe(result.job_id)
     } catch (e) {
@@ -396,7 +381,11 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     error.value = ''
     try {
       busy.value = true
-      const result = await apiPost<T>(path, body)
+      const payload =
+        body && typeof body === 'object' && !Array.isArray(body)
+          ? { ...(body as Record<string, unknown>), output_subfolder: outputSubfolder.value }
+          : body
+      const result = await apiPost<T>(path, payload)
       if (result.job_id) {
         if (queueMode) trackQueued(result.job_id)
         else subscribe(result.job_id)

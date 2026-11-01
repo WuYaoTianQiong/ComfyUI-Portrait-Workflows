@@ -3,9 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 
-import { apiGet, apiPost, thumbnailUrl } from '../api/client'
+import { cancelJob, listJobs, retryJob, stopAllJobs } from '../api/endpoints'
+import { thumbnailUrl } from '../api/client'
+import { useImageLocation } from '../composables/useImageLocation'
+import { useJobStream } from '../composables/useJobStream'
 import EmptyState from '../components/EmptyState.vue'
 import Lightbox from '../components/Lightbox.vue'
+import QueryState from '../components/QueryState.vue'
 import { useToast } from '../composables/useToast'
 import { useImagePreview } from '../composables/useImagePreview'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -20,9 +24,15 @@ import { readSession, writeSession } from '../composables/useSessionState'
  * 用 SSE（`/api/jobs/events`）而不是轮询：后端本来就广播任务状态变化，
  * 前端再每 N 秒拉一次 /api/jobs 是把已经推过来的信息再问一遍。
  */
-const { data, isFetching } = useQuery<{ jobs: JobSnapshot[] }>({
+const {
+  data,
+  isFetching,
+  isError: jobsError,
+  error: jobsErr,
+  refetch: refetchJobs,
+} = useQuery({
   queryKey: ['jobs', 60],
-  queryFn: () => apiGet('/api/jobs', { limit: 60 }),
+  queryFn: () => listJobs({ limit: 60 }),
   staleTime: 10_000,
 })
 
@@ -40,7 +50,7 @@ const toast = useToast()
 const queryClient = useQueryClient()
 const router = useRouter()
 const stopAll = useMutation({
-  mutationFn: () => apiPost<{ success: boolean; stopped: number }>('/api/jobs/stop_all'),
+  mutationFn: stopAllJobs,
   onSuccess: (result) => {
     toast.success(`已停止 ${result.stopped} 个任务`)
     queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -122,27 +132,19 @@ const activeCount = computed(
   () => jobs.value.filter((j) => j.status === 'pending' || j.status === 'running').length,
 )
 
-let source: EventSource | null = null
+const stream = useJobStream((snapshot) => {
+  const list = jobs.value.slice()
+  const index = list.findIndex((j) => j.id === snapshot.id)
+  if (index >= 0) list[index] = { ...list[index], ...snapshot }
+  else list.unshift(snapshot)
+  jobs.value = list
+})
 
 onMounted(() => {
-  source = new EventSource('/api/jobs/events')
-  source.addEventListener('job', (event) => {
-    try {
-      const snapshot = JSON.parse((event as MessageEvent).data) as JobSnapshot
-      const list = jobs.value.slice()
-      const index = list.findIndex((j) => j.id === snapshot.id)
-      if (index >= 0) list[index] = { ...list[index], ...snapshot }
-      else list.unshift(snapshot)
-      jobs.value = list
-    } catch {
-      /* 心跳/异常帧忽略 */
-    }
-  })
+  stream.open()
 })
 
 onBeforeUnmount(() => {
-  source?.close()
-  source = null
   if (scrollSaveTimer) window.clearTimeout(scrollSaveTimer)
   saveSession()
 })
@@ -155,6 +157,35 @@ function toggle(id: number) {
 }
 
 const cancelling = ref<number | null>(null)
+const retrying = ref<number | null>(null)
+
+function canRetry(job: JobSnapshot): boolean {
+  if (job.error_count > 0) return true
+  return (job.items ?? []).some(
+    (item) => item.status === 'error' || item.status === 'cancelled' || item.status === 'stopped',
+  )
+}
+
+async function retry(id: number) {
+  retrying.value = id
+  try {
+    const result = await retryJob(id)
+    if (result.success) {
+      toast.success(
+        result.idempotent
+          ? `已接回重试任务 #${result.job_id}`
+          : `已提交重试任务 #${result.job_id}（${result.submitted ?? 0} 条）`,
+      )
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    } else {
+      toast.error(result.errors?.[0]?.error || '没有可重试的条目')
+    }
+  } catch (e) {
+    toast.error(`重试失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    retrying.value = null
+  }
+}
 
 async function cancel(id: number) {
   const ok = await confirmDialog({
@@ -166,7 +197,7 @@ async function cancel(id: number) {
   if (!ok) return
   cancelling.value = id
   try {
-    await apiPost(`/api/jobs/${id}/cancel`)
+    await cancelJob(id)
   } catch (e) {
     toast.error(`取消失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
@@ -215,6 +246,8 @@ const {
   preview: openPreviewImage,
   close: closePreviewImage,
 } = useImagePreview()
+
+const { revealImage } = useImageLocation()
 /** 灯箱里的「投喂给工作流」需要工作流列表；与其他页共用同一份缓存。 */
 const { workflows } = useWorkflows()
 
@@ -245,6 +278,8 @@ function openInGallery(filename: string) {
       </label>
     </div>
 
+    <QueryState v-if="jobsError" :error="jobsErr" @retry="refetchJobs" />
+
     <div ref="listEl" class="list" @scroll.passive="onListScroll">
       <article v-for="job in visible" :key="job.id" class="job">
         <header class="job-head" @click="toggle(job.id)">
@@ -254,6 +289,15 @@ function openInGallery(filename: string) {
           <span class="status" :class="job.status">{{ statusLabel(job.status) }}</span>
           <span class="muted">{{ job.done_count ?? 0 }}/{{ job.total ?? 0 }}</span>
           <span class="muted">{{ elapsed(job) }}</span>
+          <button
+            v-if="canRetry(job)"
+            class="btn btn-sm"
+            :disabled="retrying === job.id"
+            title="把失败/取消的条目重新提交"
+            @click.stop="retry(job.id)"
+          >
+            {{ retrying === job.id ? '重试中…' : '重试' }}
+          </button>
           <button
             v-if="job.status === 'pending' || job.status === 'running'"
             class="btn btn-sm cancel"
@@ -280,10 +324,21 @@ function openInGallery(filename: string) {
             >
               <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
             </button>
+            <button
+              v-if="item.images?.[0]"
+              class="btn btn-xs locate"
+              type="button"
+              title="在资源管理器中定位原图"
+              @click="revealImage(item.images[0])"
+            >
+              定位
+            </button>
             <div class="item-body">
               <div class="item-preview">{{ item.prompt_preview || '（无预览）' }}</div>
               <div class="item-meta">
-                <span :class="['item-status', item.status]">{{ statusLabel(item.status) }}</span>
+                <span :class="['item-status', item.status]">
+                  {{ item.submit_state === 'queued' ? '排队中' : statusLabel(item.status) }}
+                </span>
                 <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
                 <span v-if="item.error" class="err">{{ item.error }}</span>
               </div>
@@ -484,6 +539,13 @@ function openInGallery(filename: string) {
   cursor: zoom-in;
   flex: none;
   display: flex;
+}
+
+.locate {
+  flex: none;
+  align-self: center;
+  font-size: 10px;
+  padding: 1px 6px;
 }
 
 .item-body {

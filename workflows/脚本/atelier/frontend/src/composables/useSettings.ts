@@ -41,12 +41,38 @@ const faceswapWorkflowPath = ref<string>(read('faceswapWorkflowPath', ''))
 const quality = ref<string>(read('quality', '4K'))
 const orientation = ref<Orientation>(read('orientation', 'portrait') as Orientation)
 
+/**
+ * 删除出图记录时是否连磁盘原图一起删。
+ *
+ * 破坏性选项，默认关闭；但用户一旦勾选就记住（画廊批量删除与灯箱单条删除
+ * 共用这一份），下次打开确认框仍是勾选态，不用每次重新勾。
+ */
+// 显式写 <string>：否则 T 会被推断成字面量 '0'，和 '1' 的比较会被 TS 判成无意义
+const deleteFiles = ref<boolean>(read<string>('deleteFiles', '0') === '1')
+
+/**
+ * 出图归档子目录（相对 ComfyUI output）。空字符串 = 旧的平铺行为。
+ * 支持 {date}/{month}/{year}/{workflow}/{job_id}/{quality}/{orientation} 变量，
+ * 由后端展开并做安全校验。
+ */
+const outputSubfolder = ref<string>(read('outputSubfolder', ''))
+
 watch(workflowPath, (v) => write('workflowPath', v))
 watch(composerWorkflowPath, (v) => write('composerWorkflowPath', v))
 watch(faceswapWorkflowPath, (v) => write('faceswapWorkflowPath', v))
 watch(quality, (v) => write('quality', v))
 watch(orientation, (v) => write('orientation', v))
+watch(deleteFiles, (v) => write('deleteFiles', v ? '1' : '0'))
+watch(outputSubfolder, (v) => write('outputSubfolder', v))
 
 export function useSettings() {
-  return { workflowPath, composerWorkflowPath, faceswapWorkflowPath, quality, orientation }
+  return {
+    workflowPath,
+    composerWorkflowPath,
+    faceswapWorkflowPath,
+    quality,
+    orientation,
+    deleteFiles,
+    outputSubfolder,
+  }
 }

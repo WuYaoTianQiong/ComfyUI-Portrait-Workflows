@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
-import { apiGet } from '../api/client'
+import { apiGet, apiPost } from '../api/client'
+import { useToast } from '../composables/useToast'
 import Modal from './Modal.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
 
@@ -41,6 +42,21 @@ interface FsListing {
 }
 
 const dir = ref('')
+const toast = useToast()
+
+async function openCurrentDir() {
+  const path = data.value?.path
+  if (!path) return
+  try {
+    const result = await apiPost<{ success: boolean; message?: string }>(
+      '/api/system/open-folder',
+      { path },
+    )
+    if (!result.success) toast.info(result.message || '无法打开目录')
+  } catch (e) {
+    toast.error(`打开目录失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 
 const { data, isFetching } = useQuery<FsListing>({
   queryKey: computed(() => ['fs-list', dir.value]),
@@ -145,6 +161,9 @@ function rememberRatio(img: FsEntry, event: Event) {
           </option>
         </select>
         <span class="cur-path" :title="data?.path">{{ data?.path || '（未选择目录）' }}</span>
+        <button class="btn btn-sm" :disabled="!data?.path" title="在资源管理器中打开当前目录" @click="openCurrentDir">
+          打开目录
+        </button>
         <span v-if="isFetching" class="muted">加载中…</span>
       </div>
 

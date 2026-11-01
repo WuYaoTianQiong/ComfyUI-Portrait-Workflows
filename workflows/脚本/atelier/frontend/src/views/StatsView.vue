@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import QueryState from '../components/QueryState.vue'
 import { sourceLabel } from '../utils/format'
 
 /**
@@ -28,15 +29,42 @@ interface Facets {
   orientation: Record<string, number>
 }
 
-const { data: stats, isFetching } = useQuery<StatsResponse>({
+const {
+  data: stats,
+  isFetching,
+  isError: statsError,
+  error: statsErr,
+  refetch: refetchStats,
+} = useQuery<StatsResponse>({
   queryKey: ['stats'],
   queryFn: () => apiGet('/api/system/stats'),
 })
 
-const { data: facets } = useQuery<Facets>({
+const {
+  data: facets,
+  isError: facetsError,
+  error: facetsErr,
+  refetch: refetchFacets,
+} = useQuery<Facets>({
   queryKey: ['history', 'facets', 'stats'],
   queryFn: () => apiGet('/api/images/facets'),
 })
+
+const loadError = computed(() => {
+  if (statsErr.value) return statsErr.value
+  if (facetsErr.value) return facetsErr.value
+  if (statsError.value) return '统计接口加载失败'
+  if (facetsError.value) return '分面统计加载失败'
+  return null
+})
+const initialLoading = computed(
+  () => isFetching.value && !stats.value && !facets.value,
+)
+
+function retry() {
+  refetchStats()
+  refetchFacets()
+}
 
 /** 分面计数 → 占比条数据；按数量降序。 */
 function bars(source: Record<string, number> | undefined) {
@@ -56,6 +84,7 @@ function tagColor(color: string | undefined): string {
 </script>
 <template>
   <div class="stats">
+    <QueryState :loading="initialLoading" :error="loadError" @retry="retry">
     <div class="cards">
       <div class="card">
         <span class="num">{{ stats?.prompt_count ?? '—' }}</span>
@@ -125,6 +154,7 @@ function tagColor(color: string | undefined): string {
         <EmptyState v-if="!modelBars.length" text="还没有图片" />
       </section>
     </div>
+    </QueryState>
   </div>
 </template>
 

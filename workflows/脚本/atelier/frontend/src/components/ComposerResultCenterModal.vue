@@ -5,6 +5,7 @@ import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
 import { statusLabel } from '../utils/format'
 import { thumbnailUrl } from '../api/client'
+import { useImageLocation } from '../composables/useImageLocation'
 import type { JobSnapshot } from '../api/types'
 
 /**
@@ -74,6 +75,8 @@ const emit = defineEmits<{
   /** 点缩略图看原图（原本只是链到 240px 缩略图，等于看了个更糊的版本）。 */
   'preview-image': [image: { filename: string; subfolder?: string | null; type?: string | null }]
 }>()
+
+const { revealImage } = useImageLocation()
 
 /** 任务快照里的图片项用 `type` 而不是 `img_type`，这里做一次字段名转换。 */
 function thumbUrl(image: { filename: string; subfolder?: string | null; type?: string | null }): string {
@@ -196,6 +199,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
                 @click="emit('preview-image', item.images[0])"
               >
                 <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
+              </button>
+              <button
+                v-if="item.images?.[0]"
+                class="locate"
+                type="button"
+                title="在资源管理器中定位原图"
+                @click="revealImage(item.images[0])"
+              >
+                定位
               </button>
               <div v-else class="shot placeholder">{{ idx + 1 }}</div>
               <div class="job-body">
@@ -472,6 +484,23 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.locate {
+  flex: none;
+  align-self: center;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.locate:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .job-body {

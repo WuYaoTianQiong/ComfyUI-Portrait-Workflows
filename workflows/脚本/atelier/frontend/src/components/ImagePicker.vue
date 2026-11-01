@@ -6,6 +6,7 @@ import { apiGet, thumbnailUrl } from '../api/client'
 import EmptyState from './EmptyState.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
 import { imageAspect } from '../utils/image'
+import { useImageLocation } from '../composables/useImageLocation'
 import type { HistoryItem, HistoryPage } from '../api/types'
 
 /**
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const search = ref('')
+const { revealImage } = useImageLocation()
 
 const { data, isFetching } = useQuery<HistoryPage>({
   queryKey: computed(() => ['picker', search.value.trim()]),
@@ -81,18 +83,24 @@ function clear() {
         :gap="6"
       >
         <template #default="{ item, height }">
-          <button
+          <div
             class="cell"
             :class="{ picked: orderOf(item.id) > 0, fav: item.is_favorite }"
             :title="item.filename"
+            role="button"
+            tabindex="0"
             @click="toggle(item.id)"
+            @keydown.enter.prevent="toggle(item.id)"
           >
             <span class="thumb" :style="{ height: `${height}px` }">
               <img :src="thumbnailUrl(item, 240)" :alt="item.filename" loading="lazy" />
               <span v-if="orderOf(item.id)" class="order">{{ orderOf(item.id) }}</span>
+              <button class="locate" title="在资源管理器中定位" @click.stop="revealImage(item)">
+                定位
+              </button>
             </span>
             <span class="name">{{ item.filename }}</span>
-          </button>
+          </div>
         </template>
       </JustifiedGrid>
       <EmptyState v-if="!items.length && !isFetching" text="没有可选图片" />
@@ -146,7 +154,28 @@ function clear() {
   border: none;
   background: transparent;
   text-align: left;
+  cursor: pointer;
   transition: 0.12s;
+}
+
+.locate {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: rgb(22 27 34 / 82%);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.5;
+  opacity: 0;
+  transition: 0.12s;
+}
+
+.cell:hover .locate,
+.cell:focus-within .locate {
+  opacity: 1;
 }
 
 .thumb {

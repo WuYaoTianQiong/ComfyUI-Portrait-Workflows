@@ -4,8 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 
 import ToastHost from './components/ToastHost.vue'
-import { apiGet } from './api/client'
-import type { JobSnapshot } from './api/types'
+import OutputLocationField from './components/OutputLocationField.vue'
+import { getSystemStatus, listJobs } from './api/endpoints'
 import { setupNaive } from './utils/naive'
 
 // 只初始化一次；测试不挂载 App，不会触发
@@ -17,9 +17,9 @@ setupNaive()
  * 只查 active 的任务、每 5 秒一次 —— 任务中心页面自己走 SSE 实时推送，
  * 这里只需要一个粗粒度计数，不值得再开一条长连接。
  */
-const { data: activeJobs } = useQuery<{ jobs: JobSnapshot[] }>({
+const { data: activeJobs } = useQuery({
   queryKey: ['jobs', 'active-badge'],
-  queryFn: () => apiGet('/api/jobs', { active: 1, limit: 50 }),
+  queryFn: () => listJobs({ active: true, limit: 50 }),
   refetchInterval: 5_000,
   staleTime: 2_000,
 })
@@ -27,9 +27,9 @@ const { data: activeJobs } = useQuery<{ jobs: JobSnapshot[] }>({
 const activeCount = computed(() => activeJobs.value?.jobs?.length ?? 0)
 
 /** ComfyUI 在线状态：离线时不该让用户以为能出图（历史上因此白跑 27 个任务）。 */
-const { data: status } = useQuery<{ comfyui: string }>({
+const { data: status } = useQuery({
   queryKey: ['status'],
-  queryFn: () => apiGet('/api/system/status'),
+  queryFn: getSystemStatus,
   refetchInterval: 10_000,
 })
 
@@ -116,6 +116,8 @@ function jumpToPrompt(promptId: number) {
         <span class="dot" />
         <span>{{ online ? 'ComfyUI 在线' : 'ComfyUI 离线' }}</span>
       </div>
+
+      <OutputLocationField />
     </header>
 
     <main class="content">

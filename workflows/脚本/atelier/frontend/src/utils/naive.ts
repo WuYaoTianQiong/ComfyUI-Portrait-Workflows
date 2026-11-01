@@ -142,7 +142,8 @@ export function confirmDialogWithCheckbox(
     const finish = (confirmed: boolean) => {
       if (settled) return
       settled = true
-      resolve({ confirmed, checked: confirmed ? checked.value : false })
+      // 取消时也带上当前勾选态：调用方据此决定是否记住用户的选择
+      resolve({ confirmed, checked: checked.value })
     }
     const api = dialogApi!
     const open = options.type === 'info' ? api.info : api.warning

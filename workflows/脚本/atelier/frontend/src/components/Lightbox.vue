@@ -3,9 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { apiDelete, apiPost, viewUrl } from '../api/client'
 import { useToast } from '../composables/useToast'
+import { useImageLocation } from '../composables/useImageLocation'
 import type { HistoryItem } from '../api/types'
 import { formatSize, resolution, shotTime, sourceLabel } from '../utils/format'
 import { confirmDialogWithCheckbox } from '../utils/naive'
+import { useSettings } from '../composables/useSettings'
+import { useEscapeLayer } from '../composables/useEscapeLayer'
+import { useViewerTransform } from '../composables/useViewerTransform'
 import Modal from './Modal.vue'
 
 /**
@@ -58,8 +62,17 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
+const { revealImage } = useImageLocation()
 
 const item = computed<HistoryItem | undefined>(() => props.items[props.index])
+
+useEscapeLayer(() => !!item.value, () => emit('close'))
+const outputPath = computed(() => {
+  const it = item.value
+  if (!it) return ''
+  const base = it.img_type && it.img_type !== 'output' ? it.img_type : 'output'
+  return `${base}/${it.subfolder ? `${it.subfolder}/` : ''}${it.filename}`
+})
 
 /**
  * 能不能重新出图：prompt_id 存在时走提示词出图；prompt_params.prompt 存在时
@@ -78,178 +91,54 @@ function go(delta: number) {
 }
 
 // ---------------------------------------------------------------------------
-// 缩放 / 平移 / 旋转 / 翻转
+// 缩放 / 平移 / 旋转 / 翻转（实现见 useViewerTransform）
 // ---------------------------------------------------------------------------
 
-const MIN_SCALE = 0.05
-const MAX_SCALE = 20
-
-const stageEl = ref<HTMLElement | null>(null)
-const imgEl = ref<HTMLImageElement | null>(null)
-/** 提示词弹窗的滚动容器：刷新后连滚动位置一起恢复。 */
 const promptTextEl = ref<HTMLPreElement | null>(null)
 const promptSideEl = ref<HTMLElement | null>(null)
-const stageSize = ref({ w: 0, h: 0 })
-/** 图片的自然像素尺寸（scale=1 时的基准）。 */
-const natural = ref({ w: 0, h: 0 })
-const imgLoaded = ref(false)
-/** 旋转角度（0 / 90 / 180 / 270）。 */
-const rotation = ref(0)
-const flipped = ref(false)
-/** true = 适应窗口；false = 手动缩放（1:1 按钮显示为激活）。 */
-const fitMode = ref(true)
-const zoomPercent = ref(100)
 const showInfo = ref(true)
 const promptInfoOpen = ref(false)
 
-interface ViewState {
-  scale: number
-  /** 图片中心在 stage 坐标系里的位置 */
-  cx: number
-  cy: number
-  targetScale: number
-  targetCx: number
-  targetCy: number
-  rafId: number | null
-}
-
-/**
- * 用普通对象保存视图状态：动画每帧直接改 DOM style，不走响应式，
- * 避免 60fps 触发整棵组件树重渲染。只有缩放百分比和 imgLoaded 需要响应式。
- */
-const view: ViewState = {
-  scale: 1,
-  cx: 0,
-  cy: 0,
-  targetScale: 1,
-  targetCx: 0,
-  targetCy: 0,
-  rafId: null,
-}
-
-/** 旋转 90/270 时有效宽高互换。 */
-function effectiveSize() {
-  const { w, h } = natural.value
-  return rotation.value % 180 === 0 ? { w, h } : { w: h, h: w }
-}
-
- /** "适应窗口"时的显示比例。 */
-function computeFit(): number {
-  const el = stageEl.value
-  const eff = effectiveSize()
-  if (!el || !eff.w || !eff.h) return 1
-  const availW = Math.max(80, el.clientWidth - 48)
-  const availH = Math.max(80, el.clientHeight - 48)
-  return Math.min(availW / eff.w, availH / eff.h)
-}
-
-/**
- * 平移边界：至少保留 15%（最小 20px）的图片在视口内，整张图不会拖丢。
- * 参数是图片中心坐标，所以边界公式是旧版 top-left 公式的等价变形。
- */
-function constrainPoint(scale: number, cx: number, cy: number) {
-  const el = stageEl.value
-  const eff = effectiveSize()
-  if (!el || !eff.w || !eff.h) return { cx, cy }
-  const cw = el.clientWidth
-  const ch = el.clientHeight
-  const bw = eff.w * scale
-  const bh = eff.h * scale
-  const keepW = Math.max(Math.min(bw, cw) * 0.15, 20)
-  const keepH = Math.max(Math.min(bh, ch) * 0.15, 20)
-  return {
-    cx: Math.min(cw - keepW + bw / 2, Math.max(keepW - bw / 2, cx)),
-    cy: Math.min(ch - keepH + bh / 2, Math.max(keepH - bh / 2, cy)),
-  }
-}
-
-function constrainView() {
-  const c = constrainPoint(view.scale, view.cx, view.cy)
-  view.cx = c.cx
-  view.cy = c.cy
-}
-
-/**
- * 应用变换。transform-origin 固定在图片中心，所以 translate 给的是
- * 「图片中心在 stage 里的坐标减去半宽/半高」；旋转与翻转都围绕中心，
- * 90° 时不会偏到角落。
- */
-function applyView() {
-  const el = imgEl.value
-  const { w, h } = natural.value
-  if (!el || !w || !h) return
-  const s = view.scale
-  el.style.width = `${w}px`
-  el.style.height = `${h}px`
-  el.style.transform =
-    `translate(${view.cx - w / 2}px, ${view.cy - h / 2}px) ` +
-    `rotate(${rotation.value}deg) scale(${flipped.value ? -s : s}, ${s})`
-  zoomPercent.value = Math.round(s * 100)
-}
-
-function cancelAnim() {
-  if (view.rafId !== null) {
-    cancelAnimationFrame(view.rafId)
-    view.rafId = null
-  }
-}
-
-/** 与旧版一致：0.35 的线性插值追帧，滚轮不会一格一格跳。 */
-function animate() {
-  if (view.rafId !== null) return
-  const LERP = 0.35
-  const tick = () => {
-    view.rafId = null
-    const ds = view.targetScale - view.scale
-    const dx = view.targetCx - view.cx
-    const dy = view.targetCy - view.cy
-    if (Math.abs(ds) < 0.0001 && Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
-      view.scale = view.targetScale
-      view.cx = view.targetCx
-      view.cy = view.targetCy
-      constrainView()
-      applyView()
-      saveViewerState()
-      return
-    }
-    view.scale += ds * LERP
-    view.cx += dx * LERP
-    view.cy += dy * LERP
-    constrainView()
-    applyView()
-    view.rafId = requestAnimationFrame(tick)
-  }
-  view.rafId = requestAnimationFrame(tick)
-}
-
-function animateTo(scale: number, cx: number, cy: number) {
-  const c = constrainPoint(scale, cx, cy)
-  view.targetScale = scale
-  view.targetCx = c.cx
-  view.targetCy = c.cy
-  animate()
-}
-
-function initView() {
-  cancelAnim()
-  const fit = computeFit()
-  view.scale = view.targetScale = fit
-  view.cx = view.targetCx = stageSize.value.w / 2
-  view.cy = view.targetCy = stageSize.value.h / 2
-  constrainView()
-  applyView()
-}
-
-function syncStageSize() {
-  const el = stageEl.value
-  if (!el) return
-  stageSize.value = { w: el.clientWidth, h: el.clientHeight }
-}
+const {
+  stageEl,
+  imgEl,
+  stageSize,
+  natural,
+  imgLoaded,
+  rotation,
+  flipped,
+  fitMode,
+  zoomPercent,
+  panning,
+  view,
+  clampScale,
+  computeFit,
+  constrainView,
+  applyView,
+  initView,
+  syncStageSize,
+  setNaturalSize,
+  zoomBy,
+  onWheel,
+  toggleFit,
+  resetView,
+  rotate90,
+  flip,
+  onPanStart,
+  onStageClick,
+  onRootClick,
+  reset: resetViewer,
+} = useViewerTransform({
+  onChange: () => saveViewerState(),
+  onPanStart: () => {
+    clearInfoTimer()
+    infoFaded.value = true
+  },
+  onStageClick: () => emit('close'),
+})
 
 function initFromImage(img: HTMLImageElement) {
-  natural.value = { w: img.naturalWidth, h: img.naturalHeight }
-  imgLoaded.value = true
-  syncStageSize()
+  setNaturalSize(img)
   // 刷新恢复：第一次拿到尺寸时套用快照；否则正常适应窗口
   if (pendingSnapshot && pendingSnapshot.id === item.value?.id) {
     const snap = pendingSnapshot
@@ -265,133 +154,6 @@ function initFromImage(img: HTMLImageElement) {
 
 function onImageLoad(event: Event) {
   initFromImage(event.target as HTMLImageElement)
-}
-
-/** 以 stage 内某个点为锚点缩放；不传锚点则围绕画面中心。 */
-function zoomTo(scale: number, anchorX?: number, anchorY?: number) {
-  if (!natural.value.w) return
-  const ax = anchorX ?? stageSize.value.w / 2
-  const ay = anchorY ?? stageSize.value.h / 2
-  const cur = view.scale || 1
-  const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale))
-  const ix = (ax - view.cx) / cur
-  const iy = (ay - view.cy) / cur
-  fitMode.value = false
-  animateTo(next, ax - ix * next, ay - iy * next)
-}
-
-function zoomBy(factor: number) {
-  zoomTo(view.scale * factor)
-}
-
-function onWheel(event: WheelEvent) {
-  const el = stageEl.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  zoomTo(
-    view.scale * Math.exp(-event.deltaY * 0.002),
-    event.clientX - rect.left,
-    event.clientY - rect.top,
-  )
-}
-
-function toggleFit() {
-  if (fitMode.value) {
-    fitMode.value = false
-    animateTo(1, stageSize.value.w / 2, stageSize.value.h / 2)
-  } else {
-    fitMode.value = true
-    animateTo(computeFit(), stageSize.value.w / 2, stageSize.value.h / 2)
-  }
-}
-
-function resetView() {
-  rotation.value = 0
-  flipped.value = false
-  fitMode.value = true
-  animateTo(computeFit(), stageSize.value.w / 2, stageSize.value.h / 2)
-}
-
-/** 旋转后按旋转后的有效宽高重算适应比例（旧版同样会重置到适应）。 */
-function rotate90() {
-  rotation.value = (rotation.value + 90) % 360
-  fitMode.value = true
-  initView()
-  saveViewerState()
-}
-
-function flip() {
-  flipped.value = !flipped.value
-  applyView()
-  saveViewerState()
-}
-
-// ---------------------------------------------------------------------------
-// 拖拽平移 / 空白点击关闭
-// ---------------------------------------------------------------------------
-
-const panning = ref(false)
-let panStart = { x: 0, y: 0, cx: 0, cy: 0 }
-/** 本次按下后是否真的拖动过：拖动过就不把 mouseup 当"点击空白"。 */
-let dragged = false
-
-function onPanStart(event: MouseEvent) {
-  if (event.button !== 0) return
-  // 拖图时立刻把信息卡变淡；指针被拖进卡片区域也不会把它唤回。
-  clearInfoTimer()
-  infoFaded.value = true
-  cancelAnim()
-  // 停掉动画后目标必须跟当前一致，否则松手瞬间会继续追旧目标。
-  view.targetScale = view.scale
-  view.targetCx = view.cx
-  view.targetCy = view.cy
-  panStart = { x: event.clientX, y: event.clientY, cx: view.cx, cy: view.cy }
-  dragged = false
-  panning.value = true
-  window.addEventListener('mousemove', onPanMove)
-  window.addEventListener('mouseup', onPanEnd)
-  event.preventDefault()
-}
-
-function onPanMove(event: MouseEvent) {
-  if (!panning.value) return
-  const dx = event.clientX - panStart.x
-  const dy = event.clientY - panStart.y
-  if (Math.abs(dx) + Math.abs(dy) > 4) dragged = true
-  view.cx = panStart.cx + dx
-  view.cy = panStart.cy + dy
-  view.targetCx = view.cx
-  view.targetCy = view.cy
-  constrainView()
-  applyView()
-}
-
-function onPanEnd() {
-  if (!panning.value) return
-  panning.value = false
-  window.removeEventListener('mousemove', onPanMove)
-  window.removeEventListener('mouseup', onPanEnd)
-  saveViewerState()
-}
-
-/** 只有点在 stage 本身的空白处才关闭；点图片 / 拖动都不关闭。 */
-function onStageClick(event: MouseEvent) {
-  if (event.target !== stageEl.value) return
-  if (dragged) return
-  emit('close')
-}
-
-/**
- * 从图片拖到信息卡再松手时，mousedown / mouseup 的目标不同，
- * 浏览器会把 click 派发到两者共同的祖先（也就是这里）——
- * 刚拖完不能算「点击空白」，否则拖图会误关灯箱。
- */
-function onRootClick() {
-  if (dragged) {
-    dragged = false
-    return
-  }
-  emit('close')
 }
 
 // ---------------------------------------------------------------------------
@@ -448,8 +210,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
-  onPanEnd()
-  cancelAnim()
   clearInfoTimer()
   if (stateSaveTimer !== null) {
     window.clearTimeout(stateSaveTimer)
@@ -478,15 +238,9 @@ watch(
 )
 
 function resetViewState() {
-  cancelAnim()
+  resetViewer()
   restoreInfo()
   scheduleInfoFade()
-  natural.value = { w: 0, h: 0 }
-  imgLoaded.value = false
-  rotation.value = 0
-  flipped.value = false
-  fitMode.value = true
-  zoomPercent.value = 100
   promptInfoOpen.value = false
 }
 
@@ -510,15 +264,20 @@ async function toggleFavorite() {
   }
 }
 
+const { deleteFiles, outputSubfolder } = useSettings()
+
 async function removeItem() {
   if (!item.value) return
   const { confirmed, checked } = await confirmDialogWithCheckbox({
     title: '删除出图记录',
     content: `确定删除「${item.value.filename}」这条出图记录吗？`,
     checkboxLabel: '同时删除磁盘上的原图文件（不可恢复）',
+    // 与画廊批量删除共用同一份记忆（useSettings.deleteFiles）
+    defaultChecked: deleteFiles.value,
     positiveText: '删除',
     negativeText: '取消',
   })
+  deleteFiles.value = checked
   if (!confirmed) return
   busy.value = true
   try {
@@ -560,7 +319,10 @@ async function feedToWorkflow() {
   }
   busy.value = true
   try {
-    await apiPost(`/api/images/${item.value.id}/process`, { workflow_path: processWf.value })
+    await apiPost(`/api/images/${item.value.id}/process`, {
+      workflow_path: processWf.value,
+      output_subfolder: outputSubfolder.value,
+    })
     toast.success('已提交处理任务，可在「任务」页看进度')
     processOpen.value = false
   } catch (e) {
@@ -594,6 +356,7 @@ const PARAM_SOURCE_LABEL: Record<string, string> = {
   prompt_run: '提示词出图',
   text_run: '文本跑图',
   composer: '组合创作',
+  batch_replace: '替换碎片出图',
   faceswap: '图像编辑',
   history_process: '图片处理',
 }
@@ -635,6 +398,14 @@ const extraRows = computed(() => {
       .map((it) => (typeof it === 'object' && it ? textOf((it as Record<string, unknown>).role) : ''))
       .filter(Boolean)
     if (roles.length) rows.push({ label: '输入角色', value: roles.join(' / ') })
+  }
+  const sourceId = textOf(p.source_prompt_id)
+  if (sourceId) {
+    const sourceName = textOf(p.source_prompt_name)
+    rows.push({
+      label: '来源提示词',
+      value: sourceName ? `${sourceName} (#${sourceId})` : `#${sourceId}`,
+    })
   }
   return rows
 })
@@ -769,7 +540,7 @@ function applyViewerSnapshot(s: ViewerSnapshot) {
   fitMode.value = !!s.fitMode
   syncStageSize()
   const fit = computeFit()
-  const scale = fitMode.value ? fit : Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.scale || fit))
+  const scale = fitMode.value ? fit : clampScale(s.scale || fit)
   view.scale = view.targetScale = scale
   view.cx = view.targetCx = (Number.isFinite(s.fx) ? s.fx : 0.5) * stageSize.value.w
   view.cy = view.targetCy = (Number.isFinite(s.fy) ? s.fy : 0.5) * stageSize.value.h
@@ -859,18 +630,12 @@ function toggleInfo() {
 // ---------------------------------------------------------------------------
 
 /**
- * 键盘：← → 翻页，Esc 关闭，+/- 缩放，0 重置，f 翻转，r 旋转。
- * 临时提示词弹窗打开时只接管 Esc，避免把整个查看器一起关掉。
+ * 键盘：← → 翻页，+/- 缩放，0 重置，f 翻转，r 旋转。
+ * Esc 由 useEscapeLayer 统一处理（弹层栈只有最上面一层响应）。
  */
 function onKey(event: KeyboardEvent) {
-  // Modal 的 Esc 监听可能先于本组件执行；它 preventDefault 过就不再关灯箱
   if (event.defaultPrevented) return
-  if (promptInfoOpen.value) {
-    if (event.key === 'Escape') promptInfoOpen.value = false
-    return
-  }
-  if (event.key === 'Escape') emit('close')
-  else if (event.key === 'ArrowLeft') go(-1)
+  if (event.key === 'ArrowLeft') go(-1)
   else if (event.key === 'ArrowRight') go(1)
   else if (event.key === '+' || event.key === '=') zoomBy(1.2)
   else if (event.key === '-') zoomBy(1 / 1.2)
@@ -904,6 +669,7 @@ function onKey(event: KeyboardEvent) {
         ⚡
       </button>
       <button class="tool" title="下载原图" @click="download">⬇</button>
+      <button class="tool" title="在资源管理器中打开所在目录" @click="revealImage(item)">目录</button>
       <button
         v-if="canOpenGallery"
         class="tool"
@@ -1002,6 +768,10 @@ function onKey(event: KeyboardEvent) {
           <div v-if="item.file_size"><dt>体积</dt><dd>{{ formatSize(item.file_size) }}</dd></div>
           <div><dt>来源</dt><dd>{{ sourceLabel(item.source) }}</dd></div>
           <div><dt>出图时间</dt><dd>{{ shotTime(item) }}</dd></div>
+          <div>
+            <dt>存储位置</dt>
+            <dd class="path" :title="outputPath">{{ outputPath }}</dd>
+          </div>
           <div v-if="item.prompt_name"><dt>提示词</dt><dd>{{ item.prompt_name }}</dd></div>
         </dl>
 

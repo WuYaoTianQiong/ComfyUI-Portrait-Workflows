@@ -7,6 +7,7 @@ import GalleryView from './GalleryView.vue'
 import Lightbox from '../components/Lightbox.vue'
 import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
+import { useSettings } from '../composables/useSettings'
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
@@ -26,6 +27,21 @@ vi.mock('../api/client', () => ({
     }
     if (path.includes('/api/tags')) {
       return { tags: [{ id: 1, name: '标签', color: '#5b8fb9', usage_count: 0, prompt_count: 3 }] }
+    }
+    if (path.includes('/api/categories')) {
+      return {
+        categories: [
+          {
+            id: 7,
+            name: '人像',
+            parent_id: null,
+            color: '#6366f1',
+            sort_order: 0,
+            prompt_count: 2,
+            children: [],
+          },
+        ],
+      }
     }
     return {
       items: [
@@ -97,6 +113,24 @@ describe('GalleryView 清理失效', () => {
     await flushPromises()
     return wrapper
   }
+
+  it('分类筛选写入 category_id 并回到第 1 页', async () => {
+    const wrapper = await mountView()
+    const category = wrapper.findAll('.cat').find((b) => b.text().includes('人像'))
+    expect(category).toBeTruthy()
+
+    await category!.trigger('click')
+    await flushPromises()
+
+    const calls = vi.mocked(apiGet).mock.calls.filter(
+      ([path]) =>
+        String(path).includes('/api/images') &&
+        !String(path).includes('/facets') &&
+        !String(path).includes('/ids'),
+    )
+    const last = calls[calls.length - 1]
+    expect(last?.[1]).toMatchObject({ category_id: 7, page: 1 })
+  })
 
   it('点「清理失效」先发 dry_run 预览，不直接写库', async () => {
     const wrapper = await mountView()
@@ -208,6 +242,35 @@ describe('GalleryView 清理失效', () => {
     const paths = vi.mocked(apiPost).mock.calls.map((c) => c[0])
     expect(paths).toContain('/api/images/1/inherit')
     expect(paths).toContain('/api/images/2/inherit')
+  })
+
+  it('批量删除的「同时删磁盘文件」勾选态会被记住并随请求发送', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const settings = useSettings()
+    settings.deleteFiles.value = false
+
+    const wrapper = await mountView()
+    const deleteBtn = () => wrapper.findAll('.btn').find((b) => b.text().includes('删除选中'))!
+
+    await wrapper.findAll('.card .pick')[0].trigger('click')
+    await flushPromises()
+    await deleteBtn().trigger('click')
+    await flushPromises()
+    expect(vi.mocked(apiPost).mock.calls[0][1]).toMatchObject({ ids: [1], delete_files: false })
+
+    // 勾上之后必须落到 localStorage，下次进页面还认
+    settings.deleteFiles.value = true
+    await flushPromises()
+    expect(store.get('pb.deleteFiles')).toBe('1')
+
+    // 记住的勾选态要真的带进下一次请求（删除后选中被清空，重新选一张）
+    await wrapper.findAll('.card .pick')[0].trigger('click')
+    await flushPromises()
+    await deleteBtn().trigger('click')
+    await flushPromises()
+    expect(vi.mocked(apiPost).mock.calls[1][1]).toMatchObject({ ids: [1], delete_files: true })
+
+    confirmSpy.mockRestore()
   })
 
   it('刷新后按图片 id 恢复上次打开的灯箱', async () => {

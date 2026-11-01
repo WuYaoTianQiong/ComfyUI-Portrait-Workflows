@@ -156,6 +156,22 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     expect(wrapper.text()).toContain('自己写的一段')
   })
 
+  it('自定义碎片存为 prompt（不再写 fragments 表）', async () => {
+    const wrapper = await mountView()
+    await wrapper.findAll('.card.add')[0].trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.custom-body textarea').setValue('自己写的一段')
+    const btn = wrapper.findAll('button').find((b) => b.text() === '存为碎片')!
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    const [path, body] = vi.mocked(apiPost).mock.calls[0]
+    expect(path).toBe('/api/prompts')
+    expect(String((body as Record<string, unknown>).prompt)).toBe('【人物面部】\n自己写的一段')
+  })
+
   it('结果中心提供「复制」与「存为提示词」', async () => {
     const wrapper = await mountView()
     const resultBtn = wrapper.findAll('button').find((b) => b.text().includes('结果'))!

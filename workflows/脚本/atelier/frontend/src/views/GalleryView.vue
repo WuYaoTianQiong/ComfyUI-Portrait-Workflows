@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import Lightbox from '../components/Lightbox.vue'
 import CompareModal from '../components/CompareModal.vue'
+import CategoryFilter from '../components/CategoryFilter.vue'
 import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Modal from '../components/Modal.vue'
 import TagCloud from '../components/TagCloud.vue'
@@ -16,6 +17,8 @@ import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useGenerate } from '../composables/useGenerate'
 import { findHistoryItem } from '../composables/useImagePreview'
 import { useSettings } from '../composables/useSettings'
+import { useImageLocation } from '../composables/useImageLocation'
+import { useGallerySelection } from '../composables/useGallerySelection'
 import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 import { flattenCategories } from '../utils/categories'
@@ -33,6 +36,7 @@ interface GallerySession {
   pageSize: number
   sortBy: string
   search: string
+  categoryId: number | null
   selectedTags: number[]
   tagMatch: 'all' | 'any'
   onlyMissing: boolean
@@ -51,6 +55,7 @@ const savedSession = readSession<GallerySession>(SESSION_KEY, {
   pageSize: 60,
   sortBy: 'newest',
   search: '',
+  categoryId: null,
   selectedTags: [],
   tagMatch: 'all',
   onlyMissing: false,
@@ -66,6 +71,7 @@ const pageSize = ref(savedSession.pageSize)
 const sortBy = ref(savedSession.sortBy)
 const page = ref(savedSession.page)
 const search = ref(savedSession.search)
+const categoryId = ref<number | null>(savedSession.categoryId)
 const selectedTags = ref<number[]>(savedSession.selectedTags)
 const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
 const onlyMissing = ref(savedSession.onlyMissing)
@@ -103,6 +109,7 @@ function toggleFacetGroup(key: string) {
 /** 当前生效的筛选数量（折叠侧栏时提示用户"还有筛选在生效"）。 */
 const filterBadge = computed(
   () =>
+    (categoryId.value ? 1 : 0) +
     (selectedTags.value.length ? 1 : 0) +
     (source.value ? 1 : 0) +
     (dateFacet.value ? 1 : 0) +
@@ -125,6 +132,7 @@ const historyKey = computed(() => [
   'history',
   page.value,
   pageSize,
+  categoryId.value,
   selectedTags.value.slice().sort((a, b) => a - b).join(','),
   tagMatch.value,
   onlyMissing.value,
@@ -140,7 +148,8 @@ function historyFilterParams() {
   return {
     page: page.value,
     page_size: pageSize.value,
-  sort: sortBy.value,
+    sort: sortBy.value,
+    category_id: categoryId.value ?? undefined,
     tag_ids: selectedTags.value.join(','),
     tag_match: tagMatch.value,
     missing: onlyMissing.value ? 1 : undefined,
@@ -154,6 +163,7 @@ function historyFilterParams() {
 /** 列表与分面共用的筛选参数（不含分面维度自身 —— 后端就是按这个口径算的）。 */
 const facetScope = computed(() => ({
   search: search.value.trim(),
+  category_id: categoryId.value ?? undefined,
   tag_ids: selectedTags.value.join(','),
   tag_match: tagMatch.value,
   missing: onlyMissing.value ? 1 : undefined,
@@ -191,6 +201,15 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
   queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'image' }),
 })
 
+const { data: catData } = useQuery<{ categories: CategoryNode[] }>({
+  queryKey: ['categories', 'gallery'],
+  queryFn: () =>
+    apiGet<{ categories: CategoryNode[] }>('/api/categories', {
+      tree: true,
+      count_scope: 'image',
+    }),
+})
+
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
 const total = computed(() => history.value?.total ?? 0)
 
@@ -211,6 +230,12 @@ const viewerItems = computed<HistoryItem[]>(() =>
 function imageKey(item: HistoryItem) {
   return item.id
 }
+
+/** 替换碎片出图的图片不挂原提示词，卡片上给一个轻量标记。 */
+function isBatchReplace(item: HistoryItem): boolean {
+  const pp = item.prompt_params as Record<string, unknown> | null | undefined
+  return pp?.source === 'batch_replace'
+}
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 const gridEl = ref<HTMLElement | null>(null)
@@ -222,6 +247,7 @@ function saveSession() {
     pageSize: pageSize.value,
     sortBy: sortBy.value,
     search: search.value,
+    categoryId: categoryId.value,
     selectedTags: selectedTags.value,
     tagMatch: tagMatch.value,
     onlyMissing: onlyMissing.value,
@@ -242,6 +268,7 @@ watch(
       pageSize.value,
       sortBy.value,
       search.value,
+      categoryId.value,
       selectedTags.value.join(','),
       tagMatch.value,
       onlyMissing.value,
@@ -315,16 +342,15 @@ onBeforeUnmount(() => {
 
 // ---------------- 选择与批量操作 ----------------
 
-const selected = ref<Set<number>>(new Set())
+const {
+  selected,
+  selectedCount,
+  toggle: toggleSelect,
+  selectAll,
+  selectPage: selectAllOnPage,
+  clear: clearSelection,
+} = useGallerySelection(() => items.value.map((it) => it.id))
 const selectingAll = ref(false)
-const selectedCount = computed(() => selected.value.size)
-
-function toggleSelect(id: number) {
-  if (selected.value.has(id)) selected.value.delete(id)
-  else selected.value.add(id)
-  // 触发响应式：Set 的增删不会自动让 size 计算属性更新
-  selected.value = new Set(selected.value)
-}
 
 /**
  * 全选全部：跨页把当前筛选下的所有记录都选上。
@@ -339,20 +365,13 @@ async function selectAllMatching() {
       '/api/images/ids',
       historyFilterParams(),
     )
-    selected.value = new Set(data.ids)
+    selectAll(data.ids)
     if (!data.ids.length) toast.info('当前筛选下没有可选的图片')
   } catch (e) {
     toast.error(`全选失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
     selectingAll.value = false
   }
-}
-function selectAllOnPage() {
-  selected.value = new Set(items.value.map((it) => it.id))
-}
-
-function clearSelection() {
-  selected.value = new Set()
 }
 
 const deleteMutation = useMutation({
@@ -368,7 +387,7 @@ const deleteMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['facets'] })
     // 勾了「同时删文件」但部分原图已经不在磁盘上时，明确告知实际删掉了几个
     if (payload.deleteFiles) {
-      toast.info(`已删除 ${data.deleted} 条记录，清理磁盘文件 ${data.files_deleted} 个`)
+      toast.info(`已删除 ${data.deleted} 条记录，清理磁盘文件 ${data.files_deleted ?? 0} 个`)
     }
   },
 })
@@ -388,9 +407,13 @@ async function batchDelete() {
     title: '删除图片记录',
     content: `确定删除选中的 ${ids.length} 张图片记录吗？`,
     checkboxLabel: '同时删除磁盘上的原图文件（不可恢复）',
+    // 勾选态跨弹窗记忆：上次勾过就默认勾上（见 useSettings.deleteFiles）
+    defaultChecked: deleteFiles.value,
     positiveText: '删除',
     negativeText: '取消',
   })
+  // 无论确认还是取消，都记住这次的选择，下次打开还是这个样子
+  deleteFiles.value = checked
   if (!confirmed) return
   deleteMutation.mutate({ ids, deleteFiles: checked })
 }
@@ -436,7 +459,8 @@ function openCompare() {
  * 走统一的出图入口 useGenerate.run —— 同样的工作流/画质/画幅设置，
  * 进度照旧用 SSE 跟踪。
  */
-const { workflowPath, quality, orientation: outOrientation } = useSettings()
+const { workflowPath, quality, orientation: outOrientation, deleteFiles, outputSubfolder } = useSettings()
+const { revealImage } = useImageLocation()
 const { run, runText, busy: regenerating, error: generateError } = useGenerate()
 
 /**
@@ -521,7 +545,10 @@ async function applyProcess() {
     toast.error('请先选择工作流')
     return
   }
-  await applyBulk('/api/images/{id}/process', '处理', { workflow_path: bulkWf.value })
+  await applyBulk('/api/images/{id}/process', '处理', {
+    workflow_path: bulkWf.value,
+    output_subfolder: outputSubfolder.value,
+  })
 }
 
 /**
@@ -754,8 +781,15 @@ function toggleFacet(key: 'source' | 'date' | 'model' | 'orientation', value: st
   target.value = target.value === value ? '' : value
   page.value = 1
 }
+
+function onCategoryChange(value: number | null) {
+  categoryId.value = value
+  page.value = 1
+  clearSelection()
+}
 function clearFilters() {
   selectedTags.value = []
+  categoryId.value = null
   tagMatch.value = 'all'
   onlyMissing.value = false
   search.value = ''
@@ -766,6 +800,14 @@ function clearFilters() {
 <template>
   <div class="gallery">
     <aside v-if="sidebarOpen" class="sidebar">
+      <CategoryFilter
+        :categories="catData?.categories"
+        :model-value="categoryId"
+        all-label="全部图片"
+        show-count
+        @update:model-value="onCategoryChange"
+      />
+
       <section class="group">
         <div class="group-head">
           <span>标签</span>
@@ -931,7 +973,18 @@ function clearFilters() {
             {{ item.is_favorite ? '★' : '☆' }}
           </button>
 
+          <button
+            class="locate"
+            title="在资源管理器中定位原图"
+            @click.stop="revealImage(item)"
+          >
+            定位
+          </button>
+
           <span v-if="item.missing" class="badge-missing">🚫 文件缺失</span>
+          <span v-else-if="isBatchReplace(item)" class="badge-replace" title="由替换碎片出图生成，提示词以临时记录保存">
+            替换
+          </span>
 
               </div>
 
@@ -1326,6 +1379,26 @@ function clearFilters() {
   color: #fbbf24;
 }
 
+.locate {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: rgb(22 27 34 / 82%);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.6;
+  opacity: 0;
+  transition: 0.12s;
+}
+
+.card:hover .locate,
+.locate:focus-visible {
+  opacity: 1;
+}
+
 .badge-missing {
   position: absolute;
   top: 8px;
@@ -1336,6 +1409,20 @@ function clearFilters() {
   background: var(--danger-soft);
   color: #fecaca;
   font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-replace {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
 }
