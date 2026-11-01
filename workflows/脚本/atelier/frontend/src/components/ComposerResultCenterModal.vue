@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
+
 import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
 import { statusLabel } from '../utils/format'
@@ -12,25 +14,49 @@ import type { JobSnapshot } from '../api/types'
  * 这里改成统一弹窗，三个页签：
  * · 画布：当前组合的完整文本 + 复制 / 存为提示词 / 试跑
  * · 随机组：组数 chips + 逐组勾选 / 重抽 / 删除，确认后才出图
- * · 任务结果：已提交批次每组的预览文本、状态与缩略图
+ * · 任务结果：**本次会话提交过的所有任务**，逐条展开看每组的预览文本、状态与缩略图
  *
  * 组件只负责展示，所有状态都留在 ComposerView。
  */
-withDefaults(
+const props = withDefaults(
   defineProps<{
     open: boolean
     tab: 'canvas' | 'random' | 'job'
     composed: string
     combos: string[]
     selected: number[]
-    job: JobSnapshot | null
+    /** 本次会话提交过的任务（新→旧）；只显示最近一个会让多批次的图"看着丢了"。 */
+    jobs: JobSnapshot[]
     count: number
     canvasCount: number
     fixedCount: number
     generating: boolean
+    /** 队列里还没跑完的任务数：>1 说明后面还排着别的批次 */
+    activeCount: number
   }>(),
-  { job: null, count: 1, canvasCount: 0, fixedCount: 0, generating: false },
+  { jobs: () => [], count: 1, canvasCount: 0, fixedCount: 0, generating: false, activeCount: 0 },
 )
+
+/** 展开的任务 id；默认展开最新的那个，之后每来一个新任务都自动展开。 */
+const expanded = ref<number[]>([])
+watch(
+  () => props.jobs.map((j) => j.id).join(','),
+  () => {
+    const newest = props.jobs[0]?.id
+    if (newest && !expanded.value.includes(newest)) expanded.value = [newest, ...expanded.value]
+  },
+  { immediate: true },
+)
+
+function isOpen(jobId: number): boolean {
+  return expanded.value.includes(jobId)
+}
+
+function toggleJob(jobId: number) {
+  expanded.value = isOpen(jobId)
+    ? expanded.value.filter((id) => id !== jobId)
+    : [jobId, ...expanded.value]
+}
 
 const emit = defineEmits<{
   close: []
@@ -84,7 +110,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
           :class="{ active: tab === 'job' }"
           @click="emit('set-tab', 'job')"
         >
-          任务结果{{ job ? ` · ${job.done_count ?? 0}/${job.total ?? 0}` : '' }}
+          任务结果{{ jobs.length ? ` · ${jobs.length}` : '' }}
         </button>
       </div>
     </template>
@@ -143,40 +169,49 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
     <div v-else class="pane job-pane">
       <div class="job-head">
-        <template v-if="job">
-          <span :class="['st', job.status]">{{ statusLabel(job.status) }}</span>
-          <span class="muted">{{ job.done_count ?? 0 }} / {{ job.total ?? 0 }}</span>
-          <span class="muted">{{ job.title }}</span>
-        </template>
+        <span v-if="jobs.length" class="muted">
+          本次会话共 {{ jobs.length }} 个任务<span v-if="activeCount">（{{ activeCount }} 个进行中）</span>
+        </span>
         <span v-else class="muted">还没有提交任务</span>
       </div>
 
       <div class="job-list">
-        <div v-for="(item, idx) in job?.items ?? []" :key="idx" class="job-row">
-          <button
-            v-if="item.images?.[0]"
-            class="shot"
-            type="button"
-            :title="`查看原图：${item.images[0].filename}`"
-            @click="emit('preview-image', item.images[0])"
-          >
-            <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
+        <div v-for="jb in jobs" :key="jb.id" class="job-card">
+          <button class="job-title" type="button" @click="toggleJob(jb.id)">
+            <span class="caret">{{ isOpen(jb.id) ? '▾' : '▸' }}</span>
+            <span :class="['st', jb.status]">{{ statusLabel(jb.status) }}</span>
+            <span class="muted">{{ jb.done_count ?? 0 }} / {{ jb.total ?? 0 }}</span>
+            <span class="job-name" :title="jb.title">{{ jb.title || `任务 #${jb.id}` }}</span>
+            <span class="spacer" />
+            <span class="muted">#{{ jb.id }}</span>
           </button>
-          <div v-else class="shot placeholder">{{ idx + 1 }}</div>
-          <div class="job-body">
-            <pre class="job-pre">{{ item.prompt_preview || '（无预览）' }}</pre>
-            <div class="meta">
-              <span :class="['st', item.status]">{{ statusLabel(item.status || 'pending') }}</span>
-              <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
-              <span v-if="item.error" class="err">{{ item.error }}</span>
+
+          <div v-if="isOpen(jb.id)" class="job-items">
+            <div v-for="(item, idx) in jb.items ?? []" :key="idx" class="job-row">
+              <button
+                v-if="item.images?.[0]"
+                class="shot"
+                type="button"
+                :title="`查看原图：${item.images[0].filename}`"
+                @click="emit('preview-image', item.images[0])"
+              >
+                <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
+              </button>
+              <div v-else class="shot placeholder">{{ idx + 1 }}</div>
+              <div class="job-body">
+                <pre class="job-pre">{{ item.prompt_preview || '（无预览）' }}</pre>
+                <div class="meta">
+                  <span :class="['st', item.status]">{{ statusLabel(item.status || 'pending') }}</span>
+                  <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
+                  <span v-if="item.error" class="err">{{ item.error }}</span>
+                </div>
+              </div>
             </div>
+            <EmptyState v-if="!jb.items?.length" compact text="正在提交，稍等…" />
           </div>
         </div>
-        <EmptyState
-          v-if="!job?.items?.length"
-          compact
-          :text="job ? '正在提交，稍等…' : '先试跑，或在随机组里勾选确认出图'"
-        />
+
+        <EmptyState v-if="!jobs.length" compact text="先试跑，或在随机组里勾选确认出图" />
       </div>
     </div>
 
@@ -195,7 +230,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
           :disabled="generating || !canvasCount"
           @click="emit('run-canvas')"
         >
-          {{ generating ? '生成中…' : '🚀 试跑' }}
+          {{ generating ? '提交中…' : '🚀 试跑' }}
         </button>
       </template>
       <template v-else-if="tab === 'random'">
@@ -352,7 +387,54 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+/* 一个任务一张卡：标题行常驻，明细按需展开（多批次时不用一次铺满） */
+.job-card {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.job-title {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-title:hover {
+  background: var(--panel-3);
+}
+
+.caret {
+  flex: none;
+  width: 10px;
+  color: var(--muted);
+}
+
+.job-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-items {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
+  padding: 0 6px 6px;
 }
 
 .job-row {

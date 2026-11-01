@@ -39,9 +39,18 @@ interface FragmentItem {
 // 组合器有自己的一份工作流，不跟提示词页/换脸页联动
 const { composerWorkflowPath, quality, orientation } = useSettings()
 const workflowPath = composerWorkflowPath
-// 'composer' 这个 key 让「最近一次任务」落盘：刷新后结果中心的任务结果页签还能看到它
-const { busy: generating, job: activeJob, error: generateError, submitAndTrack } =
-  useGenerate('composer')
+// 'composer' 这个 key 让「最近一次任务」落盘：刷新后结果中心的任务结果页签还能看到它。
+// queue: true —— 提交即放行，任务交给 ComfyUI 排队；否则按钮会一直占用到整批跑完，
+// 用户没法"再抽一组接着跑"。
+const {
+  busy: generating,
+  job: activeJob,
+  // 本次会话提交过的所有任务（新→旧）：结果中心的任务结果页签据此逐条列出
+  queue: sessionJobs,
+  activeCount,
+  error: generateError,
+  submitAndTrack,
+} = useGenerate('composer', { queue: true })
 const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
 /** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
 const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
@@ -926,6 +935,12 @@ function goJobs() {
   router.push('/jobs')
 }
 
+/** 点顶栏的「队列 N」：直接打开结果中心的任务结果页签。 */
+function openJobTab() {
+  resultTab.value = 'job'
+  resultOpen.value = true
+}
+
 /** 任务结果里的缩略图：点开看原图（复用画廊那次灯箱，不另写查看器）。 */
 const {
   items: previewItems,
@@ -1017,10 +1032,18 @@ function toggleTag(id: number) {
         :disabled="generating || !canvasCount"
         @click="runOnce"
       >
-        {{ generating ? '生成中…' : '🚀 试跑' }}
+        {{ generating ? '提交中…' : '🚀 试跑' }}
       </button>
       <span v-if="generateError" class="gen-error">{{ generateError }}</span>
-      <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
+      <button
+        v-if="activeCount"
+        class="job-state queue"
+        :title="`${activeCount} 个任务排队中（ComfyUI 顺序出图），点开看进度`"
+        @click="openJobTab"
+      >
+        队列 {{ activeCount }}
+      </button>
+      <span v-if="activeJob" class="job-state" :class="activeJob.status">
         {{ activeJob.status }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
       </span>
     </div>
@@ -1208,11 +1231,12 @@ function toggleTag(id: number) {
       :composed="composedPrompt"
       :combos="randomCombos"
       :selected="selectedCombos"
-      :job="activeJob"
+      :jobs="sessionJobs"
       :count="randomCount"
       :canvas-count="canvasCount"
       :fixed-count="pinned.length"
       :generating="generating"
+      :active-count="activeCount"
       @close="resultOpen = false"
       @set-tab="resultTab = $event"
       @set-count="setRandomCount"
@@ -1594,6 +1618,16 @@ function toggleTag(id: number) {
 .job-state {
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+
+/* 「队列 N」是个按钮（点心开结果中心），去掉浏览器默认外观 */
+.job-state.queue {
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--primary);
+  padding: 1px 8px;
+  cursor: pointer;
 }
 
 .custom-body {

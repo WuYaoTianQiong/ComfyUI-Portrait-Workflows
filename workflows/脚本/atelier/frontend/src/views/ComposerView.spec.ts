@@ -65,7 +65,11 @@ const fixture = vi.hoisted(() => ({
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
-    if (path.includes('/api/jobs/')) return fixture.job
+    if (path.includes('/api/jobs/')) {
+      // 按 id 返回同形状的快照，标题带上 id 便于断言"列出的是哪几个任务"
+      const id = Number(path.split('/api/jobs/')[1])
+      return { ...fixture.job, id, title: `批量随机组合 #${id}` }
+    }
     if (path.includes('/api/composer/fragments')) {
       return {
         grouped: { 人物面部: fixture.faces },
@@ -118,6 +122,7 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
       'pb.composerCanvas',
       'pb.composerPinned',
       'pb.lastJob.composer',
+      'pb.lastJob.composer.ids',
     ]) {
       store.delete(key)
     }
@@ -360,8 +365,40 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     expect(saved.negativePrompt).toBe('低清晰度, 水印')
   })
 
+  it('队列模式：上一组还没跑完也能接着提交下一组', async () => {
+    useSettings().composerWorkflowPath.value = 'F:/fake.json'
+    vi.mocked(apiPost).mockResolvedValue({
+      success: true,
+      job_id: 1,
+      results: [{ index: 0, success: true }],
+    } as never)
+
+    const wrapper = await mountView()
+    // 画布非空才能点「试跑」
+    await wrapper.findAll('.reel-body .card').at(0)?.trigger('click')
+    await flushPromises()
+
+    const runBtn = () => wrapper.findAll('button').find((b) => b.text().includes('试跑'))!
+    await runBtn().trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    // FakeEventSource 不会推终态，等于"任务还在跑"；按钮此时必须已经恢复
+    const btn = runBtn()
+    expect(btn.attributes('disabled')).toBeUndefined()
+    expect(btn.text()).toContain('试跑')
+    expect(wrapper.find('.job-state.queue').text()).toContain('1')
+
+    // 接着提交第二组：后端会各自建 job，ComfyUI 排队跑
+    await runBtn().trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(2)
+
+    useSettings().composerWorkflowPath.value = ''
+  })
+
   it('刷新后结果中心仍能看到上一次任务（任务结果页签不再清空）', async () => {
-    // 上一次提交记下的 job id
+    // 上一次提交记下的 job id（旧格式：单个 id，没有 .ids 列表）
     store.set('pb.lastJob.composer', '9')
 
     const wrapper = await mountView()
@@ -371,12 +408,35 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
 
     // 挂载后按 id 从 /api/jobs/9 取回快照
     const tab = wrapper.findAll('button').find((b) => b.text().includes('任务结果'))!
-    expect(tab.text()).toContain('1/1')
+    expect(tab.text()).toContain('· 1')
 
     await tab.trigger('click')
     await flushPromises()
+    expect(wrapper.findAll('.job-card').length).toBe(1)
     expect(wrapper.findAll('.job-row').length).toBe(1)
     expect(wrapper.text()).toContain('批量随机组合')
     expect(wrapper.text()).toContain('正脸，柔和光线')
+  })
+
+  it('任务结果列出本次会话的所有任务，并可逐条展开', async () => {
+    // 本次会话提交过两个任务（新→旧）
+    store.set('pb.lastJob.composer.ids', JSON.stringify([11, 10]))
+
+    const wrapper = await mountView()
+    await wrapper.findAll('button').find((b) => b.text().includes('组合结果'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('任务结果'))!.trigger('click')
+    await flushPromises()
+
+    const cards = wrapper.findAll('.job-card')
+    expect(cards.length).toBe(2)
+    expect(cards[0].text()).toContain('#11')
+    expect(cards[1].text()).toContain('#10')
+    // 默认只展开最新那条
+    expect(wrapper.findAll('.job-row').length).toBe(1)
+
+    await cards[1].find('.job-title').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.job-row').length).toBe(2)
   })
 })
