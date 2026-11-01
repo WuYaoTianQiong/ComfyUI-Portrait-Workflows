@@ -20,7 +20,7 @@ import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/type
 import { formatSize, resolution } from '../utils/format'
 import { flattenCategories } from '../utils/categories'
 import { imageAspect } from '../utils/image'
-import { confirmDialog } from '../utils/naive'
+import { confirmDialog, confirmDialogWithCheckbox } from '../utils/naive'
 import { readSession, writeSession } from '../composables/useSessionState'
 
 /**
@@ -356,13 +356,20 @@ function clearSelection() {
 }
 
 const deleteMutation = useMutation({
-  mutationFn: (ids: number[]) =>
-    apiPost<{ success: boolean; deleted: number }>('/api/images/batch_delete', { ids }),
-  onSuccess: () => {
+  mutationFn: (payload: { ids: number[]; deleteFiles: boolean }) =>
+    apiPost<{ success: boolean; deleted: number; files_deleted: number }>(
+      '/api/images/batch_delete',
+      { ids: payload.ids, delete_files: payload.deleteFiles },
+    ),
+  onSuccess: (data, payload) => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['history'] })
     // 删除后分面计数会变，不刷的话侧栏数字停在旧值
     queryClient.invalidateQueries({ queryKey: ['facets'] })
+    // 勾了「同时删文件」但部分原图已经不在磁盘上时，明确告知实际删掉了几个
+    if (payload.deleteFiles) {
+      toast.info(`已删除 ${data.deleted} 条记录，清理磁盘文件 ${data.files_deleted} 个`)
+    }
   },
 })
 
@@ -377,14 +384,15 @@ const favoriteMutation = useMutation({
 async function batchDelete() {
   const ids = Array.from(selected.value)
   if (!ids.length) return
-  const ok = await confirmDialog({
+  const { confirmed, checked } = await confirmDialogWithCheckbox({
     title: '删除图片记录',
-    content: `确定删除选中的 ${ids.length} 张图片记录吗？（只标记删除，不动磁盘文件）`,
+    content: `确定删除选中的 ${ids.length} 张图片记录吗？`,
+    checkboxLabel: '同时删除磁盘上的原图文件（不可恢复）',
     positiveText: '删除',
     negativeText: '取消',
   })
-  if (!ok) return
-  deleteMutation.mutate(ids)
+  if (!confirmed) return
+  deleteMutation.mutate({ ids, deleteFiles: checked })
 }
 
 function batchDownload() {

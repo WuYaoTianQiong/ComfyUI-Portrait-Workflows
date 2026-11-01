@@ -5,7 +5,7 @@ import { apiDelete, apiPost, viewUrl } from '../api/client'
 import { useToast } from '../composables/useToast'
 import type { HistoryItem } from '../api/types'
 import { formatSize, resolution, shotTime, sourceLabel } from '../utils/format'
-import { confirmDialog } from '../utils/naive'
+import { confirmDialogWithCheckbox } from '../utils/naive'
 import Modal from './Modal.vue'
 
 /**
@@ -512,17 +512,18 @@ async function toggleFavorite() {
 
 async function removeItem() {
   if (!item.value) return
-  const ok = await confirmDialog({
+  const { confirmed, checked } = await confirmDialogWithCheckbox({
     title: '删除出图记录',
-    content: `确定删除「${item.value.filename}」这条出图记录吗？\n（只删记录，不动磁盘文件）`,
+    content: `确定删除「${item.value.filename}」这条出图记录吗？`,
+    checkboxLabel: '同时删除磁盘上的原图文件（不可恢复）',
     positiveText: '删除',
     negativeText: '取消',
   })
-  if (!ok) return
+  if (!confirmed) return
   busy.value = true
   try {
-    await apiDelete(`/api/images/${item.value.id}`)
-    toast.success('已删除该记录')
+    await apiDelete(`/api/images/${item.value.id}`, { delete_files: checked })
+    toast.success(checked ? '已删除该记录与原图文件' : '已删除该记录')
     emit('changed')
     emit('close')
   } catch (e) {
