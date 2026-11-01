@@ -1560,6 +1560,11 @@ export interface components {
     schemas: {
         /** BatchDeleteRequest */
         BatchDeleteRequest: {
+            /**
+             * Delete Files
+             * @default false
+             */
+            delete_files: boolean;
             /** Ids */
             ids: number[];
         };
@@ -3964,7 +3969,10 @@ export interface operations {
     };
     delete_history_item_api_images__item_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description true=同时删除磁盘上的原图文件（不可恢复） */
+                delete_files?: boolean;
+            };
             header?: never;
             path: {
                 item_id: number;

@@ -3,6 +3,11 @@
     "schemas": {
       "BatchDeleteRequest": {
         "properties": {
+          "delete_files": {
+            "default": false,
+            "title": "Delete Files",
+            "type": "boolean"
+          },
           "ids": {
             "items": {
               "type": "integer"
@@ -4546,6 +4551,18 @@
             "schema": {
               "title": "Item Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "true=同时删除磁盘上的原图文件（不可恢复）",
+            "in": "query",
+            "name": "delete_files",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "true=同时删除磁盘上的原图文件（不可恢复）",
+              "title": "Delete Files",
+              "type": "boolean"
             }
           }
         ],
