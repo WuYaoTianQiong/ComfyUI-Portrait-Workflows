@@ -180,6 +180,62 @@ def test_history_batch_delete_keeps_prompt_records(api, seed_history):
     assert Prompt.get_or_none(Prompt.id == prompt.id) is not None
 
 
+def test_delete_only_touches_disk_when_asked(api, seed_history):
+    """delete_files 默认关闭：不传就只软删记录，磁盘原图必须留着。"""
+    from app.config import settings
+    from app.models import Image
+
+    out_dir = settings.comfyui_root / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    keep = out_dir / "keep_on_disk.png"
+    keep.write_bytes(b"x")
+
+    img = seed_history(filename="keep_on_disk.png")
+    assert api.post("/api/images/batch_delete", json={"ids": [img.id]}).status_code == 200
+
+    assert keep.exists(), "未勾选删除文件时不应动磁盘"
+    assert bool(Image.get_by_id(img.id).is_deleted) is True
+    keep.unlink()
+
+
+def test_delete_with_delete_files_removes_source_and_counts(api, seed_history):
+    """单条与批量删除都要能按 delete_files 真删原图，并回报删掉的文件数。"""
+    from app.config import settings
+    from app.models import Image
+
+    out_dir = settings.comfyui_root / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    single = out_dir / "single_drop.png"
+    b1 = out_dir / "batch_drop_1.png"
+    b2 = out_dir / "batch_drop_2.png"
+    for f in (single, b1, b2):
+        f.write_bytes(b"x")
+
+    i_single = seed_history(filename="single_drop.png")
+    i1 = seed_history(filename="batch_drop_1.png")
+    i2 = seed_history(filename="batch_drop_2.png")
+    i_missing = seed_history(filename="already_gone.png")
+
+    resp = api.delete(f"/api/images/{i_single.id}", params={"delete_files": True})
+    assert resp.status_code == 200
+    assert resp.json()["files_deleted"] == 1
+    assert not single.exists()
+
+    resp = api.post(
+        "/api/images/batch_delete",
+        json={"ids": [i1.id, i2.id, i_missing.id], "delete_files": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted"] == 3
+    # 磁盘上本来就没文件的记录不该被算进 files_deleted
+    assert body["files_deleted"] == 2
+    assert not b1.exists() and not b2.exists()
+    assert all(
+        bool(Image.get_by_id(i).is_deleted) for i in (i1.id, i2.id, i_missing.id)
+    )
+
+
 def test_batch_delete_prompts_detaches_history(api, seed_history):
     """批量删提示词只解除关联，不能把画廊里的图片记录一起删掉。"""
     from app.models import Image, Prompt
