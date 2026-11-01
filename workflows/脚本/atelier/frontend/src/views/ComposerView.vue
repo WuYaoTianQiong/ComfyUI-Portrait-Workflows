@@ -39,7 +39,9 @@ interface FragmentItem {
 // 组合器有自己的一份工作流，不跟提示词页/换脸页联动
 const { composerWorkflowPath, quality, orientation } = useSettings()
 const workflowPath = composerWorkflowPath
-const { busy: generating, job: activeJob, error: generateError, submitAndTrack } = useGenerate()
+// 'composer' 这个 key 让「最近一次任务」落盘：刷新后结果中心的任务结果页签还能看到它
+const { busy: generating, job: activeJob, error: generateError, submitAndTrack } =
+  useGenerate('composer')
 const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
 /** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
 const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)

@@ -1,11 +1,12 @@
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
-import { apiPost } from '../api/client'
+import { apiGet, apiPost } from '../api/client'
 import { customWorkflowContent } from './useWorkflows'
 import type { JobSnapshot } from '../api/types'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
+const LAST_JOB_PREFIX = 'pb.lastJob'
 
 /**
  * 提交出图并跟踪进度。
@@ -13,14 +14,62 @@ const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
  * 用后端已有的 SSE（`/api/jobs/events?ids=<id>`）而不是轮询：
  * 单任务订阅在终态时服务端会主动结束连接，前端不用自己判超时。
  * 旧前端是 1Hz 轮询 `GET /api/jobs/{id}`，双 tab 就会翻倍打后端。
+ *
+ * `sessionKey`（可选）把这"最近一次任务"记到 localStorage：任务快照本来就在
+ * 后端 `gen_jobs` 里，前端只要记住 id，刷新后就能接回来 —— 否则结果中心一刷新
+ * 就变成"还没有提交任务"。不传则保持纯内存（不持久化）。
  */
-export function useGenerate() {
+export function useGenerate(sessionKey = '') {
   const queryClient = useQueryClient()
 
+  const storeKey = sessionKey ? `${LAST_JOB_PREFIX}.${sessionKey}` : ''
   const busy = ref(false)
   const job = ref<JobSnapshot | null>(null)
   const error = ref('')
   let source: EventSource | null = null
+
+  function rememberJob(jobId: number) {
+    if (!storeKey) return
+    try {
+      localStorage.setItem(storeKey, String(jobId))
+    } catch {
+      /* 隐私模式下忽略 */
+    }
+  }
+
+  function forgetJob() {
+    if (!storeKey) return
+    try {
+      localStorage.removeItem(storeKey)
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  /**
+   * 刷新后把上一次任务接回来：还在跑就继续订阅，已经结束也恢复快照
+   * （结果中心要能看到上次出的图与状态）。任务已被删除就忘掉这条记录。
+   */
+  async function restoreLastJob() {
+    if (!storeKey) return
+    let jobId = 0
+    try {
+      jobId = Number(localStorage.getItem(storeKey) ?? '')
+    } catch {
+      return
+    }
+    if (!jobId) return
+    try {
+      const snapshot = await apiGet<JobSnapshot>(`/api/jobs/${jobId}`)
+      job.value = snapshot
+      if (TERMINAL.has(snapshot.status)) return
+      subscribe(jobId)
+    } catch {
+      forgetJob()
+    }
+  }
+
+  onMounted(restoreLastJob)
 
   function closeStream() {
     if (source) {
@@ -49,6 +98,7 @@ export function useGenerate() {
   }
 
   function subscribe(jobId: number) {
+    rememberJob(jobId)
     closeStream()
     // 等待首帧也算在飞行中：提交后到第一次进度之间不该出现"可再次点击"的空窗
     busy.value = true

@@ -45,10 +45,27 @@ const fixture = vi.hoisted(() => ({
       dup_count: 1,
     },
   ],
+  /** 刷新后要能接回来的"上一次任务"（后端 /api/jobs/{id} 的快照形状） */
+  job: {
+    id: 9,
+    status: 'done',
+    title: '批量随机组合 (1 组)',
+    total: 1,
+    done_count: 1,
+    items: [
+      {
+        status: 'done',
+        prompt_preview: '【人物面部】正脸，柔和光线',
+        seed: 12345,
+        images: [{ filename: 'a.png', subfolder: '', type: 'output' }],
+      },
+    ],
+  },
 }))
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(async (path: string) => {
+    if (path.includes('/api/jobs/')) return fixture.job
     if (path.includes('/api/composer/fragments')) {
       return {
         grouped: { 人物面部: fixture.faces },
@@ -66,6 +83,9 @@ vi.mock('../api/client', () => ({
   apiPost: vi.fn(async () => ({ success: true })),
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
+  // 任务结果的缩略图与原图地址（结果中心/灯箱会用到）
+  thumbnailUrl: () => '/api/thumb',
+  viewUrl: () => '/api/media/image',
 }))
 
 const stub = { template: '<div />' }
@@ -93,7 +113,12 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     vi.mocked(apiPost).mockClear()
     // 组合器自己把画布 / 固定列 / 结果中心写进 localStorage，用例之间必须清干净，
     // 否则上一例留下的"弹窗开着 / 画布有内容"会污染下一例
-    for (const key of ['pb.session.composer', 'pb.composerCanvas', 'pb.composerPinned']) {
+    for (const key of [
+      'pb.session.composer',
+      'pb.composerCanvas',
+      'pb.composerPinned',
+      'pb.lastJob.composer',
+    ]) {
       store.delete(key)
     }
     // happy-dom 没有剪贴板实现。
@@ -333,5 +358,25 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     await flushPromises()
     const saved = JSON.parse(localStorage.getItem('pb.session.composer') ?? '{}')
     expect(saved.negativePrompt).toBe('低清晰度, 水印')
+  })
+
+  it('刷新后结果中心仍能看到上一次任务（任务结果页签不再清空）', async () => {
+    // 上一次提交记下的 job id
+    store.set('pb.lastJob.composer', '9')
+
+    const wrapper = await mountView()
+    // 先打开结果中心（页签在弹窗里）
+    await wrapper.findAll('button').find((b) => b.text().includes('组合结果'))!.trigger('click')
+    await flushPromises()
+
+    // 挂载后按 id 从 /api/jobs/9 取回快照
+    const tab = wrapper.findAll('button').find((b) => b.text().includes('任务结果'))!
+    expect(tab.text()).toContain('1/1')
+
+    await tab.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.job-row').length).toBe(1)
+    expect(wrapper.text()).toContain('批量随机组合')
+    expect(wrapper.text()).toContain('正脸，柔和光线')
   })
 })
