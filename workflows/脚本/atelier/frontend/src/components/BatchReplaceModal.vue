@@ -37,11 +37,17 @@ const props = defineProps<{
   categoryId: number | null
   tagIds: number[]
   tagMatch: 'all' | 'any'
+  /** 碎片筛选（与左侧列表同一份条件，否则"看到的"和"替换的"不是一批） */
+  fragmentTypes: string[]
+  fragmentMatch: 'has' | 'only'
   selectedIds: number[]
   workflowPath: string
   quality: string
   orientation: 'portrait' | 'landscape'
   caps: WorkflowCaps
+  /** 锁定到单条提示词（提示词详情里的「替换碎片」入口）。 */
+  lockPromptId?: number | null
+  lockPromptName?: string
 }>()
 
 const emit = defineEmits<{
@@ -59,31 +65,96 @@ const replacement = ref('')
 const fragQuery = ref('')
 const promptQuery = ref('')
 const selected = ref<Set<number>>(new Set())
+const missingMode = ref<'skip' | 'append'>('skip')
 
 /** 勾选优先：左侧有勾选就只看勾选项，没勾选才用当前筛选全部。 */
 const scope = ref<'selected' | 'filtered'>(
   props.selectedIds.length ? 'selected' : 'filtered',
 )
 
+const OPTIONS_KEY = 'pb.batchReplace'
+
+interface SavedOptions {
+  type: string
+  replacement: string
+  scope: 'selected' | 'filtered'
+  missing: 'skip' | 'append'
+}
+
+function readSavedOptions(): Partial<SavedOptions> {
+  try {
+    const raw = localStorage.getItem(OPTIONS_KEY)
+    return raw ? (JSON.parse(raw) as Partial<SavedOptions>) : {}
+  } catch {
+    return {}
+  }
+}
+
+let saveTimer: number | undefined
+
+function scheduleSave() {
+  if (typeof window === 'undefined') return
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(OPTIONS_KEY, JSON.stringify({
+        type: targetType.value,
+        replacement: replacement.value,
+        scope: scope.value,
+        missing: missingMode.value,
+      }))
+    } catch {
+      /* localStorage 不可用时忽略 */
+    }
+  }, 300)
+}
+
 watch(
   () => props.open,
   (open) => {
     if (!open) return
-    scope.value = props.selectedIds.length ? 'selected' : 'filtered'
-    targetType.value = ''
-    replacement.value = ''
+    const saved = readSavedOptions()
+    targetType.value =
+      typeof saved.type === 'string' && (FRAGMENT_TYPES as readonly string[]).includes(saved.type)
+        ? saved.type
+        : ''
+    replacement.value = typeof saved.replacement === 'string' ? saved.replacement : ''
+    missingMode.value = saved.missing === 'append' ? 'append' : 'skip'
+    scope.value =
+      saved.scope === 'selected' || saved.scope === 'filtered'
+        ? saved.scope
+        : props.selectedIds.length ? 'selected' : 'filtered'
     fragQuery.value = ''
     promptQuery.value = ''
     selected.value = new Set()
   },
+  { immediate: true },
 )
 
-const usingSelected = computed(() => scope.value === 'selected')
+watch([targetType, replacement, scope, missingMode], scheduleSave)
+
+function resetOptions() {
+  targetType.value = ''
+  replacement.value = ''
+  missingMode.value = 'skip'
+  scope.value = props.selectedIds.length ? 'selected' : 'filtered'
+  try {
+    localStorage.removeItem(OPTIONS_KEY)
+  } catch {
+    /* localStorage 不可用时忽略 */
+  }
+}
+
+const lockedId = computed(() => props.lockPromptId ?? null)
+const usingSelected = computed(() => lockedId.value !== null || scope.value === 'selected')
+const effectiveIds = computed(() =>
+  lockedId.value !== null ? [lockedId.value] : props.selectedIds,
+)
 
 const { data: fullData } = useQuery<{ items: FullPromptRow[]; total: number }>({
   queryKey: computed(() =>
     usingSelected.value
-      ? ['prompts-full', 'ids', props.selectedIds.slice().sort((a, b) => a - b).join(',')]
+      ? ['prompts-full', 'ids', effectiveIds.value.slice().sort((a, b) => a - b).join(',')]
       : [
           'prompts-full',
           'filter',
@@ -91,19 +162,23 @@ const { data: fullData } = useQuery<{ items: FullPromptRow[]; total: number }>({
           props.categoryId,
           props.tagIds.slice().sort((a, b) => a - b).join(','),
           props.tagMatch,
+          props.fragmentTypes.join(','),
+          props.fragmentMatch,
         ],
   ),
   queryFn: () =>
     usingSelected.value
-      ? apiGet('/api/prompts/full', { ids: props.selectedIds.join(',') })
+      ? apiGet('/api/prompts/full', { ids: effectiveIds.value.join(',') })
       : apiGet('/api/prompts/full', {
           search: props.search.trim(),
           category_id: props.categoryId ?? undefined,
           tag_ids: props.tagIds.length ? props.tagIds.join(',') : undefined,
           tag_match: props.tagMatch,
+          fragment_types: props.fragmentTypes.join(','),
+          fragment_match: props.fragmentMatch,
         }),
   enabled: computed(
-    () => props.open && (!usingSelected.value || props.selectedIds.length > 0),
+    () => props.open && (!usingSelected.value || effectiveIds.value.length > 0),
   ),
 })
 
@@ -143,20 +218,20 @@ interface MatchedRow {
   seed: number
   oldContent: string
   replaced: string
+  appended: boolean
 }
 
 /**
- * 只列出"本来就有这一片"的提示词；其余计入跳过数。
- *
- * 预览由后端算（`POST /api/composition/batch_replace`）—— `【类型】` 语法只有
- * 后端一份实现，替换也保持"其他块原样保留"的语义。一次往返算完整个范围。
+ * "本来就有这一片"的提示词进入替换列表；缺少该类型时按 missingMode 决定
+ * 追加还是跳过。预览由后端算（`POST /api/composition/batch_replace`）——
+ * `【类型】` 语法只有后端一份实现，其他块原样保留。
  * 用递增序号丢弃过期响应：用户连续修改内容时，先发的请求可能后到。
  */
 const previewRows = ref<MatchedRow[]>([])
 let previewSeq = 0
 
 watch(
-  [targetType, replacement, () => fullData.value?.items],
+  [targetType, replacement, missingMode, () => fullData.value?.items],
   async () => {
     const type = targetType.value
     const text = replacement.value.trim()
@@ -171,6 +246,7 @@ watch(
         items.map((p) => ({ id: p.id, text: p.prompt })),
         type,
         text,
+        missingMode.value,
       )
       if (seq !== previewSeq) return
       previewRows.value = items.flatMap((p) => {
@@ -182,6 +258,7 @@ watch(
           seed: p.seed ?? 0,
           oldContent: hit.oldContent,
           replaced: hit.replaced,
+          appended: hit.action === 'appended',
         }]
       })
     } catch {
@@ -204,6 +281,7 @@ const visibleRows = computed<MatchedRow[]>(() => {
 
 const totalCount = computed(() => fullData.value?.items.length ?? 0)
 const skippedCount = computed(() => Math.max(0, totalCount.value - matchedAll.value.length))
+const appendedCount = computed(() => matchedAll.value.filter((r) => r.appended).length)
 
 /** 类型/范围/内容变化后默认全选匹配项；检索不改变已选集合。 */
 watch(
@@ -258,15 +336,12 @@ function submit() {
 <template>
   <Modal
     :open="open"
-    title="批量替换碎片"
+    :title="lockedId ? '替换碎片出图' : '批量替换碎片'"
     width="min(1180px, 96vw)"
+    height="min(720px, 88vh)"
     @close="emit('close')"
   >
     <div class="pane">
-      <p class="intro">
-        把同一类碎片换成同一段内容，再批量出图。原提示词不会被修改。
-      </p>
-
       <div class="step-row">
         <span class="step-no">1</span>
         <span class="step-title">类型与范围</span>
@@ -275,7 +350,10 @@ function submit() {
           <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">【{{ t }}】</option>
         </select>
 
-        <div class="seg">
+        <span v-if="lockedId" class="scope-locked">
+          当前提示词：{{ lockPromptName || `#${lockedId}` }}
+        </span>
+        <div v-else class="seg">
           <button
             class="btn btn-sm"
             :class="{ on: scope === 'selected' }"
@@ -295,11 +373,36 @@ function submit() {
           </button>
         </div>
 
+        <div class="seg missing-seg">
+          <span class="muted">缺少时</span>
+          <button
+            class="btn btn-sm"
+            :class="{ on: missingMode === 'skip' }"
+            title="没有目标【类型】的提示词直接跳过"
+            @click="missingMode = 'skip'"
+          >
+            跳过
+          </button>
+          <button
+            class="btn btn-sm"
+            :class="{ on: missingMode === 'append' }"
+            title="没有目标【类型】时，在提示词末尾追加一段"
+            @click="missingMode = 'append'"
+          >
+            追加
+          </button>
+        </div>
+        <button class="btn btn-sm ghost" title="清除已记住的类型和替换内容" @click="resetOptions">
+          重置
+        </button>
+
+        <span class="spacer" />
         <span class="count">
           <template v-if="!targetType">先选择碎片类型</template>
           <template v-else-if="!replacement.trim()">填好替换内容后显示匹配数量</template>
           <template v-else>
-            范围 {{ totalCount }} 条 · 可替换 {{ matchedAll.length }} 条
+            范围 {{ totalCount }} 条 · 可处理 {{ matchedAll.length }} 条
+            <template v-if="appendedCount"> · 追加 {{ appendedCount }}</template>
             <template v-if="skippedCount"> · 跳过 {{ skippedCount }} 条</template>
           </template>
         </span>
@@ -406,7 +509,10 @@ function submit() {
                 @change="toggle(row.id)"
               />
               <span class="name">{{ row.name }}</span>
-              <span class="old">{{ row.oldContent || '（该块为空）' }}</span>
+              <span v-if="row.appended" class="append-tag">追加</span>
+              <span class="old" :title="row.oldContent">
+                {{ row.appended ? '（缺少该类型，将追加）' : (row.oldContent || '（该块为空）') }}
+              </span>
               <span class="arrow">→</span>
               <span class="new">{{ replacement }}</span>
             </label>
@@ -433,7 +539,7 @@ function submit() {
         :disabled="!selectedCount || !caps.prompt || !workflowPath"
         @click="submit"
       >
-        替换并出图 {{ selectedCount }} 条
+        {{ appendedCount ? '替换/追加并出图' : '替换并出图' }} {{ selectedCount }} 条
       </button>
     </template>
   </Modal>
@@ -442,23 +548,41 @@ function submit() {
 <style scoped>
 .pane {
   box-sizing: border-box;
+  height: 100%;
   padding: var(--gap) var(--gap-lg);
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
-}
-
-.intro {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-xs);
+  gap: var(--gap-sm);
 }
 
 .step-row {
   display: flex;
   align-items: center;
-  gap: var(--gap);
+  gap: var(--gap-sm);
   flex-wrap: wrap;
+  flex: none;
+}
+
+.scope-locked {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--fs-xs);
+}
+
+.missing-seg {
+  align-items: center;
+}
+
+.missing-seg .muted {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 
 .step-no,
@@ -497,18 +621,25 @@ function submit() {
 }
 
 .main {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  gap: var(--gap-lg);
-  align-items: start;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--gap);
+  align-items: stretch;
 }
 
 .left,
 .right {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
 }
 
 .panel-head {
@@ -522,12 +653,13 @@ function submit() {
 .content-input {
   width: 100%;
   box-sizing: border-box;
-  min-height: 88px;
-  max-height: 180px;
-  resize: vertical;
+  flex: 1 1 0;
+  min-height: 110px;
+  max-height: none;
+  resize: none;
   font: inherit;
   color: var(--text);
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 5px 8px;
@@ -546,7 +678,8 @@ function submit() {
 }
 
 .cand-list {
-  max-height: 200px;
+  flex: 1.35 1 0;
+  min-height: 120px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -554,7 +687,7 @@ function submit() {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px;
-  background: var(--panel-2);
+  background: var(--panel);
 }
 
 .cand-row {
@@ -603,7 +736,8 @@ function submit() {
 }
 
 .prompt-list {
-  max-height: 46vh;
+  flex: 1;
+  min-height: 160px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -611,10 +745,16 @@ function submit() {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px;
-  background: var(--panel-2);
+  background: var(--panel);
 }
 
 .empty-line {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   padding: 14px;
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -644,6 +784,16 @@ function submit() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.append-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  line-height: 1.6;
 }
 
 .old,
@@ -701,10 +851,12 @@ function submit() {
 @media (max-width: 900px) {
   .main {
     grid-template-columns: 1fr;
+    overflow-y: auto;
   }
 
-  .prompt-list {
-    max-height: 38vh;
+  .left,
+  .right {
+    min-height: 360px;
   }
 }
 </style>

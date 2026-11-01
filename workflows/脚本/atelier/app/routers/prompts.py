@@ -13,6 +13,7 @@ from app.models import (
     Prompt, Image, db, Category, Tag, EntityTag,
     PromptCategory, PromptTag, auto_classify_prompt,
 )
+from app.services.fragment_syntax import parse
 from app.services.image_meta import get_image_metadata
 from app.services.tagging import sync_prompt_tags
 
@@ -114,8 +115,52 @@ class PromptPreview(BaseModel):
 
 # ---------- Routes ----------
 
-def _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match="all"):
-    """构造提示词筛选 + 排序后的查询（不含分页），供列表与"定位到已选"共用，保证排序一致。"""
+def _fragment_matched_ids(fragment_types: str, fragment_match: str, fragment_kw: str) -> list[int] | None:
+    """按正文里的【类型】结构筛出提示词 id —— 碎片级检索（返回 None = 未启用该筛选）。
+
+    为什么在 Python 里算而不是写 SQL：碎片是 `【类型】内容` 的**解析结果**，库里没有
+    `prompt_fragments` 索引表；300+ 条提示词全表解析是毫秒级，而建表意味着 create/update/
+    import/批量替换所有写入路径都要维护索引，成本远高于收益。真正到万级再换索引表。
+
+    · `fragment_types`：逗号分隔的类型名
+    · `fragment_match`：has=含有全部所选类型（默认）；only=出现过的类型集合恰好等于所选
+      （这才是"只有某一段描写的提示词"，1-3 类混在一起的"单项提示词"分类给不出这个粒度）
+    · `fragment_kw`：关键词必须**落在碎片正文里**（不是整段 prompt 的任意位置），
+      且指定了类型时它得落在所选类型的那一片里 —— 否则搜一个词会把该提示词的所有碎片都当成命中
+    """
+    types = [t.strip() for t in (fragment_types or "").replace("，", ",").split(",") if t.strip()]
+    keyword = (fragment_kw or "").strip().lower()
+    if not types and not keyword:
+        return None
+
+    wanted = set(types)
+    matched: list[int] = []
+    for row in Prompt.select(Prompt.id, Prompt.prompt):
+        fragments = parse(row.prompt)
+        if not fragments:
+            continue
+        present = {f["type"] for f in fragments}
+        if wanted:
+            if fragment_match == "only":
+                if present != wanted:
+                    continue
+            elif not wanted <= present:
+                continue
+        if keyword:
+            hits = [f for f in fragments if keyword in (f["content"] or "").lower()]
+            if not hits:
+                continue
+            if wanted and not any(f["type"] in wanted for f in hits):
+                continue
+        matched.append(row.id)
+    return matched
+
+
+def _build_prompt_query(
+    search, tag, category_id, tag_ids, sort, order, tag_match="all",
+    fragment_types="", fragment_match="has", fragment_kw="",
+):
+    """构造提示词筛选 + 排序后的查询（不含分页），供列表、定位、批量替换共用，保证三者一致。"""
     query = Prompt.select()
     if search:
         query = query.where(
@@ -126,6 +171,12 @@ def _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_matc
         )
     if tag:
         query = query.where(Prompt.tags.contains(tag))
+
+    # 碎片级筛选：没有索引表，先在内存里算 id 集合再回填条件
+    frag_ids = _fragment_matched_ids(fragment_types, fragment_match, fragment_kw)
+    if frag_ids is not None:
+        # 空集合要显式变成假条件：peewee 对各版本空 in_ 的生成行为不一致
+        query = query.where(Prompt.id.in_(frag_ids) if frag_ids else (Prompt.id < 0))
 
     # ======== Phase 2: 添加分类和标签筛选 ========
     # 按分类筛选
@@ -192,9 +243,15 @@ def prompt_position(
     sort: str = Query("newest"),
     order: str = Query("desc"),
     tag_match: str = Query("all"),
+    fragment_types: str = Query("", description="碎片类型，逗号分隔"),
+    fragment_match: str = Query("has", description="has=含有, only=仅含"),
+    fragment_kw: str = Query("", description="关键词需命中碎片正文"),
 ):
     """返回某条提示词在给定筛选/排序下的 0-based 全局序号，用于"定位到已选"跨页跳转。"""
-    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match)
+    query = _build_prompt_query(
+        search, tag, category_id, tag_ids, sort, order, tag_match,
+        fragment_types, fragment_match, fragment_kw,
+    )
     ids = [r.id for r in query]
     if prompt_id in ids:
         return {"found": True, "index": ids.index(prompt_id), "total": len(ids)}
@@ -212,9 +269,15 @@ def list_prompts(
     page: int = Query(1),
     page_size: int = Query(50),
     tag_match: str = Query("all", description="多标签语义：all=交集, any=并集"),
+    fragment_types: str = Query("", description="碎片类型，逗号分隔（如 人物面部,人物服饰）"),
+    fragment_match: str = Query("has", description="has=含有所选类型, only=仅含所选类型"),
+    fragment_kw: str = Query("", description="关键词需命中碎片正文"),
 ):
     """搜索提示词列表，支持排序和分页"""
-    query = _build_prompt_query(search, tag, category_id, tag_ids, sort, order, tag_match)
+    query = _build_prompt_query(
+        search, tag, category_id, tag_ids, sort, order, tag_match,
+        fragment_types, fragment_match, fragment_kw,
+    )
     total = query.count()
     
     offset = (page - 1) * page_size
@@ -247,12 +310,15 @@ def list_prompts_full(
     category_id: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
     tag_match: str = Query("all"),
+    fragment_types: str = Query(""),
+    fragment_match: str = Query("has"),
+    fragment_kw: str = Query(""),
     ids: str = Query(""),
 ):
     """按当前筛选（或指定 ids）返回提示词全文（批量替换碎片用，不分页）。
 
     列表接口只给 60 字预览，批量替换必须拿到完整正文；这里复用与列表完全
-    相同的筛选条件，避免"看到的和替换的不是同一批"。
+    相同的筛选条件（含碎片筛选），避免"看到的和替换的不是同一批"。
     `ids` 用于"只替换左侧已勾选的提示词"——勾选可能跨页/跨筛选，不能再套筛选。
     """
     if ids:
@@ -261,6 +327,7 @@ def list_prompts_full(
     else:
         query = _build_prompt_query(
             search, "", category_id, tag_ids, "newest", "desc", tag_match,
+            fragment_types, fragment_match, fragment_kw,
         )
     rows = list(query)
     return {
@@ -538,6 +605,8 @@ def import_prompts(data: BatchImportRequest):
                 d.pop(k, None)
             with db.atomic():
                 r = Prompt.create(**d)
+                # 与单条创建保持一致：文本标签是唯一事实来源，写入时同步关联表
+                sync_prompt_tags(r.id, d.get("tags"))
                 # 与单条创建保持一致，自动归入 组合/单项/零散
                 auto_classify_prompt(r.id)
             imported += 1

@@ -5,6 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import BatchReplaceModal from './BatchReplaceModal.vue'
 import { apiGet } from '../api/client'
 
+/** happy-dom 的 localStorage 在某些运行方式下只是空壳，补一份最小实现。 */
+const store = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  getItem: (key: string) => store.get(key) ?? null,
+  setItem: (key: string, value: string) => void store.set(key, value),
+  removeItem: (key: string) => void store.delete(key),
+  clear: () => store.clear(),
+})
+
 const PROMPTS = [
   {
     id: 1,
@@ -56,6 +65,7 @@ function fakeBatchReplace(body: {
   texts: Array<{ id: number; text: string }>
   type: string
   content: string
+  missing?: 'skip' | 'append'
 }) {
   const items = body.texts.map((t) => {
     let oldContent = ''
@@ -70,13 +80,25 @@ function fakeBatchReplace(body: {
       }
       return block
     })
+    if (!hit && body.missing === 'append' && body.content.trim()) {
+      const base = String(t.text).trim()
+      return {
+        id: t.id,
+        old_content: '',
+        replaced: base
+          ? `${base}\n\n【${body.type}】\n${body.content}`
+          : `【${body.type}】\n${body.content}`,
+        action: 'appended',
+      }
+    }
     return {
       id: t.id,
       old_content: oldContent,
       replaced: hit ? out.join('\n\n').trim() : null,
+      action: hit ? 'replaced' : 'skipped',
     }
   })
-  return { items, skipped: items.filter((i) => i.replaced === null).length }
+  return { items, skipped: items.filter((i) => i.action === 'skipped').length }
 }
 
 vi.mock('../api/client', () => ({
@@ -111,6 +133,8 @@ async function mountModal(selectedIds: number[] = []) {
       categoryId: null,
       tagIds: [],
       tagMatch: 'all',
+      fragmentTypes: [],
+      fragmentMatch: 'has',
       selectedIds,
       workflowPath: 'F:/wf.json',
       quality: '4K',
@@ -144,6 +168,7 @@ function button(wrapper: Wrapper, text: string) {
 describe('BatchReplaceModal', () => {
   beforeEach(() => {
     vi.mocked(apiGet).mockClear()
+    localStorage.clear()
   })
 
   it('候选碎片来自提示词与碎片库，点一条就填入替换内容', async () => {
@@ -226,5 +251,38 @@ describe('BatchReplaceModal', () => {
     expect(payload.items[0].promptOverride).toContain('【人物身材】\n统一身材，比例自然')
     expect(payload.items[0].promptOverride).toContain('【场景环境】街道')
     expect(payload.items[0].promptOverride).not.toContain('旧身材')
+  })
+
+  it('缺少目标类型时可选择追加，而不是只跳过', async () => {
+    const wrapper = await mountModal()
+    await wrapper.find('.type-select').setValue('人物身材')
+    await wrapper.findAll('.missing-seg button').find((b) => b.text() === '追加')!.trigger('click')
+    await wrapper.find('.cand-row').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.findAll('.row').length).toBe(3)
+    expect(wrapper.findAll('.append-tag').length).toBe(1)
+    expect(wrapper.text()).toContain('追加 1')
+    const appendedRow = wrapper.findAll('.row').find((r) => r.find('.append-tag').exists())!
+    expect(appendedRow.find('.old').text()).toContain('缺少该类型')
+    expect(button(wrapper, '替换/追加并出图 3 条')).toBeTruthy()
+  })
+
+  it('再次打开保留上次的类型、替换内容与追加策略', async () => {
+    const first = await mountModal()
+    await prepare(first)
+    await first.findAll('.missing-seg button').find((b) => b.text() === '追加')!.trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    first.unmount()
+
+    const second = await mountModal()
+    expect((second.find('.type-select').element as HTMLSelectElement).value).toBe('人物身材')
+    expect((second.find('.content-input').element as HTMLTextAreaElement).value).toBe(
+      '统一身材，比例自然',
+    )
+    expect(
+      second.findAll('.missing-seg button').find((b) => b.text() === '追加')!.classes(),
+    ).toContain('on')
   })
 })

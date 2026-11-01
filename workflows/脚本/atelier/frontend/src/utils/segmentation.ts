@@ -165,10 +165,11 @@ interface ParseResponse {
   leftover: string
 }
 
-interface ReplaceOutcome {
+export interface ReplaceOutcome {
   oldContent: string
-  /** 该类型不存在时为 null —— 调用方据此跳过，不要凭空补一段 */
+  /** 该类型不存在且选择跳过时为 null */
   replaced: string | null
+  action: 'replaced' | 'appended' | 'skipped'
 }
 
 /** 解析一段提示词：已标记块（type → content）+ 未标记残留文字。 */
@@ -225,14 +226,26 @@ export async function batchReplaceSegments(
   texts: Array<{ id: number; text: string }>,
   type: string,
   content: string,
+  missing: 'skip' | 'append' = 'skip',
 ): Promise<Map<number, ReplaceOutcome>> {
   const out = new Map<number, ReplaceOutcome>()
   if (!texts.length || !type) return out
   const data = await apiPost<{
-    items: Array<{ id: number; old_content: string; replaced: string | null }>
-  }>('/api/composition/batch_replace', { texts, type, content })
+    items: Array<{
+      id: number
+      old_content: string
+      replaced: string | null
+      action?: ReplaceOutcome['action']
+    }>
+  }>('/api/composition/batch_replace', { texts, type, content, missing })
   for (const item of data.items) {
-    out.set(item.id, { oldContent: item.old_content, replaced: item.replaced })
+    const action =
+      item.action ?? (item.replaced === null ? 'skipped' : 'replaced')
+    out.set(item.id, {
+      oldContent: item.old_content,
+      replaced: item.replaced,
+      action,
+    })
   }
   return out
 }

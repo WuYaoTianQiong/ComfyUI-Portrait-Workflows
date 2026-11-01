@@ -1,6 +1,7 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 import TaxonomyView from './TaxonomyView.vue'
 import { apiPost } from '../api/client'
@@ -12,6 +13,13 @@ vi.mock('../api/client', () => ({
         categories: [
           { id: 1, name: '分类A', parent_id: null, color: '#6366f1', prompt_count: 2, children: [] },
         ],
+      }
+    }
+    // 深链定位用：不分页、全量按类型分组的碎片索引
+    if (path.includes('/api/fragments/by_type')) {
+      return {
+        grouped: { 人物面部: [{ fragment_id: 1, name: '侧脸', fragment_type: '人物面部' }] },
+        total: 1,
       }
     }
     if (path.includes('/api/fragments')) {
@@ -37,9 +45,23 @@ vi.mock('../api/client', () => ({
   apiDelete: vi.fn(async () => ({ success: true })),
 }))
 
-async function mountView() {
+const stub = { template: '<div />' }
+
+async function mountView(initialPath = '/taxonomy') {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/taxonomy', component: stub },
+      { path: '/', component: stub },
+    ],
+  })
+  // 深链（?panel=fragment&frag=1）必须在挂载前就生效，否则组件读到的是空路由
+  await router.push(initialPath)
+  await router.isReady()
   const wrapper = mount(TaxonomyView, {
-    global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], router],
+    },
   })
   await flushPromises()
   return wrapper
@@ -100,27 +122,5 @@ describe('TaxonomyView 分类与标签', () => {
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(vi.mocked(apiPost).mock.calls[0][0]).toBe('/api/categories/auto-classify')
   })
-  it('碎片库页签列出碎片', async () => {
-    const wrapper = await mountView()
-    await wrapper.findAll('.tabs button').find((b) => b.text() === '碎片库')!.trigger('click')
-    await flushPromises()
-    expect(wrapper.findAll('.frag-row').length).toBe(1)
-    expect(wrapper.text()).toContain('侧脸')
-  })
-
-  it('新增碎片调用 POST /api/fragments', async () => {
-    const wrapper = await mountView()
-    await wrapper.findAll('.tabs button').find((b) => b.text() === '碎片库')!.trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.frag-content-input').setValue('新的碎片内容')
-    const btn = wrapper.findAll('.btn').find((b) => b.text() === '添加')!
-    await btn.trigger('click')
-    await flushPromises()
-
-    expect(apiPost).toHaveBeenCalledTimes(1)
-    const [path, body] = vi.mocked(apiPost).mock.calls[0]
-    expect(path).toBe('/api/fragments')
-    expect((body as Record<string, unknown>).content).toBe('新的碎片内容')
-  })
+  // α 之后碎片库 tab 已删除（碎片 = 单块 prompt，在提示词页管理）
 })

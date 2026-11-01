@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useRoute } from 'vue-router'
 
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
@@ -9,12 +10,16 @@ import PromptTrialPanel from '../components/PromptTrialPanel.vue'
 import PromptCreateModal from '../components/PromptCreateModal.vue'
 import PromptImportModal from '../components/PromptImportModal.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
+import Lightbox from '../components/Lightbox.vue'
 import { parseMarkedSegments, renderAllSegments, smartSegmentText } from '../utils/segmentation'
 import { confirmDialog } from '../utils/naive'
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { apiDelete, apiGet, apiPost, apiPut, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import QueryState from '../components/QueryState.vue'
 import { useSettings } from '../composables/useSettings'
 import { useGenerate } from '../composables/useGenerate'
+import { useImageLocation } from '../composables/useImageLocation'
+import { usePromptDraft, splitTagText } from '../composables/usePromptDraft'
 import { useToast } from '../composables/useToast'
 import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
@@ -23,8 +28,17 @@ import WorkflowParams from '../components/WorkflowParams.vue'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import { statusLabel } from '../utils/format'
 import Pager from '../components/Pager.vue'
+import { FRAGMENT_TYPES } from '../constants'
 import { flattenCategories } from '../utils/categories'
-import type { CategoryNode, PromptDetail, PromptListPage, PromptListItem, TagRow } from '../api/types'
+import type {
+  CategoryNode,
+  HistoryItem,
+  HistoryPage,
+  PromptDetail,
+  PromptListPage,
+  PromptListItem,
+  TagRow,
+} from '../api/types'
 
 const { workflowPath, quality, orientation } = useSettings()
 const {
@@ -107,6 +121,8 @@ interface PromptSession {
   categoryId: number | null
   tagIds: number[]
   tagMatch: 'all' | 'any'
+  fragmentType: string
+  fragmentMatch: 'has' | 'only'
   selectedId: number | null
   scrollTop: number
 }
@@ -118,6 +134,8 @@ const savedSession = readSession<PromptSession>(SESSION_KEY, {
   categoryId: null,
   tagIds: [],
   tagMatch: 'all',
+  fragmentType: '',
+  fragmentMatch: 'has',
   selectedId: null,
   scrollTop: 0,
 })
@@ -127,20 +145,25 @@ const search = ref(savedSession.search)
 const categoryId = ref<number | null>(savedSession.categoryId)
 const missingOpen = ref(false)
 const replaceOpen = ref(false)
+const replaceTargetId = ref<number | null>(null)
 const tagIds = ref<number[]>(savedSession.tagIds)
 const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
 const tagPanelOpen = ref(false)
+/**
+ * 碎片级筛选：按正文里的 `【类型】` 结构筛，而不是全文本 LIKE。
+ * 「仅含」= 出现过的类型集合恰好等于所选 —— 这才是"只有某段描写的提示词"。
+ * α 之后碎片 = 单块 prompt，关键词搜索由顶部搜索框覆盖（搜 prompt 正文）。
+ */
+const fragmentType = ref<string>(savedSession.fragmentType)
+const fragmentMatch = ref<'has' | 'only'>(savedSession.fragmentMatch)
 const selectedId = ref<number | null>(savedSession.selectedId)
 /** 外部跳转的目标 id：列表变化时据此保留选中，不抢着改选第一条。 */
 const jumpTargetId = ref<number | null>(null)
 /** 负面提示词默认收起：空值不该占一大块；有内容时显示单行摘要。 */
 const negativeExpanded = ref(false)
-/** 草稿恢复只针对"刚打开这条提示词"；详情因收藏/置顶等 refetch 时不再弹窗。 */
-const draftRestoredFor = ref<number | null>(null)
 
 watch(selectedId, () => {
   negativeExpanded.value = false
-  draftRestoredFor.value = null
 })
 
 const listEl = ref<HTMLElement | null>(null)
@@ -153,6 +176,8 @@ function saveSession() {
     categoryId: categoryId.value,
     tagIds: tagIds.value,
     tagMatch: tagMatch.value,
+    fragmentType: fragmentType.value,
+    fragmentMatch: fragmentMatch.value,
     selectedId: selectedId.value,
     scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
   })
@@ -166,6 +191,8 @@ watch(
       categoryId.value,
       tagIds.value.join(','),
       tagMatch.value,
+      fragmentType.value,
+      fragmentMatch.value,
       selectedId.value,
     ].join('|'),
   saveSession,
@@ -182,6 +209,17 @@ function onListScroll() {
 
 const queryClient = useQueryClient()
 
+/**
+ * 碎片筛选参数：列表、定位、批量替换必须传同一份，否则"看到的"和"替换的"不是一批。
+ * 后端没有碎片索引表，这些参数会走一次全表解析（300+ 条，毫秒级）。
+ */
+function fragmentParams() {
+  return {
+    fragment_types: fragmentType.value,
+    fragment_match: fragmentMatch.value,
+  }
+}
+
 const listKey = computed(() => [
   'prompts',
   page.value,
@@ -190,11 +228,19 @@ const listKey = computed(() => [
   categoryId.value,
   tagIds.value.slice().sort((a, b) => a - b).join(','),
   tagMatch.value,
+  fragmentType.value,
+  fragmentMatch.value,
   sort.value,
   order.value,
 ])
 
-const { data: listData, isFetching } = useQuery<PromptListPage>({
+const {
+  data: listData,
+  isFetching,
+  isError: listError,
+  error: listErr,
+  refetch: refetchList,
+} = useQuery<PromptListPage>({
   queryKey: listKey,
   queryFn: () =>
     apiGet<PromptListPage>('/api/prompts', {
@@ -204,6 +250,7 @@ const { data: listData, isFetching } = useQuery<PromptListPage>({
       category_id: categoryId.value ?? undefined,
       tag_ids: tagIds.value.join(','),
       tag_match: tagMatch.value,
+      ...fragmentParams(),
       sort: sort.value,
       order: order.value,
     }),
@@ -262,6 +309,23 @@ function generate() {
   })
 }
 
+/** 单条提示词的「替换碎片出图」入口；批量替换走左侧勾选栏。 */
+function openReplaceForCurrent() {
+  if (!draft.value) return
+  replaceTargetId.value = draft.value.id
+  replaceOpen.value = true
+}
+
+function openReplaceForSelection() {
+  replaceTargetId.value = null
+  replaceOpen.value = true
+}
+
+function closeReplace() {
+  replaceOpen.value = false
+  replaceTargetId.value = null
+}
+
 /** 树拍平成一维，带 depth 做缩进 —— 分类层级只有两级，递归组件是过度设计。 */
 const flatCats = computed(() => flattenCategories(catData.value?.categories))
 
@@ -272,107 +336,6 @@ const { data: detail } = useQuery<PromptDetail>({
   queryFn: () => apiGet<PromptDetail>(`/api/prompts/${selectedId.value}`),
   enabled: computed(() => selectedId.value !== null),
 })
-
-const draft = ref<PromptDetail | null>(null)
-
-const DRAFT_KEY = (id: number) => `pb.draft.${id}`
-
-function readSavedDraft(id: number): Partial<PromptDetail> | null {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY(id))
-    return raw ? (JSON.parse(raw) as Partial<PromptDetail>) : null
-  } catch {
-    return null
-  }
-}
-
-/** 只有这些字段算"用户编辑"；收藏/置顶/评级等元数据变化不应触发脏状态。 */
-function editableSnapshot(value: PromptDetail): Partial<PromptDetail> {
-  return {
-    name: value.name,
-    tags: value.tags,
-    prompt: value.prompt,
-    negative_prompt: value.negative_prompt,
-    note: value.note,
-    steps: value.steps,
-    cfg_scale: value.cfg_scale,
-    sampler: value.sampler,
-    seed: value.seed,
-  }
-}
-
-function sameEditable(
-  a: Partial<PromptDetail>,
-  b: Partial<PromptDetail>,
-): boolean {
-  const keys: Array<keyof PromptDetail> = [
-    'name',
-    'tags',
-    'prompt',
-    'negative_prompt',
-    'note',
-    'steps',
-    'cfg_scale',
-    'sampler',
-    'seed',
-  ]
-  return keys.every((key) => a[key] === b[key])
-}
-
-/**
- * 详情到达后初始化草稿；只有"首次打开这条提示词"才检查本地草稿。
- *
- * 收藏/置顶/评级等操作会触发详情 refetch，如果每次都弹"恢复草稿"，
- * 用户会被无休止打断。这里用 `draftRestoredFor` 保证每条提示词只问一次。
- */
-watch(
-  detail,
-  async (value) => {
-    if (!value) {
-      draft.value = null
-      return
-    }
-    const id = selectedId.value
-    if (id === null) {
-      draft.value = { ...value }
-      return
-    }
-
-    // 已有未保存编辑：只同步服务端元数据，绝不能用服务端正文覆盖本地正文
-    if (draft.value && dirty.value) {
-      draft.value = {
-        ...draft.value,
-        is_favorite: value.is_favorite,
-        is_pinned: value.is_pinned,
-        rating: value.rating,
-        usage_count: value.usage_count,
-        updated_at: value.updated_at,
-      }
-      return
-    }
-
-    draft.value = { ...value }
-    if (draftRestoredFor.value === id) return
-    draftRestoredFor.value = id
-
-    const saved = readSavedDraft(id)
-    if (!saved) return
-    if (sameEditable(saved, editableSnapshot(value))) {
-      localStorage.removeItem(DRAFT_KEY(id))
-      return
-    }
-    const restore = await confirmDialog({
-      title: '发现本地草稿',
-      content: '这条提示词有未保存的草稿，要恢复吗？',
-      positiveText: '恢复草稿',
-      negativeText: '丢弃',
-      type: 'info',
-    })
-    if (restore) draft.value = { ...value, ...saved }
-    else localStorage.removeItem(DRAFT_KEY(id))
-  },
-  { immediate: true },
-)
 
 /**
  * 列表变化后保证"总有一条被选中"，避免右侧空着。
@@ -391,10 +354,14 @@ watch(
   { immediate: true },
 )
 
-const dirty = computed(() => {
-  if (!draft.value || !detail.value) return false
-  return !sameEditable(editableSnapshot(draft.value), editableSnapshot(detail.value))
-})
+const {
+  draft,
+  dirty,
+  draftTagList,
+  revert,
+  markSaved,
+  clearDraft,
+} = usePromptDraft(detail, selectedId)
 
 function invalidateAll(id: number | null) {
   queryClient.invalidateQueries({ queryKey: ['prompts'] })
@@ -435,26 +402,6 @@ function toggleCategory(catId: number) {
   categoryMutation.mutate({ catId, attach: !isLinked(catId) })
 }
 
-/**
- * 标签数组 ↔ `prompts.tags` 文本互转。
- *
- * 拆分规则必须与后端 `services/taxonomy.split_tags` 一致：只按中英文逗号与分号拆，
- * **不拆空格** —— 库里有 "Moody Photography" 这种带空格的标签，拆开就是两个垃圾标签。
- */
-function splitTagText(text: string): string[] {
-  return text
-    .split(/[,，;；]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
-const draftTagList = computed<string[]>({
-  get: () => splitTagText(draft.value?.tags ?? ''),
-  set: (list: string[]) => {
-    if (draft.value) draft.value.tags = list.join(',')
-  },
-})
-
 /** 单条自动归类：按提示词正文里的【类型】数量归入 组合/单项/零散。 */
 const autoClassifyMutation = useMutation({
   mutationFn: (id: number) => apiPost(`/api/categories/auto-classify/${id}`),
@@ -475,8 +422,12 @@ function autoClassifyOne() {
 /** 外部要求选中的提示词（路由 `/prompt/:id` 传入）。 */
 const props = defineProps<{ selectId?: number | null }>()
 
+const route = useRoute()
+/** 从组合器跳过来编辑碎片时带的类型（`?frag_type=人物面部`），用于定位并高亮正文里的那一段。 */
+const fragTypeFromJump = computed(() => String(route.query.frag_type || ''))
+
 /**
- * 外部（画廊）要求定位到某条提示词时切过去。
+ * 外部（画廊/组合器）要求定位到某条提示词时切过去。
  *
  * - `immediate`：PromptView 是切页后才挂载的，没有它首帧不会触发；
  * - 清空筛选并记下目标：目标可能被筛选挡住，列表 watcher 据此保留选中。
@@ -491,6 +442,62 @@ watch(
     tagIds.value = []
     page.value = 1
     selectedId.value = id
+  },
+  { immediate: true },
+)
+
+/**
+ * 左侧列表滚动定位到选中行（外部跳转时列表默认停在顶部，看不到高亮）。
+ * 只在外部跳转时触发，避免用户自己点列表时被强行拉滚动条。
+ */
+watch(
+  () => [selectedId.value, list.value.length] as const,
+  async ([id, len]) => {
+    if (!id || !len || selectedId.value !== jumpTargetId.value) return
+    await nextTick()
+    const row = listEl.value?.querySelector(`.row[data-id="${id}"]`)
+    row?.scrollIntoView({ block: 'center' })
+    jumpTargetId.value = null // 只滚一次
+  },
+)
+
+/** 手动把左侧列表滚到当前选中的提示词；不在本页时给出提示。 */
+async function locateSelected() {
+  const id = selectedId.value
+  if (id === null) return
+  await nextTick()
+  const row = listEl.value?.querySelector(`.row[data-id="${id}"]`)
+  if (!row) {
+    toast.info('当前提示词不在这一页')
+    return
+  }
+  row.scrollIntoView({ block: 'center' })
+  row.classList.add('locate-flash')
+  window.setTimeout(() => row.classList.remove('locate-flash'), 900)
+}
+
+/**
+ * 从组合器跳来编辑碎片：正文里选中并滚动到 `【frag_type】` 那一段，
+ * 用户一眼看到要改哪里。用完即抹掉参数，刷新不再重复高亮。
+ */
+watch(
+  [() => draft.value?.prompt, fragTypeFromJump],
+  async ([text, fragType]) => {
+    if (!text || !fragType) return
+    const marker = `【${fragType}】`
+    const idx = text.indexOf(marker)
+    if (idx === -1) return
+    // 只在首次进入时高亮（draft 变化会重复触发，但抹掉参数后 fragTypeFromJump 变空就不会再进）
+    await nextTick()
+    const ta = document.querySelector<HTMLTextAreaElement>('.editor.pos')
+    if (!ta) return
+    const contentStart = idx + marker.length
+    const nextMarker = text.indexOf('【', contentStart)
+    const end = nextMarker === -1 ? text.length : nextMarker
+    ta.focus()
+    ta.setSelectionRange(contentStart, Math.max(contentStart, end))
+    // 抹掉 query，避免刷新/后退重复高亮
+    route.query.frag_type && window.history.replaceState(null, '', route.path)
   },
   { immediate: true },
 )
@@ -512,30 +519,49 @@ async function copyText(text: string, label: string) {
 /**
  * 这条提示词已经出过哪些图。
  *
- * 走 `/api/prompts/{id}/history` —— 从图片跳到提示词之后，最自然的下一步就是
- * 想看看"它到底长什么样"。
+ * 先取 id，再走画廊同一个 `/api/images` 序列化入口 —— 缩略图、灯箱、收藏/删除/
+ * 定位全部复用画廊组件，不再在这里手拼 URL 和 `<a target=_blank>`。
  */
-interface PromptShot {
-  id: number
-  filename: string
-  subfolder: string
-  img_type: string
-  width?: number | null
-  height?: number | null
-}
-
-const { data: shotHistory } = useQuery<{ items: PromptShot[] }>({
+const { data: shotHistory } = useQuery<HistoryPage>({
   queryKey: computed(() => ['prompt-history', selectedId.value]),
-  queryFn: () => apiGet(`/api/prompts/${selectedId.value}/history`, { limit: 24 }),
+  queryFn: async () => {
+    const empty: HistoryPage = { items: [], total: 0, page: 1, page_size: 24 }
+    const id = selectedId.value
+    if (!id) return empty
+    const refs = await apiGet<{ items: Array<{ id: number }> }>(
+      `/api/prompts/${id}/history`,
+      { limit: 24 },
+    )
+    const ids = refs.items.map((it) => it.id)
+    if (!ids.length) return empty
+    return apiGet<HistoryPage>('/api/images', {
+      ids: ids.join(','),
+      page: 1,
+      page_size: ids.length,
+      sort: 'newest',
+    })
+  },
   enabled: computed(() => selectedId.value !== null),
 })
 
-function shotThumb(item: PromptShot): string {
-  return `/api/media/thumbnail?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}&size=200`
+const shotItems = computed<HistoryItem[]>(() => shotHistory.value?.items ?? [])
+const shotOpen = ref(false)
+const shotIndex = ref(0)
+const { revealImage } = useImageLocation()
+
+function openShot(index: number) {
+  shotIndex.value = index
+  shotOpen.value = true
 }
 
-function shotFull(item: PromptShot): string {
-  return `/api/media/image?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder || '')}&type=${encodeURIComponent(item.img_type || 'output')}`
+function regenerateShot() {
+  shotOpen.value = false
+  generate()
+}
+
+function onShotChanged() {
+  queryClient.invalidateQueries({ queryKey: ['prompt-history', selectedId.value] })
+  queryClient.invalidateQueries({ queryKey: ['prompts'] })
 }
 
 
@@ -586,48 +612,12 @@ async function smartSegment() {
   toast.success('已按类型分段')
 }
 
-/**
- * 草稿自动保存。
- *
- * 编辑到一半刷新页面 / 误关标签，草稿会丢 —— 存一份到 localStorage，
- * 重新打开这条提示词时问要不要恢复。存的是"这台机器上的临时状态"，
- * 不进数据库。
- */
-let draftTimer: number | undefined
-
-watch(
-  draft,
-  (value) => {
-    if (!value || selectedId.value === null) return
-    // 定时器触发时 selectedId 可能已经切走，必须锁定当时的 id
-    const id = selectedId.value
-    window.clearTimeout(draftTimer)
-    draftTimer = window.setTimeout(() => {
-      const snapshot = editableSnapshot(value)
-      const server = detail.value ? editableSnapshot(detail.value) : null
-      try {
-        if (server && sameEditable(snapshot, server)) {
-          localStorage.removeItem(DRAFT_KEY(id))
-          return
-        }
-        // 只存可编辑字段，不存 is_pinned / is_favorite 这类元数据
-        localStorage.setItem(DRAFT_KEY(id), JSON.stringify(snapshot))
-      } catch {
-        /* 隐私模式下不可用，忽略 */
-      }
-    }, 800)
-  },
-  { deep: true },
-)
-
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
     apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
   onSuccess: () => {
-    window.clearTimeout(draftTimer)
-    const id = selectedId.value
-    if (id !== null) localStorage.removeItem(DRAFT_KEY(id))
-    invalidateAll(id)
+    markSaved()
+    invalidateAll(selectedId.value)
   },
 })
 
@@ -651,10 +641,6 @@ function save() {
     sampler: draft.value.sampler,
     seed: asNumberOrNull(draft.value.seed),
   })
-}
-
-function revert() {
-  draft.value = detail.value ? { ...detail.value } : null
 }
 
 /**
@@ -718,7 +704,7 @@ const deleteMutation = useMutation({
   onSuccess: () => {
     selectedId.value = null
     jumpTargetId.value = null
-    draft.value = null
+    clearDraft()
     queryClient.invalidateQueries({ queryKey: ['prompts'] })
     queryClient.invalidateQueries({ queryKey: ['tags'] })
     queryClient.invalidateQueries({ queryKey: ['categories'] })
@@ -745,9 +731,6 @@ const selectedIds = ref<Set<number>>(new Set())
 /** 批量替换弹窗要读"左侧勾选了哪些"，Set 在模板里不好直接展开。 */
 const selectedPromptIds = computed(() => Array.from(selectedIds.value))
 const selectedCount = computed(() => selectedIds.value.size)
-const allOnPageSelected = computed(
-  () => list.value.length > 0 && list.value.every((it) => selectedIds.value.has(it.id)),
-)
 
 function toggleSelect(id: number) {
   if (selectedIds.value.has(id)) selectedIds.value.delete(id)
@@ -840,12 +823,14 @@ async function onBatchReplace(payload: {
     return
   }
   if (!payload.items.length) return
+  const single = payload.items.length === 1 && replaceTargetId.value !== null
   const wfName = workflowPath.value.split(/[\\/]/).pop() || '未选择'
   const ok = await confirmDialog({
-    title: '批量替换碎片并出图',
+    title: single ? '替换碎片出图' : '批量替换碎片并出图',
     content:
       `把 ${payload.items.length} 条提示词里的【${payload.type}】替换成同一段内容，` +
-      `用「${wfName}」出图。\n\n只影响本次出图，不会写回提示词库。`,
+      `用「${wfName}」出图。\n\n只影响本次出图，不会写回提示词库；` +
+      `生成的图片会作为「临时提示词」保留实际替换文本，不挂到原提示词名下。`,
     positiveText: '开始出图',
     negativeText: '取消',
   })
@@ -854,15 +839,20 @@ async function onBatchReplace(payload: {
     workflowPath: workflowPath.value,
     quality: caps.value.quality ? quality.value : '4K',
     orientation: caps.value.orientation ? orientation.value : 'keep',
-    title: `批量替换【${payload.type}】 ${payload.items.length} 条`,
+    title: single ? `替换碎片出图` : `批量替换【${payload.type}】 ${payload.items.length} 条`,
   })
-  replaceOpen.value = false
+  closeReplace()
   toast.success(`已提交 ${payload.items.length} 条替换任务`)
 }
 
 // ---------------- 导入 / 导出 ----------------
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const moreMenu = ref<HTMLDetailsElement | null>(null)
+
+function closeMore() {
+  if (moreMenu.value) moreMenu.value.open = false
+}
 const importMessage = ref('')
 
 function exportPrompts() {
@@ -939,6 +929,8 @@ function clearFilters() {
   categoryId.value = null
   tagIds.value = []
   tagMatch.value = 'all'
+  fragmentType.value = ''
+  fragmentMatch.value = 'has'
   page.value = 1
 }
 
@@ -1044,27 +1036,17 @@ onBeforeUnmount(() => {
         <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">
           导出
         </button>
-        <button
-          class="btn btn-sm"
-          title="批量粘贴 AI 润色后的多条提示词，自动分段后入库"
-          @click="importOpen = true"
-        >
-          智能导入
-        </button>
-        <button
-          class="btn btn-sm"
-          title="给「有提示词但没出图」的条目补图"
-          @click="missingOpen = true"
-        >
-          补跑缺图
-        </button>
-        <button
-          class="btn btn-sm"
-          title="把当前筛选下所有提示词的某一类碎片换成同一段，再批量出图（不写回库）"
-          @click="replaceOpen = true"
-        >
-          批量替换
-        </button>
+        <details ref="moreMenu" class="more-menu">
+          <summary class="btn btn-sm" title="更多批量操作">更多 ▾</summary>
+          <div class="more-pop">
+            <button class="btn btn-sm" title="批量粘贴 AI 润色后的多条提示词，自动分段后入库" @click="closeMore(); importOpen = true">
+              智能导入
+            </button>
+            <button class="btn btn-sm" title="给「有提示词但没出图」的条目补图" @click="closeMore(); missingOpen = true">
+              补跑缺图
+            </button>
+          </div>
+        </details>
         <input
           ref="fileInput"
           type="file"
@@ -1098,14 +1080,46 @@ onBeforeUnmount(() => {
         <button
           class="btn btn-sm tag-toggle"
           :class="{ active: tagPanelOpen }"
-          title="标签筛选"
+          title="标签 / 碎片类型筛选"
           @click="tagPanelOpen = !tagPanelOpen"
         >
-          标签<span v-if="tagIds.length" class="badge">{{ tagIds.length }}</span>
+          筛选
+          <span v-if="tagIds.length || fragmentType" class="badge">
+            {{ tagIds.length + (fragmentType ? 1 : 0) }}
+          </span>
         </button>
       </div>
 
       <div v-if="tagPanelOpen" class="tag-panel">
+        <div class="frag-filter-row inline">
+          <select
+            v-model="fragmentType"
+            class="frag-select"
+            title="按碎片类型筛选（正文里的【类型】结构）"
+            @change="page = 1"
+          >
+            <option value="">全部碎片</option>
+            <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <template v-if="fragmentType">
+            <button
+              class="btn btn-sm"
+              :class="{ active: fragmentMatch === 'has' }"
+              title="含有该类型（多出来的类型不影响）"
+              @click="fragmentMatch = 'has'; page = 1"
+            >
+              含有
+            </button>
+            <button
+              class="btn btn-sm"
+              :class="{ active: fragmentMatch === 'only' }"
+              title="只含该类型：出现别的类型就不算，用来找「只有某一段描写」的提示词"
+              @click="fragmentMatch = 'only'; page = 1"
+            >
+              仅含
+            </button>
+          </template>
+        </div>
         <TagCloud
           :tags="tagData?.tags ?? []"
           :selected="tagIds"
@@ -1118,7 +1132,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div
-        v-if="categoryId !== null || tagIds.length"
+        v-if="categoryId !== null || tagIds.length || fragmentType"
         class="active-filters"
       >
         <button
@@ -1138,33 +1152,27 @@ onBeforeUnmount(() => {
         >
           {{ tagById.get(id)?.name ?? `#${id}` }} ×
         </button>
+        <button
+          v-if="fragmentType"
+          class="filter-chip"
+          :title="`清除碎片筛选：${fragmentType}`"
+          @click="fragmentType = ''; fragmentMatch = 'has'; page = 1"
+        >
+          {{ fragmentMatch === 'only' ? '仅' : '含' }}{{ fragmentType }} ×
+        </button>
         <button class="btn btn-sm ghost" @click="clearFilters">全部清除</button>
       </div>
 
       <div v-if="importMessage" class="import-line">{{ importMessage }}</div>
 
-      <div v-if="selectedCount" class="bulk">
-        <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 条</span>
-        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
-        <button class="btn btn-sm" @click="clearSelection">取消</button>
-        <span class="spacer" />
-        <button class="btn btn-sm" @click="batchFavorite">收藏</button>
-        <button
-          class="btn btn-sm primary"
-          :class="{ loading: generating }"
-          :disabled="generating"
-          @click="batchGenerate"
-        >
-          批量出图
-        </button>
-        <button class="btn btn-sm danger" @click="batchDelete">删除</button>
-      </div>
+      <QueryState v-if="listError" :error="listErr" @retry="refetchList" />
 
-      <div ref="listEl" class="list" @scroll.passive="onListScroll">
+      <div ref="listEl" class="list" :class="{ 'has-bulk': selectedCount }" @scroll.passive="onListScroll">
         <div
           v-for="item in list"
           :key="item.id"
           class="row"
+          :data-id="item.id"
           :class="{ active: selectedId === item.id, picked: selectedIds.has(item.id) }"
           @click="selectRow(item.id)"
         >
@@ -1195,20 +1203,42 @@ onBeforeUnmount(() => {
         <EmptyState v-if="!list.length && !isFetching" size="big" text="没有符合条件的提示词" />
       </div>
 
-      <div class="pager-row">
-        <button
-          class="btn btn-sm select-all"
-          :title="allOnPageSelected ? '取消本页选择' : '选中当前页全部条目'"
-          @click="allOnPageSelected ? clearSelection() : selectAllOnPage()"
-        >
-          {{ allOnPageSelected ? '取消本页' : '全选本页' }}
-        </button>
-        <span class="count">{{ total }} 条<span v-if="isFetching"> · 加载中</span></span>
+      <div v-if="selectedCount" class="bulk">
+        <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 条</span>
+        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
+        <button class="btn btn-sm" @click="clearSelection">取消</button>
         <span class="spacer" />
-        <Pager compact :page="page" :total-pages="totalPages" @update:page="page = $event" />
-        <select v-model.number="pageSize" class="page-size" title="每页条数" @change="page = 1">
-          <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }} 条/页</option>
-        </select>
+        <button class="btn btn-sm" @click="batchFavorite">收藏</button>
+        <button class="btn btn-sm" title="替换选中提示词的某一类碎片后出图" @click="openReplaceForSelection">
+          批量替换
+        </button>
+        <button
+          class="btn btn-sm primary"
+          :class="{ loading: generating }"
+          :disabled="generating"
+          @click="batchGenerate"
+        >
+          批量出图
+        </button>
+        <button class="btn btn-sm danger" @click="batchDelete">删除</button>
+      </div>
+
+      <div class="pager-row">
+        <span class="count">{{ total }} 条<span v-if="isFetching"> · 加载中</span></span>
+        <div class="pager-center">
+          <Pager compact :page="page" :total-pages="totalPages" @update:page="page = $event" />
+          <select v-model.number="pageSize" class="page-size" title="每页条数" @change="page = 1">
+            <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }} 条/页</option>
+          </select>
+        </div>
+        <button
+          class="btn btn-sm locate-btn"
+          :disabled="selectedId === null"
+          title="滚动到当前选中的提示词"
+          @click="locateSelected"
+        >
+          定位
+        </button>
       </div>
     </aside>
 
@@ -1257,6 +1287,14 @@ onBeforeUnmount(() => {
             </button>
             <button class="btn btn-sm" title="按关键词把提示词拆成【类型】结构" @click="smartSegment">
               ✂ 智能分段
+            </button>
+            <button
+              class="btn btn-sm"
+              title="只替换这条提示词里的某一类碎片，再出图"
+              :disabled="!caps.prompt"
+              @click="openReplaceForCurrent"
+            >
+              替换碎片
             </button>
             <button
               class="btn btn-sm"
@@ -1480,19 +1518,28 @@ onBeforeUnmount(() => {
 
             <section class="section">
               <div class="section-head">
-                <span>出图历史（{{ shotHistory?.items?.length ?? 0 }} 张）</span>
+                <span>出图历史（{{ shotItems.length }} 张）</span>
               </div>
-              <div v-if="shotHistory?.items?.length" class="shot-grid">
-                <a
-                  v-for="shot in shotHistory.items"
+              <div v-if="shotItems.length" class="shot-grid">
+                <div
+                  v-for="(shot, index) in shotItems"
                   :key="shot.id"
                   class="shot"
-                  :href="shotFull(shot)"
-                  target="_blank"
-                  :title="shot.filename"
+                  role="button"
+                  tabindex="0"
+                  :title="`${shot.filename}\n点击查看原图`"
+                  @click="openShot(index)"
+                  @keydown.enter.prevent="openShot(index)"
                 >
-                  <img :src="shotThumb(shot)" :alt="shot.filename" loading="lazy" />
-                </a>
+                  <img :src="thumbnailUrl(shot, 200)" :alt="shot.filename" loading="lazy" />
+                  <button
+                    class="shot-locate"
+                    title="在资源管理器中定位"
+                    @click.stop="revealImage(shot)"
+                  >
+                    定位
+                  </button>
+                </div>
               </div>
               <span v-else class="muted">这条提示词还没有出图</span>
             </section>
@@ -1509,6 +1556,16 @@ onBeforeUnmount(() => {
     </section>
 
     <MissingImageRunPanel :open="missingOpen" @close="missingOpen = false" />
+    <Lightbox
+      v-if="shotOpen"
+      :items="shotItems"
+      :index="shotIndex"
+      :workflows="workflows"
+      @update:index="shotIndex = $event"
+      @close="shotOpen = false"
+      @regenerate="regenerateShot"
+      @changed="onShotChanged"
+    />
     <PromptTrialPanel
       :open="trialOpen"
       :prompt="draft?.prompt ?? ''"
@@ -1524,12 +1581,16 @@ onBeforeUnmount(() => {
       :category-id="categoryId"
       :tag-ids="tagIds"
       :tag-match="tagMatch"
+      :fragment-types="fragmentType ? [fragmentType] : []"
+      :fragment-match="fragmentMatch"
       :selected-ids="selectedPromptIds"
       :workflow-path="workflowPath"
       :quality="quality"
       :orientation="orientation"
       :caps="caps"
-      @close="replaceOpen = false"
+      :lock-prompt-id="replaceTargetId"
+      :lock-prompt-name="replaceTargetId !== null ? (draft?.name ?? '') : ''"
+      @close="closeReplace"
       @submit="onBatchReplace"
     />
   </div>
@@ -1600,13 +1661,52 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* 5 个按钮平分整行宽度；侧栏拖窄时自动折成多行，仍然等宽 */
+/* 4 个入口平分整行宽度；其余低频操作收进「更多」，避免工具栏占两行 */
 .side-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
   gap: var(--gap-xs);
   padding: var(--gap-sm) var(--gap);
   border-bottom: 1px solid var(--border);
+}
+
+.more-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.more-menu > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  list-style: none;
+  cursor: pointer;
+}
+
+.more-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 150px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg, 0 10px 24px rgb(0 0 0 / 35%));
+}
+
+.more-pop .btn {
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .side-actions .btn {
@@ -1668,6 +1768,41 @@ onBeforeUnmount(() => {
 
 .tag-panel .full {
   width: 100%;
+}
+
+.frag-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.frag-filter-row.inline {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.frag-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.frag-filter-row .btn {
+  flex: none;
+}
+
+.frag-filter-row .btn.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .badge {
@@ -1733,14 +1868,15 @@ onBeforeUnmount(() => {
 /* 批量操作条：浮在页面底部居中。 */
 .bulk {
   position: fixed;
-  bottom: 22px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap-lg);
+  padding: 8px 18px;
   border-radius: 999px;
   background: var(--panel-3);
   border: 1px solid var(--border-strong);
@@ -1751,6 +1887,25 @@ onBeforeUnmount(() => {
 
 .bulk > button {
   flex: none;
+}
+
+.list.has-bulk {
+  /* 给底部悬浮条留出滚动空间，最后一条能被滚到它上方 */
+  padding-bottom: 64px;
+}
+
+@media (max-width: 640px) {
+  .bulk {
+    width: calc(100vw - 24px);
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 18px;
+    white-space: normal;
+  }
+
+  .list.has-bulk {
+    padding-bottom: 104px;
+  }
 }
 
 .bulk-count b {
@@ -1899,16 +2054,37 @@ onBeforeUnmount(() => {
 
 /* 翻页行：全选 / 总数 / 翻页 / 每页条数，都在侧栏底部一行里 */
 .pager-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--gap-xs);
+  gap: var(--gap-sm);
   padding: var(--gap-sm) var(--gap);
   border-top: 1px solid var(--border);
 }
 
-.select-all {
-  flex: none;
+.pager-row .count {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.pager-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-xs);
+}
+
+.locate-btn {
+  justify-self: end;
+}
+
+.row.locate-flash {
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
 
 .page-size {
@@ -2291,11 +2467,33 @@ onBeforeUnmount(() => {
 }
 
 .shot {
+  position: relative;
   display: block;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--panel-2);
+  cursor: pointer;
+}
+
+.shot-locate {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: rgb(22 27 34 / 82%);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.5;
+  opacity: 0;
+  transition: 0.12s;
+}
+
+.shot:hover .shot-locate,
+.shot:focus-within .shot-locate {
+  opacity: 1;
 }
 
 .shot img {

@@ -62,3 +62,42 @@ def test_batch_replace_reports_old_content_and_skips_missing_type(api):
     # 没有这一片的提示词不能被凭空加上一段
     assert by_id[2]["replaced"] is None
     assert data["skipped"] == 1
+
+
+def test_batch_replace_can_append_when_type_is_missing(api):
+    data = api.post(
+        "/api/composition/batch_replace",
+        json={
+            "texts": [
+                {"id": 1, "text": MARKED},
+                {"id": 2, "text": "【人物面部】\n黑色长发"},
+            ],
+            "type": "人物服饰",
+            "content": "统一服饰",
+            "missing": "append",
+        },
+    ).json()
+
+    by_id = {item["id"]: item for item in data["items"]}
+    assert by_id[1]["action"] == "replaced"
+    assert by_id[1]["replaced"] == "【人物面部】\n黑色长发\n\n【人物服饰】\n统一服饰"
+    assert by_id[2]["action"] == "appended"
+    assert by_id[2]["replaced"] == "【人物面部】\n黑色长发\n\n【人物服饰】\n统一服饰"
+    assert data["appended"] == 1
+    assert data["skipped"] == 0
+
+
+def test_batch_replace_append_keeps_flat_text(api):
+    data = api.post(
+        "/api/composition/batch_replace",
+        json={
+            "texts": [{"id": 1, "text": "白门走廊，黑袍赤足"}],
+            "type": "人物身材",
+            "content": "纤细修长",
+            "missing": "append",
+        },
+    ).json()
+
+    item = data["items"][0]
+    assert item["action"] == "appended"
+    assert item["replaced"] == "白门走廊，黑袍赤足\n\n【人物身材】\n纤细修长"

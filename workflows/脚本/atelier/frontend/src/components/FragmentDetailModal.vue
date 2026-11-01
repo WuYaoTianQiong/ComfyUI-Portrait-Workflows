@@ -4,15 +4,25 @@ import Modal from './Modal.vue'
 interface FragmentDetail {
   type: string
   content: string
-  source: 'prompt' | 'library' | 'custom'
+  source: 'prompt' | 'custom'
   promptId: number | null
   promptName: string
   dupCount: number
 }
 
-/** 碎片全文弹层：卡片只能显示 3 行，双击这里看完整内容与来源。 */
+/**
+ * 碎片全文弹层：卡片只能显示 3 行，双击这里看完整内容与来源。
+ *
+ * α 之后碎片统一从 prompts 解析（单块 prompt 就是碎片），编辑一律跳提示词页。
+ * 这里**不做就地编辑**：同一段内容可能散落在多条提示词里（见 dupCount），
+ * 就地改会让"已选"和"源"静默分叉。
+ */
 defineProps<{ open: boolean; fragment: FragmentDetail | null }>()
-const emit = defineEmits<{ close: []; pick: []; jump: [promptId: number] }>()
+const emit = defineEmits<{
+  close: []
+  pick: []
+  jump: [promptId: number, fragType: string]
+}>()
 </script>
 
 <template>
@@ -21,18 +31,20 @@ const emit = defineEmits<{ close: []; pick: []; jump: [promptId: number] }>()
       <pre class="frag-full">{{ fragment.content }}</pre>
       <div class="meta">
         <span class="src">
-          {{ fragment.source === 'library' ? '碎片库' : fragment.source === 'custom' ? '自定义' : '来自提示词' }}
+          {{ fragment.source === 'custom' ? '自定义' : '来自提示词' }}
         </span>
         <span v-if="fragment.promptName" class="name">{{ fragment.promptName }}</span>
-        <span v-if="fragment.dupCount > 1" class="muted">出现在 {{ fragment.dupCount }} 条提示词里</span>
+        <span v-if="fragment.dupCount > 1" class="muted">
+          同一段还出现在 {{ fragment.dupCount }} 条提示词里，改其中一条不会影响其它条
+        </span>
         <span class="spacer" />
         <button
           v-if="fragment.promptId"
           class="btn btn-sm"
-          title="跳到这条来源提示词"
-          @click="emit('jump', fragment.promptId)"
+          title="去提示词页改这条提示词的正文（只改这一条）"
+          @click="emit('jump', fragment.promptId, fragment.type)"
         >
-          ↗ 来源提示词
+          ✎ 编辑来源提示词
         </button>
       </div>
     </div>

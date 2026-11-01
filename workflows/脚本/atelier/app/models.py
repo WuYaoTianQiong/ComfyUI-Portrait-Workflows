@@ -563,6 +563,37 @@ def _migrate_v3_indexes(database):
         database.execute_sql(sql)
 
 
+def _migrate_v4_fragments_to_prompts(database):
+    """把 fragments 表的独立碎片转成单块 prompt（α：碎片也变成 prompt）。
+
+    幂等：按 prompt 正文精确匹配去重，已转过的不重复插入。
+    转完后 fragments 表保留但不再被读写（前端统一走 prompts）。
+    """
+    try:
+        rows = database.execute_sql(
+            "SELECT name, fragment_type, content, tags, created_at, updated_at FROM fragments"
+        ).fetchall()
+    except Exception:
+        return 0  # fragments 表不存在（新库）
+
+    migrated = 0
+    for name, frag_type, content, tags, created_at, updated_at in rows:
+        prompt_text = f"【{frag_type}】\n{content}"
+        # 幂等：已有相同正文的 prompt 就跳过
+        existing = database.execute_sql(
+            "SELECT id FROM prompts WHERE prompt = ?", (prompt_text,)
+        ).fetchone()
+        if existing:
+            continue
+        database.execute_sql(
+            "INSERT INTO prompts (name, prompt, negative_prompt, tags, note, created_at, updated_at) "
+            "VALUES (?, ?, '', ?, '', ?, ?)",
+            (name or "", prompt_text, tags or "", created_at, updated_at),
+        )
+        migrated += 1
+    return migrated
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -570,6 +601,8 @@ MIGRATIONS = [
     (2, "标签收敛：把 prompt_tags/image_tags 与 prompts.tags 文本统一进 entity_tags",
         lambda database: _migrate_v2_entity_tags(database)),
     (3, "补齐高频筛选/排序索引", lambda database: _migrate_v3_indexes(database)),
+    (4, "碎片也变成 prompt：fragments 表转单块 prompt，碎片库不再独立存在",
+        lambda database: _migrate_v4_fragments_to_prompts(database)),
 ]
 
 

@@ -7,6 +7,8 @@
 与 `routers/composer.py` 的分工：composer 是"组合创作"这个功能（碎片池 + 跑图），
 composition 是"组合结果"这段文本的语法操作 —— 不碰数据库、不跑图。
 """
+from typing import Literal
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -57,19 +59,23 @@ class BatchReplaceRequest(BaseModel):
     texts: list[ReplaceText] = Field(default_factory=list)
     type: str
     content: str = ""
+    #: 缺少目标类型时：skip = 跳过；append = 在末尾追加一段【类型】内容
+    missing: Literal["skip", "append"] = "skip"
 
 
 class ReplaceResult(BaseModel):
     id: int
     #: 替换前该类型的正文（没有这一片时为空串）
     old_content: str = ""
-    #: 替换后全文；该类型不存在时为 None（调用方据此跳过）
+    #: 替换/追加后全文；跳过时为 None
     replaced: str | None = None
+    action: Literal["replaced", "appended", "skipped"] = "replaced"
 
 
 class BatchReplaceResponse(BaseModel):
     items: list[ReplaceResult] = Field(default_factory=list)
     skipped: int = 0
+    appended: int = 0
 
 
 @router.post("/composition/parse", response_model=ParseResponse)
@@ -92,18 +98,35 @@ def render_composition(req: RenderRequest):
 
 @router.post("/composition/batch_replace", response_model=BatchReplaceResponse)
 def batch_replace_composition(req: BatchReplaceRequest):
-    """批量替换指定类型的正文，返回替换前内容与替换后全文。"""
+    """批量替换指定类型的正文；可选在缺少该类型时追加到末尾。"""
     results: list[ReplaceResult] = []
     skipped = 0
+    appended = 0
+    content = (req.content or "").strip()
     for item in req.texts:
         replaced = replace_type(item.text, req.type, req.content)
         if replaced is None:
-            skipped += 1
-            results.append({"id": item.id, "old_content": "", "replaced": None})
+            if req.missing == "append" and content:
+                base = (item.text or "").rstrip()
+                full = f"{base}\n\n【{req.type}】\n{content}" if base else f"【{req.type}】\n{content}"
+                appended += 1
+                results.append({
+                    "id": item.id, "old_content": "", "replaced": full,
+                    "action": "appended",
+                })
+            else:
+                skipped += 1
+                results.append({
+                    "id": item.id, "old_content": "", "replaced": None,
+                    "action": "skipped",
+                })
             continue
         old = next(
             (f["content"] for f in parse(item.text) if f["type"] == req.type),
             "",
         )
-        results.append({"id": item.id, "old_content": old, "replaced": replaced})
-    return {"items": results, "skipped": skipped}
+        results.append({
+            "id": item.id, "old_content": old, "replaced": replaced,
+            "action": "replaced",
+        })
+    return {"items": results, "skipped": skipped, "appended": appended}
