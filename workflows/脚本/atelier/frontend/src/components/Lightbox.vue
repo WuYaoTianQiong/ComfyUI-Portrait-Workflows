@@ -1045,6 +1045,7 @@ function onKey(event: KeyboardEvent) {
     <Modal
       :open="promptInfoOpen"
       headless
+      raised
       width="min(1100px, 94vw)"
       height="86vh"
       @close="promptInfoOpen = false"
@@ -1135,7 +1136,8 @@ function onKey(event: KeyboardEvent) {
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* 高于普通弹窗：结果中心/任务弹窗里点缩略图看原图时，查看器要盖在弹窗上面 */
+  z-index: var(--z-lightbox);
   display: flex;
   /* header 在文档流里占一行，stage 拿到剩余高度 —— 图片不会被工具栏盖住，
      也不用再在 padding 里手动预留 40px。 */

@@ -19,8 +19,13 @@ const props = withDefaults(
     height?: string
     /** 不要顶部标题栏（由内容自己在右侧放标题/关闭时用） */
     headless?: boolean
+    /**
+     * 抬一层：只有「开在灯箱里面的弹窗」需要（如查看器里的临时提示词）。
+     * 灯箱本身已经高于普通弹窗，不再抬就会被灯箱盖住。
+     */
+    raised?: boolean
   }>(),
-  { title: '', width: 'min(760px, 92vw)', height: '', headless: false },
+  { title: '', width: 'min(760px, 92vw)', height: '', headless: false, raised: false },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -39,7 +44,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-overlay" @click.self="emit('close')">
+    <div v-if="open" class="modal-overlay" :class="{ raised }" @click.self="emit('close')">
       <div class="modal-panel" :style="{ width, height }">
         <header v-if="!headless" class="modal-head">
           <span v-if="title" class="title">{{ title }}</span>
@@ -63,10 +68,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.55);
   display: grid;
   place-items: center;
+}
+
+/* 开在灯箱里面的弹窗：必须比灯箱高，否则被查看器整块盖住 */
+.modal-overlay.raised {
+  z-index: var(--z-modal-raised);
 }
 
 .modal-panel {

@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
 .compare {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: var(--z-compare);
   display: flex;
   flex-direction: column;
   background: rgba(0, 0, 0, 0.92);
