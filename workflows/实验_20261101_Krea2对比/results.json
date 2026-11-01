@@ -1,0 +1,289 @@
+[
+  {
+    "label": "V8SE_A_orig_2.16MP_8_cfg1",
+    "workflow": "A_V8SE_原始单程.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "527fed6a-737f-4587-8f4d-c714bd15e8fa",
+    "status": "success",
+    "elapsed_s": 32.15,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_A_orig_2.16MP_8_cfg1_00001_.png",
+        "filename": "V8SE_A_orig_2.16MP_8_cfg1_00001_.png",
+        "width": 1128,
+        "height": 2008,
+        "bytes": 2410487
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V8SE_B_1MP_8_cfg1",
+    "workflow": "B_V8SE_1MP.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "f06dde22-bdee-4d79-beac-9c4209f43d63",
+    "status": "success",
+    "elapsed_s": 8.33,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_B_1MP_8_cfg1_00001_.png",
+        "filename": "V8SE_B_1MP_8_cfg1_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1171432
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V8SE_C_1MP_12_cfg2",
+    "workflow": "C_V8SE_1MP_12步_cfg2.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "08e04c30-852d-4bf9-8c17-a6be99098a4d",
+    "status": "success",
+    "elapsed_s": 16.81,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_C_1MP_12_cfg2_00001_.png",
+        "filename": "V8SE_C_1MP_12_cfg2_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 9215
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V8SE_D_2.16MP_12_cfg2",
+    "workflow": "D_V8SE_2MP_12步_cfg2.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "6458c215-fd1e-44e9-965b-3b24ccf6282b",
+    "status": "success",
+    "elapsed_s": 37.55,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_D_2.16MP_12_cfg2_00001_.png",
+        "filename": "V8SE_D_2.16MP_12_cfg2_00001_.png",
+        "width": 1128,
+        "height": 2008,
+        "bytes": 12750
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V8SE_E_C_merged",
+    "workflow": "C_V8SE_1MP_12步_cfg2.json",
+    "prompt": "prompt_merged.txt",
+    "prompt_id": "c3dae7ca-a78c-4d7c-ac9a-2eccbd7d0b3c",
+    "status": "success",
+    "elapsed_s": 27.05,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_E_C_merged_00001_.png",
+        "filename": "V8SE_E_C_merged_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 8806
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V25_A_int4_2.4MP_8_cfg1",
+    "workflow": "A_V25_int4_原始单程.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "51a09a06-885d-4dd4-a615-45d284be6c5e",
+    "status": "success",
+    "elapsed_s": 31.94,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_A_int4_2.4MP_8_cfg1_00001_.png",
+        "filename": "V25_A_int4_2.4MP_8_cfg1_00001_.png",
+        "width": 1192,
+        "height": 2112,
+        "bytes": 2602579
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V25_B_int4_1MP_12_cfg2",
+    "workflow": "B_V25_int4_1MP_12步_cfg2.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "1b56187c-e1c2-4a31-89e0-24b3b7775fdb",
+    "status": "success",
+    "elapsed_s": 18.31,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_B_int4_1MP_12_cfg2_00001_.png",
+        "filename": "V25_B_int4_1MP_12_cfg2_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1584820
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "V25_C_int4_1MP_8_cfg1",
+    "workflow": "C_V25_int4_1MP_8步_cfg1.json",
+    "prompt": "prompt_original.txt",
+    "prompt_id": "f12aed02-be8a-4e58-952d-f3e16bf78267",
+    "status": "success",
+    "elapsed_s": 9.46,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_C_int4_1MP_8_cfg1_00001_.png",
+        "filename": "V25_C_int4_1MP_8_cfg1_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1079650
+      }
+    ],
+    "error": ""
+  },
+  {
+    "label": "ZIT_A_orig",
+    "status": "success",
+    "elapsed_s": 37.16,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\ZIT_A_orig_00001_.png",
+        "width": 1088,
+        "height": 1632,
+        "bytes": 2034013
+      }
+    ]
+  },
+  {
+    "label": "ZIT_B_merged",
+    "status": "success",
+    "elapsed_s": 33.9,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\ZIT_B_merged_00001_.png",
+        "width": 1088,
+        "height": 1632,
+        "bytes": 2016395
+      }
+    ]
+  },
+  {
+    "label": "V8SE_E2_1MP_8_cfg1_merged",
+    "status": "success",
+    "elapsed_s": 24.0,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_E2_1MP_8_cfg1_merged_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1190300
+      }
+    ]
+  },
+  {
+    "label": "V8SE_F_1MP_12_cfg1_orig",
+    "status": "success",
+    "elapsed_s": 13.0,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_F_1MP_12_cfg1_orig_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1170145
+      }
+    ]
+  },
+  {
+    "label": "V8SE_G_1MP_8_cfg2_orig",
+    "status": "success",
+    "elapsed_s": 15.13,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_G_1MP_8_cfg2_orig_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 9218
+      }
+    ]
+  },
+  {
+    "label": "V25_D_1MP_12_cfg1_orig",
+    "status": "success",
+    "elapsed_s": 20.2,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_D_1MP_12_cfg1_orig_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1084953
+      }
+    ]
+  },
+  {
+    "label": "V25_E_1MP_8_cfg2_orig",
+    "status": "success",
+    "elapsed_s": 18.24,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_E_1MP_8_cfg2_orig_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1603612
+      }
+    ]
+  },
+  {
+    "label": "V8SE_H_1MP_8_cfg1_bodyshort",
+    "status": "success",
+    "elapsed_s": 22.93,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_H_1MP_8_cfg1_bodyshort_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1144569
+      }
+    ]
+  },
+  {
+    "label": "V25_F_1MP_8_cfg1_bodyshort",
+    "status": "success",
+    "elapsed_s": 20.99,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_F_1MP_8_cfg1_bodyshort_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1125027
+      }
+    ]
+  },
+  {
+    "label": "V8SE_I_compact",
+    "status": "success",
+    "elapsed_s": 22.98,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V8SE_I_compact_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1180265
+      }
+    ]
+  },
+  {
+    "label": "V25_G_compact",
+    "status": "success",
+    "elapsed_s": 20.09,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\V25_G_compact_00001_.png",
+        "width": 768,
+        "height": 1368,
+        "bytes": 1086761
+      }
+    ]
+  }
+]

@@ -1,0 +1,41 @@
+[
+  {
+    "label": "Fluxmania_Q6_Chinese_832",
+    "status": "success",
+    "elapsed_s": 82.77,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Fluxmania_Q6_Chinese_832_00001_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1768073
+      }
+    ]
+  },
+  {
+    "label": "Fluxmania_Q6_English_832",
+    "status": "success",
+    "elapsed_s": 60.16,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Fluxmania_Q6_English_832_00001_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1139693
+      }
+    ]
+  },
+  {
+    "label": "Fluxmania_Q6_EnglishCompact_768x1344",
+    "status": "success",
+    "elapsed_s": 59.96,
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Fluxmania_Q6_EnglishCompact_768x1344_00001_.png",
+        "width": 768,
+        "height": 1344,
+        "bytes": 1074307
+      }
+    ]
+  }
+]
