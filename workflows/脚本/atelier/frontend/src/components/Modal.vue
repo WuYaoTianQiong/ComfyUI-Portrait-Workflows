@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+
+import { useEscapeLayer } from '../composables/useEscapeLayer'
 
 /**
  * 统一弹层。
@@ -8,6 +10,8 @@ import { onBeforeUnmount, onMounted } from 'vue'
  * 结构几乎一样、样式各写一遍。抽出来之后：
  * · 遮罩、圆角、阴影、ESC 关闭只有一处实现
  * · Teleport 到 body，避免被父容器的 overflow / transform 裁掉
+ *
+ * Esc 走全局弹层栈：嵌套弹窗只有最上面那层响应，关闭后焦点回到打开前的元素。
  */
 const props = withDefaults(
   defineProps<{
@@ -30,22 +34,71 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-function onKey(event: KeyboardEvent) {
-  if (event.key === 'Escape' && props.open) {
-    // 标记已处理：叠在弹层下面的查看器（如 Lightbox）不应再被同一次 Esc 关掉
+const panelRef = ref<HTMLElement | null>(null)
+let previousFocus: HTMLElement | null = null
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+useEscapeLayer(() => props.open, () => emit('close'))
+
+watch(
+  () => props.open,
+  async (open) => {
+    if (open) {
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      await nextTick()
+      const root = panelRef.value
+      const first = root?.querySelector<HTMLElement>(FOCUSABLE)
+      ;(first ?? root)?.focus()
+    } else {
+      previousFocus?.focus?.()
+      previousFocus = null
+    }
+  },
+)
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Tab' || !props.open) return
+  const root = panelRef.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE))
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
     event.preventDefault()
-    emit('close')
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  previousFocus?.focus?.()
+  previousFocus = null
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-overlay" :class="{ raised }" @click.self="emit('close')">
-      <div class="modal-panel" :style="{ width, height }">
+    <div
+      v-if="open"
+      class="modal-overlay"
+      :class="{ raised }"
+      @click.self="emit('close')"
+      @keydown="onKeydown"
+    >
+      <div
+        ref="panelRef"
+        class="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="title || '对话框'"
+        tabindex="-1"
+        :style="{ width, height }"
+      >
         <header v-if="!headless" class="modal-head">
           <span v-if="title" class="title">{{ title }}</span>
           <slot name="head" />

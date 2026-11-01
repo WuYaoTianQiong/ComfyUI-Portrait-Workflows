@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { viewUrl } from '../api/client'
 import type { HistoryItem } from '../api/types'
+import { useEscapeLayer } from '../composables/useEscapeLayer'
+import { useImageLocation } from '../composables/useImageLocation'
 
 /**
  * 多图对比。
@@ -23,6 +25,9 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
+const { revealImage } = useImageLocation()
+
+useEscapeLayer(() => props.open, () => emit('close'))
 
 /** 缩放是否在所有图之间联动。 */
 const linkZoom = ref(true)
@@ -132,8 +137,7 @@ function resetView() {
 
 function onKey(event: KeyboardEvent) {
   if (!props.open) return
-  if (event.key === 'Escape') emit('close')
-  else if (event.key === '0') resetView()
+  if (event.key === '0') resetView()
 }
 
 // 窗口尺寸变了要重算"适应"比例
@@ -198,7 +202,12 @@ onBeforeUnmount(() => {
             @load="onImageLoad($event, index)"
           />
         </div>
-        <figcaption :title="item.filename">{{ item.filename }}</figcaption>
+        <figcaption :title="item.filename">
+          <span class="name">{{ item.filename }}</span>
+          <button class="locate" type="button" title="在资源管理器中定位" @click.stop="revealImage(item)">
+            定位
+          </button>
+        </figcaption>
       </figure>
 
       <p v-if="items.length < 2" class="empty">至少选择 2 张图片才能对比</p>
@@ -329,13 +338,38 @@ onBeforeUnmount(() => {
 
 .cell figcaption {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 10px;
   color: var(--muted);
   padding: 3px 6px;
   overflow: hidden;
+  background: rgba(20, 24, 30, 0.85);
+}
+
+.cell figcaption .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(20, 24, 30, 0.85);
+}
+
+.cell figcaption .locate {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.cell figcaption .locate:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .empty {
