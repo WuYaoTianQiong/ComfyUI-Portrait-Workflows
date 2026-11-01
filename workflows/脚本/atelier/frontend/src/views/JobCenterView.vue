@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useRouter } from 'vue-router'
 
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import Lightbox from '../components/Lightbox.vue'
 import { useToast } from '../composables/useToast'
+import { useImagePreview } from '../composables/useImagePreview'
+import { useWorkflows } from '../composables/useWorkflows'
 import type { JobSnapshot } from '../api/types'
 import { statusLabel } from '../utils/format'
 import { confirmDialog } from '../utils/naive'
@@ -34,6 +38,7 @@ watch(
 /** 停止所有进行中的任务（后端是定向取消，不会清空整个 ComfyUI 队列）。 */
 const toast = useToast()
 const queryClient = useQueryClient()
+const router = useRouter()
 const stopAll = useMutation({
   mutationFn: () => apiPost<{ success: boolean; stopped: number }>('/api/jobs/stop_all'),
   onSuccess: (result) => {
@@ -201,6 +206,22 @@ const TYPE_LABEL: Record<string, string> = {
 function thumbUrl(image: { filename: string; subfolder?: string | null; type?: string | null }): string {
   return thumbnailUrl({ filename: image.filename, subfolder: image.subfolder, img_type: image.type }, 200)
 }
+
+/** 点缩略图看原图：直接复用画廊那套灯箱（缩放/下载/收藏/投喂都在）。 */
+const {
+  items: previewItems,
+  readonly: previewReadonly,
+  open: previewOpen,
+  preview: openPreviewImage,
+  close: closePreviewImage,
+} = useImagePreview()
+/** 灯箱里的「投喂给工作流」需要工作流列表；与其他页共用同一份缓存。 */
+const { workflows } = useWorkflows()
+
+function openInGallery(filename: string) {
+  closePreviewImage()
+  router.push({ path: '/gallery', query: { image: filename } })
+}
 </script>
 
 <template>
@@ -250,12 +271,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
         <div v-if="expanded.has(job.id)" class="items">
           <div v-if="!job.items?.length" class="muted">无明细</div>
           <div v-for="(item, idx) in job.items ?? []" :key="idx" class="item">
-            <img
+            <button
               v-if="item.images?.[0]"
-              :src="thumbUrl(item.images[0])"
-              :alt="item.images[0].filename"
-              loading="lazy"
-            />
+              class="thumb"
+              type="button"
+              :title="`查看原图：${item.images[0].filename}`"
+              @click="openPreviewImage(item.images[0])"
+            >
+              <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
+            </button>
             <div class="item-body">
               <div class="item-preview">{{ item.prompt_preview || '（无预览）' }}</div>
               <div class="item-meta">
@@ -270,6 +294,18 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
       <EmptyState v-if="!visible.length" :text="onlyActive ? '没有进行中的任务' : '还没有任务记录'" />
     </div>
+
+    <Lightbox
+      v-if="previewOpen"
+      :items="previewItems"
+      :index="0"
+      :readonly="previewReadonly"
+      :workflows="workflows"
+      can-open-gallery
+      @close="closePreviewImage"
+      @open-in-gallery="openInGallery"
+      @changed="queryClient.invalidateQueries({ queryKey: ['jobs'] })"
+    />
   </div>
 </template>
 
@@ -439,6 +475,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   border-radius: var(--radius-sm);
   background: var(--panel-3);
   flex: none;
+}
+
+.thumb {
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+  flex: none;
+  display: flex;
 }
 
 .item-body {

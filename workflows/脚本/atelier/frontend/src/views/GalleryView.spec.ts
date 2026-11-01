@@ -1,6 +1,7 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 import GalleryView from './GalleryView.vue'
 import Lightbox from '../components/Lightbox.vue'
@@ -81,7 +82,14 @@ describe('GalleryView 清理失效', () => {
   async function mountView() {
     const wrapper = mount(GalleryView, {
       global: {
-      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      plugins: [
+        [VueQueryPlugin, { queryClient: new QueryClient() }],
+        // 画廊会读 route.query.image（深链定位），没有 router 会直接抛错
+        createRouter({
+          history: createMemoryHistory(),
+          routes: [{ path: '/', component: { template: '<div />' } }, { path: '/gallery', component: { template: '<div />' } }],
+        }),
+      ],
       // Modal 用 Teleport 渲染到 body，测试里要 stub 掉才能在 wrapper 内查到
       stubs: { teleport: true },
     },

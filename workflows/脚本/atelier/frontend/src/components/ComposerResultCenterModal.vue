@@ -45,6 +45,8 @@ const emit = defineEmits<{
   'copy-canvas': []
   'save-prompt': []
   'go-jobs': []
+  /** 点缩略图看原图（原本只是链到 240px 缩略图，等于看了个更糊的版本）。 */
+  'preview-image': [image: { filename: string; subfolder?: string | null; type?: string | null }]
 }>()
 
 /** 任务快照里的图片项用 `type` 而不是 `img_type`，这里做一次字段名转换。 */
@@ -151,15 +153,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
       <div class="job-list">
         <div v-for="(item, idx) in job?.items ?? []" :key="idx" class="job-row">
-          <a
+          <button
             v-if="item.images?.[0]"
             class="shot"
-            :href="thumbUrl(item.images[0])"
-            target="_blank"
-            rel="noreferrer"
+            type="button"
+            :title="`查看原图：${item.images[0].filename}`"
+            @click="emit('preview-image', item.images[0])"
           >
             <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
-          </a>
+          </button>
           <div v-else class="shot placeholder">{{ idx + 1 }}</div>
           <div class="job-body">
             <pre class="job-pre">{{ item.prompt_preview || '（无预览）' }}</pre>
@@ -279,11 +281,23 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   align-content: start;
 }
 
-/* 只有一组时不要贴在左上角占半屏：单列、限宽、居中 */
+/* 只有一组时铺满可用区域：不再限宽/垂直居中，否则四周留出大片空白，
+   而正文反而挤在 34vh 的小滚动框里。让卡片吃满高度，正文自己滚。 */
 .res-grid.single {
-  grid-template-columns: minmax(0, 760px);
-  justify-content: center;
-  align-content: center;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.res-grid.single .res-card {
+  height: 100%;
+  min-height: 0;
+}
+
+.res-grid.single .res-text {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .res-card {
@@ -362,6 +376,14 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   place-items: center;
   color: var(--muted);
   font-size: var(--fs-xs);
+  /* 缩略图现在是按钮（点开看原图），抹掉浏览器默认外观 */
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.shot:hover img {
+  opacity: 0.85;
 }
 
 .shot img {

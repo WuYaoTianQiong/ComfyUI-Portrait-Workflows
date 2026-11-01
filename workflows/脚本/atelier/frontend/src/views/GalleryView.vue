@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useRoute, useRouter } from 'vue-router'
 
 import Lightbox from '../components/Lightbox.vue'
 import CompareModal from '../components/CompareModal.vue'
@@ -13,6 +14,7 @@ import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useGenerate } from '../composables/useGenerate'
+import { findHistoryItem } from '../composables/useImagePreview'
 import { useSettings } from '../composables/useSettings'
 import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
@@ -192,6 +194,20 @@ const { data: tagData } = useQuery<{ tags: TagRow[] }>({
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
 const total = computed(() => history.value?.total ?? 0)
 
+/**
+ * 深链（`/gallery?image=<文件名>`）：组合器 / 任务页点「在画廊中查看」过来。
+ *
+ * 不覆盖当前筛选、也不往网格里塞一张不属于本页的卡片 —— 单独取那条记录
+ * 交给灯箱，取不到就提示（图还没入库）。看完关闭即回到正常画廊。
+ */
+const route = useRoute()
+const router = useRouter()
+const deepLinkItem = ref<HistoryItem | null>(null)
+/** 灯箱的数据源：深链那张单图，或当前网格这一页。 */
+const viewerItems = computed<HistoryItem[]>(() =>
+  deepLinkItem.value ? [deepLinkItem.value] : items.value,
+)
+
 function imageKey(item: HistoryItem) {
   return item.id
 }
@@ -215,7 +231,7 @@ function saveSession() {
     orientation: orientation.value,
     scrollTop: gridEl.value?.scrollTop ?? savedSession.scrollTop,
     viewerId:
-      lightboxIndex.value !== null ? (items.value[lightboxIndex.value]?.id ?? null) : null,
+      lightboxIndex.value !== null ? (viewerItems.value[lightboxIndex.value]?.id ?? null) : null,
   })
 }
 
@@ -262,6 +278,35 @@ watch(items, async () => {
   await nextTick()
   if (gridEl.value) gridEl.value.scrollTop = savedSession.scrollTop
 })
+
+/** 深链进来时优先展示那张图，别被会话里"上次开着的灯箱"抢走。 */
+watch(
+  () => route.query.image,
+  async (filename) => {
+    if (typeof filename !== 'string' || !filename) return
+    // 用完即抹掉：否则刷新、返回都会再次触发，且没法回到普通画廊地址
+    router.replace({ path: '/gallery' })
+    try {
+      const hit = await findHistoryItem({ filename })
+      if (!hit) {
+        toast.info('这张图还没入库，暂时无法在画廊中查看')
+        return
+      }
+      viewerRestored = true
+      deepLinkItem.value = hit
+      lightboxIndex.value = 0
+    } catch (e) {
+      toast.error(`打开图片失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  },
+  { immediate: true },
+)
+
+/** 关闭灯箱时把深链那张单图放掉，回到正常网格。 */
+function closeLightbox() {
+  lightboxIndex.value = null
+  deepLinkItem.value = null
+}
 
 onBeforeUnmount(() => {
   if (scrollSaveTimer) window.clearTimeout(scrollSaveTimer)
@@ -421,7 +466,7 @@ async function regenerate(target: HistoryItem) {
     if (generateError.value) toast.error(`提交失败：${generateError.value}`)
     else toast.success('已提交重新出图，可在「任务」页看进度')
   } finally {
-    lightboxIndex.value = null
+    closeLightbox()
   }
 }
 /** 画廊向上层抛的事件：跨页跳转（跳到提示词）。 */
@@ -547,6 +592,7 @@ const { caps } = useWorkflowCaps(workflowPath, allWorkflows)
 const lightboxOpen = computed(() => lightboxIndex.value !== null)
 
 function openLightbox(index: number) {
+  deepLinkItem.value = null
   lightboxIndex.value = index
 }
 
@@ -902,14 +948,14 @@ function clearFilters() {
 
     <Lightbox
       v-if="lightboxOpen"
-      :items="items"
+      :items="viewerItems"
       :index="lightboxIndex!"
       :workflows="workflows"
       :regenerating="regenerating"
       @update:index="lightboxIndex = $event"
-      @close="lightboxIndex = null"
+      @close="closeLightbox"
       @regenerate="regenerate"
-      @jump-to-prompt="(id) => { lightboxIndex = null; emit('jump-to-prompt', id) }"
+      @jump-to-prompt="(id) => { closeLightbox(); emit('jump-to-prompt', id) }"
       @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
     />
 

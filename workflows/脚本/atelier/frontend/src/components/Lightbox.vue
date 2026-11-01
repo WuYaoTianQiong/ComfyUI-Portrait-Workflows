@@ -35,6 +35,13 @@ const props = defineProps<{
   workflows?: Array<{ path: string; name: string }>
   /** 重新出图的任务正在提交/生成，按钮应保持禁用并给出可见反馈。 */
   regenerating?: boolean
+  /**
+   * 只读：任务/结果中心里"图还没入库"时打开的情况。
+   * 隐藏收藏 / 删除 / 重出图 / 投喂这些写操作，其余（缩放、下载、信息）照常。
+   */
+  readonly?: boolean
+  /** 是否显示「在画廊中查看」（画廊自己用不到，任务侧才需要）。 */
+  canOpenGallery?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -46,6 +53,8 @@ const emit = defineEmits<{
   (e: 'regenerate', item: HistoryItem): void
   /** 跳到这条图片对应的提示词（旧版「跳到提示词」）。 */
   (e: 'jump-to-prompt', promptId: number): void
+  /** 到画廊里按文件名定位这张图（任务侧打开时才有意义）。 */
+  (e: 'open-in-gallery', filename: string): void
 }>()
 
 const toast = useToast()
@@ -876,7 +885,7 @@ function onKey(event: KeyboardEvent) {
       <span class="pos">{{ index + 1 }} / {{ items.length }}</span>
       <span class="spacer" />
 
-      <div v-if="processOpen" class="wf-picker">
+      <div v-if="processOpen && !readonly" class="wf-picker">
         <select v-model="processWf" class="wf-select">
           <option value="">选择工作流…</option>
           <option v-for="wf in workflows ?? []" :key="wf.path" :value="wf.path">{{ wf.name }}</option>
@@ -886,6 +895,7 @@ function onKey(event: KeyboardEvent) {
       </div>
 
       <button
+        v-if="!readonly"
         class="tool"
         :title="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
         @click="processOpen = !processOpen"
@@ -894,7 +904,15 @@ function onKey(event: KeyboardEvent) {
       </button>
       <button class="tool" title="下载原图" @click="download">⬇</button>
       <button
-        v-if="canRegenerate"
+        v-if="canOpenGallery"
+        class="tool"
+        title="到画廊里按文件名定位这张图"
+        @click="emit('open-in-gallery', item.filename)"
+      >
+        🗂
+      </button>
+      <button
+        v-if="canRegenerate && !readonly"
         class="tool"
         :class="{ loading: regenerating }"
         :disabled="regenerating"
@@ -904,14 +922,19 @@ function onKey(event: KeyboardEvent) {
         {{ regenerating ? '' : '🔄' }}
       </button>
       <button
-        v-if="item.prompt_id"
+        v-if="item.prompt_id && !readonly"
         class="tool"
         title="跳到这条提示词"
         @click="emit('jump-to-prompt', item.prompt_id!)"
       >
         ↗
       </button>
-      <button class="tool" :title="item.is_favorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
+      <button
+        v-if="!readonly"
+        class="tool"
+        :title="item.is_favorite ? '取消收藏' : '收藏'"
+        @click="toggleFavorite"
+      >
         {{ item.is_favorite ? '★' : '☆' }}
       </button>
       <button class="tool" title="水平翻转 (F)" @click="flip">⇋</button>
@@ -926,7 +949,7 @@ function onKey(event: KeyboardEvent) {
       <button class="tool" :class="{ active: showInfo }" title="显示/隐藏信息" @click="toggleInfo">
         ⓘ
       </button>
-      <button class="tool danger" title="删除记录" @click="removeItem">🗑</button>
+      <button v-if="!readonly" class="tool danger" title="删除记录" @click="removeItem">🗑</button>
       <button class="tool close" title="关闭 (Esc)" @click="emit('close')">✕</button>
     </header>
 
