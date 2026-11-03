@@ -3373,10 +3373,20 @@ export interface components {
             /** Base Width */
             base_width?: number | null;
             /**
+             * Default Quality
+             * @default
+             */
+            default_quality: string;
+            /**
              * Default Ratio
              * @default
              */
             default_ratio: string;
+            /**
+             * Mp Unit
+             * @default mp
+             */
+            mp_unit: string;
             /**
              * Multiple
              * @default 16
@@ -3388,10 +3398,17 @@ export interface components {
              */
             orientation_mode: string;
             /**
+             * Post Scale
+             * @default 1
+             */
+            post_scale: number;
+            /**
              * Quality Mode
              * @default none
              */
             quality_mode: string;
+            /** Quality Tiers */
+            quality_tiers?: string[];
         };
         /** WorkflowRow */
         WorkflowRow: {

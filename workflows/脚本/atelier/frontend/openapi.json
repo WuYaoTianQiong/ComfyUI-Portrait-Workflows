@@ -3207,9 +3207,19 @@
             ],
             "title": "Base Width"
           },
+          "default_quality": {
+            "default": "",
+            "title": "Default Quality",
+            "type": "string"
+          },
           "default_ratio": {
             "default": "",
             "title": "Default Ratio",
+            "type": "string"
+          },
+          "mp_unit": {
+            "default": "mp",
+            "title": "Mp Unit",
             "type": "string"
           },
           "multiple": {
@@ -3222,10 +3232,22 @@
             "title": "Orientation Mode",
             "type": "string"
           },
+          "post_scale": {
+            "default": 1.0,
+            "title": "Post Scale",
+            "type": "number"
+          },
           "quality_mode": {
             "default": "none",
             "title": "Quality Mode",
             "type": "string"
+          },
+          "quality_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality Tiers",
+            "type": "array"
           }
         },
         "title": "WorkflowParams",

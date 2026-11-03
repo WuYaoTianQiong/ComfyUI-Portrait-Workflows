@@ -289,11 +289,15 @@ class WorkflowParams(BaseModel):
     base_width: int | None = None
     base_height: int | None = None
     base_megapixels: float | None = None
+    mp_unit: str = "mp"  # mp（1e6）/ mip（1024²）
+    post_scale: float = 1.0  # latent 之后的固定放大倍率（如 ZIT 1.7×）
     orientation_mode: str = "none"  # swap / knob / none
-    # 统一比例契约：所有非特殊工作流都应支持这 8 个比例
+    # 节点真实选项 + 已验证的单程扩展；ZIT 固定放大链路不含 9:21
     aspect_ratios: list[str] = Field(default_factory=list)
     default_ratio: str = ""
     multiple: int = 16
+    quality_tiers: list[str] = Field(default_factory=list)
+    default_quality: str = ""
 
 
 class WorkflowRow(BaseModel):
