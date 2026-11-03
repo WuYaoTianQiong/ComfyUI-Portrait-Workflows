@@ -93,11 +93,17 @@
   比例仅作为归档信息：从碎片正文移除后，仍写入 DB 的 width/height 字段。
   比例与正文构图冲突时，以正文的构图描述为准，不要为凑比例追问用户。
 
-【负面提示词仅存档】
-  工作流不使用 negative_prompt，但负面提示词仍完整存入 negative_prompt 字段，
-  作为提示词原文留档，不参与出图。原文用“负面提示词 / 避免”表述时，
-  统一改写为 `Negative prompt:` 行，交给 parse_negative_prompt 提取，
-  不能留在碎片正文里。
+【负面提示词】
+  negative_prompt 必须完整入库，不再只是留档：Atelier 会按工作流能力决定是否提交
+  （ZIT 第一程 CFG=3、Qwen 提到 CFG>1 时真实生效；其余线路仅归档）。
+  原文用“负面提示词 / 避免 / Negative prompt”表述时，统一写成：
+    - `Negative prompt: ...` 行，或
+    - `【避免】...` / `【负面】...` 段落（脚本会自动移到 negative_prompt）
+  不要把“不要/避免”列表留在碎片正文里；编译器虽然会兜底，但入库时就分开最干净。
+
+【标签同步】
+  脚本写入 prompts.tags 后会同步 tags + entity_tags；前端筛选/详情只读
+  entity_tags，不能只写文本，否则标签筛选和计数看不到新条目。
 
 【不要写在 organized_prompts.txt 顶部】
   该文件按三个以上空行切块，任何说明文字都会被解析成提示词块并入库。
@@ -214,14 +220,14 @@ def auto_split_fragments(text):
         elif ptype == "pose":
             frags["姿态动作"] = para
         elif ptype == "scene":
-            frags["场景背景"] = para
+            frags["场景环境"] = para
         else:
             app_parts.append(para)
 
     if app_parts:
-        frags["人物外貌"] = "\n".join(app_parts).strip()
+        frags["人物面部"] = "\n".join(app_parts).strip()
     if cloth_parts:
-        frags["服装配饰"] = "\n".join(cloth_parts).strip()
+        frags["人物服饰"] = "\n".join(cloth_parts).strip()
     return frags if sum(1 for t in FRAGMENT_TYPES if frags.get(t)) >= 2 else {}
 
 
@@ -231,7 +237,7 @@ def reassemble(frags):
 
 def clean_fragments(frags):
     modified = False
-    app, tech, pose = frags.get("人物外貌", ""), frags.get("风格技术", ""), frags.get("姿态动作", "")
+    app, tech, pose = frags.get("人物面部", ""), frags.get("画风技术", ""), frags.get("姿态动作", "")
     stripped, extracted = app, []
     for prefix in STYLE_PREFIXES:
         if stripped.startswith(prefix):
@@ -242,7 +248,7 @@ def clean_fragments(frags):
     if extracted:
         add = "，".join(extracted)
         tech = (tech.rstrip("。，") + "，" + add) if tech else add
-        frags["人物外貌"], frags["风格技术"] = stripped, tech
+        frags["人物面部"], frags["画风技术"] = stripped, tech
         modified = True
 
     for ft in FRAGMENT_TYPES:
@@ -306,9 +312,50 @@ def parse_metadata(block):
     return (meta, block[:m.start()].strip())
 
 
+_NEG_SECTION_RE = re.compile(
+    r'^\s*【(?:避免|负面|反向|negative|avoid)】\s*[:：]?\s*(.*)$',
+    re.IGNORECASE,
+)
+
+
+def _extract_negative_sections(body):
+    """把【避免】/【负面】/【反向】整段从正文移到负面提示词。"""
+    lines = body.splitlines()
+    kept, parts = [], []
+    i = 0
+    while i < len(lines):
+        match = _NEG_SECTION_RE.match(lines[i])
+        if not match:
+            kept.append(lines[i])
+            i += 1
+            continue
+        content = match.group(1).strip()
+        if content:
+            parts.append(content)
+            i += 1
+            continue
+        i += 1
+        while i < len(lines):
+            line = lines[i]
+            if not line.strip() or line.lstrip().startswith("【"):
+                break
+            parts.append(line.strip())
+            i += 1
+    return "\n".join(kept), parts
+
+
 def parse_negative_prompt(body):
+    """支持 Negative prompt: 行和【避免】/【负面】段落，二者合并去重。"""
+    body, section_parts = _extract_negative_sections(body)
     m = re.search(r'Negative prompt:\s*(.*?)(?:\n\s*\n|\n(?=Steps:)|$)', body, re.IGNORECASE | re.DOTALL)
-    return (body[:m.start()].strip(), m.group(1).strip()) if m else (body, '')
+    explicit = m.group(1).strip() if m else ''
+    if m:
+        body = body[:m.start()].strip()
+    parts = []
+    for part in section_parts + ([explicit] if explicit else []):
+        if part and part not in parts:
+            parts.append(part)
+    return body.strip(), "，".join(parts)
 
 
 def _resolve_name(name_result, idx, llm_name_map, args):
@@ -404,13 +451,32 @@ def validate_purity(frags):
     for ft in FRAGMENT_TYPES:
         val = frags.get(ft, "")
         if not val: continue
-        if ft == "人物外貌":
+        if ft == "人物面部":
             for p in STYLE_PREFIXES:
                 if p in val: warns.append(f'【{ft}】包含风格名「{p}」')
         if ft == "姿态动作":
             for kw in ["穿着", "上衣", "裤子", "裙子"]:
                 if kw in val: warns.append(f'【{ft}】可能混入服装描述（含「{kw}」）')
     return warns
+
+
+def _sync_prompt_tags(cur, prompt_id, tags_text, now):
+    """写文本的同时维护 entity_tags（当前唯一读路径），否则标签筛选/详情看不到。"""
+    for name in re.split(r'[,，;；]', tags_text or ''):
+        name = name.strip()
+        if not name:
+            continue
+        cur.execute(
+            'INSERT OR IGNORE INTO tags (name, color, usage_count, created_at) VALUES (?,?,?,?)',
+            (name, '#5b8fb9', 0, now),
+        )
+        cur.execute('SELECT id FROM tags WHERE name = ?', (name,))
+        row = cur.fetchone()
+        if row:
+            cur.execute(
+                'INSERT OR IGNORE INTO entity_tags (entity_type, entity_id, tag_id) VALUES (?,?,?)',
+                ('prompt', prompt_id, row[0]),
+            )
 
 
 def insert_records(records, dry_run=False):
@@ -445,7 +511,11 @@ def insert_records(records, dry_run=False):
             prompt_id = cur.lastrowid
             inserted += 1
 
-            # 2. 插入 templates
+            # 1b. 标签文本 → entity_tags（UI 筛选/详情只读 entity_tags）
+            _sync_prompt_tags(cur, prompt_id, r['tags'], now)
+
+            # 2. 兼容旧模板体系：新 UI 已直接解析 prompts，保留写入不读也无害；
+            #    若确认不再使用模板页，可以删掉这一段以减少冗余行。
             cur.execute(
                 'INSERT INTO templates (name, category_id, created_at, updated_at) VALUES (?,?,?,?)',
                 (r['name'], None, now, now))
