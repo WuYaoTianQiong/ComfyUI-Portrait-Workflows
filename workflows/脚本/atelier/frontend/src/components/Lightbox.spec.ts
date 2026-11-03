@@ -198,6 +198,47 @@ describe('Lightbox', () => {
     expect(wrapper.emitted('jump-to-prompt')?.[0]).toEqual([1127])
   })
 
+  it('显示提交时的编译器快照与实际负向', async () => {
+    const withCompiled = {
+      ...item(1, 'a.png'),
+      prompt_params: {
+        prompt: '原始正向，不要印章',
+        negative_prompt: '原始负向',
+        source: 'prompt_run',
+        compiled: {
+          positive: '编译后的正向，画面干净',
+          negative: '印章, 水印',
+          notes: ['把文字/水印类否定改写为「纸面干净」'],
+          warnings: ['列表型否定仍有未处理项：摆拍'],
+          negative_effective: true,
+        },
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withCompiled], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    expect(document.body.querySelector('.compiled-positive')?.textContent).toContain('编译后的正向')
+    expect(document.body.querySelector('.compiled-negative')?.textContent).toContain('印章, 水印')
+    expect(document.body.querySelector('.compiled-notes')?.textContent).toContain('纸面干净')
+    expect(document.body.querySelector('.compiled-notes.warn')?.textContent).toContain('摆拍')
+  })
+
+  it('负向不生效时编译快照明确标注不提交', async () => {
+    const withCompiled = {
+      ...item(1, 'a.png'),
+      prompt_params: {
+        prompt: '原始正向',
+        compiled: {
+          positive: '编译后的正向',
+          negative: '水印',
+          negative_effective: false,
+        },
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withCompiled], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    expect(document.body.querySelector('.compiled-negative')?.textContent).toContain('工作流负向不生效')
+  })
+
   it('已关联提示词但缺正文时回退到提示词库当前版本', async () => {
     const withPrompt = {
       ...item(1, 'a.png'),

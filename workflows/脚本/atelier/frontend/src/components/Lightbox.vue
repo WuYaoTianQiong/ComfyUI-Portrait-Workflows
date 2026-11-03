@@ -382,6 +382,27 @@ const promptPlaceholder = computed(() =>
     : '（出图参数里没有留下提示词正文）',
 )
 
+interface CompiledSnapshot {
+  positive?: unknown
+  negative?: unknown
+  notes?: unknown
+  warnings?: unknown
+  negative_effective?: boolean
+}
+
+/** 提交时的编译快照：原文在左栏，这里展示实际注入的正向与负向。 */
+const compiled = computed<CompiledSnapshot | null>(() => {
+  const raw = promptParams.value.compiled
+  return raw && typeof raw === 'object' ? (raw as CompiledSnapshot) : null
+})
+const compiledPositive = computed(() => textOf(compiled.value?.positive).trim())
+const compiledNegative = computed(() => textOf(compiled.value?.negative).trim())
+const compiledEffective = computed(() => compiled.value?.negative_effective !== false)
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []
+const compiledNotes = computed(() => stringList(compiled.value?.notes))
+const compiledWarnings = computed(() => stringList(compiled.value?.warnings))
+
 const PARAM_SOURCE_LABEL: Record<string, string> = {
   prompt_run: '提示词出图',
   text_run: '文本跑图',
@@ -1029,6 +1050,34 @@ function onKey(event: KeyboardEvent) {
               </header>
               <pre class="prompt-text neg-prompt">{{ shownNegative }}</pre>
             </section>
+
+            <section v-if="compiledPositive" class="text-section compiled-section">
+              <header class="text-head">
+                <span>
+                  编译后
+                  <span class="text-note">· 负向{{ compiledEffective ? '生效' : '不生效' }}</span>
+                </span>
+                <button class="btn btn-sm" @click="copyText(compiledPositive, '编译后正向')">
+                  复制
+                </button>
+              </header>
+              <div class="compiled-grid">
+                <div>
+                  <h4>正向（提交）</h4>
+                  <pre class="prompt-text compiled-text compiled-positive">{{ compiledPositive }}</pre>
+                </div>
+                <div>
+                  <h4>实际负向（{{ compiledEffective ? '提交' : '不提交' }}）</h4>
+                  <pre class="prompt-text compiled-text compiled-negative">{{ compiledEffective ? (compiledNegative || '（空）') : '（工作流负向不生效）' }}</pre>
+                </div>
+              </div>
+              <ul v-if="compiledNotes.length" class="compiled-notes">
+                <li v-for="(note, i) in compiledNotes" :key="`compiled-note-${i}`">{{ note }}</li>
+              </ul>
+              <ul v-if="compiledWarnings.length" class="compiled-notes warn">
+                <li v-for="(warn, i) in compiledWarnings" :key="`compiled-warn-${i}`">{{ warn }}</li>
+              </ul>
+            </section>
           </div>
 
           <aside
@@ -1509,6 +1558,48 @@ function onKey(event: KeyboardEvent) {
 .neg-section {
   flex: 0 1 auto;
   max-height: 30%;
+}
+
+.compiled-section {
+  flex: 0 1 auto;
+  max-height: 42%;
+  overflow-y: auto;
+}
+
+.compiled-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-sm);
+}
+
+.compiled-grid h4 {
+  margin: 0 0 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.compiled-text {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.compiled-notes {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.compiled-notes.warn {
+  color: var(--warn);
+}
+
+@media (max-width: 900px) {
+  .compiled-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .text-head {
