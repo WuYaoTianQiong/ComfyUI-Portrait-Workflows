@@ -14,8 +14,9 @@ from pydantic import BaseModel
 
 from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
+from app.services.prompt_compiler import compile_prompt
 from app.services.workflow_catalog import find_default_workflow, list_valid_workflows
-from app.services.workflow_parser import load_workflow, inject_prompt
+from app.services.workflow_parser import detect_workflow_caps, load_workflow, inject_prompt
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
     OutputLocationError,
@@ -58,6 +59,13 @@ class RunTextRequest(BaseModel):
     seed: int = 0
     source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
     output_subfolder: str = ""
+
+
+class CompilePromptRequest(BaseModel):
+    prompt: str = ""
+    negative_prompt: str = ""
+    workflow_path: str = ""
+    workflow_content: str | None = None
 
 
 class BatchItem(BaseModel):
@@ -135,6 +143,30 @@ def list_workflows(
     }
 
 
+# ---------- 提示词编译预览 ----------
+
+@router.post("/prompts/compile")
+def compile_prompt_preview(req: CompilePromptRequest):
+    """只编译、不出图：返回实际会提交的正向/负向与改写说明。"""
+    workflow_path = req.workflow_path or ""
+    if not workflow_path and not req.workflow_content:
+        raise HTTPException(400, "缺少工作流路径")
+    try:
+        api_wf = load_workflow(workflow_path, req.workflow_content)
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+
+    caps = detect_workflow_caps(api_wf)
+    effective = bool(caps.get("negative_effective"))
+    # 与真正的提交入口一致：只去掉【类型】标题，预览看到的才是实际注入的正文。
+    compiled = compile_prompt(
+        strip_headers(req.prompt), req.negative_prompt, negative_effective=effective,
+    )
+    body = compiled.as_dict()
+    body["negative_cfg"] = caps.get("negative_cfg")
+    return body
+
+
 # ---------- 单图跑图 ----------
 
 @router.post("/runs")
@@ -181,6 +213,7 @@ def run_prompt(req: RunRequest):
             "width": p.width, "height": p.height,
             "aspect_ratio": req.aspect_ratio,
             "source": "prompt_run",
+            "compiled": prompt_data.get("compiled"),
         }
         items = [{
             "prompt_id": req.id,
@@ -258,6 +291,7 @@ def run_text_prompt(req: RunTextRequest):
             "aspect_ratio": req.aspect_ratio,
             "source": "text_run",
             "source_prompt_id": req.source_prompt_id or 0,
+            "compiled": prompt_data.get("compiled"),
         }
         # 试跑若指定了来源提示词，直接关联到该提示词的 history（否则关弹窗就找不到了）
         linked_prompt_id = req.source_prompt_id or 0

@@ -6,6 +6,7 @@ import re
 
 from app.services.comfyui_client import get_object_info
 from app.services.image_formats import convert_heif_to_png, is_heif
+from app.services.prompt_compiler import compile_prompt
 from app.services.quality_keys import normalize_quality, quality_scale
 
 logger = logging.getLogger("atelier.workflow")
@@ -670,12 +671,94 @@ def is_video_workflow(api_workflow: dict) -> bool:
     return False
 
 
-def detect_workflow_caps(api_workflow: dict) -> dict[str, bool]:
+#: 带 negative 槽的引导节点。KSampler 系直接吃 negative；CFGGuider 供
+#: SamplerCustomAdvanced 这类链路使用。
+_GUIDANCE_NODES = {"KSampler", "KSamplerAdvanced", "CFGGuider"}
+
+
+def _as_float(val: object) -> float | None:
+    """把 widget 字面量解析成 float；连线引用 / 非数字字符串一律返回 None。"""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _negative_has_text(api_workflow: dict, ref: object, seen: set[str] | None = None) -> bool:
+    """负向连线是否最终来自文本编码节点。
+
+    `ConditioningZeroOut` 会切断判断：即使它上游是提示词，也已经被清零。
+    其他条件节点（Combine / SetArea / ControlNetApply 等）继续沿条件输入回溯。
+    """
+    if seen is None:
+        seen = set()
+    if not isinstance(ref, (list, tuple)) or len(ref) != 2:
+        return False
+    src_id = str(ref[0])
+    if src_id in seen:
+        return False
+    seen = seen | {src_id}
+    node = api_workflow.get(src_id)
+    if not isinstance(node, dict):
+        return False
+    cls = node.get("class_type", "")
+    if cls == "ConditioningZeroOut":
+        return False
+    if cls in _TEXT_ENCODE_NODES:
+        return True
+    inputs = node.get("inputs") or {}
+    for key, val in inputs.items():
+        if key in ("model", "clip", "vae", "positive", "control_net", "image"):
+            continue
+        if _negative_has_text(api_workflow, val, seen):
+            return True
+    return False
+
+
+def _detect_negative_effectiveness(api_workflow: dict) -> tuple[bool, float | None]:
+    """负向条件是否真的参与采样，以及真实负向路径上的最大 CFG。
+
+    - 负向来自 `ConditioningZeroOut` → 没接入，返回 (False, None)；
+    - 负向来自文本节点但 cfg<=1 → 字段存在但不生效，返回 (False, cfg)；
+    - 任一采样器 cfg>1 且负向来自文本节点 → 生效，返回 (True, 最大 cfg)。
+    """
+    cfgs: list[float] = []
+    unknown_cfg = False
+    for node in api_workflow.values():
+        if not isinstance(node, dict) or node.get("class_type") not in _GUIDANCE_NODES:
+            continue
+        inputs = node.get("inputs") or {}
+        if not _negative_has_text(api_workflow, inputs.get("negative")):
+            continue
+        cfg = _as_float(inputs.get("cfg"))
+        if cfg is None:
+            unknown_cfg = True
+        else:
+            cfgs.append(cfg)
+    if unknown_cfg:
+        return True, (max(cfgs) if cfgs else None)
+    if not cfgs:
+        return False, None
+    best = max(cfgs)
+    return best > 1.0, best
+
+
+def detect_workflow_caps(api_workflow: dict) -> dict[str, object]:
     """探测工作流能接受哪些注入项。
 
     判定规则与 `inject_prompt` 完全一致：只标记真正会被改到的项。
     否则前端会显示一个点了也不生效的"横竖/画质"旋钮
     （例如视频工作流没有 EmptyLatentImage，超分工作流没有横竖比旋钮）。
+
+    `negative` 只表示结构上有没有负向输入；`negative_effective` 才表示它
+    是否真的参与采样（负向来自文本节点且 cfg>1）。两者分开，UI 才能提示
+    "有输入框但不会生效"，而不是假装支持。
     """
     text_nodes = [
         node for node in api_workflow.values()
@@ -683,9 +766,12 @@ def detect_workflow_caps(api_workflow: dict) -> dict[str, bool]:
         and node.get("class_type") in _TEXT_ENCODE_NODES
         and node.get("inputs", {}).get("clip") is not None
     ]
+    negative_effective, negative_cfg = _detect_negative_effectiveness(api_workflow)
     caps = {
         "prompt": bool(text_nodes),
         "negative": False,
+        "negative_effective": negative_effective,
+        "negative_cfg": negative_cfg,
         "quality": False,
         "orientation": False,
     }
@@ -906,15 +992,23 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
         # 纯图像工作流（如 SeedVR2 超分）不含文本编码节点，跳过提示词注入
         print("[workflow_parser] 警告：未找到文本编码节点（CLIPTextEncode / TextEncodeQwenImage21 等），跳过提示词注入")
     else:
+        negative_effective, _negative_cfg = _detect_negative_effectiveness(api_workflow)
+        compiled = compile_prompt(
+            str(prompt_data.get("prompt") or ""),
+            str(prompt_data.get("negative_prompt") or ""),
+            negative_effective=negative_effective,
+        )
         _nid, _node, (_pos_field, _neg_field) = text_nodes[0]
-        _node["inputs"][_pos_field] = prompt_data["prompt"]
-        _negative = prompt_data.get("negative_prompt") or ""
+        _node["inputs"][_pos_field] = compiled.positive
+        # 负向不生效时不提交任何负向内容，避免留下"写了但没用"的假象。
+        _negative = compiled.negative if negative_effective else ""
         if _neg_field:
             # 单节点自带负面字段（如 Qwen-Image 2.1），直接写同一个节点
             _node["inputs"][_neg_field] = _negative
         elif len(text_nodes) >= 2:
             # 旧行为：第二个文本编码节点当负面
             text_nodes[1][1]["inputs"][text_nodes[1][2][0]] = _negative
+        prompt_data["compiled"] = compiled.as_dict()
 
     # 2. 注入种子
     # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0

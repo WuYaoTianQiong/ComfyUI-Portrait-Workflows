@@ -350,6 +350,70 @@ function unpick(type: string) {
 
 const negativePrompt = ref(savedSession.negativePrompt)
 
+/** 负向条件是否真的参与采样；工作流探测不到时保持旧行为（不报警）。 */
+const negativeEffective = computed(() => caps.value.negative_effective !== false)
+
+const negativeTip = computed(() =>
+  negativeEffective.value
+    ? '编辑负面提示词（出图时使用）'
+    : '当前工作流不使用负向提示词（不会生效）',
+)
+
+const negativeHint = computed(() => {
+  if (negativeEffective.value) {
+    const cfg = caps.value.negative_cfg
+    return typeof cfg === 'number'
+      ? `这些内容会在 CFG=${cfg} 的采样中作为负向条件使用。留空 = 不加负面提示词。`
+      : '这些内容会作为负向条件提交；留空 = 不加负面提示词。'
+  }
+  const cfg = caps.value.negative_cfg
+  return typeof cfg === 'number'
+    ? `当前工作流使用 CFG=${cfg}，负向条件不会参与采样；这里的内容不会影响出图。`
+    : '当前工作流没有接入负向条件（negative 已清零）；这里的内容不会影响出图。'
+})
+
+interface CompilePreview {
+  positive: string
+  negative: string
+  notes: string[]
+  warnings: string[]
+  extracted: string[]
+  negative_effective: boolean
+  negative_cfg: number | null
+}
+
+const compileOpen = ref(false)
+const compileBusy = ref(false)
+const compileError = ref('')
+const compileResult = ref<CompilePreview | null>(null)
+
+async function openCompilePreview() {
+  if (!composedPrompt.value) {
+    toast.error('画布是空的')
+    return
+  }
+  if (!workflowPath.value) {
+    toast.error('请先选择工作流')
+    return
+  }
+  compileOpen.value = true
+  compileBusy.value = true
+  compileError.value = ''
+  compileResult.value = null
+  try {
+    compileResult.value = await apiPost<CompilePreview>('/api/prompts/compile', {
+      prompt: composedPrompt.value,
+      negative_prompt: negativePrompt.value,
+      workflow_path: workflowPath.value,
+      workflow_content: customWorkflowContent(workflowPath.value),
+    })
+  } catch (e) {
+    compileError.value = `编译失败：${e instanceof Error ? e.message : String(e)}`
+  } finally {
+    compileBusy.value = false
+  }
+}
+
 // ---------------- 跑图 ----------------
 
 /** 画布上的碎片作为"固定碎片"，其余类型由后端随机填充。 */
@@ -951,11 +1015,20 @@ function toggleTag(id: number) {
       </button>
       <button
         class="btn btn-sm"
-        :class="{ on: !!negativePrompt.trim() }"
-        title="编辑负面提示词（出图时使用）"
+        :class="{ on: !!negativePrompt.trim(), 'cap-off': !negativeEffective }"
+        :title="negativeTip"
         @click="settingsOpen = true"
       >
         🚫 负面提示词
+        <span v-if="!negativeEffective" class="cap-badge">不生效</span>
+      </button>
+      <button
+        class="btn btn-sm"
+        :disabled="!composedPrompt"
+        title="查看编译后的正向/负向（只编译，不出图）"
+        @click="openCompilePreview"
+      >
+        🧩 编译
       </button>
       <button class="btn btn-sm" @click="templateOpen = true">
         📚 模板 {{ templates.length }}
@@ -1000,8 +1073,8 @@ function toggleTag(id: number) {
       @close="settingsOpen = false"
     >
       <div class="neg-panel">
-        <p class="neg-hint">
-          这些内容不会被画出来。留空 = 不加负面提示词；换行分隔也可以，提交时按原样带上。
+        <p class="neg-hint" :class="{ warn: !negativeEffective }">
+          {{ negativeHint }}
         </p>
         <textarea
           v-model="negativePrompt"
@@ -1015,6 +1088,48 @@ function toggleTag(id: number) {
         <button class="btn btn-sm" @click="negativePrompt = ''">清空</button>
         <button class="btn btn-sm primary" @click="settingsOpen = false">确定</button>
       </template>
+    </Modal>
+
+    <Modal
+      :open="compileOpen"
+      title="提示词编译预览"
+      width="min(860px, 92vw)"
+      height="min(72vh, 720px)"
+      @close="compileOpen = false"
+    >
+      <div class="compile-panel">
+        <p v-if="compileBusy" class="compile-status">编译中…</p>
+        <p v-else-if="compileError" class="compile-status error">{{ compileError }}</p>
+        <template v-else-if="compileResult">
+          <p class="compile-meta">
+            负向通道：
+            <b>{{ compileResult.negative_effective ? '生效' : '不生效' }}</b>
+            <span v-if="compileResult.negative_cfg != null">
+              （CFG={{ compileResult.negative_cfg }}）
+            </span>
+          </p>
+          <section class="compile-block">
+            <h4>正向（提交）</h4>
+            <pre>{{ compileResult.positive }}</pre>
+          </section>
+          <section class="compile-block">
+            <h4>负向（{{ compileResult.negative_effective ? '提交' : '不提交' }}）</h4>
+            <pre>{{ compileResult.negative || '（空）' }}</pre>
+          </section>
+          <section v-if="compileResult.notes.length" class="compile-block">
+            <h4>改写</h4>
+            <ul>
+              <li v-for="(note, i) in compileResult.notes" :key="`note-${i}`">{{ note }}</li>
+            </ul>
+          </section>
+          <section v-if="compileResult.warnings.length" class="compile-block warn">
+            <h4>提醒</h4>
+            <ul>
+              <li v-for="(item, i) in compileResult.warnings" :key="`warn-${i}`">{{ item }}</li>
+            </ul>
+          </section>
+        </template>
+      </div>
     </Modal>
 
     <div v-if="filtersOpen" class="filter-drawer">
@@ -1319,6 +1434,24 @@ function toggleTag(id: number) {
   color: var(--muted);
 }
 
+.neg-hint.warn {
+  color: var(--warn);
+}
+
+.cap-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--warn);
+}
+
+.btn.cap-off {
+  opacity: 0.75;
+}
+
 .neg-text {
   flex: 1;
   min-height: 0;
@@ -1332,6 +1465,65 @@ function toggleTag(id: number) {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
+}
+
+/* 编译预览：只读，不写库；整块可滚动，长提示词不会撑破弹窗 */
+.compile-panel {
+  height: 100%;
+  box-sizing: border-box;
+  padding: var(--gap);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.compile-status {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.compile-status.error {
+  color: var(--danger);
+}
+
+.compile-meta {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.compile-block h4 {
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.compile-block pre {
+  margin: 0;
+  padding: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  font: inherit;
+  color: var(--text);
+}
+
+.compile-block ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.compile-block.warn h4 {
+  color: var(--warn);
 }
 
 /* 8 条并列滚筒：每列独立滚动，候选与选中项同列 */

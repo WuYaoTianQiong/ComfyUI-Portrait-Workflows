@@ -270,10 +270,14 @@ class WorkflowCaps(BaseModel):
     """工作流能接受哪些注入项；前端据此隐藏无效旋钮。
 
     默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。
+    `negative` 只表示结构上有没有负向输入；`negative_effective` 才表示
+    它是否真的参与采样（负向来自文本节点且 cfg>1）。
     """
 
     prompt: bool = True
     negative: bool = True
+    negative_effective: bool = True
+    negative_cfg: float | None = None
     quality: bool = True
     orientation: bool = True
 

@@ -7,7 +7,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.models import Prompt, Category, Tag, PromptCategory, EntityTag, db
-from app.services.workflow_parser import load_workflow, inject_prompt
+from app.services.prompt_compiler import compile_prompt
+from app.services.workflow_parser import detect_workflow_caps, load_workflow, inject_prompt
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
     OutputLocationError,
@@ -165,6 +166,7 @@ def composer_run(req: ComposerRunRequest):
                 "negative_prompt": req.negative_prompt,
                 "aspect_ratio": req.aspect_ratio,
                 "source": "composer",
+                "compiled": prompt_data.get("compiled"),
             }, ensure_ascii=False),
         }]
         job_id = create_job(
@@ -300,10 +302,21 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
 
         # 创建任务；真正的 push 交给后台提交线程
         try:
-            load_workflow(workflow_path, req.workflow_content)
+            api_wf = load_workflow(workflow_path, req.workflow_content)
         except Exception as e:
             raise HTTPException(400, f"工作流加载失败: {e}")
+        # 批量任务在入队时就编译一次，prompt_params 里留下实际提交的正/负向；
+        # 后台 prepare 里的 inject_prompt 会再编译一次（幂等），不会改变结果。
+        negative_effective = bool(detect_workflow_caps(api_wf).get("negative_effective"))
         for item in job_items:
+            params = json.loads(item["prompt_params"])
+            compiled = compile_prompt(
+                strip_headers(params.get("prompt") or ""),
+                params.get("negative_prompt") or "",
+                negative_effective=negative_effective,
+            )
+            params["compiled"] = compiled.as_dict()
+            item["prompt_params"] = json.dumps(params, ensure_ascii=False)
             item["status"] = "pending"
             item["submit_state"] = "queued"
 

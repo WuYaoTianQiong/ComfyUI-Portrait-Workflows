@@ -182,6 +182,9 @@ function clearLog() {
       <p class="note">
         试跑用的就是当前草稿的文本，不会写回提示词库 —— 试完满意再保存。
       </p>
+      <p v-if="negativePrompt.trim() && caps.negative_effective === false" class="note warn">
+        当前工作流不会使用负向提示词；草稿里的负向内容不会影响出图。
+      </p>
 
       <div class="controls">
         <label class="field">
@@ -258,6 +261,10 @@ function clearLog() {
   font-size: var(--fs-xs);
   color: var(--muted);
   line-height: 1.6;
+}
+
+.note.warn {
+  color: var(--warn);
 }
 
 .controls {
