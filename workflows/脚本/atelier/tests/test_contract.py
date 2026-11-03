@@ -302,6 +302,73 @@ def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     assert api.get(f"/api/prompts/{p.id}").json()["prompt"].startswith("【人物身材】旧")
 
 
+def test_composer_batch_run_records_compiled_snapshot(api, monkeypatch):
+    """批量随机在入队时就写 compiled，灯箱/任务详情才能看到实际正负向。"""
+    from app.routers import composer as composer_router
+
+    wf = {
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "9": {
+            "class_type": "KSamplerAdvanced",
+            "inputs": {
+                "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0],
+                "latent_image": ["6", 0], "cfg": 3,
+            },
+        },
+    }
+    monkeypatch.setattr(composer_router, "enqueue_submission", lambda task: None)
+    r = api.post("/api/composer/batch_random_run", json={
+        "count": 1,
+        "workflow_path": "F:/wf.json",
+        "workflow_content": json.dumps(wf),
+        "composed_prompts": ["不要看镜头，穿白衬衫"],
+        "negative_prompt": "水印",
+    })
+    assert r.status_code == 200
+    job = api.get(f"/api/jobs/{r.json()['job_id']}").json()
+    params = json.loads(job["items"][0]["prompt_params"])
+    compiled = params["compiled"]
+    assert compiled["negative_effective"] is True
+    assert "视线自然垂落" in compiled["positive"]
+    assert "水印" in compiled["negative"]
+    assert "看镜头" in compiled["negative"]
+
+
+def test_retry_rebuild_compiles_prompt():
+    """重试从 prompt_params 复原时也要走同一个编译器。"""
+    from app.services import job_retry
+
+    wf = {
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "9": {
+            "class_type": "KSamplerAdvanced",
+            "inputs": {
+                "model": ["5", 0], "positive": ["7", 0], "negative": ["8", 0],
+                "latent_image": ["6", 0], "cfg": 3,
+            },
+        },
+    }
+    job = {
+        "workflow_path": "F:/wf.json",
+        "orientation": "portrait",
+        "quality": "4K",
+        "extra": json.dumps({"workflow_content": json.dumps(wf)}),
+    }
+    item = {
+        "prompt_params": json.dumps({
+            "prompt": "不要看镜头，穿白衬衫",
+            "negative_prompt": "水印",
+            "seed": 1,
+        }),
+    }
+    api_wf = job_retry._build_prompt_workflow(job, item, 1, "")
+    assert "视线自然垂落" in api_wf["7"]["inputs"]["text"]
+    assert "水印" in api_wf["8"]["inputs"]["text"]
+    assert "看镜头" in api_wf["8"]["inputs"]["text"]
+
+
 def test_workflows_api_exposes_params(api):
     """/api/workflows 必须带上 params，否则前端只能退回固定的 2K..12K 死档位。"""
     rows = api.get("/api/workflows").json()["workflows"]
