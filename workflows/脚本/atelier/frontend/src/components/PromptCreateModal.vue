@@ -121,6 +121,9 @@ async function submit() {
         <label class="field">
           <span>负面提示词</span>
           <textarea v-model="form.negative_prompt" rows="2" spellcheck="false" placeholder="可留空" />
+          <small class="field-hint">
+            负向是否生效取决于出图工作流：只有 ZIT 或 CFG&gt;1 的链路会使用；其余线路只归档。
+          </small>
         </label>
       </template>
 
@@ -192,6 +195,12 @@ async function submit() {
   flex-direction: column;
   gap: 4px;
   font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.field-hint {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
   color: var(--muted);
 }
 

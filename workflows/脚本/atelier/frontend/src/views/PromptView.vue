@@ -1307,11 +1307,13 @@ onBeforeUnmount(() => {
                 :quality-options="qualityOptions"
               />
               <span
-                v-if="workflowPath && caps.prompt && !caps.negative"
+                v-if="workflowPath && caps.prompt && (!caps.negative || caps.negative_effective === false)"
                 class="cap-hint"
-                title="该工作流不接收负面提示词"
+                :title="caps.negative_effective === false
+                  ? '该工作流有负向字段，但 CFG=1，采样时不会生效'
+                  : '该工作流不接收负面提示词'"
               >
-                不支持负面
+                {{ caps.negative_effective === false ? '负向不生效' : '不支持负面' }}
               </span>
               <span
                 v-if="workflowPath && !caps.prompt"
@@ -1417,7 +1419,11 @@ onBeforeUnmount(() => {
               <div class="section-head">
                 <span>
                   负面提示词
-                  <i v-if="!caps.negative" class="cap-inline">该工作流不注入</i>
+                  <i v-if="caps.negative_effective === false" class="cap-inline warn">
+                    负向不生效
+                    <template v-if="typeof caps.negative_cfg === 'number'">（CFG={{ caps.negative_cfg }}）</template>
+                  </i>
+                  <i v-else-if="!caps.negative" class="cap-inline">该工作流不注入</i>
                 </span>
                 <div class="section-actions">
                   <button
@@ -1443,7 +1449,11 @@ onBeforeUnmount(() => {
                 <span :class="{ empty: !draft.negative_prompt }">
                   {{
                     draft.negative_prompt ||
-                    (caps.negative ? '（空）点击添加' : '（空，仅归档，不参与出图）')
+                    (caps.negative_effective === false
+                      ? '（空；当前工作流负向不生效，仅归档）'
+                      : caps.negative
+                        ? '（空）点击添加'
+                        : '（空，仅归档，不参与出图）')
                   }}
                 </span>
               </button>
@@ -2396,6 +2406,10 @@ onBeforeUnmount(() => {
   font-style: normal;
   font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.cap-inline.warn {
+  color: var(--warn);
 }
 
 /* 收起状态只占一行：空值不再吃掉 84px */
