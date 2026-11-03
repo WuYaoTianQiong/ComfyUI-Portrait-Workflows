@@ -29,14 +29,27 @@ _COMMON_QUERY = (
 )
 
 
+def _iter_routes(routes, prefix: str = ""):
+    """递归展开 FastAPI 0.162+ 的 _IncludedRouter，兼容旧版扁平路由。"""
+    for route in routes:
+        original = getattr(route, "original_router", None)
+        context = getattr(route, "include_context", None)
+        if original is not None and context is not None:
+            sub_prefix = (prefix + (getattr(context, "prefix", "") or "")).rstrip("/")
+            yield from _iter_routes(getattr(original, "routes", []), sub_prefix)
+            continue
+        if isinstance(route, APIRoute):
+            path = f"{prefix}{route.path}" if prefix else route.path
+            yield route, path
+
+
 def _get_endpoints() -> list[str]:
     paths = {
-        route.path
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and "GET" in route.methods
-        and route.path.startswith("/api")
-        and route.path not in _SKIP
+        path
+        for route, path in _iter_routes(app.routes)
+        if "GET" in route.methods
+        and path.startswith("/api")
+        and path not in _SKIP
     }
     return sorted(paths)
 
@@ -59,11 +72,9 @@ def test_get_endpoint_does_not_500(api, path):
 def test_all_api_paths_are_covered_or_skipped():
     """防止有人加了新端点却把它塞进 _SKIP 蒙混过关。"""
     total = {
-        route.path
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and "GET" in route.methods
-        and route.path.startswith("/api")
+        path
+        for route, path in _iter_routes(app.routes)
+        if "GET" in route.methods and path.startswith("/api")
     }
     assert _SKIP <= total, f"_SKIP 里有不存在的端点: {_SKIP - total}"
     # 当前 GET 端点 36 个；数量明显下降说明路由注册被破坏
