@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -1176,6 +1177,19 @@ class ProcessImageRequest(BaseModel):
     output_subfolder: str = ""
 
 
+class CleanupBoxModel(BaseModel):
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
+class CleanupRequest(BaseModel):
+    mode: str = "seals"  # seals / text / all / manual（带 boxes 时）
+    padding: int = 6
+    boxes: list[CleanupBoxModel] | None = None
+
+
 @router.post("/images/{item_id}/process")
 def process_history_image(item_id: int, data: ProcessImageRequest):
     """将历史图片作为输入，用指定工作流处理（如超分、重绘等）"""
@@ -1264,6 +1278,135 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     except Exception as e:
         update_job_items(job_id, items, status="error")
         raise HTTPException(500, f"推送 ComfyUI 失败: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 后期清理：红印章 / 文字检测与擦除
+# ---------------------------------------------------------------------------
+
+_CLEANUP_MODES = {"seals", "text", "all"}
+
+
+def _cleanup_source(item_id: int) -> tuple[Image, Path]:
+    row = Image.get_or_none(Image.id == item_id)
+    if row is None:
+        raise HTTPException(404, "历史记录不存在")
+    src = resolve_image_path(row.filename or "", row.subfolder or "", row.img_type or "output")
+    if src is None:
+        raise HTTPException(404, "图片文件不存在")
+    return row, Path(src)
+
+
+@router.get("/images/cleanup/capabilities")
+def cleanup_capabilities():
+    """红印章擦除依赖 opencv；文字 OCR 依赖可选安装的 RapidOCR。"""
+    from app.services.text_cleanup import capabilities
+
+    return capabilities()
+
+
+@router.post("/images/{item_id}/cleanup/detect")
+def detect_cleanup_regions(item_id: int, data: CleanupRequest):
+    """只检测不擦除：返回红印章/文本框，供后续选择性清理。"""
+    mode = (data.mode or "seals").lower()
+    if mode not in _CLEANUP_MODES:
+        raise HTTPException(400, f"未知清理模式: {mode}")
+    _row, src = _cleanup_source(item_id)
+    from app.services.text_cleanup import detect_boxes
+
+    try:
+        boxes = detect_boxes(src, mode)
+    except (RuntimeError, FileNotFoundError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return {
+        "success": True,
+        "mode": mode,
+        "count": len(boxes),
+        "boxes": [b.as_dict() for b in boxes],
+    }
+
+
+@router.post("/images/{item_id}/cleanup")
+def cleanup_history_image(item_id: int, data: CleanupRequest):
+    """擦除红印章或文字，生成一张新图；原图不覆盖。"""
+    row, src = _cleanup_source(item_id)
+    from app.services.text_cleanup import CleanupBox, cleanup_image, detect_boxes
+
+    if data.boxes:
+        mode = "manual"
+        boxes = [
+            CleanupBox(b.x1, b.y1, b.x2, b.y2, "manual")
+            for b in data.boxes
+            if b.x2 > b.x1 and b.y2 > b.y1
+        ]
+        if not boxes:
+            raise HTTPException(400, "选区无效")
+    else:
+        mode = (data.mode or "seals").lower()
+        if mode not in _CLEANUP_MODES:
+            raise HTTPException(400, f"未知清理模式: {mode}")
+        try:
+            boxes = detect_boxes(src, mode)
+        except (RuntimeError, FileNotFoundError, ValueError) as e:
+            raise HTTPException(400, str(e))
+        if not boxes:
+            return {
+                "success": False,
+                "removed": 0,
+                "message": "未检测到红印章或文字，未生成新图",
+            }
+
+    # 输出跟原图同子目录；原图不在 output 下时落到 output/cleanup。
+    try:
+        rel = src.resolve().relative_to(settings.output_dir.resolve())
+        subdir = rel.parent
+    except ValueError:
+        subdir = Path("cleanup")
+    subfolder = "" if str(subdir) == "." else subdir.as_posix()
+    out_dir = settings.output_dir / (subdir if subfolder else "")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{src.stem}_clean_{mode}_{int(time.time() * 1000)}.png"
+    out_path = out_dir / filename
+
+    try:
+        removed, used = cleanup_image(
+            src, out_path, mode, padding=max(0, min(50, int(data.padding))), boxes=boxes,
+        )
+    except (RuntimeError, OSError, FileNotFoundError) as e:
+        raise HTTPException(500, str(e))
+
+    view_url = build_view_url(filename, subfolder, "output")
+    prompt_params = json.dumps({
+        "source": "cleanup",
+        "source_image_id": item_id,
+        "source_filename": row.filename or "",
+        "mode": mode,
+        "removed": removed,
+        "boxes": [b.as_dict() for b in used],
+    }, ensure_ascii=False)
+    image_id = Image.insert(
+        job_id=None,
+        prompt_id=None,
+        comfyui_prompt_id="",
+        filename=filename,
+        subfolder=subfolder,
+        img_type="output",
+        view_url=view_url,
+        preview="",
+        prompt_params=prompt_params,
+        is_favorite=False,
+        captured_at=datetime.now(),
+        source="cleanup",
+    ).execute()
+    return {
+        "success": True,
+        "image_id": image_id,
+        "filename": filename,
+        "subfolder": subfolder,
+        "view_url": view_url,
+        "mode": mode,
+        "removed": removed,
+    }
 
 
 # ======== Phase 5: 图片分类 / 标签管理 ========

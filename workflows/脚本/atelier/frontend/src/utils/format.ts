@@ -69,6 +69,7 @@ export function sourceLabel(source: string): string {
     disk_scan: '磁盘扫描',
     composer: '组合创作',
     faceswap: '图像编辑',
+    cleanup: '后期清理',
   }
   return map[source] ?? source ?? ''
 }

@@ -1,0 +1,5 @@
+# 可选后期清理：文字 OCR（RapidOCR，自带中英模型）。
+# 红印章擦除只需要 opencv + numpy；生产 Python 已自带。
+# 安装：pip install -r requirements-cleanup.txt
+-r requirements.txt
+rapidocr-onnxruntime==1.3.24

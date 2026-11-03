@@ -6,3 +6,5 @@ httpx>=0.27.0
 Pillow>=10.0.0
 # iPhone HEIC/HEIF 解码；未安装时项目仍可运行，只是 HEIC 会提示不支持
 pillow-heif>=0.16
+# 后期清理：红印章擦除使用生产环境已有的 opencv/numpy；
+# 文字 OCR（RapidOCR）体积较大，放 requirements-cleanup.txt 可选安装。

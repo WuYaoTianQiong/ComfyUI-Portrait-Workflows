@@ -459,6 +459,64 @@
         "title": "CategoryUpdate",
         "type": "object"
       },
+      "CleanupBoxModel": {
+        "properties": {
+          "x1": {
+            "title": "X1",
+            "type": "integer"
+          },
+          "x2": {
+            "title": "X2",
+            "type": "integer"
+          },
+          "y1": {
+            "title": "Y1",
+            "type": "integer"
+          },
+          "y2": {
+            "title": "Y2",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x1",
+          "y1",
+          "x2",
+          "y2"
+        ],
+        "title": "CleanupBoxModel",
+        "type": "object"
+      },
+      "CleanupRequest": {
+        "properties": {
+          "boxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CleanupBoxModel"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boxes"
+          },
+          "mode": {
+            "default": "seals",
+            "title": "Mode",
+            "type": "string"
+          },
+          "padding": {
+            "default": 6,
+            "title": "Padding",
+            "type": "integer"
+          }
+        },
+        "title": "CleanupRequest",
+        "type": "object"
+      },
       "CompilePromptRequest": {
         "properties": {
           "negative_prompt": {
@@ -4733,6 +4791,26 @@
         ]
       }
     },
+    "/api/images/cleanup/capabilities": {
+      "get": {
+        "description": "红印章擦除依赖 opencv；文字 OCR 依赖可选安装的 RapidOCR。",
+        "operationId": "cleanup_capabilities_api_images_cleanup_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cleanup Capabilities",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
     "/api/images/cleanup_missing": {
       "post": {
         "description": "把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。\n\n默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。\n真正执行要同时传 `dry_run=false&confirm=true`。\n\n筛选参数与画廊一致，避免\"看着筛过的列表点清理，却清掉了范围外的记录\"。",
@@ -5374,6 +5452,108 @@
           }
         },
         "summary": "Add Image Category",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/cleanup": {
+      "post": {
+        "description": "擦除红印章或文字，生成一张新图；原图不覆盖。",
+        "operationId": "cleanup_history_image_api_images__item_id__cleanup_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cleanup History Image",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/{item_id}/cleanup/detect": {
+      "post": {
+        "description": "只检测不擦除：返回红印章/文本框，供后续选择性清理。",
+        "operationId": "detect_cleanup_regions_api_images__item_id__cleanup_detect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detect Cleanup Regions",
         "tags": [
           "图片"
         ]

@@ -546,6 +546,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/cleanup/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cleanup Capabilities
+         * @description 红印章擦除依赖 opencv；文字 OCR 依赖可选安装的 RapidOCR。
+         */
+        get: operations["cleanup_capabilities_api_images_cleanup_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/cleanup_missing": {
         parameters: {
             query?: never;
@@ -683,6 +703,46 @@ export interface paths {
         post: operations["add_image_category_api_images__item_id__categories__cat_id__post"];
         /** Remove Image Category */
         delete: operations["remove_image_category_api_images__item_id__categories__cat_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/images/{item_id}/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cleanup History Image
+         * @description 擦除红印章或文字，生成一张新图；原图不覆盖。
+         */
+        post: operations["cleanup_history_image_api_images__item_id__cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/images/{item_id}/cleanup/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect Cleanup Regions
+         * @description 只检测不擦除：返回红印章/文本框，供后续选择性清理。
+         */
+        post: operations["detect_cleanup_regions_api_images__item_id__cleanup_detect_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1937,6 +1997,32 @@ export interface components {
             parent_id?: number | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /** CleanupBoxModel */
+        CleanupBoxModel: {
+            /** X1 */
+            x1: number;
+            /** X2 */
+            x2: number;
+            /** Y1 */
+            y1: number;
+            /** Y2 */
+            y2: number;
+        };
+        /** CleanupRequest */
+        CleanupRequest: {
+            /** Boxes */
+            boxes?: components["schemas"]["CleanupBoxModel"][] | null;
+            /**
+             * Mode
+             * @default seals
+             */
+            mode: string;
+            /**
+             * Padding
+             * @default 6
+             */
+            padding: number;
         };
         /** CompilePromptRequest */
         CompilePromptRequest: {
@@ -4337,6 +4423,26 @@ export interface operations {
             };
         };
     };
+    cleanup_capabilities_api_images_cleanup_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     cleanup_missing_files_api_images_cleanup_missing_post: {
         parameters: {
             query?: {
@@ -4629,6 +4735,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cleanup_history_image_api_images__item_id__cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detect_cleanup_regions_api_images__item_id__cleanup_detect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

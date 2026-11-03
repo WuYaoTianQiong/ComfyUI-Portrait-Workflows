@@ -18,6 +18,7 @@ import { confirmDialogWithCheckbox } from '../utils/naive'
 import { useSettings } from '../composables/useSettings'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useViewerTransform } from '../composables/useViewerTransform'
+import ManualCleanupModal from './ManualCleanupModal.vue'
 import Modal from './Modal.vue'
 
 /**
@@ -338,6 +339,12 @@ async function feedToWorkflow() {
   } finally {
     busy.value = false
   }
+}
+
+const manualCleanupOpen = ref(false)
+
+function onCleanupApplied() {
+  emit('changed')
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1132,20 @@ function onKey(event: KeyboardEvent) {
               </dl>
             </section>
 
+            <section class="side-block cleanup-block">
+              <h3 class="side-title">后期清理</h3>
+              <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
+              <div class="cleanup-actions">
+                <button
+                  class="btn btn-sm"
+                  :disabled="busy"
+                  @click="promptInfoOpen = false; manualCleanupOpen = true"
+                >
+                  框选清理
+                </button>
+              </div>
+            </section>
+
             <section v-if="detailLoading" class="side-block">
               <span class="prompt-tip">正在汇总工作流与运行参数…</span>
             </section>
@@ -1199,6 +1220,14 @@ function onKey(event: KeyboardEvent) {
         </div>
       </div>
     </Modal>
+
+    <ManualCleanupModal
+      :open="manualCleanupOpen"
+      :image-id="item?.id ?? 0"
+      :image-url="item ? viewUrl(item) : ''"
+      @close="manualCleanupOpen = false"
+      @applied="onCleanupApplied"
+    />
   </div>
 </template>
 
@@ -1784,6 +1813,13 @@ function onKey(event: KeyboardEvent) {
   font-size: var(--fs-xs);
   color: var(--muted);
   line-height: 1.6;
+}
+
+.cleanup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--gap-sm);
 }
 
 @media (max-width: 820px) {
