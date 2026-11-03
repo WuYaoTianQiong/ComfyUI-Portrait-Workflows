@@ -38,6 +38,20 @@ _RATIO_VALUES = {
     ratio: int(ratio.split(":")[0]) / int(ratio.split(":")[1]) for ratio in CANONICAL_RATIOS
 }
 
+# ResolutionPresetPicker / ResolutionSelector 的真实选项；都没有 9:21。
+# 固定放大链路（ZIT 1.7×）不允许 App 再用字面量硬塞 9:21：实测 9:16 就已经
+# 有 1/3 底部拼贴，9:21 更差。单程工作流（Qwen/Krea2/Porn）才开放 9:21 扩展。
+NATIVE_PRESET_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9")
+NATIVE_RESOLVER_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9")
+
+# 第二程（post_scale）输出长边上限。超过后 ZIT 用固定 1.7× 硬拉会出现
+# 底部货架/地面拼贴；2048 是 9:16 三 seed 验证过的安全阈值。
+MAX_FINAL_LONG_SIDE = 2048
+
+
+class RatioNotSupported(ValueError):
+    """请求的比例超出工作流安全范围（例如 ZIT 预设链路 + 9:21）。"""
+
 
 def normalize_aspect_ratio(value: object) -> str | None:
     """把 '9:16 (Portrait Widescreen)' / '640x960（2:3）' 归一到 8 个标准比例之一。"""
@@ -243,6 +257,38 @@ def _get_combo_options(node_type: str, input_name: str) -> list[str]:
     except Exception as exc:
         logger.debug("取 %s.%s 可选值失败：%s", node_type, input_name, type(exc).__name__)
         return []
+
+
+def _allowed_preset_ratios() -> list[str]:
+    """ResolutionPresetPicker 实际支持的比例；拿不到 object_info 时退回静态表。"""
+    options = _get_combo_options("ResolutionPresetPicker", "preset")
+    ratios: list[str] = []
+    for option in options:
+        ratio = normalize_aspect_ratio(option)
+        if ratio and ratio not in ratios:
+            ratios.append(ratio)
+    return ratios or list(NATIVE_PRESET_RATIOS)
+
+
+def _allowed_resolver_ratios() -> list[str]:
+    """ResolutionSelector 实际支持的比例；拿不到 object_info 时退回静态表。"""
+    options = _get_combo_options("ResolutionSelector", "aspect_ratio")
+    ratios: list[str] = []
+    for option in options:
+        ratio = normalize_aspect_ratio(option)
+        if ratio and ratio not in ratios:
+            ratios.append(ratio)
+    return ratios or list(NATIVE_RESOLVER_RATIOS)
+
+
+def _cap_latent_to_final_long_side(
+    width: float, height: float, post_scale: float, multiple: int,
+) -> tuple[int, int]:
+    """按第二程倍率反推第一程尺寸，保证成品长边不超过 MAX_FINAL_LONG_SIDE。"""
+    if post_scale <= 1.0 or max(width, height) * post_scale <= MAX_FINAL_LONG_SIDE:
+        return int(round(width)), int(round(height))
+    k = MAX_FINAL_LONG_SIDE / (max(width, height) * post_scale)
+    return _round_to(width * k, multiple), _round_to(height * k, multiple)
 
 
 def _reciprocal_ratio(ratio: str) -> str:
@@ -884,9 +930,17 @@ def detect_workflow_params(api_workflow: dict) -> dict:
         params["base_height"] = info["height"]
         params["base_megapixels"] = round(float(info["megapixels"]), 3)
         params["mp_unit"] = "mip" if info["unit"] == 1024 * 1024 else "mp"
-        params["post_scale"] = _output_scale(api_workflow, info["id"])
+        post_scale = _output_scale(api_workflow, info["id"])
+        params["post_scale"] = post_scale
         params["default_ratio"] = info["ratio"]
-        params["aspect_ratios"] = list(CANONICAL_RATIOS)
+        # 按节点真实选项检测：preset 永远用 picker 自己的比例；
+        # resolver 只有固定放大时才收紧，单程 resolver 允许 9:21 的字面量扩展。
+        if info["mode"] == "preset":
+            params["aspect_ratios"] = _allowed_preset_ratios()
+        elif info["mode"] == "resolver" and post_scale > 1.0:
+            params["aspect_ratios"] = _allowed_resolver_ratios()
+        else:
+            params["aspect_ratios"] = list(CANONICAL_RATIOS)
         params["multiple"] = info["multiple"]
         params["quality_mode"] = "megapixels" if info["mode"] in ("resolver", "megapixels") else "scale"
         params["orientation_mode"] = "swap" if info["mode"] == "literal" else "knob"
@@ -939,6 +993,20 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         if not _matches_orientation(requested, orientation):
             requested = _reciprocal_ratio(requested)
 
+    post_scale = _output_scale(api_workflow, info["id"])
+    if post_scale > 1.0:
+        if info["mode"] == "preset":
+            allowed = _allowed_preset_ratios()
+        elif info["mode"] == "resolver":
+            allowed = _allowed_resolver_ratios()
+        else:
+            allowed = None
+        if allowed and requested not in allowed:
+            raise RatioNotSupported(
+                f"该工作流只支持 {', '.join(allowed)}，已拒绝 {requested}；"
+                "请改用支持该比例的工作流"
+            )
+
     target_mp = float(info["megapixels"]) * scale * scale
 
     if info["mode"] == "resolver":
@@ -948,26 +1016,47 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
             _get_combo_options(src.get("class_type", ""), "aspect_ratio"), requested,
         )
         if picked and isinstance(src_inputs.get("megapixels"), (int, float)):
+            width, height = compute_aspect_size(
+                requested, target_mp, info["multiple"], info["unit"],
+            )
+            capped_w, capped_h = _cap_latent_to_final_long_side(
+                width, height, post_scale, info["multiple"],
+            )
+            # 未触发上限时保留原始 target_mp，避免宽高取整带来 2.16 → 2.159 的漂移。
+            capped_mp = target_mp if (capped_w, capped_h) == (width, height) \
+                else (capped_w * capped_h) / info["unit"]
             src_inputs["aspect_ratio"] = picked
-            src_inputs["megapixels"] = round(max(0.1, min(16.0, target_mp)), 3)
+            src_inputs["megapixels"] = round(max(0.1, min(16.0, capped_mp)), 3)
             logger.info("分辨率：%s aspect_ratio=%s, megapixels=%s",
                         src.get("class_type"), picked, src_inputs["megapixels"])
             return
         # 旋钮不支持该比例时退回字面量，单位与旋钮一致（MiP）
         width, height = compute_aspect_size(requested, target_mp, info["multiple"], info["unit"])
+        width, height = _cap_latent_to_final_long_side(
+            width, height, post_scale, info["multiple"],
+        )
         _set_latent_size(info, width, height)
         return
 
     # literal / preset / megapixels：默认比例 + 1.0× 保持原生尺寸，其余按比例重算
     if requested == info["ratio"] and abs(scale - 1.0) < 1e-9:
-        _set_latent_size(info, info["width"], info["height"])
+        width, height = _cap_latent_to_final_long_side(
+            info["width"], info["height"], post_scale, info["multiple"],
+        )
+        _set_latent_size(info, width, height)
         return
     # 旧调用只给横竖时，倒数比例 + 1.0× 仍是"原生宽高交换"，与历史输出逐像素一致
     if implicit_ratio and info["mode"] == "literal" and abs(scale - 1.0) < 1e-9 \
             and requested == _reciprocal_ratio(info["ratio"]):
-        _set_latent_size(info, info["height"], info["width"])
+        width, height = _cap_latent_to_final_long_side(
+            info["height"], info["width"], post_scale, info["multiple"],
+        )
+        _set_latent_size(info, width, height)
         return
     width, height = compute_aspect_size(requested, target_mp, info["multiple"], info["unit"])
+    width, height = _cap_latent_to_final_long_side(
+        width, height, post_scale, info["multiple"],
+    )
     _set_latent_size(info, width, height)
 
 

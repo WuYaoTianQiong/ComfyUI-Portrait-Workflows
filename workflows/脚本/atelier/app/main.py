@@ -10,13 +10,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app import __version__
 from app.config import settings
 from app.models import init_db, db
 from app.services.paths import _resolve_if_reparse
 from app.services.logging_setup import setup_logging
+from app.services.workflow_parser import RatioNotSupported
 
 logger = logging.getLogger("atelier")
 
@@ -83,6 +84,12 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RatioNotSupported)
+async def _ratio_not_supported(_request, exc: RatioNotSupported):
+    """比例超出工作流安全范围时直接拒绝，前端根据 detail 提示换工作流。"""
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 # CORS：前端与后端同源部署，开发期走 Vite 代理，本来不需要跨域。
 # 保留本机开发来源即可；绝不能用 "*" —— 否则任意网页都能借本机浏览器读接口响应。

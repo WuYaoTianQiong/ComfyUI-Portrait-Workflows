@@ -234,6 +234,56 @@ describe('画质参数与真实档位', () => {
       .toBe('1.25× · 0.96MP · 800×1200 → 成品 1360×2040')
   })
 
+  it('预设 + 后置放大：只给预设真实比例，不含 9:21', () => {
+    const params = paramsOf({
+      1: { class_type: 'ResolutionPresetPicker', inputs: { preset: '640x960 （2:3）', base_name: 'ZIT' } },
+      2: { class_type: 'EmptyLatentImage', inputs: { width: ['1', 0], height: ['1', 1] } },
+      3: { class_type: 'KSampler', inputs: { latent_image: ['2', 0] } },
+      4: { class_type: 'LatentUpscaleBy', inputs: { samples: ['3', 0], upscale_method: 'bislerp', scale_by: 1.7 } },
+      5: { class_type: 'KSampler', inputs: { latent_image: ['4', 0] } },
+      6: { class_type: 'VAEDecode', inputs: { samples: ['5', 0] } },
+      7: { class_type: 'SaveImage', inputs: { images: ['6', 0], filename_prefix: 'x' } },
+    })
+    expect(params.post_scale).toBe(1.7)
+    expect(params.aspect_ratios).toEqual([
+      '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9',
+    ])
+  })
+
+  it('旋钮 + 后置放大：只给旋钮真实比例，不含 9:21', () => {
+    const params = paramsOf({
+      1: { class_type: 'ResolutionSelector', inputs: { aspect_ratio: '9:16', megapixels: 2.16, multiple: 8 } },
+      2: { class_type: 'EmptyLatentImage', inputs: { width: ['1', 0], height: ['1', 1] } },
+      3: { class_type: 'LatentUpscaleBy', inputs: { samples: ['2', 0], upscale_method: 'bislerp', scale_by: 1.7 } },
+      4: { class_type: 'VAEDecode', inputs: { samples: ['3', 0] } },
+      5: { class_type: 'SaveImage', inputs: { images: ['4', 0], filename_prefix: 'x' } },
+    })
+    expect(params.post_scale).toBe(1.7)
+    expect(params.aspect_ratios).toEqual([
+      '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
+    ])
+  })
+
+  it('第二程长边上限：1.5× + 9:16 的成品不超过 2048', () => {
+    const options = optionsFor({
+      quality_mode: 'scale',
+      orientation_mode: 'knob',
+      base_width: 640,
+      base_height: 960,
+      base_megapixels: 0.614,
+      mp_unit: 'mp',
+      post_scale: 1.7,
+      default_ratio: '2:3',
+      aspect_ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
+      multiple: 16,
+    }, '9:16')
+    const q15 = options.find((o) => o.value === '8K')
+    expect(q15).toBeTruthy()
+    const match = q15?.label.match(/成品 (\d+)×(\d+)/)
+    expect(match).toBeTruthy()
+    expect(Math.max(Number(match?.[1]), Number(match?.[2]))).toBeLessThanOrEqual(2048 + 8)
+  })
+
   it('工作流声明的档位会过滤掉低档', () => {
     const params = paramsOf({
       1: { class_type: 'EmptyLatentImage', inputs: { width: 832, height: 1216 } },

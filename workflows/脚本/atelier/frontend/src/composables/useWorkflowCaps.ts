@@ -70,6 +70,19 @@ export const CANONICAL_RATIOS = [
   '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', '9:21',
 ] as const
 
+/** ResolutionPresetPicker 的真实选项；没有 9:21。 */
+export const PRESET_RATIOS = [
+  '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9',
+] as const
+
+/** ResolutionSelector 的真实选项；也没有 9:21（21:9 的竖版靠字面量扩展）。 */
+export const RESOLVER_RATIOS = [
+  '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
+] as const
+
+/** 第二程输出长边上限；超过后固定放大链路会出现底部拼贴。 */
+export const MAX_FINAL_LONG_SIDE = 2048
+
 const RATIO_VALUES: Record<string, number> = Object.fromEntries(
   CANONICAL_RATIOS.map((r) => {
     const [a, b] = r.split(':').map(Number)
@@ -109,6 +122,20 @@ function computeSize(
   const r = ratioValue(ratio)
   const width = Math.sqrt(Math.max(0.01, megapixels) * unit * r)
   return [roundTo(width, multiple), roundTo(width / r, multiple)]
+}
+
+/** 按第二程倍率反推第一程尺寸，保证成品长边不超过 MAX_FINAL_LONG_SIDE。 */
+function capFirstPassSize(
+  w: number,
+  h: number,
+  postScale: number,
+  multiple: number,
+): [number, number] {
+  if (postScale <= 1 || Math.max(w, h) * postScale <= MAX_FINAL_LONG_SIDE) {
+    return [w, h]
+  }
+  const k = MAX_FINAL_LONG_SIDE / (Math.max(w, h) * postScale)
+  return [roundTo(w * k, multiple), roundTo(h * k, multiple)]
 }
 
 const LATENT_TYPES = new Set([
@@ -417,7 +444,12 @@ export function detectParamsFromContent(content: string): WorkflowParams {
     // 读不到 widgets_values：按"有潜空间节点"乐观判定，实际不可用时后端静默降级
     if (!hasSeedvr) params.quality_mode = 'scale'
     params.orientation_mode = 'swap'
-    params.aspect_ratios = [...CANONICAL_RATIOS]
+    // 预设/旋钮节点只暴露自己的真实比例；9:21 不能靠字面量硬塞给固定放大链路。
+    const hasPresetPicker = nodes.some((n) => n.class_type === 'ResolutionPresetPicker')
+    const hasResolver = nodes.some((n) => n.class_type === 'ResolutionSelector')
+    params.aspect_ratios = hasPresetPicker
+      ? [...PRESET_RATIOS]
+      : hasResolver ? [...RESOLVER_RATIOS] : [...CANONICAL_RATIOS]
     params.default_ratio = '2:3'
     return params
   }
@@ -459,7 +491,10 @@ export function detectParamsFromContent(content: string): WorkflowParams {
       const [bw, bh] = computeSize(ratio, mp, multiple, 1024 * 1024)
       params.base_width = bw
       params.base_height = bh
-      params.aspect_ratios = [...CANONICAL_RATIOS]
+      // 旋钮没有 9:21；只有单程链路（post_scale=1）才允许字面量扩展。
+      params.aspect_ratios = (params.post_scale ?? 1) > 1
+        ? [...RESOLVER_RATIOS]
+        : [...CANONICAL_RATIOS]
       return params
     }
 
@@ -471,7 +506,8 @@ export function detectParamsFromContent(content: string): WorkflowParams {
       params.base_height = preset.height
       params.base_megapixels = Math.round((preset.width * preset.height) / 10_000) / 100
       params.default_ratio = preset.ratio
-      params.aspect_ratios = [...CANONICAL_RATIOS]
+      // preset 节点实际只有 8 个选项；固定放大链路（ZIT 1.7×）不允许 9:21。
+      params.aspect_ratios = [...PRESET_RATIOS]
       return params
     }
 
@@ -482,7 +518,9 @@ export function detectParamsFromContent(content: string): WorkflowParams {
       params.mp_unit = 'mip'
       params.default_ratio = '1:1'
       params.multiple = rawMultiple ?? 16
-      params.aspect_ratios = [...CANONICAL_RATIOS]
+      params.aspect_ratios = (params.post_scale ?? 1) > 1
+        ? [...RESOLVER_RATIOS]
+        : [...CANONICAL_RATIOS]
       return params
     }
     break
@@ -542,13 +580,14 @@ function qualityOptionsFor(
     return tiers.flatMap(({ value, scale }) => {
       if (!base) return [{ value, label: scaleLabel(scale) }]
       const mp = base * scale * scale
-      const actualMp = (mp * unit) / 1_000_000
       const isNative = scale === 1 && (!defaultRatio || effectiveRatio === defaultRatio)
       const prefix = isNative ? '原生 1.0×' : scaleLabel(scale)
-      let label = `${prefix} · ${Math.round(actualMp * 100) / 100}MP`
+      let label = `${prefix} · ${Math.round(((mp * unit) / 1_000_000) * 100) / 100}MP`
       if (effectiveRatio) {
-        const [w, h] = computeSize(effectiveRatio, mp, multiple, unit)
-        label += ` · ${w}×${h}`
+        let [w, h] = computeSize(effectiveRatio, mp, multiple, unit)
+        ;[w, h] = capFirstPassSize(w, h, postScale, multiple)
+        const cappedMp = (w * h) / 1_000_000
+        label = `${prefix} · ${Math.round(cappedMp * 100) / 100}MP · ${w}×${h}`
         if (postScale !== 1) {
           const [fw, fh] = finalSize(w, h)
           label += ` → 成品 ${fw}×${fh}`
@@ -574,10 +613,12 @@ function qualityOptionsFor(
       } else {
         ;[w, h] = computeSize(effectiveRatio, mp, multiple, unit)
       }
+      ;[w, h] = capFirstPassSize(w, h, postScale, multiple)
     }
     const prefix = isNative ? '原生 1.0×' : scaleLabel(scale)
+    const actualMp = w && h ? (w * h) / 1_000_000 : (mp ?? 0)
     let label = w && h
-      ? `${prefix} · ${Math.round((mp ?? 0) * 100) / 100}MP · ${w}×${h}`
+      ? `${prefix} · ${Math.round(actualMp * 100) / 100}MP · ${w}×${h}`
       : prefix
     if (w && h && postScale !== 1) {
       const [fw, fh] = finalSize(w, h)

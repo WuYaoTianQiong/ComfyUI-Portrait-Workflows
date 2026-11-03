@@ -176,11 +176,20 @@ def test_resolver_uses_mip_and_reports_post_scale(monkeypatch):
     assert params["mp_unit"] == "mip"
     assert (params["base_width"], params["base_height"]) == (1128, 2008)
     assert params["post_scale"] == 1.7
+    assert "9:21" not in params["aspect_ratios"]
 
-    # 9:21 不在 ResolutionSelector 选项里，退回字面量时仍要沿用 MiP
-    wf2 = json.loads(json.dumps(wf))
-    inject_prompt(wf2, {"prompt": "x", "quality": "4K", "aspect_ratio": "9:21"})
-    assert (wf2["5"]["inputs"]["width"], wf2["5"]["inputs"]["height"]) == (984, 2296)
+    # 固定放大链路不允许 9:21
+    from app.services.workflow_parser import RatioNotSupported
+    with pytest.raises(RatioNotSupported, match="9:21"):
+        inject_prompt(json.loads(json.dumps(wf)), {
+            "prompt": "x", "quality": "4K", "aspect_ratio": "9:21",
+        })
+
+    # 单程 resolver（没有 1.7×）仍允许 9:21，退回字面量并沿用 MiP
+    single = json.loads(json.dumps(wf))
+    single["10"]["inputs"]["scale_by"] = 1.0
+    inject_prompt(single, {"prompt": "x", "quality": "4K", "aspect_ratio": "9:21"})
+    assert (single["5"]["inputs"]["width"], single["5"]["inputs"]["height"]) == (984, 2296)
 
 
 def test_aspect_ratio_resolver_sets_knob_and_megapixels(monkeypatch):
@@ -213,7 +222,10 @@ def test_aspect_ratio_resolver_sets_knob_and_megapixels(monkeypatch):
 
 
 def test_aspect_ratio_preset_falls_back_to_literal():
-    """ZIT 的 preset 没有 21:9：仍要能出 21:9，退化成字面量宽高。"""
+    """预设且没有固定放大时，仍允许字面量扩展（合成用例）。
+
+    真实 ZIT 带 1.7× 第二程，9:21 会被拒绝，见下一条。
+    """
     from app.services.workflow_parser import inject_prompt
 
     wf = {
@@ -231,6 +243,56 @@ def test_aspect_ratio_preset_falls_back_to_literal():
     wf2 = json.loads(json.dumps(wf))
     inject_prompt(wf2, {"prompt": "x", "quality": "4K", "aspect_ratio": "2:3"})
     assert (wf2["6"]["inputs"]["width"], wf2["6"]["inputs"]["height"]) == (640, 960)
+
+
+def test_preset_with_fixed_upscale_rejects_921(monkeypatch):
+    """ZIT（preset + 1.7× 第二程）不允许 9:21：比例列表和注入都要拒绝。"""
+    from app.services import workflow_parser
+    from app.services.workflow_parser import (
+        RatioNotSupported, detect_workflow_params, inject_prompt,
+    )
+
+    monkeypatch.setattr(workflow_parser, "_get_combo_options", lambda *_: [
+        "640x960 （2:3）", "800x1200 （2:3）", "768x1024 （3:4）",
+        "720x1280 （9:16）", "960x640 （3:2）", "1024x768 （4:3）",
+        "1280x720 （16:9）", "1024x1024 （1:1）",
+    ])
+    wf = {
+        "1": {"class_type": "ResolutionPresetPicker", "inputs": {
+            "preset": "640x960 （2:3）", "base_name": "MoodyZIT"}},
+        "2": {"class_type": "EmptyLatentImage", "inputs": {
+            "width": ["1", 0], "height": ["1", 1], "batch_size": 1}},
+        "3": {"class_type": "KSampler", "inputs": {"latent_image": ["2", 0]}},
+        "4": {"class_type": "LatentUpscaleBy", "inputs": {
+            "samples": ["3", 0], "upscale_method": "bislerp", "scale_by": 1.7}},
+        "5": {"class_type": "KSampler", "inputs": {"latent_image": ["4", 0]}},
+        "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0]}},
+        "7": {"class_type": "SaveImage", "inputs": {
+            "images": ["6", 0], "filename_prefix": "x"}},
+    }
+
+    params = detect_workflow_params(wf)
+    assert params["post_scale"] == 1.7
+    assert "9:21" not in params["aspect_ratios"]
+    assert "9:16" in params["aspect_ratios"]
+
+    with pytest.raises(RatioNotSupported, match="9:21"):
+        inject_prompt(json.loads(json.dumps(wf)), {
+            "prompt": "x", "quality": "4K", "aspect_ratio": "9:21",
+        })
+
+    ok = json.loads(json.dumps(wf))
+    inject_prompt(ok, {"prompt": "x", "quality": "4K", "aspect_ratio": "9:16"})
+    w, h = ok["2"]["inputs"]["width"], ok["2"]["inputs"]["height"]
+    assert abs((w / h) / (9 / 16) - 1) < 0.03
+    assert (w, h) == (592, 1040)
+
+    # 1.5× + 9:16：第二程长边必须被钳到 2048 以内
+    capped = json.loads(json.dumps(wf))
+    inject_prompt(capped, {"prompt": "x", "quality": "1.5x", "aspect_ratio": "9:16"})
+    cw, ch = capped["2"]["inputs"]["width"], capped["2"]["inputs"]["height"]
+    assert max(cw, ch) * 1.7 <= 2048 + 16
+    assert abs((cw / ch) / (9 / 16) - 1) < 0.03
 
 
 def test_prompts_full_returns_complete_text_under_filters(api, seed_prompt, seed_taxonomy):

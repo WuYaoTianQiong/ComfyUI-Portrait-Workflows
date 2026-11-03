@@ -16,7 +16,9 @@ from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
 from app.services.prompt_compiler import compile_prompt
 from app.services.workflow_catalog import find_default_workflow, list_valid_workflows
-from app.services.workflow_parser import detect_workflow_caps, load_workflow, inject_prompt
+from app.services.workflow_parser import (
+    RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt,
+)
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
     OutputLocationError,
@@ -249,6 +251,8 @@ def run_prompt(req: RunRequest):
         raise HTTPException(400, str(e))
     except OutputLocationError as e:
         raise HTTPException(400, str(e))
+    except RatioNotSupported:
+        raise
     except RuntimeError as e:
         logger.exception("跑图失败(prompt=%s, 工作流=%s)", req.id, workflow_path)
         raise HTTPException(500, str(e))
@@ -324,6 +328,8 @@ def run_text_prompt(req: RunTextRequest):
         raise HTTPException(400, str(e))
     except OutputLocationError as e:
         raise HTTPException(400, str(e))
+    except RatioNotSupported:
+        raise
     except RuntimeError as e:
         raise HTTPException(500, str(e))
     except Exception as e:

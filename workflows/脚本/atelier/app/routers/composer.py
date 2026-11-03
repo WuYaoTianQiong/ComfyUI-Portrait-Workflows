@@ -8,7 +8,9 @@ from typing import Optional
 
 from app.models import Prompt, Category, Tag, PromptCategory, EntityTag, db
 from app.services.prompt_compiler import compile_prompt
-from app.services.workflow_parser import detect_workflow_caps, load_workflow, inject_prompt
+from app.services.workflow_parser import (
+    RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt,
+)
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
     OutputLocationError,
@@ -192,6 +194,8 @@ def composer_run(req: ComposerRunRequest):
         raise HTTPException(400, str(e))
     except OutputLocationError as e:
         raise HTTPException(400, str(e))
+    except RatioNotSupported:
+        raise
     except RuntimeError as e:
         raise HTTPException(500, str(e))
     except Exception as e:
