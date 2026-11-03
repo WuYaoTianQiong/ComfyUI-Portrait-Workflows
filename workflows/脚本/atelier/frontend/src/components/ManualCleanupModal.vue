@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import { useToast } from '../composables/useToast'
+import { confirmDialog } from '../utils/naive'
 
 const props = defineProps<{
   open: boolean
@@ -101,23 +102,51 @@ function clearSelection() {
 
 async function apply() {
   if (!naturalBox.value || busy.value) return
+  const img = imgEl.value
+  const box = naturalBox.value
+  if (img) {
+    const bw = box.x2 - box.x1
+    const bh = box.y2 - box.y1
+    if (bw < 8 || bh < 8) {
+      error.value = '选区太小，请框住完整印章或文字'
+      return
+    }
+    const ratio = (bw * bh) / (img.naturalWidth * img.naturalHeight)
+    if (ratio > 0.08) {
+      const ok = await confirmDialog({
+        title: '选区较大',
+        content: '选区超过图片 8%，OpenCV 擦除可能糊掉周围内容；建议只框住印章/文字本身。仍要应用吗？',
+        positiveText: '仍然应用',
+        negativeText: '重新框选',
+        type: 'warning',
+      })
+      if (!ok) return
+    }
+  }
+
   busy.value = true
   error.value = ''
   try {
     const res = await apiPost<{
       success: boolean
       removed: number
+      remaining_red?: number
+      warning?: string
       filename?: string
       message?: string
     }>(`/api/images/${props.imageId}/cleanup`, {
-      boxes: [naturalBox.value],
+      boxes: [box],
       padding: 6,
     })
     if (!res.success) {
       error.value = res.message || '未生成新图'
       return
     }
-    toast.success(`已清理 ${res.removed} 个选区，生成 ${res.filename}`)
+    if (res.warning) {
+      toast.info(res.warning)
+    } else {
+      toast.success(`已清理 ${res.removed} 个选区，生成 ${res.filename}`)
+    }
     emit('applied', { filename: res.filename, removed: res.removed })
     clearSelection()
     emit('close')

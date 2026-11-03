@@ -150,6 +150,24 @@ def detect_boxes(image_path: str | Path, mode: str = "seals") -> list[CleanupBox
     raise ValueError(f"未知清理模式: {mode}")
 
 
+def red_pixels_in_boxes(image_path: str | Path, boxes: list[CleanupBox]) -> int:
+    """统计选区内的红色像素；用于提示“选区可能过小，印章仍有残留”。"""
+    image = _read(image_path)
+    b, g, r = [channel.astype(np.int16) for channel in cv2.split(image)]
+    redness = r - (g + b) // 2
+    total = 0
+    for box in boxes:
+        x1, y1 = max(0, box.x1), max(0, box.y1)
+        x2, y2 = min(image.shape[1], box.x2), min(image.shape[0], box.y2)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        crop = redness[y1:y2, x1:x2]
+        color = image[y1:y2, x1:x2]
+        red_channel = color[:, :, 2].astype(np.int16)
+        total += int(((crop > 10) & (red_channel > 90)).sum())
+    return total
+
+
 def build_mask(shape: tuple[int, int], boxes: list[CleanupBox], padding: int = 6):
     _require_cv()
     h, w = shape

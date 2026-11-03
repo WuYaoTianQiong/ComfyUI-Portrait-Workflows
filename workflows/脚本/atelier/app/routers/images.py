@@ -1330,7 +1330,12 @@ def detect_cleanup_regions(item_id: int, data: CleanupRequest):
 def cleanup_history_image(item_id: int, data: CleanupRequest):
     """擦除红印章或文字，生成一张新图；原图不覆盖。"""
     row, src = _cleanup_source(item_id)
-    from app.services.text_cleanup import CleanupBox, cleanup_image, detect_boxes
+    from app.services.text_cleanup import (
+        CleanupBox,
+        cleanup_image,
+        detect_boxes,
+        red_pixels_in_boxes,
+    )
 
     if data.boxes:
         mode = "manual"
@@ -1372,6 +1377,7 @@ def cleanup_history_image(item_id: int, data: CleanupRequest):
         removed, used = cleanup_image(
             src, out_path, mode, padding=max(0, min(50, int(data.padding))), boxes=boxes,
         )
+        remaining_red = red_pixels_in_boxes(out_path, used)
     except (RuntimeError, OSError, FileNotFoundError) as e:
         raise HTTPException(500, str(e))
 
@@ -1406,6 +1412,11 @@ def cleanup_history_image(item_id: int, data: CleanupRequest):
         "view_url": view_url,
         "mode": mode,
         "removed": removed,
+        "remaining_red": remaining_red,
+        "warning": (
+            "选区内仍有红色残留，选区可能太小；可放大选区再清理一次"
+            if mode == "manual" and remaining_red > 20 else ""
+        ),
     }
 
 

@@ -45,7 +45,25 @@ def test_cleanup_endpoint_accepts_manual_boxes(api, seed_history):
     assert body["success"] is True
     assert body["mode"] == "manual"
     assert body["removed"] == 1
+    assert body["remaining_red"] == 0
     assert (settings.output_dir / body["subfolder"] / body["filename"]).exists()
+
+
+def test_manual_box_too_small_warns_remaining_red(api, seed_history):
+    name = "cleanup_small_box.png"
+    image = np.full((400, 400, 3), 245, dtype=np.uint8)
+    cv2.rectangle(image, (120, 120), (180, 180), (0, 0, 220), thickness=-1)
+    cv2.imwrite(str(settings.output_dir / name), image)
+    row = seed_history(filename=name, subfolder="", img_type="output", source="local")
+    resp = api.post(f"/api/images/{row.id}/cleanup", json={
+        "boxes": [{"x1": 145, "y1": 145, "x2": 155, "y2": 155}],
+        "padding": 2,
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["remaining_red"] > 0
+    assert "选区可能太小" in body["warning"]
 
 
 def test_cleanup_endpoint_reports_nothing_detected(api, seed_history):
