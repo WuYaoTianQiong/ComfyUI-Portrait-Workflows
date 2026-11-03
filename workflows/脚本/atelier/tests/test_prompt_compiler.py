@@ -260,10 +260,30 @@ def test_overposed_and_stiff_posture_list_is_consumed():
     assert "自然动态姿势" in result.positive
 
 
-def test_remaining_list_items_are_reported_not_silently_kept():
+def test_list_items_are_moved_to_negative_when_effective():
     result = compile_prompt(
         "站立，避免普通站姿、无互动、平铺表情", negative_effective=True,
     )
+    for item in ("普通站姿", "无互动", "平铺表情"):
+        assert item not in result.positive
+    assert "自然动态姿势" in result.positive
+    assert "互动" in result.negative
+    assert "平铺表情" in result.negative
+    assert not any("列表型否定" in item for item in result.warnings)
+
+
+def test_unmatched_list_items_survive_with_warning_when_ineffective():
+    result = compile_prompt(
+        "站立，避免普通站姿、无互动、平铺表情", negative_effective=False,
+    )
     assert "普通站姿" not in result.positive
     assert "无互动" in result.positive
+    assert "平铺表情" in result.positive
     assert any("列表型否定仍有未处理项" in item for item in result.warnings)
+
+
+def test_compound_phrase_is_not_split_into_bad_negative_terms():
+    result = compile_prompt("坐姿，避免腿部或脸部变形", negative_effective=True)
+    assert "人体与面部结构准确" in result.positive
+    assert "腿部" not in result.negative
+    assert "脸部" not in result.negative

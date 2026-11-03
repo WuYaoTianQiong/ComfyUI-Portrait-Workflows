@@ -66,13 +66,17 @@ _LEFTOVER_NEG_RE = re.compile(
     r"(?:不要|避免|禁止|去除|去掉|不出现)[^，,。；;、\n]*"
 )
 # 一条否定管一串顿号项：「避免未成年外貌、学校制服感、cosplay…」
-_NEG_BLOCK_RE = re.compile(r"(?:避免|不要|禁止)([^，,。；;\n]+)")
+_NEG_BLOCK_RE = re.compile(r"(?P<prefix>避免|不要|禁止)(?P<body>[^，,。；;\n]+)")
 _SAFETY_RE = re.compile(r"未成年|幼态|童颜|萝莉|低龄|儿童")
+_LIST_STOPWORDS = {"以", "和", "或", "及", "与", "的", "并", "且", "任何"}
+_LIST_SEP_RE = re.compile(r"[、和及与或]+")
 _NEG_SECTION_HEADER_RE = re.compile(
     r"^\s*【(?:避免|负面|反向|negative|avoid)】\s*[:：]?\s*(.*)$",
     re.IGNORECASE,
 )
-_NEG_ITEM_PREFIX_RE = re.compile(r"^(?:不要|避免|禁止|无需|不用|无|没有)\s*")
+_NEG_ITEM_PREFIX_RE = re.compile(
+    r"^(?:不要|避免|禁止|无需|不用|不出现|任何|无|没有)\s*"
+)
 _CALLIGRAPHY_RE = re.compile(r"书法|卷轴|宣纸|题字|毛笔|墨迹|汉字|字形|字帖|匾额|碑帖")
 _SIGN_RE = re.compile(r"招牌|店招|门头|霓虹|菜单|海报|标语|路牌|指示牌|广告牌")
 
@@ -237,7 +241,7 @@ _RULES: tuple[_Rule, ...] = (
     ),
     _Rule(
         re.compile(
-            rf"(?:不要|避免|禁止){_POSE_TERM}"
+            rf"(?:不要|避免|禁止|不){_POSE_TERM}"
             rf"(?:[、,，和或与\s]*{_POSE_TERM})*"
         ),
         "自然动态姿势，身体重心有变化",
@@ -247,11 +251,11 @@ _RULES: tuple[_Rule, ...] = (
     _Rule(
         re.compile(
             r"(?:不要|避免|禁止|不出现|无|没有)"
-            r"(?:错字|乱码|缺笔画|重复字|错别字|文字变形)"
-            r"(?:[、,，和或与\s]*(?:错字|乱码|缺笔画|重复字|错别字|文字变形))*"
+            r"(?:错字|乱码|缺笔画|重复字|错别字|文字变形|多余文字|引号|英文拼写错误)"
+            r"(?:[、,，和或与\s]*(?:错字|乱码|缺笔画|重复字|错别字|文字变形|多余文字|引号|英文拼写错误))*"
         ),
         "字形准确，笔画完整",
-        ("错字", "乱码", "缺笔画", "重复字"),
+        ("错字", "乱码", "缺笔画", "重复字", "多余文字", "引号"),
         "把错字/乱码否定改写为字形准确",
     ),
     _Rule(
@@ -473,13 +477,91 @@ def _extract_negative_sections(text: str) -> tuple[str, list[str], list[str]]:
     return ("\n".join(kept) if removed else text), terms, notes
 
 
+def _match_rule_item(item: str) -> _Rule | None:
+    for candidate in (item, "不要" + item, "避免" + item):
+        for rule in _RULES:
+            if rule.pattern.search(candidate):
+                return rule
+    return None
+
+
+def _rule_covers_whole(prefix: str, body: str) -> bool:
+    probe = prefix + body
+    for rule in _RULES:
+        for match in rule.pattern.finditer(probe):
+            if match.start() == 0 and match.end() == len(probe):
+                return True
+    return False
+
+
+def _rewrite_negation_lists(
+    text: str, negative_effective: bool,
+) -> tuple[str, list[str], list[str], bool, list[str]]:
+    """逐项处理「避免 A、B、C」：命中项改写，未命中项按能力路由。"""
+    notes: list[str] = []
+    extracted: list[str] = []
+    warnings: list[str] = []
+    changed = False
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal changed
+        prefix = match.group("prefix")
+        body = match.group("body")
+        if not any(sep in body for sep in ("、", "和", "及", "与", "或")):
+            return match.group(0)
+        if _rule_covers_whole(prefix, body):
+            return match.group(0)
+        items = [
+            item.strip() for item in _LIST_SEP_RE.split(body)
+            if item.strip() and item.strip() not in _LIST_STOPWORDS
+        ]
+        if len(items) < 2:
+            return match.group(0)
+
+        replacements: list[str] = []
+        unmatched: list[str] = []
+        for item in items:
+            rule = _match_rule_item(item)
+            if rule is None:
+                unmatched.append(item)
+                continue
+            if rule.replacement not in replacements:
+                replacements.append(rule.replacement)
+            extracted.extend(rule.negatives)
+
+        changed = True
+        notes.append(f"把列表否定逐项拆分：{'、'.join(items)}")
+
+        residual = ""
+        if negative_effective:
+            for item in unmatched:
+                term = _NEG_ITEM_PREFIX_RE.sub("", item).strip()
+                if term:
+                    extracted.append(term)
+        elif unmatched:
+            residual = prefix + "、".join(unmatched)
+            shown = "、".join(unmatched[:4])
+            suffix = " 等" if len(unmatched) > 4 else ""
+            warnings.append(f"列表型否定仍有未处理项：{shown}{suffix}")
+
+        parts = []
+        if replacements:
+            parts.append("；".join(replacements))
+        if residual:
+            parts.append(residual)
+        return "；".join(parts)
+
+    text = _NEG_BLOCK_RE.sub(repl, text)
+    return text, notes, extracted, changed, warnings
+
+
 def _rewrite_safety_blocks(text: str) -> tuple[str, list[str], list[str]]:
     """安全项可能藏在顿号列表里，不能只处理紧挨着否定词的那一项。"""
     notes: list[str] = []
     extracted: list[str] = []
 
     def repl(match: re.Match[str]) -> str:
-        body = match.group(1)
+        body = match.group("body")
         if not _SAFETY_RE.search(body):
             return match.group(0)
         items = [item.strip() for item in re.split(r"[、和及]", body) if item.strip()]
@@ -513,12 +595,6 @@ def compile_prompt(
     warnings: list[str] = []
     extracted: list[str] = []
     changed = False
-    list_blocks = [
-        [item.strip() for item in re.split(r"[、和及]", match.group(1)) if item.strip()]
-        for match in _NEG_BLOCK_RE.finditer(original_positive)
-        if "、" in match.group(1)
-    ]
-
     text, section_terms, section_notes = _extract_negative_sections(text)
     if section_notes:
         notes.extend(section_notes)
@@ -552,6 +628,15 @@ def compile_prompt(
         extracted.extend(terms)
         changed = True
 
+    text, list_notes, list_terms, list_changed, list_warnings = _rewrite_negation_lists(
+        text, negative_effective,
+    )
+    if list_changed:
+        notes.extend(list_notes)
+        extracted.extend(list_terms)
+        warnings.extend(list_warnings)
+        changed = True
+
     for rule in _RULES:
         if not rule.pattern.search(text):
             continue
@@ -579,12 +664,6 @@ def compile_prompt(
 
     # 没有任何规则命中时逐字保留原文：不为了清理空白而改动英文/无否定提示。
     positive_out = _clean_text(text) if changed else original_positive
-    for items in list_blocks:
-        remaining = [item for item in items if item and item in positive_out]
-        if remaining:
-            shown = "、".join(remaining[:4])
-            suffix = " 等" if len(remaining) > 4 else ""
-            warnings.append(f"列表型否定仍有未处理项：{shown}{suffix}")
     existing = _split_terms(negative)
     extracted_clean = _dedupe([term for term in extracted if term])
 
