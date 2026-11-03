@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 
 import { cancelJob, listJobs, retryJob, stopAllJobs } from '../api/endpoints'
 import { thumbnailUrl } from '../api/client'
+import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useImageLocation } from '../composables/useImageLocation'
 import { useJobStream } from '../composables/useJobStream'
 import EmptyState from '../components/EmptyState.vue'
@@ -74,22 +75,22 @@ async function stopAllRunning() {
   if (!ok) return
   stopAll.mutate()
 }
-/** 会话状态：筛选与展开的任务、滚动位置。 */
+/** 会话状态：筛选、当前打开的任务抽屉、滚动位置。 */
 interface JobsSession {
   onlyActive: boolean
-  expanded: number[]
+  selectedJobId: number | null
   scrollTop: number
 }
 
 const SESSION_KEY = 'pb.session.jobs'
 const savedSession = readSession<JobsSession>(SESSION_KEY, {
   onlyActive: false,
-  expanded: [],
+  selectedJobId: null,
   scrollTop: 0,
 })
 
 const onlyActive = ref(savedSession.onlyActive)
-const expanded = ref<Set<number>>(new Set(savedSession.expanded))
+const selectedJobId = ref<number | null>(savedSession.selectedJobId ?? null)
 
 const listEl = ref<HTMLElement | null>(null)
 let scrollSaveTimer: number | undefined
@@ -97,13 +98,13 @@ let scrollSaveTimer: number | undefined
 function saveSession() {
   writeSession(SESSION_KEY, {
     onlyActive: onlyActive.value,
-    expanded: Array.from(expanded.value),
+    selectedJobId: selectedJobId.value,
     scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
   })
 }
 
 watch(
-  [onlyActive, expanded],
+  [onlyActive, selectedJobId],
   saveSession,
   { deep: true },
 )
@@ -153,12 +154,25 @@ onBeforeUnmount(() => {
   saveSession()
 })
 
-function toggle(id: number) {
-  const next = new Set(expanded.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  expanded.value = next
+const selectedJob = computed(
+  () => jobs.value.find((job) => job.id === selectedJobId.value) ?? null,
+)
+const selectedFirstImage = computed(
+  () => selectedJob.value?.items?.[0]?.images?.[0] ?? null,
+)
+
+function openJob(id: number) {
+  selectedJobId.value = id
 }
+
+function closeJob() {
+  selectedJobId.value = null
+}
+
+useEscapeLayer(
+  () => selectedJobId.value !== null,
+  closeJob,
+)
 
 const cancelling = ref<number | null>(null)
 const retrying = ref<number | null>(null)
@@ -303,8 +317,7 @@ function openInGallery(filename: string) {
 
     <div ref="listEl" class="list" @scroll.passive="onListScroll">
       <article v-for="job in visible" :key="job.id" class="job">
-        <header class="job-head" @click="toggle(job.id)">
-          <span class="arrow">{{ expanded.has(job.id) ? '▾' : '▸' }}</span>
+        <header class="job-head" @click="openJob(job.id)">
           <span class="type">{{ TYPE_LABEL[job.job_type] ?? job.job_type }}</span>
           <span class="job-title" :title="job.title">{{ job.title }}</span>
           <span class="status" :class="job.status">{{ statusLabel(job.status) }}</span>
@@ -354,54 +367,100 @@ function openInGallery(filename: string) {
           <div class="bar" :class="job.status" :style="{ width: `${percent(job)}%` }" />
         </div>
 
-        <div v-if="expanded.has(job.id)" class="items">
-          <dl class="job-facts">
-            <div><dt>工作流</dt><dd :title="job.workflow_path ?? ''">{{ workflowName(job) }}</dd></div>
-            <div><dt>质量</dt><dd>{{ job.quality || '—' }}</dd></div>
-            <div><dt>比例</dt><dd>{{ extraText(job, 'aspect_ratio') }}</dd></div>
-            <div><dt>输出目录</dt><dd>{{ extraText(job, 'output_subfolder', '默认') }}</dd></div>
-            <div>
-              <dt>提交</dt>
-              <dd>{{ formatDateTime(job.created_at, true) || '—' }}</dd>
-            </div>
-            <div><dt>完成</dt><dd>{{ finishTime(job) || '—' }}</dd></div>
-          </dl>
-          <div v-if="!job.items?.length" class="muted">无明细</div>
-          <div v-for="(item, idx) in job.items ?? []" :key="idx" class="item">
-            <button
-              v-if="item.images?.[0]"
-              class="thumb"
-              type="button"
-              :title="`查看原图：${item.images[0].filename}`"
-              @click="openPreviewImage(item.images[0])"
-            >
-              <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
-            </button>
-            <button
-              v-if="item.images?.[0]"
-              class="btn btn-xs locate"
-              type="button"
-              title="在资源管理器中定位原图"
-              @click="revealImage(item.images[0])"
-            >
-              定位
-            </button>
-            <div class="item-body">
-              <div class="item-preview">{{ item.prompt_preview || '（无预览）' }}</div>
-              <div class="item-meta">
-                <span :class="['item-status', item.status]">
-                  {{ item.submit_state === 'queued' ? '排队中' : statusLabel(item.status) }}
-                </span>
-                <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
-                <span v-if="item.error" class="err">{{ item.error }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </article>
 
       <EmptyState v-if="!visible.length" :text="onlyActive ? '没有进行中的任务' : '还没有任务记录'" />
     </div>
+
+    <div v-if="selectedJob" class="drawer-scrim" @click="closeJob" />
+    <aside
+      v-if="selectedJob"
+      class="job-drawer"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="`任务详情：${selectedJob.title}`"
+    >
+      <header class="drawer-head">
+        <div class="drawer-title">
+          <span class="type">{{ TYPE_LABEL[selectedJob.job_type] ?? selectedJob.job_type }}</span>
+          <h2 :title="selectedJob.title">{{ selectedJob.title }}</h2>
+          <span class="status" :class="selectedJob.status">{{ statusLabel(selectedJob.status) }}</span>
+        </div>
+        <button class="btn btn-sm" @click="closeJob">关闭</button>
+      </header>
+
+      <div class="drawer-body">
+        <div class="drawer-actions">
+          <button
+            v-if="canRetry(selectedJob)"
+            class="btn btn-sm"
+            :disabled="retrying === selectedJob.id"
+            @click="retry(selectedJob.id)"
+          >
+            {{ retrying === selectedJob.id ? '重试中…' : '重试失败条目' }}
+          </button>
+          <button
+            v-if="selectedJob.status === 'pending' || selectedJob.status === 'running'"
+            class="btn btn-sm cancel"
+            :disabled="cancelling === selectedJob.id"
+            @click="cancel(selectedJob.id)"
+          >
+            取消任务
+          </button>
+          <button
+            v-if="selectedFirstImage"
+            class="btn btn-sm"
+            @click="openPreviewImage(selectedFirstImage)"
+          >
+            查看首张原图
+          </button>
+        </div>
+
+        <dl class="job-facts">
+          <div><dt>工作流</dt><dd :title="selectedJob.workflow_path ?? ''">{{ workflowName(selectedJob) }}</dd></div>
+          <div><dt>质量</dt><dd>{{ selectedJob.quality || '—' }}</dd></div>
+          <div><dt>比例</dt><dd>{{ extraText(selectedJob, 'aspect_ratio') }}</dd></div>
+          <div><dt>输出目录</dt><dd>{{ extraText(selectedJob, 'output_subfolder', '默认') }}</dd></div>
+          <div><dt>提交</dt><dd>{{ formatDateTime(selectedJob.created_at, true) || '—' }}</dd></div>
+          <div><dt>完成</dt><dd>{{ finishTime(selectedJob) || '—' }}</dd></div>
+          <div><dt>进度</dt><dd>{{ selectedJob.done_count ?? 0 }}/{{ selectedJob.total ?? 0 }}</dd></div>
+          <div><dt>耗时</dt><dd>{{ elapsed(selectedJob) || '—' }}</dd></div>
+        </dl>
+
+        <h3 class="drawer-subtitle">条目</h3>
+        <div v-if="!selectedJob.items?.length" class="muted">无明细</div>
+        <div v-for="(item, idx) in selectedJob.items ?? []" :key="idx" class="item">
+          <button
+            v-if="item.images?.[0]"
+            class="thumb"
+            type="button"
+            :title="`查看原图：${item.images[0].filename}`"
+            @click="openPreviewImage(item.images[0])"
+          >
+            <img :src="thumbUrl(item.images[0])" :alt="item.images[0].filename" loading="lazy" />
+          </button>
+          <button
+            v-if="item.images?.[0]"
+            class="btn btn-xs locate"
+            type="button"
+            title="在资源管理器中定位原图"
+            @click="revealImage(item.images[0])"
+          >
+            定位
+          </button>
+          <div class="item-body">
+            <div class="item-preview">{{ item.prompt_preview || '（无预览）' }}</div>
+            <div class="item-meta">
+              <span :class="['item-status', item.status]">
+                {{ item.submit_state === 'queued' ? '排队中' : statusLabel(item.status) }}
+              </span>
+              <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
+              <span v-if="item.error" class="err">{{ item.error }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
 
     <Lightbox
       v-if="previewOpen"
@@ -484,10 +543,10 @@ function openInGallery(filename: string) {
 /* 两行表头：第一行标题/状态/操作，第二行工作流/进度/耗时/时间 */
 .job-head {
   display: grid;
-  grid-template-columns: 12px auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   grid-template-areas:
-    'arrow type title status actions'
-    'sub sub sub sub sub';
+    'type title status actions'
+    'sub sub sub sub';
   align-items: center;
   gap: 2px var(--gap-sm);
   padding: 6px var(--gap);
@@ -497,11 +556,6 @@ function openInGallery(filename: string) {
 
 .job-head:hover {
   background: var(--panel-2);
-}
-
-.arrow {
-  grid-area: arrow;
-  color: var(--muted);
 }
 
 .type {
@@ -730,6 +784,83 @@ function openInGallery(filename: string) {
 
 .err {
   color: var(--danger);
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  z-index: var(--z-modal);
+}
+
+.job-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(560px, 94vw);
+  height: 100%;
+  z-index: calc(var(--z-modal) + 1);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+}
+
+.drawer-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.drawer-title .type,
+.drawer-title .status {
+  grid-area: auto;
+}
+
+.drawer-title h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.drawer-subtitle {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .empty {
