@@ -125,8 +125,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .wf-picker {
   position: relative;
-  flex: 1 1 240px;
-  min-width: 0;
+  /* 这一行里只有工作流名可以省略，所以压缩优先发生在它身上，下拉保持内容宽度 */
+  flex: 4 1 240px;
+  min-width: 160px;
   max-width: 640px;
 }
 

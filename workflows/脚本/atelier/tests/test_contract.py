@@ -13,6 +13,18 @@ import pytest
 # 基础与提示词
 # ---------------------------------------------------------------------------
 
+def test_quality_keys_normalize_to_scale():
+    """画质键只该存 0.75x…2.0x；旧 K 键在读写两端都要兼容。"""
+    from app.services.quality_keys import normalize_quality, quality_scale
+
+    assert normalize_quality("8K") == "1.5x"
+    assert normalize_quality("1.5x") == "1.5x"
+    assert normalize_quality("high") == "1.0x"
+    assert quality_scale("8K") == 1.5
+    assert quality_scale("1.25x") == 1.25
+    assert quality_scale("unknown") == 1.0
+
+
 def test_workflow_params_describe_real_quality_semantics():
     """画质 / 方向档位必须能描述"实际怎么改"，而不是让前端摆一排固定 K 值。"""
     from app.services.workflow_parser import detect_workflow_params
@@ -44,6 +56,181 @@ def test_workflow_params_describe_real_quality_semantics():
         "1": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 1]}},
     })
     assert video["quality_mode"] == "none"
+
+    # SD3 / Flux2 / Z-Image 的空 latent 类名不同，宽高语义一致
+    for cls in ("EmptySD3LatentImage", "EmptyFlux2LatentImage"):
+        latent = detect_workflow_params({
+            "1": {"class_type": cls, "inputs": {"width": 832, "height": 1216}},
+        })
+        assert latent["quality_mode"] == "scale"
+        assert (latent["base_width"], latent["base_height"]) == (832, 1216)
+        assert latent["orientation_mode"] == "swap"
+
+
+def test_caps_recognise_flux2_latent_and_inject_orientation():
+    """Flux2 用 EmptyFlux2LatentImage，横竖与画质旋钮不能因为类名不同就失效。"""
+    from app.services.workflow_parser import detect_workflow_caps, inject_prompt
+
+    wf = {
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "2": {"class_type": "CLIPLoader", "inputs": {}},
+        "3": {"class_type": "EmptyFlux2LatentImage",
+              "inputs": {"width": 832, "height": 1216, "batch_size": 1}},
+    }
+    caps = detect_workflow_caps(wf)
+    assert caps["orientation"] is True
+    assert caps["quality"] is True
+
+    inject_prompt(wf, {"prompt": "x", "orientation": "landscape", "quality": "4K"})
+    assert (wf["3"]["inputs"]["width"], wf["3"]["inputs"]["height"]) == (1216, 832)
+
+
+def test_aspect_ratio_contract_for_literal_latent():
+    """统一比例契约：8 个标准比例都可用，默认比例 + 1.0× 保持原生尺寸。"""
+    from app.services.workflow_parser import (
+        CANONICAL_RATIOS, detect_workflow_params, inject_prompt,
+    )
+
+    base = {
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "2": {"class_type": "CLIPLoader", "inputs": {}},
+        "3": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": 832, "height": 1216, "batch_size": 1}},
+    }
+    params = detect_workflow_params(base)
+    assert params["default_ratio"] == "2:3"
+    assert params["aspect_ratios"] == list(CANONICAL_RATIOS)
+    assert params["base_megapixels"] == 1.012
+
+    # 默认比例、4K（1.0×）不重算，保证与旧输出逐像素一致
+    wf = json.loads(json.dumps(base))
+    inject_prompt(wf, {"prompt": "x", "quality": "4K", "aspect_ratio": "2:3"})
+    assert (wf["3"]["inputs"]["width"], wf["3"]["inputs"]["height"]) == (832, 1216)
+
+    # 9:16 / 1:1 / 21:9 / 9:21 都要能落到合理的宽高，且都是 16 的倍数
+    for ratio, expect_ratio in (("9:16", 9 / 16), ("1:1", 1.0),
+                                ("21:9", 21 / 9), ("9:21", 9 / 21)):
+        wf = json.loads(json.dumps(base))
+        inject_prompt(wf, {"prompt": "x", "quality": "4K", "aspect_ratio": ratio})
+        w, h = wf["3"]["inputs"]["width"], wf["3"]["inputs"]["height"]
+        assert w % 16 == 0 and h % 16 == 0
+        assert abs((w / h) / expect_ratio - 1) < 0.03
+        assert 0.9 <= w * h / 1_000_000 <= 1.1
+
+
+def test_missing_aspect_ratio_uses_workflow_ratio_not_side_scaling():
+    """未传比例（None / 空串）时按工作流默认比例算，不能退回"宽高 × 倍率"。
+
+    旧行为下同一个 2K 档会因调用方是否带比例出 624×912 或 608×928 两种尺寸。
+    """
+    from app.services.workflow_parser import inject_prompt
+
+    base = {
+        "3": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": 832, "height": 1216, "batch_size": 1}},
+    }
+
+    def size(payload):
+        wf = json.loads(json.dumps(base))
+        inject_prompt(wf, {"prompt": "x", **payload})
+        return wf["3"]["inputs"]["width"], wf["3"]["inputs"]["height"]
+
+    # 显式比例、不传比例、空串三条路径必须一致
+    assert size({"quality": "2K", "aspect_ratio": "2:3"}) == (608, 928)
+    assert size({"quality": "2K", "orientation": "portrait"}) == (608, 928)
+    assert size({"quality": "2K", "orientation": "portrait", "aspect_ratio": ""}) == (608, 928)
+
+    # 横竖只切到倒数比例
+    assert size({"quality": "2K", "orientation": "landscape"}) == (928, 608)
+
+    # 1.0× 仍保持原生尺寸；只给横竖时是原地交换
+    assert size({"quality": "4K", "orientation": "portrait"}) == (832, 1216)
+    assert size({"quality": "4K", "orientation": "landscape"}) == (1216, 832)
+
+
+def test_resolver_uses_mip_and_reports_post_scale(monkeypatch):
+    """ResolutionSelector 的 megapixels 是 MiP（1024²），不是 1e6；
+    后置 LatentUpscaleBy 要进 post_scale。"""
+    from app.services import workflow_parser
+    from app.services.workflow_parser import detect_workflow_params, inject_prompt
+
+    monkeypatch.setattr(workflow_parser, "_get_combo_options", lambda *_: [
+        "1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)", "3:4 (Portrait Standard)",
+        "4:3 (Standard)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)",
+        "21:9 (Ultrawide)",
+    ])
+
+    wf = {
+        "4": {"class_type": "ResolutionSelector", "inputs": {
+            "aspect_ratio": "9:16 (Portrait Widescreen)", "megapixels": 2.16, "multiple": 8}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {
+            "width": ["4", 0], "height": ["4", 1], "batch_size": 1}},
+        "7": {"class_type": "KSampler", "inputs": {"latent_image": ["5", 0]}},
+        "10": {"class_type": "LatentUpscaleBy", "inputs": {
+            "samples": ["7", 0], "upscale_method": "bislerp", "scale_by": 1.7}},
+        "11": {"class_type": "KSampler", "inputs": {"latent_image": ["10", 0]}},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0]}},
+        "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": "x"}},
+    }
+    params = detect_workflow_params(wf)
+    assert params["mp_unit"] == "mip"
+    assert (params["base_width"], params["base_height"]) == (1128, 2008)
+    assert params["post_scale"] == 1.7
+
+    # 9:21 不在 ResolutionSelector 选项里，退回字面量时仍要沿用 MiP
+    wf2 = json.loads(json.dumps(wf))
+    inject_prompt(wf2, {"prompt": "x", "quality": "4K", "aspect_ratio": "9:21"})
+    assert (wf2["5"]["inputs"]["width"], wf2["5"]["inputs"]["height"]) == (984, 2296)
+
+
+def test_aspect_ratio_resolver_sets_knob_and_megapixels(monkeypatch):
+    """Krea2 这类 ResolutionSelector 工作流：写比例旋钮 + 目标 MP，而不是硬改 latent。"""
+    from app.services import workflow_parser
+    from app.services.workflow_parser import inject_prompt
+
+    monkeypatch.setattr(workflow_parser, "_get_combo_options", lambda *_: [
+        "1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)", "3:4 (Portrait Standard)",
+        "4:3 (Standard)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)",
+        "21:9 (Ultrawide)",
+    ])
+
+    wf = {
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+        "2": {"class_type": "CLIPLoader", "inputs": {}},
+        "4": {"class_type": "ResolutionSelector", "inputs": {
+            "aspect_ratio": "9:16 (Portrait Widescreen)", "megapixels": 2.16, "multiple": 8}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {
+            "width": ["4", 0], "height": ["4", 1], "batch_size": 1}},
+    }
+    inject_prompt(wf, {"prompt": "x", "quality": "4K", "aspect_ratio": "4:3"})
+    assert wf["4"]["inputs"]["aspect_ratio"].startswith("4:3")
+    assert wf["4"]["inputs"]["megapixels"] == 2.16
+    assert wf["5"]["inputs"]["width"] == ["4", 0]
+
+    # 画质倍率按面积缩放
+    inject_prompt(wf, {"prompt": "x", "quality": "4K", "aspect_ratio": "16:9"})
+    assert wf["4"]["inputs"]["aspect_ratio"].startswith("16:9")
+
+
+def test_aspect_ratio_preset_falls_back_to_literal():
+    """ZIT 的 preset 没有 21:9：仍要能出 21:9，退化成字面量宽高。"""
+    from app.services.workflow_parser import inject_prompt
+
+    wf = {
+        "6": {"class_type": "EmptyLatentImage", "inputs": {
+            "width": ["22", 0], "height": ["22", 1], "batch_size": 1}},
+        "22": {"class_type": "ResolutionPresetPicker", "inputs": {
+            "preset": "640x960（2:3）", "base_name": "ZIT"}},
+    }
+    inject_prompt(wf, {"prompt": "x", "quality": "4K", "aspect_ratio": "21:9"})
+    w, h = wf["6"]["inputs"]["width"], wf["6"]["inputs"]["height"]
+    assert isinstance(w, int) and isinstance(h, int)
+    assert abs((w / h) / (21 / 9) - 1) < 0.03
+
+    # 默认 2:3 + 1.0× 仍是原生 640×960
+    wf2 = json.loads(json.dumps(wf))
+    inject_prompt(wf2, {"prompt": "x", "quality": "4K", "aspect_ratio": "2:3"})
+    assert (wf2["6"]["inputs"]["width"], wf2["6"]["inputs"]["height"]) == (640, 960)
 
 
 def test_prompts_full_returns_complete_text_under_filters(api, seed_prompt, seed_taxonomy):

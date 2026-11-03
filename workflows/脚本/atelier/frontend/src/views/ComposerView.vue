@@ -14,6 +14,8 @@ import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import WorkflowParams from '../components/WorkflowParams.vue'
 import { useGenerate } from '../composables/useGenerate'
@@ -38,7 +40,9 @@ interface FragmentItem {
 }
 
 // 组合器有自己的一份工作流，不跟提示词页/换脸页联动
-const { composerWorkflowPath, quality, orientation } = useSettings()
+const { composerWorkflowPath, orientation } = useSettings()
+const quality = useWorkflowQuality(composerWorkflowPath)
+const aspectRatio = useWorkflowAspectRatio(composerWorkflowPath)
 const workflowPath = composerWorkflowPath
 // 'composer' 这个 key 让「最近一次任务」落盘：刷新后结果中心的任务结果页签还能看到它。
 // queue: true —— 提交即放行，任务交给 ComfyUI 排队；否则按钮会一直占用到整批跑完，
@@ -54,8 +58,12 @@ const {
 } = useGenerate('composer', { queue: true })
 const { workflows, allWorkflows } = useWorkflows(composerWorkflowPath)
 /** 画质档位与横竖按工作流能力生成：不支持的项直接隐藏，不发无效参数。 */
-const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
+  workflowPath, allWorkflows, aspectRatio,
+)
 const router = useRouter()
+/** 灯箱「出图档案」里的来源提示词：交给 App 路由到提示词页。 */
+const emit = defineEmits<{ (e: 'jump-to-prompt', promptId: number): void }>()
 
 /**
  * 会话状态：检索条件、负向提示词、随机组数、各列已加载条数，
@@ -797,6 +805,7 @@ async function runOnce() {
       workflow_content: customWorkflowContent(workflowPath.value),
       quality: caps.value.quality ? quality.value : '4K',
       orientation: caps.value.orientation ? orientation.value : 'keep',
+      aspect_ratio: aspectRatio.value || defaultRatio.value,
     })
     if (!result.success) toast.error('提交失败')
   } catch (e) {
@@ -831,6 +840,7 @@ async function confirmRandomRun() {
       workflow_content: customWorkflowContent(workflowPath.value),
       quality: caps.value.quality ? quality.value : '4K',
       orientation: caps.value.orientation ? orientation.value : 'keep',
+      aspect_ratio: aspectRatio.value || defaultRatio.value,
       negative_prompt: negativePrompt.value,
     })
     if (!result.success) return
@@ -924,6 +934,9 @@ function toggleTag(id: number) {
       <WorkflowParams
         v-model:quality="quality"
         v-model:orientation="orientation"
+        v-model:aspect-ratio="aspectRatio"
+        :aspect-ratios="aspectRatios"
+        :default-ratio="defaultRatio"
         :workflow-path="workflowPath"
         :caps="caps"
         :quality-options="qualityOptions"
@@ -1198,6 +1211,7 @@ function toggleTag(id: number) {
       can-open-gallery
       @close="closePreviewImage"
       @open-in-gallery="openInGallery"
+      @jump-to-prompt="(id) => { closePreviewImage(); emit('jump-to-prompt', id) }"
       @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
     />
 

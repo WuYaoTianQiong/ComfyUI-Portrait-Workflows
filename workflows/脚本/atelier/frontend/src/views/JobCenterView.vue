@@ -14,9 +14,11 @@ import { useToast } from '../composables/useToast'
 import { useImagePreview } from '../composables/useImagePreview'
 import { useWorkflows } from '../composables/useWorkflows'
 import type { JobSnapshot } from '../api/types'
-import { statusLabel } from '../utils/format'
+import { formatDateTime, formatElapsed, statusLabel } from '../utils/format'
 import { confirmDialog } from '../utils/naive'
 import { readSession, writeSession } from '../composables/useSessionState'
+
+const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
 
 /**
  * 任务中心：进行中 / 历史任务的实时视图。
@@ -49,6 +51,8 @@ watch(
 const toast = useToast()
 const queryClient = useQueryClient()
 const router = useRouter()
+/** 灯箱「出图档案」里的来源提示词：交给 App 路由到提示词页。 */
+const emit = defineEmits<{ (e: 'jump-to-prompt', promptId: number): void }>()
 const stopAll = useMutation({
   mutationFn: stopAllJobs,
   onSuccess: (result) => {
@@ -211,20 +215,37 @@ function percent(job: JobSnapshot): number {
 }
 
 function elapsed(job: JobSnapshot): string {
-  const start = new Date(job.created_at).getTime()
-  const end =
-    job.status === 'done' || job.status === 'error'
-      ? new Date(job.updated_at).getTime()
-      : Date.now()
-  if (!start || Number.isNaN(start)) return ''
-  const seconds = Math.max(0, Math.round((end - start) / 1000))
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, '0')}s`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, '0')}m`
-  // 历史任务可能放了好几天，"485m01s" 这种读不出来
-  return `${Math.floor(hours / 24)}天${hours % 24}h`
+  const start = Date.parse(job.created_at)
+  if (!start) return ''
+  const end = TERMINAL.has(job.status) ? Date.parse(job.updated_at) : Date.now()
+  if (!end) return ''
+  return formatElapsed(Math.max(0, (end - start) / 1000))
+}
+
+/** 完成时间：只对终态任务有意义；运行中显示最近一次状态更新。 */
+function finishTime(job: JobSnapshot): string {
+  if (!job.updated_at) return ''
+  return TERMINAL.has(job.status)
+    ? formatDateTime(job.updated_at, true)
+    : `更新于 ${formatDateTime(job.updated_at)}`
+}
+
+/** 工作流名：路径只取文件名，custom:// 伪路径直接显示名字。 */
+function workflowName(job: JobSnapshot): string {
+  const raw = job.workflow_path || ''
+  if (!raw) return '未记录工作流'
+  if (raw.startsWith('custom://')) return raw.slice('custom://'.length) || '自定义工作流'
+  const base = raw.replace(/\\/g, '/').split('/').pop() || raw
+  return base.replace(/\.json$/i, '')
+}
+
+function jobExtra(job: JobSnapshot): Record<string, unknown> {
+  return (job.extra ?? {}) as Record<string, unknown>
+}
+
+function extraText(job: JobSnapshot, key: string, fallback = '—'): string {
+  const value = jobExtra(job)[key]
+  return value === null || value === undefined || value === '' ? fallback : String(value)
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -287,25 +308,46 @@ function openInGallery(filename: string) {
           <span class="type">{{ TYPE_LABEL[job.job_type] ?? job.job_type }}</span>
           <span class="job-title" :title="job.title">{{ job.title }}</span>
           <span class="status" :class="job.status">{{ statusLabel(job.status) }}</span>
-          <span class="muted">{{ job.done_count ?? 0 }}/{{ job.total ?? 0 }}</span>
-          <span class="muted">{{ elapsed(job) }}</span>
-          <button
-            v-if="canRetry(job)"
-            class="btn btn-sm"
-            :disabled="retrying === job.id"
-            title="把失败/取消的条目重新提交"
-            @click.stop="retry(job.id)"
-          >
-            {{ retrying === job.id ? '重试中…' : '重试' }}
-          </button>
-          <button
-            v-if="job.status === 'pending' || job.status === 'running'"
-            class="btn btn-sm cancel"
-            :disabled="cancelling === job.id"
-            @click.stop="cancel(job.id)"
-          >
-            取消
-          </button>
+          <div class="job-actions">
+            <button
+              v-if="canRetry(job)"
+              class="btn btn-sm"
+              :disabled="retrying === job.id"
+              title="把失败/取消的条目重新提交"
+              @click.stop="retry(job.id)"
+            >
+              {{ retrying === job.id ? '重试中…' : '重试' }}
+            </button>
+            <button
+              v-if="job.status === 'pending' || job.status === 'running'"
+              class="btn btn-sm cancel"
+              :disabled="cancelling === job.id"
+              @click.stop="cancel(job.id)"
+            >
+              取消
+            </button>
+          </div>
+
+          <div class="job-subline">
+            <span class="job-sub" :title="job.workflow_path ?? ''">
+              {{ workflowName(job) }}
+              <template v-if="job.quality"> · {{ job.quality }}</template>
+              <template v-if="extraText(job, 'aspect_ratio', '')">
+                · {{ extraText(job, 'aspect_ratio') }}
+              </template>
+            </span>
+            <span class="job-meta">
+              <span class="count" :title="`完成 ${job.done_count ?? 0} / 共 ${job.total ?? 0}`">
+                {{ job.done_count ?? 0 }}/{{ job.total ?? 0 }}
+              </span>
+              <span class="meta-item" title="从提交到任务结束（含排队）">
+                耗时 {{ elapsed(job) || '—' }}
+              </span>
+              <span class="meta-item" title="完成时间 / 最近状态更新">
+                {{ finishTime(job) || '—' }}
+              </span>
+            </span>
+          </div>
         </header>
 
         <div class="progress">
@@ -313,6 +355,17 @@ function openInGallery(filename: string) {
         </div>
 
         <div v-if="expanded.has(job.id)" class="items">
+          <dl class="job-facts">
+            <div><dt>工作流</dt><dd :title="job.workflow_path ?? ''">{{ workflowName(job) }}</dd></div>
+            <div><dt>质量</dt><dd>{{ job.quality || '—' }}</dd></div>
+            <div><dt>比例</dt><dd>{{ extraText(job, 'aspect_ratio') }}</dd></div>
+            <div><dt>输出目录</dt><dd>{{ extraText(job, 'output_subfolder', '默认') }}</dd></div>
+            <div>
+              <dt>提交</dt>
+              <dd>{{ formatDateTime(job.created_at, true) || '—' }}</dd>
+            </div>
+            <div><dt>完成</dt><dd>{{ finishTime(job) || '—' }}</dd></div>
+          </dl>
           <div v-if="!job.items?.length" class="muted">无明细</div>
           <div v-for="(item, idx) in job.items ?? []" :key="idx" class="item">
             <button
@@ -359,6 +412,7 @@ function openInGallery(filename: string) {
       can-open-gallery
       @close="closePreviewImage"
       @open-in-gallery="openInGallery"
+      @jump-to-prompt="(id) => { closePreviewImage(); emit('jump-to-prompt', id) }"
       @changed="queryClient.invalidateQueries({ queryKey: ['jobs'] })"
     />
   </div>
@@ -408,25 +462,35 @@ function openInGallery(filename: string) {
   flex: 1;
   overflow-y: auto;
   padding: var(--gap) var(--gap-lg);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  /* 卡片是 overflow:hidden 的滚动容器，auto 行高只按最小内容算会把卡片压扁；
+     max-content 才能让每行跟卡片实际高度走（展开后也自动变高） */
+  grid-auto-rows: max-content;
+  align-content: start;
+  align-items: start;
   gap: var(--gap-sm);
 }
 
 .job {
-  /* 关键：flex 容器里的子项默认可收缩，146 条任务会把每条压成几像素高的横线 */
-  flex: none;
+  /* 多列卡片：宽度自适应，内容多时只撑高自己这一张 */
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
   overflow: hidden;
 }
 
+/* 两行表头：第一行标题/状态/操作，第二行工作流/进度/耗时/时间 */
 .job-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 12px auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    'arrow type title status actions'
+    'sub sub sub sub sub';
   align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap);
+  gap: 2px var(--gap-sm);
+  padding: 6px var(--gap);
   cursor: pointer;
   font-size: var(--fs-sm);
 }
@@ -436,29 +500,113 @@ function openInGallery(filename: string) {
 }
 
 .arrow {
+  grid-area: arrow;
   color: var(--muted);
-  width: 12px;
 }
 
 .type {
+  grid-area: type;
   font-size: var(--fs-xs);
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 6px;
-  flex: none;
+  white-space: nowrap;
 }
 
 .job-title {
-  flex: 1;
+  grid-area: title;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .status {
+  grid-area: status;
   font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.job-actions {
+  grid-area: actions;
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.job-actions .btn {
   flex: none;
+  white-space: nowrap;
+}
+
+.job-subline {
+  grid-area: sub;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.job-sub {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.count,
+.meta-item {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.count {
+  min-width: 30px;
+  text-align: right;
+}
+
+.job-facts {
+  margin: 0 0 var(--gap-sm);
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 4px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.job-facts div {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+}
+
+.job-facts dt {
+  flex: none;
+  width: 48px;
+  color: var(--muted);
+}
+
+.job-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status.running,

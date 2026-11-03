@@ -90,6 +90,13 @@ function jumpToPrompt(promptId: number) {
         </button>
         <button
           class="btn btn-sm"
+          :class="{ active: activeKey === 'upscale' }"
+          @click="go('upscale')"
+        >
+          批量超分
+        </button>
+        <button
+          class="btn btn-sm"
           :class="{ active: activeKey === 'taxonomy' }"
           @click="go('taxonomy')"
         >

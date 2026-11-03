@@ -1,7 +1,9 @@
 import { ref, watch } from 'vue'
 
 /**
- * 出图设置（工作流 / 画质 / 方向），持久化到 localStorage。
+ * 出图设置（工作流 / 方向），持久化到 localStorage。
+ *
+ * 画质不在这里：它按工作流分别记忆，见 `useWorkflowQuality`。
  *
  * 旧前端把这些塞进 UiState 的十几个 key 里，且和画廊筛选混在一起；
  * 这里单独一份，键名带 `pb.` 前缀，语义清晰。
@@ -38,7 +40,7 @@ function write(key: string, value: string) {
 const workflowPath = ref<string>(read('workflowPath', ''))
 const composerWorkflowPath = ref<string>(read('composerWorkflowPath', ''))
 const faceswapWorkflowPath = ref<string>(read('faceswapWorkflowPath', ''))
-const quality = ref<string>(read('quality', '4K'))
+const upscaleWorkflowPath = ref<string>(read('upscaleWorkflowPath', ''))
 const orientation = ref<Orientation>(read('orientation', 'portrait') as Orientation)
 
 /**
@@ -60,7 +62,7 @@ const outputSubfolder = ref<string>(read('outputSubfolder', ''))
 watch(workflowPath, (v) => write('workflowPath', v))
 watch(composerWorkflowPath, (v) => write('composerWorkflowPath', v))
 watch(faceswapWorkflowPath, (v) => write('faceswapWorkflowPath', v))
-watch(quality, (v) => write('quality', v))
+watch(upscaleWorkflowPath, (v) => write('upscaleWorkflowPath', v))
 watch(orientation, (v) => write('orientation', v))
 watch(deleteFiles, (v) => write('deleteFiles', v ? '1' : '0'))
 watch(outputSubfolder, (v) => write('outputSubfolder', v))
@@ -70,7 +72,7 @@ export function useSettings() {
     workflowPath,
     composerWorkflowPath,
     faceswapWorkflowPath,
-    quality,
+    upscaleWorkflowPath,
     orientation,
     deleteFiles,
     outputSubfolder,

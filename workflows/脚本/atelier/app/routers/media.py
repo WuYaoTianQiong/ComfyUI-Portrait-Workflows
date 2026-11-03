@@ -24,9 +24,10 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 
 from app.config import settings
+from app.services.image_formats import is_heif
 from app.services.paths import (
     IMAGE_EXTENSIONS,
     _resolve_if_reparse,
@@ -324,10 +325,37 @@ def browser_thumb(path: str = Query(...), size: int = Query(300)):
                         headers={"Cache-Control": "no-cache"})
 
 
+def _preview_cache_path(p: Path) -> Path:
+    """HEIC 预览缓存：浏览器不能直接显示 HEIC，转成同尺寸 WebP 后缓存。"""
+    try:
+        mtime = int(p.stat().st_mtime)
+    except OSError:
+        mtime = 0
+    key = hashlib.md5(f"{p}|{mtime}|preview".encode("utf-8")).hexdigest()
+    return settings.thumbnail_dir / f"view_{key}.webp"
+
+
 @router.get("/browser/image")
 def browser_image(path: str = Query(...)):
-    """任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）"""
+    """任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）。
+
+    HEIC/HEIF（包括改名成 .jpg 的）浏览器无法直接渲染，这里返回转换后的 WebP。
+    """
     p = resolve_local_image(path)
     if p is None:
         return missing_image_response()
+    if is_heif(p):
+        cache = _preview_cache_path(p)
+        if not cache.is_file():
+            try:
+                settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
+                with PILImage.open(p) as raw:
+                    image = ImageOps.exif_transpose(raw)
+                    if image.mode not in ("RGB", "RGBA", "L"):
+                        image = image.convert("RGB")
+                    image.save(cache, "WEBP", quality=90)
+            except Exception:
+                return missing_image_response()
+        return FileResponse(str(cache), media_type="image/webp",
+                            headers={"Cache-Control": "no-cache"})
     return FileResponse(str(p), headers={"Cache-Control": "no-cache"})

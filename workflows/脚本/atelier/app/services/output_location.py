@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 
 from app.services.workflow_parser import prepend_output_subfolder
+from app.services.quality_keys import normalize_quality
 
 MAX_DEPTH = 3
 MAX_SEGMENT = 60
@@ -84,7 +85,7 @@ def expand_subfolder(
         "year": current.strftime("%Y"),
         "workflow": _workflow_stem(workflow_path),
         "job_id": "" if job_id is None else str(job_id),
-        "quality": quality or "",
+        "quality": normalize_quality(quality) if quality else "",
         "orientation": orientation or "",
     }
 

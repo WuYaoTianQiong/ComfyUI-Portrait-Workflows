@@ -50,7 +50,41 @@ export interface ConfirmOptions {
   positiveText?: string
   negativeText?: string
   type?: 'warning' | 'info' | 'error' | 'success'
+  /**
+   * 传了就显示「下次不再提示」勾选框；确认时勾选则记到 localStorage，
+   * 之后同一个 key 的确认框直接放行，不再弹。破坏性操作不要传。
+   */
+  rememberKey?: string
 }
+
+const SKIP_KEY_PREFIX = 'pb.confirmSkip.'
+
+/** 这个确认框是否已被用户记住「不再提示」。 */
+export function isConfirmSkipped(key: string): boolean {
+  try {
+    return localStorage.getItem(SKIP_KEY_PREFIX + key) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function skipConfirm(key: string): void {
+  try {
+    localStorage.setItem(SKIP_KEY_PREFIX + key, '1')
+  } catch {
+    /* 隐私模式下 localStorage 不可用，忽略即可 */
+  }
+}
+
+export function resetConfirmSkip(key: string): void {
+  try {
+    localStorage.removeItem(SKIP_KEY_PREFIX + key)
+  } catch {
+    /* 隐私模式下 localStorage 不可用，忽略即可 */
+  }
+}
+
+const REMEMBER_LABEL = '下次不再提示（可在「分类与标签」里恢复）'
 
 /**
  * 统一确认框。
@@ -59,11 +93,36 @@ export interface ConfirmOptions {
  * 避免为了一个确认框去依赖 App 的 Provider 层级。
  */
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
+  if (options.rememberKey && isConfirmSkipped(options.rememberKey)) {
+    return Promise.resolve(true)
+  }
   if (!dialogApi) {
     return Promise.resolve(
       typeof window !== 'undefined' ? window.confirm(options.content) : false,
     )
   }
+  const remember = ref(false)
+  // Dialog 的 content 只渲染一次：用组件包一层，勾选态才会跟着刷新
+  const RememberedContent = options.rememberKey
+    ? defineComponent({
+        setup() {
+          return () =>
+            h('div', null, [
+              h('div', { style: 'margin-bottom:12px;white-space:pre-line' }, options.content),
+              h(
+                NCheckbox,
+                {
+                  checked: remember.value,
+                  'onUpdate:checked': (next: boolean) => {
+                    remember.value = next
+                  },
+                },
+                { default: () => REMEMBER_LABEL },
+              ),
+            ])
+        },
+      })
+    : null
   return new Promise<boolean>((resolve) => {
     let settled = false
     const finish = (value: boolean) => {
@@ -75,10 +134,13 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
     const open = options.type === 'info' ? api.info : api.warning
     open({
       title: options.title ?? '请确认',
-      content: options.content,
+      content: RememberedContent ? () => h(RememberedContent) : options.content,
       positiveText: options.positiveText ?? '确定',
       negativeText: options.negativeText ?? '取消',
-      onPositiveClick: () => finish(true),
+      onPositiveClick: () => {
+        if (options.rememberKey && remember.value) skipConfirm(options.rememberKey)
+        finish(true)
+      },
       onNegativeClick: () => finish(false),
       onClose: () => finish(false),
       onMaskClick: () => finish(false),

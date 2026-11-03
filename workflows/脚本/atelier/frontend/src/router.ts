@@ -4,6 +4,7 @@ import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
 import ComposerView from './views/ComposerView.vue'
 import EditorView from './views/EditorView.vue'
+import UpscaleView from './views/UpscaleView.vue'
 import JobCenterView from './views/JobCenterView.vue'
 import TaxonomyView from './views/TaxonomyView.vue'
 import StatsView from './views/StatsView.vue'
@@ -17,7 +18,8 @@ import DesignView from './views/DesignView.vue'
  *
  * 路由段 / 视图名 / 导航文案三者同名（`命名规范.md` §8）：
  * `/gallery` ↔ `GalleryView` ↔ "画廊"、`/editor` ↔ `EditorView` ↔ "图像编辑"、
- * `/taxonomy` ↔ `TaxonomyView` ↔ "分类与标签"。旧路径 `/faceswap`、`/manage`、`/design`
+ * `/upscale` ↔ `UpscaleView` ↔ "批量超分"、`/taxonomy` ↔ `TaxonomyView` ↔ "分类与标签"。
+ * 旧路径 `/faceswap`、`/manage`、`/design`
  * 各留一条 redirect，书签不失效。设计令牌预览是开发用页面，只在 `/dev/design`，顶栏无入口。
  */
 export const router = createRouter({
@@ -35,6 +37,7 @@ export const router = createRouter({
     },
     { path: '/composer', name: 'composer', component: ComposerView },
     { path: '/editor', name: 'editor', component: EditorView },
+    { path: '/upscale', name: 'upscale', component: UpscaleView },
     { path: '/taxonomy', name: 'taxonomy', component: TaxonomyView },
     { path: '/jobs', name: 'jobs', component: JobCenterView },
     { path: '/stats', name: 'stats', component: StatsView },

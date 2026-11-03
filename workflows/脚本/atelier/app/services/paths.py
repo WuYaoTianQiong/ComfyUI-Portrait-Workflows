@@ -14,7 +14,10 @@ from app.config import settings
 
 #: 允许经图片接口读取/浏览的扩展名。放在这里而不是 media.py，
 #: 是为了让路径校验和目录浏览共用同一份白名单。
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff",
+    ".heic", ".heif",
+}
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 

@@ -40,6 +40,10 @@ export type HistoryItem = Required<Schemas['HistoryItem']>
 export type HistoryPage = Omit<Required<Schemas['HistoryListResponse']>, 'items'> & {
   items: HistoryItem[]
 }
+export type ImageRunInfo = Required<Schemas['ImageRunInfo']>
+export type ImageDetail = Omit<Required<Schemas['ImageDetailResponse']>, 'run'> & {
+  run: ImageRunInfo
+}
 
 // ---------------------------------------------------------------------------
 // 任务

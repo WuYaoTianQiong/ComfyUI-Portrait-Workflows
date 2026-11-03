@@ -10,19 +10,30 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from app.schemas import FacetsResponse, HistoryIdsResponse, HistoryListResponse
+from app.schemas import (
+    FacetsResponse,
+    HistoryIdsResponse,
+    HistoryListResponse,
+    ImageDetailResponse,
+    ImageRunInfo,
+)
 from fastapi.responses import FileResponse
 from peewee import fn
 from pydantic import BaseModel
 
 from app.config import settings
 from app.models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from app.services.comfyui_client import get_history_for_prompt
 from app.services.image_meta import (
     compute_orientation,
     extract_model_from_comfy_prompt,
+    extract_run_params,
+    extract_run_times,
     get_image_metadata,
     get_image_metadata_fast,
+    read_embedded_run_params,
 )
+from app.services.job_state import to_utc_iso
 from app.services.paths import _resolve_if_reparse, build_view_url, resolve_image_path
 from app.services.output_location import (
     OutputLocationError,
@@ -973,6 +984,108 @@ def download_history_item(item_id: int):
     )
 
 
+# ---------------------------------------------------------------------------
+# 单张图的完整出图参数（灯箱「查看提示词信息」用）
+# ---------------------------------------------------------------------------
+
+def _workflow_display_name(path: str) -> str:
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("custom://"):
+        return raw[len("custom://"):] or "自定义工作流"
+    name = raw.replace("\\", "/").rsplit("/", 1)[-1]
+    return name[:-5] if name.lower().endswith(".json") else name
+
+
+def _job_extra(job) -> dict:
+    raw = getattr(job, "extra", None) if job is not None else None
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _fill_missing(base: dict, values: dict) -> None:
+    for key, value in (values or {}).items():
+        if value in (None, ""):
+            continue
+        if base.get(key) in (None, ""):
+            base[key] = value
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/images/{item_id}/detail", response_model=ImageDetailResponse)
+def image_detail(item_id: int):
+    """补全单张图的出图上下文：任务（工作流/质量/比例）+ 实际采样参数 + 耗时。
+
+    参数来源按可信度补空：任务记录的 prompt_params（提交/完成时写入）
+    → ComfyUI history（实际执行值）→ PNG 内嵌 prompt（老图也能读出来）。
+    """
+    r = Image.get_or_none((Image.id == item_id) & (Image.is_deleted == False))
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+
+    item = _enrich_item(r)
+    params = dict(item.get("prompt_params") or {})
+    job = GenJob.get_or_none(GenJob.id == r.job_id) if r.job_id else None
+    extra = _job_extra(job)
+
+    pid = r.comfyui_prompt_id or ""
+    if pid:
+        entry = (get_history_for_prompt(pid) or {}).get(pid)
+        if isinstance(entry, dict):
+            _fill_missing(params, extract_run_params(entry.get("prompt")))
+            _fill_missing(params, extract_run_times(entry))
+    if not params.get("steps") or not params.get("sampler"):
+        _fill_missing(
+            params,
+            read_embedded_run_params(r.filename or "", r.subfolder or "", r.img_type or "output"),
+        )
+
+    run = ImageRunInfo(
+        workflow_path=(job.workflow_path or "") if job else "",
+        workflow_name=_workflow_display_name(job.workflow_path if job else ""),
+        quality=(job.quality or "") if job else "",
+        aspect_ratio=str(extra.get("aspect_ratio") or params.get("aspect_ratio") or ""),
+        output_subfolder=str(extra.get("output_subfolder") or ""),
+        submitted_at=to_utc_iso(job.created_at) if job else "",
+        started_at=str(params.get("started_at") or ""),
+        finished_at=str(params.get("finished_at") or ""),
+        duration_seconds=_as_float(params.get("duration_seconds")),
+        steps=_as_int(params.get("steps")),
+        cfg_scale=_as_float(params.get("cfg_scale")),
+        sampler=str(params.get("sampler") or ""),
+        scheduler=str(params.get("scheduler") or ""),
+        seed=_as_int(params.get("seed")),
+        denoise=_as_float(params.get("denoise")),
+        model=str(params.get("model") or ""),
+    )
+    return {
+        **item,
+        "job_type": (job.job_type or "") if job else "",
+        "job_status": (job.status or "") if job else "",
+        "job_title": (job.title or "") if job else "",
+        "run": run,
+    }
+
+
 class RevealRequest(BaseModel):
     id: int | None = None
     filename: str = ""
@@ -1059,6 +1172,7 @@ class ProcessImageRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     output_subfolder: str = ""
 
 
@@ -1110,6 +1224,7 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
         "prompt": "", "negative_prompt": "",
         "seed": 0, "seed_override": 0,
         "orientation": data.orientation, "quality": data.quality,
+        "aspect_ratio": data.aspect_ratio,
     }
     inject_prompt(api_wf, prompt_data)
 
@@ -1129,7 +1244,7 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
         workflow_path, data.orientation, data.quality,
         extra=build_job_extra(
             workflow_path, data.workflow_content, data.output_subfolder,
-            source="history_process",
+            source="history_process", aspect_ratio=data.aspect_ratio,
         ),
     )
     subfolder = expand_subfolder(

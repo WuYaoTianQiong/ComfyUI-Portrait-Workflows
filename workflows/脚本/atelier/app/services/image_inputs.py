@@ -4,11 +4,27 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+# 注册 HEIC/HEIF 解码器：遮罩合成、元数据读取都可能直接打开这类文件
+from app.services import image_formats  # noqa: F401
+
 
 def dest_name(src: dict) -> str:
     """拷进 ComfyUI input 目录时用的稳定文件名：同一条素材只拷一份，不同素材不撞名。"""
     h = hashlib.sha1(str(src["path"]).lower().encode("utf-8")).hexdigest()[:10]
     return f"atelier_fs_{h}_{src['name']}"
+
+
+def clean_dest_name(src: dict) -> str:
+    """保留原文件名，放进 input 下的稳定子目录。
+
+    按源图名命名的保存节点（`SaveImageFromSource`）会从 LoadImage 的 image
+    输入取 basename 当源图名；加前缀会让成品名变成 `atelier_xxx_原名`。
+    子目录只用来避免同名文件互相覆盖，basename 仍是原名。
+
+    ComfyUI 的 LoadImage 支持 `子目录/文件名` 这种相对写法（已实测 0.41.3）。
+    """
+    h = hashlib.sha1(str(src["path"]).lower().encode("utf-8")).hexdigest()[:10]
+    return f"atelier_upscale/{h}/{src['name']}"
 
 
 def compose_masked_target(target_path: Path, mask_path: Path, dest_dir: Path) -> Path:

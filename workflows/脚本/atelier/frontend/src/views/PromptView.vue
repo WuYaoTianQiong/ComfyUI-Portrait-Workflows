@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
@@ -13,10 +13,13 @@ import WorkflowPicker from '../components/WorkflowPicker.vue'
 import Lightbox from '../components/Lightbox.vue'
 import { parseMarkedSegments, renderAllSegments, smartSegmentText } from '../utils/segmentation'
 import { confirmDialog } from '../utils/naive'
+import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { apiDelete, apiGet, apiPost, apiPut, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import QueryState from '../components/QueryState.vue'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useGenerate } from '../composables/useGenerate'
 import { useImageLocation } from '../composables/useImageLocation'
 import { usePromptDraft, splitTagText } from '../composables/usePromptDraft'
@@ -40,7 +43,10 @@ import type {
   TagRow,
 } from '../api/types'
 
-const { workflowPath, quality, orientation } = useSettings()
+const { workflowPath, orientation } = useSettings()
+const router = useRouter()
+const quality = useWorkflowQuality(workflowPath)
+const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const {
   busy: generating,
   job: activeJob,
@@ -124,6 +130,7 @@ interface PromptSession {
   fragmentType: string
   fragmentMatch: 'has' | 'only'
   selectedId: number | null
+  selectedIds: number[]
   scrollTop: number
 }
 
@@ -137,6 +144,7 @@ const savedSession = readSession<PromptSession>(SESSION_KEY, {
   fragmentType: '',
   fragmentMatch: 'has',
   selectedId: null,
+  selectedIds: [],
   scrollTop: 0,
 })
 
@@ -146,6 +154,8 @@ const categoryId = ref<number | null>(savedSession.categoryId)
 const missingOpen = ref(false)
 const replaceOpen = ref(false)
 const replaceTargetId = ref<number | null>(null)
+/** 最近一次「替换碎片出图」的任务 id：弹窗靠它订阅进度、刷新后也能接回来。 */
+const replaceJobId = ref<number | null>(null)
 const tagIds = ref<number[]>(savedSession.tagIds)
 const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
 const tagPanelOpen = ref(false)
@@ -157,6 +167,8 @@ const tagPanelOpen = ref(false)
 const fragmentType = ref<string>(savedSession.fragmentType)
 const fragmentMatch = ref<'has' | 'only'>(savedSession.fragmentMatch)
 const selectedId = ref<number | null>(savedSession.selectedId)
+/** 多选集合（批量操作与批量替换用）；随会话保存，刷新后勾选不丢。 */
+const selectedIds = ref<Set<number>>(new Set(savedSession.selectedIds))
 /** 外部跳转的目标 id：列表变化时据此保留选中，不抢着改选第一条。 */
 const jumpTargetId = ref<number | null>(null)
 /** 负面提示词默认收起：空值不该占一大块；有内容时显示单行摘要。 */
@@ -179,6 +191,7 @@ function saveSession() {
     fragmentType: fragmentType.value,
     fragmentMatch: fragmentMatch.value,
     selectedId: selectedId.value,
+    selectedIds: Array.from(selectedIds.value),
     scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
   })
 }
@@ -194,6 +207,7 @@ watch(
       fragmentType.value,
       fragmentMatch.value,
       selectedId.value,
+      Array.from(selectedIds.value).sort((a, b) => a - b).join(','),
     ].join('|'),
   saveSession,
 )
@@ -294,7 +308,9 @@ const { data: wfValidation } = useWorkflowValidation(workflowPath)
  * 当前工作流的能力与真实档位：不支持画质 / 横竖时隐藏对应控件，
  * 档位按工作流的实际作用方式生成（不是固定的 2K..12K）。
  */
-const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
+  workflowPath, allWorkflows, aspectRatio,
+)
 
 function generate() {
   if (!draft.value) return
@@ -306,6 +322,7 @@ function generate() {
     workflowPath: workflowPath.value,
     quality: caps.value.quality ? quality.value : '4K',
     orientation: caps.value.orientation ? orientation.value : 'keep',
+    aspectRatio: aspectRatio.value || defaultRatio.value,
   })
 }
 
@@ -559,6 +576,12 @@ function regenerateShot() {
   generate()
 }
 
+/** 档案里点「来源提示词」：关灯箱并切到那条提示词（沿用未保存修改的确认）。 */
+async function jumpToPrompt(id: number) {
+  shotOpen.value = false
+  await selectRow(id)
+}
+
 function onShotChanged() {
   queryClient.invalidateQueries({ queryKey: ['prompt-history', selectedId.value] })
   queryClient.invalidateQueries({ queryKey: ['prompts'] })
@@ -606,6 +629,7 @@ async function smartSegment() {
     content: `将整理为 ${keys.length} 类：${keys.join('、')}。\n用分段结果替换当前提示词？`,
     positiveText: '替换',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.smartSegment.key,
   })
   if (!ok || !draft.value) return
   draft.value.prompt = rendered
@@ -727,7 +751,6 @@ async function deletePrompt() {
 
 // ---------------- 多选与批量 ----------------
 
-const selectedIds = ref<Set<number>>(new Set())
 /** 批量替换弹窗要读"左侧勾选了哪些"，Set 在模板里不好直接展开。 */
 const selectedPromptIds = computed(() => Array.from(selectedIds.value))
 const selectedCount = computed(() => selectedIds.value.size)
@@ -796,12 +819,14 @@ async function batchGenerate() {
     content: `用「${workflowPath.value.split('\\').pop() || '未选择'}」出图 ${ids.length} 张？（画质 ${quality.value}）`,
     positiveText: '开始出图',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.batchGenerate.key,
   })
   if (!ok) return
   runBatch(ids, {
     workflowPath: workflowPath.value,
     quality: caps.value.quality ? quality.value : '4K',
     orientation: caps.value.orientation ? orientation.value : 'keep',
+    aspectRatio: aspectRatio.value || defaultRatio.value,
   })
 }
 
@@ -811,10 +836,13 @@ async function batchGenerate() {
  * 每条提示词仍用自己保存的 seed/steps/cfg，便于对比"换了一片之后"的效果。
  */
 async function onBatchReplace(payload: {
-  type: string
+  types: string[]
+  workflowPath: string
+  quality?: string
+  aspectRatio?: string
   items: Array<{ promptId: number; seed: number; promptOverride: string }>
 }) {
-  if (!workflowPath.value) {
+  if (!payload.workflowPath) {
     toast.error('请先选择工作流')
     return
   }
@@ -824,25 +852,35 @@ async function onBatchReplace(payload: {
   }
   if (!payload.items.length) return
   const single = payload.items.length === 1 && replaceTargetId.value !== null
-  const wfName = workflowPath.value.split(/[\\/]/).pop() || '未选择'
+  const wfName = payload.workflowPath.split(/[\\/]/).pop() || '未选择'
+  const typeText = payload.types.map((t) => `【${t}】`).join('、')
   const ok = await confirmDialog({
     title: single ? '替换碎片出图' : '批量替换碎片并出图',
     content:
-      `把 ${payload.items.length} 条提示词里的【${payload.type}】替换成同一段内容，` +
+      `按替换清单修改 ${payload.items.length} 条提示词里的 ${typeText}（各自按设定的跳过/追加策略），` +
       `用「${wfName}」出图。\n\n只影响本次出图，不会写回提示词库；` +
       `生成的图片会作为「临时提示词」保留实际替换文本，不挂到原提示词名下。`,
     positiveText: '开始出图',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.batchReplace.key,
   })
   if (!ok) return
-  runBatchReplace(payload.items, {
-    workflowPath: workflowPath.value,
-    quality: caps.value.quality ? quality.value : '4K',
+  const jobId = await runBatchReplace(payload.items, {
+    workflowPath: payload.workflowPath,
+    quality: payload.quality || (caps.value.quality ? quality.value : '4K'),
     orientation: caps.value.orientation ? orientation.value : 'keep',
-    title: single ? `替换碎片出图` : `批量替换【${payload.type}】 ${payload.items.length} 条`,
+    aspectRatio: payload.aspectRatio || aspectRatio.value || defaultRatio.value,
+    title: single
+      ? '替换碎片出图'
+      : payload.types.length > 1
+        ? `替换 ${payload.types.length} 类碎片 ${payload.items.length} 条`
+        : `批量替换${typeText} ${payload.items.length} 条`,
   })
-  closeReplace()
-  toast.success(`已提交 ${payload.items.length} 条替换任务`)
+  if (jobId) {
+    // 弹窗不关：切到「任务与结果」页签，继续看进度与出图
+    replaceJobId.value = jobId
+    toast.success(`已提交 ${payload.items.length} 条替换任务`)
+  }
 }
 
 // ---------------- 导入 / 导出 ----------------
@@ -1256,78 +1294,77 @@ onBeforeUnmount(() => {
       <div v-else class="detail">
         <div class="detail-top">
           <div class="generate-bar">
-            <WorkflowPicker v-model="workflowPath" :workflows="workflows" />
-            <WorkflowParams
-              v-model:quality="quality"
-              v-model:orientation="orientation"
-              :workflow-path="workflowPath"
-              :caps="caps"
-              :quality-options="qualityOptions"
-            />
-            <span
-              v-if="workflowPath && caps.prompt && !caps.negative"
-              class="cap-hint"
-              title="该工作流不接收负面提示词"
-            >
-              不支持负面
-            </span>
-            <span
-              v-if="workflowPath && !caps.prompt"
-              class="cap-hint warn"
-              title="该工作流不注入提示词"
-            >
-              不注入提示词
-            </span>
-            <button
-              class="btn btn-sm"
-              title="复制正向提示词"
-              @click="copyText(draft.prompt, '提示词')"
-            >
-              复制
-            </button>
-            <button class="btn btn-sm" title="按关键词把提示词拆成【类型】结构" @click="smartSegment">
-              ✂ 智能分段
-            </button>
-            <button
-              class="btn btn-sm"
-              title="只替换这条提示词里的某一类碎片，再出图"
-              :disabled="!caps.prompt"
-              @click="openReplaceForCurrent"
-            >
-              替换碎片
-            </button>
-            <button
-              class="btn btn-sm"
-              title="用当前草稿试跑，不写回提示词库"
-              :disabled="!caps.prompt"
-              @click="trialOpen = true"
-            >
-              🧪 试跑
-            </button>
-            <button
-              class="btn btn-sm"
-              title="同一条提示词换种子出多张变体"
-              :disabled="!caps.prompt"
-              @click="trialOpen = true"
-            >
-              🎲 变体
-            </button>
-            <span class="spacer" />
-            <span v-if="wfValidation && !wfValidation.valid" class="gen-error">
-              工作流不可用：{{ wfValidation.error }}
-            </span>
-            <span v-else-if="generateError" class="gen-error">{{ generateError }}</span>
-            <span v-else-if="activeJob" class="job-state" :class="activeJob?.status">
-              {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
-            </span>
-            <button
-              class="btn btn-sm primary"
-              :class="{ loading: generating }"
-              :disabled="generating || !workflowPath || !caps.prompt"
-              @click="generate"
-            >
-              {{ generating ? '生成中…' : '🚀 出图' }}
-            </button>
+            <div class="generate-settings">
+              <WorkflowPicker v-model="workflowPath" :workflows="workflows" />
+              <WorkflowParams
+                v-model:quality="quality"
+                v-model:orientation="orientation"
+                v-model:aspect-ratio="aspectRatio"
+                :aspect-ratios="aspectRatios"
+                :default-ratio="defaultRatio"
+                :workflow-path="workflowPath"
+                :caps="caps"
+                :quality-options="qualityOptions"
+              />
+              <span
+                v-if="workflowPath && caps.prompt && !caps.negative"
+                class="cap-hint"
+                title="该工作流不接收负面提示词"
+              >
+                不支持负面
+              </span>
+              <span
+                v-if="workflowPath && !caps.prompt"
+                class="cap-hint warn"
+                title="该工作流不注入提示词"
+              >
+                不注入提示词
+              </span>
+            </div>
+            <div class="generate-actions">
+              <button class="btn btn-sm" title="按关键词把提示词拆成【类型】结构" @click="smartSegment">
+                ✂ 智能分段
+              </button>
+              <button
+                class="btn btn-sm"
+                title="只替换这条提示词里的某一类碎片，再出图"
+                :disabled="!caps.prompt"
+                @click="openReplaceForCurrent"
+              >
+                替换碎片
+              </button>
+              <button
+                class="btn btn-sm"
+                title="用当前草稿试跑，不写回提示词库"
+                :disabled="!caps.prompt"
+                @click="trialOpen = true"
+              >
+                🧪 试跑
+              </button>
+              <button
+                class="btn btn-sm"
+                title="同一条提示词换种子出多张变体"
+                :disabled="!caps.prompt"
+                @click="trialOpen = true"
+              >
+                🎲 变体
+              </button>
+              <span v-if="wfValidation && !wfValidation.valid" class="gen-error">
+                工作流不可用：{{ wfValidation.error }}
+              </span>
+              <span v-else-if="generateError" class="gen-error">{{ generateError }}</span>
+              <span v-else-if="activeJob" class="job-state" :class="activeJob?.status">
+                {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
+              </span>
+              <button
+                class="btn btn-sm primary"
+                :class="{ loading: generating }"
+                :disabled="generating || !workflowPath || !caps.prompt"
+                @click="generate"
+              >
+                {{ generating ? '生成中…' : '🚀 出图' }}
+              </button>
+            </div>
           </div>
 
           <div class="action-bar">
@@ -1564,6 +1601,7 @@ onBeforeUnmount(() => {
       @update:index="shotIndex = $event"
       @close="shotOpen = false"
       @regenerate="regenerateShot"
+      @jump-to-prompt="jumpToPrompt"
       @changed="onShotChanged"
     />
     <PromptTrialPanel
@@ -1585,13 +1623,13 @@ onBeforeUnmount(() => {
       :fragment-match="fragmentMatch"
       :selected-ids="selectedPromptIds"
       :workflow-path="workflowPath"
-      :quality="quality"
-      :orientation="orientation"
-      :caps="caps"
       :lock-prompt-id="replaceTargetId"
       :lock-prompt-name="replaceTargetId !== null ? (draft?.name ?? '') : ''"
+      :job-id="replaceJobId"
       @close="closeReplace"
       @submit="onBatchReplace"
+      @go-jobs="closeReplace(); router.push('/jobs')"
+      @jump-to-prompt="(id) => { closeReplace(); jumpToPrompt(id) }"
     />
   </div>
 </template>
@@ -2128,13 +2166,56 @@ onBeforeUnmount(() => {
 
 .generate-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--gap-sm);
   padding: var(--gap-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+/* 左边设置区先按内容撑开，放不下时由工作流名让出宽度；右边动作组整体不压缩 */
+.generate-settings {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.generate-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-left: auto;
+}
+
+/* 按钮整组不参与压缩，压缩优先发生在工作流选择器上 */
+.generate-settings > .btn,
+.generate-actions > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 这档宽度下单行放不下全部内容：先收起能力提示（下方负面提示词区有同样信息），
+   把宽度留给工作流名和分辨率 */
+@container (min-width: 1041px) and (max-width: 1260px) {
+  .generate-settings > .cap-hint {
+    display: none;
+  }
+}
+
+/* 详情区不够宽时，整组动作落到下一行，而不是把几个按钮拆散 */
+@container (max-width: 1040px) {
+  .generate-bar,
+  .generate-settings,
+  .generate-actions {
+    flex-wrap: wrap;
+  }
 }
 
 /* 正文与元数据分栏：宽屏右栏常驻，窄屏自动落回单列 */
@@ -2179,6 +2260,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 1px 7px;
   white-space: nowrap;
+  flex: none;
 }
 
 .cap-hint.warn {
@@ -2216,6 +2298,12 @@ onBeforeUnmount(() => {
   gap: var(--gap-xs);
 }
 
+/* 标题输入吃掉剩余宽度，按钮保持单行不拆字 */
+.action-bar > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
 .dirty-badge {
   flex: none;
   padding: 1px 7px;
@@ -2229,7 +2317,7 @@ onBeforeUnmount(() => {
 
 .name-input {
   flex: 1;
-  min-width: 0;
+  min-width: 180px;
   font-size: var(--fs-lg);
   font-weight: 600;
   background: transparent;

@@ -5,6 +5,8 @@ import { apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useToast } from '../composables/useToast'
@@ -58,9 +60,13 @@ function saveLog() {
   }
 }
 
-const { workflowPath, quality, orientation } = useSettings()
+const { workflowPath, orientation } = useSettings()
+const quality = useWorkflowQuality(workflowPath)
+const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { allWorkflows } = useWorkflows()
-const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions, defaultRatio } = useWorkflowCaps(
+  workflowPath, allWorkflows, aspectRatio,
+)
 const toast = useToast()
 
 /** 面板里只展示当前档位对应的真实尺寸/MP，不支持画质时写明"由工作流固定"。 */
@@ -113,6 +119,7 @@ async function runTrial() {
       workflow_content: customWorkflowContent(workflowPath.value),
       orientation: caps.value.orientation ? orientation.value : 'keep',
       quality: caps.value.quality ? quality.value : '4K',
+      aspect_ratio: aspectRatio.value || defaultRatio.value,
       seed: seed.value,
       // 与「改文本跑」一致：出图仍关联回当前提示词
       source_prompt_id: props.promptId ?? 0,
@@ -145,6 +152,7 @@ async function runVariants() {
         workflow_content: customWorkflowContent(workflowPath.value),
         orientation: caps.value.orientation ? orientation.value : 'keep',
         quality: caps.value.quality ? quality.value : '4K',
+        aspect_ratio: aspectRatio.value || defaultRatio.value,
         seed: useSeed,
         source_prompt_id: props.promptId ?? 0,
       }).then((result) => {
@@ -216,7 +224,7 @@ function clearLog() {
         <span class="spacer" />
         <span class="hint">
           画质 {{ qualityLabel }} ·
-          {{ caps.orientation ? (orientation === 'portrait' ? '竖图' : '横图') : '方向固定' }}
+          {{ caps.orientation ? (aspectRatio || defaultRatio || '比例固定') : '方向固定' }}
         </span>
       </div>
 

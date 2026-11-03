@@ -1,8 +1,9 @@
-import { enableAutoUnmount, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import Lightbox from './Lightbox.vue'
 import Modal from './Modal.vue'
+import { apiPost } from '../api/client'
 import type { HistoryItem } from '../api/types'
 
 enableAutoUnmount(afterEach)
@@ -10,7 +11,17 @@ enableAutoUnmount(afterEach)
 vi.mock('../api/client', () => ({
   viewUrl: (item: { filename: string }) => '/api/media/image?filename=' + item.filename,
   thumbnailUrl: (item: { filename: string }) => '/api/thumb?filename=' + item.filename,
+  apiGet: vi.fn(async (path: string) =>
+    path.includes('/api/prompts/')
+      ? { prompt: '库里的当前正文', negative_prompt: '库负面' }
+      : { run: {} },
+  ),
+  apiPost: vi.fn(async () => ({ success: true, path: 'a.png' })),
 }))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 /** happy-dom 的 localStorage 不完整，这里补一份最小实现（刷新恢复用例需要）。 */
 const store = new Map<string, string>()
@@ -157,16 +168,52 @@ describe('Lightbox', () => {
     expect(wrapper.find('.missing-tip').text()).toContain('磁盘上已找不到')
   })
 
-  it('有 prompt_id 时提供跳转提示词入口', async () => {
-    const withPrompt = { ...item(1, 'a.png'), prompt_id: 1127, prompt_name: '日系卧室' }
+  it('所有图片都显示统一的「出图档案」入口', () => {
+    const linked = mount(Lightbox, {
+      props: { items: [{ ...item(1, 'a.png'), prompt_id: 1127 }], index: 0 },
+    })
+    expect(linked.find('.prompt-link').text()).toContain('出图档案')
+
+    const plain = mount(Lightbox, { props: { items: ITEMS, index: 0 } })
+    expect(plain.find('.prompt-link').text()).toContain('出图档案')
+  })
+
+  it('已关联提示词的图也能打开档案，显示提示词快照并可跳到提示词库', async () => {
+    const withPrompt = {
+      ...item(1, 'a.png'),
+      prompt_id: 1127,
+      prompt_name: '日系卧室',
+      prompt_params: { prompt: '出图时的正文', negative_prompt: '低质量', source: 'prompt_run' },
+    }
     const wrapper = mount(Lightbox, { props: { items: [withPrompt], index: 0 } })
-    const link = wrapper.find('.prompt-link')
-    expect(link.text()).toContain('跳到提示词')
-    await link.trigger('click')
+    await wrapper.find('.prompt-link').trigger('click')
+    expect(wrapper.findComponent(Modal).props('open')).toBe(true)
+    expect(document.body.querySelector('.prompt-text')?.textContent).toContain('出图时的正文')
+    expect(document.body.querySelector('.side-tag')?.textContent).toContain('已关联提示词库')
+
+    const jump = document.body.querySelector('.prompt-jump') as HTMLElement
+    expect(jump.textContent).toContain('日系卧室')
+    jump.click()
+    await wrapper.vm.$nextTick()
     expect(wrapper.emitted('jump-to-prompt')?.[0]).toEqual([1127])
   })
 
-  it('无 prompt_id 但有临时提示词时打开参数弹窗', async () => {
+  it('已关联提示词但缺正文时回退到提示词库当前版本', async () => {
+    const withPrompt = {
+      ...item(1, 'a.png'),
+      prompt_id: 1127,
+      prompt_name: '日系卧室',
+      prompt_params: null,
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withPrompt], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('.prompt-text')?.textContent).toContain('库里的当前正文')
+    expect(document.body.querySelector('.text-note')?.textContent).toContain('当前提示词库版本')
+    expect(document.body.querySelector('.neg-prompt')?.textContent).toContain('库负面')
+  })
+
+  it('临时提示词同样打开统一档案弹窗', async () => {
     const temp = {
       ...item(1, 'a.png'),
       prompt_id: 0,
@@ -180,21 +227,23 @@ describe('Lightbox', () => {
       },
     }
     const wrapper = mount(Lightbox, { props: { items: [temp], index: 0 } })
-    const link = wrapper.find('.prompt-link')
-    expect(link.text()).toContain('查看提示词信息')
-    await link.trigger('click')
+    await wrapper.find('.prompt-link').trigger('click')
     expect(wrapper.findComponent(Modal).props('open')).toBe(true)
     expect(document.body.querySelector('.prompt-text')?.textContent).toContain('临时正文')
     // 标题与文件信息在右栏；左栏只有提示词；没有额外标题栏
     const side = document.body.querySelector('.prompt-side')?.textContent ?? ''
     const main = document.body.querySelector('.prompt-main')?.textContent ?? ''
-    expect(side).toContain('出图参数（未关联提示词库）')
+    expect(side).toContain('出图档案')
+    expect(side).toContain('临时提示词')
     expect(side).toContain('文件信息')
     expect(main).toContain('临时正文')
     expect(main).not.toContain('文件信息')
     expect(document.body.querySelector('.modal-head')).toBeNull()
+    // 短字段两列、长字段整行
+    expect(document.body.querySelectorAll('.side-facts .kv:not(.wide)').length).toBeGreaterThan(0)
+    expect(document.body.querySelectorAll('.side-facts .kv.wide').length).toBeGreaterThan(0)
 
-    // 标题与文件名点击复制
+    // 文件名点击复制
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -203,8 +252,50 @@ describe('Lightbox', () => {
     ;(document.body.querySelector('.side-filename') as HTMLElement).click()
     await wrapper.vm.$nextTick()
     expect(writeText).toHaveBeenCalledWith('a.png')
-    ;(document.body.querySelector('.side-heading') as HTMLElement).click()
-    expect(writeText).toHaveBeenCalledTimes(2)
+  })
+
+  it('存储位置点击后在资源管理器中定位', async () => {
+    const wrapper = mount(Lightbox, { props: { items: ITEMS, index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    const path = document.body.querySelector('.side-facts dd.path') as HTMLElement
+    expect(path.textContent).toContain('output/a.png')
+    path.click()
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith('/api/images/reveal', { id: 1 })
+  })
+
+  it('来源提示词可点击跳到对应提示词', async () => {
+    const replaced = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: {
+        prompt: '替换后的正文',
+        source: 'batch_replace',
+        source_prompt_id: 1049,
+        source_prompt_name: '午后庭院',
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [replaced], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    const rows = Array.from(document.body.querySelectorAll('.side-facts .kv'))
+    const row = rows.find((el) => el.textContent?.includes('来源提示词')) as HTMLElement
+    const link = row.querySelector('dd.linkable') as HTMLElement
+    expect(link.textContent).toContain('午后庭院')
+    expect(link.textContent).toContain('#1049')
+    link.click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('jump-to-prompt')?.[0]).toEqual([1049])
+  })
+
+  it('source_prompt_id=0 不显示来源提示词行', async () => {
+    const noSource = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: { prompt: '正文', source: 'composer', source_prompt_id: 0 },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [noSource], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    expect(document.body.querySelector('.prompt-side')?.textContent ?? '').not.toContain('来源提示词')
   })
 
   it('刷新后自动恢复临时提示词弹窗', async () => {

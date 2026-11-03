@@ -13,9 +13,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.services.fragment_syntax import (
-    parse,
     render,
-    replace_type,
+    replace_types,
     split_marked,
     types_in,
     validate,
@@ -55,27 +54,35 @@ class ReplaceText(BaseModel):
     text: str = ""
 
 
+class ReplacementItem(BaseModel):
+    type: str = ""
+    content: str = ""
+    #: 该类型不存在时：skip = 跳过；append = 在末尾追加一段【类型】内容
+    missing: Literal["skip", "append"] = "skip"
+
+
 class BatchReplaceRequest(BaseModel):
     texts: list[ReplaceText] = Field(default_factory=list)
+    #: 替换清单，按顺序应用；每种类型各带自己的缺失策略
+    replacements: list[ReplacementItem] = Field(default_factory=list)
+
+
+class TypeOutcome(BaseModel):
     type: str
-    content: str = ""
-    #: 缺少目标类型时：skip = 跳过；append = 在末尾追加一段【类型】内容
-    missing: Literal["skip", "append"] = "skip"
+    #: 替换前该类型的正文（没有这一片时为空串）
+    old_content: str = ""
+    action: Literal["replaced", "appended", "skipped"] = "replaced"
 
 
 class ReplaceResult(BaseModel):
     id: int
-    #: 替换前该类型的正文（没有这一片时为空串）
-    old_content: str = ""
-    #: 替换/追加后全文；跳过时为 None
+    #: 应用整份清单后的全文；所有条目都跳过时为 None
     replaced: str | None = None
-    action: Literal["replaced", "appended", "skipped"] = "replaced"
+    outcomes: list[TypeOutcome] = Field(default_factory=list)
 
 
 class BatchReplaceResponse(BaseModel):
     items: list[ReplaceResult] = Field(default_factory=list)
-    skipped: int = 0
-    appended: int = 0
 
 
 @router.post("/composition/parse", response_model=ParseResponse)
@@ -98,35 +105,10 @@ def render_composition(req: RenderRequest):
 
 @router.post("/composition/batch_replace", response_model=BatchReplaceResponse)
 def batch_replace_composition(req: BatchReplaceRequest):
-    """批量替换指定类型的正文；可选在缺少该类型时追加到末尾。"""
+    """按替换清单批量改写提示词；每个类型可独立选择缺失时跳过或追加。"""
+    specs = [item.model_dump() for item in req.replacements]
     results: list[ReplaceResult] = []
-    skipped = 0
-    appended = 0
-    content = (req.content or "").strip()
     for item in req.texts:
-        replaced = replace_type(item.text, req.type, req.content)
-        if replaced is None:
-            if req.missing == "append" and content:
-                base = (item.text or "").rstrip()
-                full = f"{base}\n\n【{req.type}】\n{content}" if base else f"【{req.type}】\n{content}"
-                appended += 1
-                results.append({
-                    "id": item.id, "old_content": "", "replaced": full,
-                    "action": "appended",
-                })
-            else:
-                skipped += 1
-                results.append({
-                    "id": item.id, "old_content": "", "replaced": None,
-                    "action": "skipped",
-                })
-            continue
-        old = next(
-            (f["content"] for f in parse(item.text) if f["type"] == req.type),
-            "",
-        )
-        results.append({
-            "id": item.id, "old_content": old, "replaced": replaced,
-            "action": "replaced",
-        })
-    return {"items": results, "skipped": skipped, "appended": appended}
+        replaced, outcomes = replace_types(item.text, specs)
+        results.append({"id": item.id, "replaced": replaced, "outcomes": outcomes})
+    return {"items": results}

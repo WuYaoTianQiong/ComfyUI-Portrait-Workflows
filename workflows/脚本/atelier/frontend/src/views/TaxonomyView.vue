@@ -8,7 +8,13 @@ import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
 import { readSession, writeSession } from '../composables/useSessionState'
 import { flattenCategories } from '../utils/categories'
-import { confirmDialog } from '../utils/naive'
+import { confirmDialog, resetConfirmSkip } from '../utils/naive'
+import {
+  CONFIRM_PROMPTS,
+  listSkippedPrompts,
+  resetAllConfirmSkips,
+  type ConfirmPromptMeta,
+} from '../utils/confirmKeys'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
@@ -40,6 +46,21 @@ const savedSession = readSession<TaxonomySession>(SESSION_KEY, {
 })
 
 const panel = ref<Panel>(savedSession.panel)
+
+/** 用户勾过「下次不再提示」的确认框；这里可以逐条恢复，不用清 localStorage。 */
+const skippedPrompts = ref<ConfirmPromptMeta[]>(listSkippedPrompts())
+
+function restorePrompt(meta: ConfirmPromptMeta) {
+  resetConfirmSkip(meta.key)
+  skippedPrompts.value = listSkippedPrompts()
+  toast.success(`已恢复「${meta.label}」的确认提示`)
+}
+
+function restoreAllPrompts() {
+  resetAllConfirmSkips()
+  skippedPrompts.value = []
+  toast.success('已恢复全部确认提示')
+}
 
 const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
   queryKey: ['categories', 'taxonomy'],
@@ -145,6 +166,7 @@ async function autoClassifyAll() {
     content: '将对所有提示词重新计算类型分类（组合 / 单项 / 零散），继续？',
     positiveText: '开始',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.autoClassify.key,
   })
   if (!ok) return
   autoClassifyMutation.mutate()
@@ -245,6 +267,21 @@ async function removeItem(kind: Panel, id: number, name: string) {
       >
         {{ clearThumbs.isPending.value ? '清理中…' : '清理缩略图缓存' }}
       </button>
+    </div>
+
+    <div v-if="skippedPrompts.length" class="skipped-bar">
+      <span class="skipped-label">已关闭的确认提示</span>
+      <button
+        v-for="p in skippedPrompts"
+        :key="p.key"
+        class="skipped-chip"
+        :title="`恢复「${p.label}」的确认`"
+        @click="restorePrompt(p)"
+      >
+        {{ p.label }} ×
+      </button>
+      <span class="spacer" />
+      <button class="btn btn-sm" @click="restoreAllPrompts">全部恢复</button>
     </div>
 
     <div v-if="panel === 'category' || panel === 'tag'" class="creator">
@@ -369,6 +406,32 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .tabs {
   display: flex;
   gap: var(--gap-xs);
+}
+
+.skipped-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.skipped-label {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.skipped-chip {
+  border: 1px solid var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
 }
 
 .creator {

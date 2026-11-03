@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { apiDelete, apiPost, viewUrl } from '../api/client'
+import { apiDelete, apiGet, apiPost, viewUrl } from '../api/client'
 import { useToast } from '../composables/useToast'
 import { useImageLocation } from '../composables/useImageLocation'
-import type { HistoryItem } from '../api/types'
-import { formatSize, resolution, shotTime, sourceLabel } from '../utils/format'
+import type { HistoryItem, ImageDetail, PromptDetail } from '../api/types'
+import {
+  formatDateTime,
+  formatElapsed,
+  formatSize,
+  resolution,
+  shotTime,
+  sourceLabel,
+  statusLabel,
+} from '../utils/format'
 import { confirmDialogWithCheckbox } from '../utils/naive'
 import { useSettings } from '../composables/useSettings'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
@@ -191,10 +199,10 @@ onMounted(() => {
 
   scheduleInfoFade()
 
-  // 刷新前弹窗是开着的：同一张图 + 有临时提示词时自动恢复
+  // 刷新前弹窗是开着的：同一张图时自动恢复
   const savedPromptId = readPromptOpenId()
   if (savedPromptId !== null) {
-    if (item.value?.id === savedPromptId && tempPrompt.value) {
+    if (item.value?.id === savedPromptId) {
       promptInfoOpen.value = true
       if (restoredScroll) {
         nextTick(() => {
@@ -344,12 +352,34 @@ function textOf(value: unknown): string {
   return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
 }
 
-/** 没有关联提示词库记录、但出图参数里留了正文的「临时提示词」。 */
-const tempPrompt = computed(() =>
-  item.value?.prompt_id ? '' : textOf(promptParams.value.prompt).trim(),
+/**
+ * 出图时记录在参数里的提示词正文。
+ * 已关联提示词库的图也保留一份快照 —— 库里后来改过，也能看到这张图当时用的版本。
+ */
+const recordedPrompt = computed(() => textOf(promptParams.value.prompt).trim())
+const recordedNegative = computed(() => textOf(promptParams.value.negative_prompt).trim())
+
+/**
+ * 已关联提示词库、但出图记录没留正文的旧图：只读补一份库里的当前版本，
+ * 免得档案左栏空着。是否回退会在标题旁标注，避免和"出图时快照"混淆。
+ */
+const libraryPrompt = ref<PromptDetail | null>(null)
+const libraryPromptText = computed(() => textOf(libraryPrompt.value?.prompt).trim())
+
+const shownPrompt = computed(() => recordedPrompt.value || libraryPromptText.value)
+const shownNegative = computed(
+  () => recordedNegative.value || textOf(libraryPrompt.value?.negative_prompt).trim(),
 )
-const tempNegative = computed(() =>
-  item.value?.prompt_id ? '' : textOf(promptParams.value.negative_prompt).trim(),
+const promptNote = computed(() => {
+  if (!item.value?.prompt_id) return ''
+  if (recordedPrompt.value) return '· 出图时快照'
+  return libraryPromptText.value ? '· 当前提示词库版本' : ''
+})
+
+const promptPlaceholder = computed(() =>
+  item.value?.prompt_id
+    ? '（这条出图记录没有留下提示词正文，可打开提示词库查看）'
+    : '（出图参数里没有留下提示词正文）',
 )
 
 const PARAM_SOURCE_LABEL: Record<string, string> = {
@@ -367,44 +397,180 @@ const promptSource = computed(() => {
   return sourceLabel(item.value?.source ?? '')
 })
 
-const PARAM_LABEL: Record<string, string> = {
-  seed: '随机种子',
-  steps: '步数',
-  cfg_scale: 'CFG',
-  sampler: '采样器',
-  model: '模型',
-  width: '宽度',
-  height: '高度',
-  orientation: '方向',
+/**
+ * 面板打开时才补取完整参数（工作流 / 实际采样参数 / 耗时）。
+ * 列表接口只带快照，逐张图查 ComfyUI history 会把画廊拖慢。
+ */
+const detail = ref<ImageDetail | null>(null)
+const detailLoading = ref(false)
+let detailSeq = 0
+
+watch(
+  [promptInfoOpen, () => item.value?.id],
+  async ([open, id]) => {
+    if (!open || !id) {
+      detail.value = null
+      libraryPrompt.value = null
+      detailLoading.value = false
+      return
+    }
+    const seq = ++detailSeq
+    detailLoading.value = true
+    const promptId = item.value?.prompt_id ?? 0
+    // 有出图时快照就不必再查库；只有旧图缺正文时补一次当前版本
+    const libraryPromise =
+      promptId && !recordedPrompt.value
+        ? apiGet<PromptDetail>(`/api/prompts/${promptId}`).catch(() => null)
+        : Promise.resolve(null)
+    try {
+      const [data, lib] = await Promise.all([
+        apiGet<ImageDetail>(`/api/images/${id}/detail`),
+        libraryPromise,
+      ])
+      if (seq === detailSeq) {
+        detail.value = data
+        libraryPrompt.value = lib
+      }
+    } catch {
+      if (seq === detailSeq) {
+        detail.value = null
+        libraryPrompt.value = null
+      }
+    } finally {
+      if (seq === detailSeq) detailLoading.value = false
+    }
+  },
+  { immediate: true },
+)
+
+function pick(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue
+    return String(value)
+  }
+  return ''
 }
 
-const paramRows = computed(() => {
-  const p = promptParams.value
-  return Object.keys(PARAM_LABEL)
-    .filter((key) => p[key] !== null && p[key] !== undefined && p[key] !== '' && typeof p[key] !== 'object')
-    .map((key) => ({ label: PARAM_LABEL[key], value: String(p[key]) }))
+interface ArchiveRow {
+  label: string
+  value: string
+  title?: string
+  /** 长字段（路径、文件名、模型名）独占整行。 */
+  wide?: boolean
+  /** 有值时整行可点击跳到对应提示词。 */
+  promptId?: number
+}
+
+/** 文件信息：短字段两列，存储位置单独整行并支持定位。 */
+const fileRows = computed<ArchiveRow[]>(() => {
+  const it = item.value
+  if (!it) return []
+  return [
+    { label: '来源', value: promptSource.value },
+    { label: '出图时间', value: shotTime(it) || '—' },
+    { label: '执行耗时', value: elapsedText.value || '—' },
+    { label: '分辨率', value: resolution(it) },
+    { label: '体积', value: it.file_size ? formatSize(it.file_size) : '' },
+  ].filter((row) => row.value)
 })
 
-/** 换脸 / 图片处理这类任务额外留下的溯源字段。 */
-const extraRows = computed(() => {
+/** 实际运行参数：任务快照 → ComfyUI history → PNG 元数据，缺失的逐项回退。 */
+const runParamRows = computed<ArchiveRow[]>(() => {
   const p = promptParams.value
-  const rows: Array<{ label: string; value: string }> = []
+  const run = detail.value?.run
+  const sampler = [pick(run?.sampler, p.sampler), pick(run?.scheduler, p.scheduler)]
+    .filter(Boolean)
+    .join(' · ')
+  return [
+    { label: '模型', value: pick(run?.model, p.model), wide: true },
+    { label: '采样器', value: sampler },
+    { label: '步数', value: pick(run?.steps, p.steps) },
+    { label: 'CFG', value: pick(run?.cfg_scale, p.cfg_scale) },
+    { label: '去噪', value: pick(run?.denoise, p.denoise) },
+    { label: '随机种子', value: pick(run?.seed, p.seed) },
+    { label: '方向', value: pick(p.orientation) },
+  ].filter((row) => row.value)
+})
+
+const QUALITY_SCALES: Record<string, number> = {
+  '0.75x': 0.75,
+  '1.0x': 1,
+  '1.25x': 1.25,
+  '1.5x': 1.5,
+  '2.0x': 2,
+  // 兼容迁移前的历史记录
+  '2K': 0.75,
+  '4K': 1,
+  '6K': 1.25,
+  '8K': 1.5,
+  '12K': 2,
+}
+
+/** 档案里不暴露内部键（8K），用真实宽高反算倍率与 MP。 */
+const qualityText = computed(() => {
+  const q = detail.value?.run.quality
+  if (!q) return ''
+  const scale = QUALITY_SCALES[q]
+  const it = item.value
+  if (!scale || !it?.width || !it?.height) return q
+  const mp = (it.width * it.height) / 1_000_000
+  return `${scale}× · ${Math.round(mp * 100) / 100}MP · ${it.width}×${it.height}`
+})
+
+const workflowRows = computed<ArchiveRow[]>(() => {
+  const run = detail.value?.run
+  if (!run) return []
+  return [
+    {
+      label: '工作流',
+      value: pick(run.workflow_name, run.workflow_path),
+      title: run.workflow_path,
+      wide: true,
+    },
+    { label: '质量档位', value: qualityText.value, title: run.quality },
+    { label: '出图比例', value: run.aspect_ratio, title: '' },
+    { label: '输出目录', value: run.output_subfolder, title: '', wide: true },
+    { label: '提交时间', value: formatDateTime(run.submitted_at, true), title: run.submitted_at },
+    { label: '完成时间', value: formatDateTime(run.finished_at, true), title: run.finished_at },
+  ].filter((row) => row.value)
+})
+
+const jobRow = computed(() => {
+  const d = detail.value
+  if (!d?.job_title) return null
+  const status = statusLabel(d.job_status)
+  return {
+    title: d.job_title,
+    status,
+    text: status ? `${d.job_title} · ${status}` : d.job_title,
+  }
+})
+
+const elapsedText = computed(() => formatElapsed(detail.value?.run.duration_seconds))
+
+/** 换脸 / 图片处理这类任务额外留下的溯源字段。 */
+const extraRows = computed<ArchiveRow[]>(() => {
+  const p = promptParams.value
+  const rows: ArchiveRow[] = []
   const original = textOf(p.original_filename)
-  if (original) rows.push({ label: '处理源图', value: original })
+  if (original) rows.push({ label: '处理源图', value: original, title: original, wide: true })
   const inputImage = textOf(p.input_image)
-  if (inputImage) rows.push({ label: '输入图', value: inputImage })
+  if (inputImage) rows.push({ label: '输入图', value: inputImage, title: inputImage, wide: true })
   if (Array.isArray(p.inputs)) {
     const roles = p.inputs
       .map((it) => (typeof it === 'object' && it ? textOf((it as Record<string, unknown>).role) : ''))
       .filter(Boolean)
     if (roles.length) rows.push({ label: '输入角色', value: roles.join(' / ') })
   }
-  const sourceId = textOf(p.source_prompt_id)
-  if (sourceId) {
+  const sourceId = Number(textOf(p.source_prompt_id))
+  if (Number.isFinite(sourceId) && sourceId > 0) {
     const sourceName = textOf(p.source_prompt_name)
     rows.push({
       label: '来源提示词',
       value: sourceName ? `${sourceName} (#${sourceId})` : `#${sourceId}`,
+      title: `打开提示词${sourceName ? `：${sourceName}` : ` #${sourceId}`}`,
+      wide: true,
+      promptId: sourceId,
     })
   }
   return rows
@@ -418,6 +584,12 @@ async function copyText(text: string, label: string) {
   } catch {
     toast.error('复制失败（浏览器拒绝了剪贴板访问）')
   }
+}
+
+/** 档案里的提示词入口：先收起弹窗，再交给父组件跳转。 */
+function jumpToPrompt(promptId: number) {
+  promptInfoOpen.value = false
+  emit('jump-to-prompt', promptId)
 }
 
 // ---------------------------------------------------------------------------
@@ -776,20 +948,11 @@ function onKey(event: KeyboardEvent) {
         </dl>
 
         <button
-          v-if="item.prompt_id"
           class="prompt-link"
-          title="打开提示词库里的这条提示词"
-          @click="emit('jump-to-prompt', item.prompt_id!)"
-        >
-          📝 跳到提示词{{ item.prompt_name ? `：${item.prompt_name}` : '' }}
-        </button>
-        <button
-          v-else-if="tempPrompt"
-          class="prompt-link"
-          title="查看这张图出图时记录的临时提示词与参数"
+          title="查看这张图的提示词、工作流与出图参数"
           @click="promptInfoOpen = true"
         >
-          📝 查看提示词信息（临时）
+          📋 出图档案
         </button>
 
         <div v-if="item.tags.length" class="tags">
@@ -824,13 +987,48 @@ function onKey(event: KeyboardEvent) {
       <div class="prompt-info">
         <div class="prompt-cols">
           <div class="prompt-main">
-            <div class="prompt-box">
-              <pre
-                ref="promptTextEl"
-                class="prompt-text main-prompt"
-                @scroll.passive="onPromptScroll"
-              >{{ tempPrompt || '（出图参数里没有留下提示词正文）' }}</pre>
-            </div>
+            <section class="text-section">
+              <header class="text-head">
+                <span>
+                  正向提示词
+                  <span v-if="promptNote" class="text-note">{{ promptNote }}</span>
+                </span>
+                <div class="text-actions">
+                  <button
+                    v-if="item.prompt_id"
+                    class="btn btn-sm prompt-jump"
+                    :title="item.prompt_name || `#${item.prompt_id}`"
+                    @click="jumpToPrompt(item.prompt_id!)"
+                  >
+                    ↗ 提示词库{{ item.prompt_name ? `：${item.prompt_name}` : '' }}
+                  </button>
+                  <button
+                    class="btn btn-sm"
+                    :disabled="!shownPrompt"
+                    @click="copyText(shownPrompt, '正向提示词')"
+                  >
+                    复制
+                  </button>
+                </div>
+              </header>
+              <div class="prompt-box">
+                <pre
+                  ref="promptTextEl"
+                  class="prompt-text main-prompt"
+                  @scroll.passive="onPromptScroll"
+                >{{ shownPrompt || promptPlaceholder }}</pre>
+              </div>
+            </section>
+
+            <section v-if="shownNegative" class="text-section neg-section">
+              <header class="text-head">
+                <span>负面提示词</span>
+                <button class="btn btn-sm" @click="copyText(shownNegative, '负面提示词')">
+                  复制
+                </button>
+              </header>
+              <pre class="prompt-text neg-prompt">{{ shownNegative }}</pre>
+            </section>
           </div>
 
           <aside
@@ -839,12 +1037,9 @@ function onKey(event: KeyboardEvent) {
             @scroll.passive="onPromptScroll"
           >
             <div class="side-head">
-              <h3
-                class="side-heading copyable"
-                title="点击复制文件名"
-                @click="copyFilename"
-              >
-                出图参数（未关联提示词库）
+              <h3 class="side-heading">
+                出图档案
+                <span class="side-tag">{{ item.prompt_id ? '已关联提示词库' : '临时提示词' }}</span>
               </h3>
               <button class="btn btn-sm" @click="promptInfoOpen = false">关闭</button>
             </div>
@@ -858,43 +1053,98 @@ function onKey(event: KeyboardEvent) {
               >
                 {{ item.filename }}
               </div>
-              <div v-if="promptSource" class="side-row">
-                <span>来源</span><b>{{ promptSource }}</b>
-              </div>
-              <div class="side-row">
-                <span>出图时间</span><b>{{ shotTime(item) }}</b>
-              </div>
+              <dl class="facts side-facts">
+                <div
+                  v-for="row in fileRows"
+                  :key="row.label"
+                  class="kv"
+                  :class="{ wide: row.wide }"
+                >
+                  <dt>{{ row.label }}</dt>
+                  <dd :title="row.title">{{ row.value }}</dd>
+                </div>
+                <div class="kv wide">
+                  <dt>存储位置</dt>
+                  <dd
+                    class="path linkable"
+                    :title="`在资源管理器中定位：${outputPath}`"
+                    @click.stop="revealImage(item)"
+                  >
+                    {{ outputPath }}
+                  </dd>
+                </div>
+              </dl>
             </section>
 
-            <button
-              class="btn btn-sm side-copy"
-              :disabled="!tempPrompt"
-              @click="copyText(tempPrompt, '正向提示词')"
-            >
-              复制正向提示词
-            </button>
-
-            <section v-if="tempNegative" class="side-block">
-              <h3 class="side-title">负面提示词</h3>
-              <pre class="prompt-text side-prompt">{{ tempNegative }}</pre>
+            <section v-if="detailLoading" class="side-block">
+              <span class="prompt-tip">正在汇总工作流与运行参数…</span>
             </section>
 
-            <dl v-if="paramRows.length" class="facts side-facts">
-              <div v-for="row in paramRows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </div>
-            </dl>
+            <section v-if="workflowRows.length || jobRow" class="side-block">
+              <h3 class="side-title">工作流与任务</h3>
+              <dl class="facts side-facts">
+                <div v-if="jobRow" class="kv wide">
+                  <dt>任务</dt>
+                  <dd :title="jobRow.title">{{ jobRow.text }}</dd>
+                </div>
+                <div
+                  v-for="row in workflowRows"
+                  :key="row.label"
+                  class="kv"
+                  :class="{ wide: row.wide }"
+                >
+                  <dt>{{ row.label }}</dt>
+                  <dd :title="row.title">{{ row.value }}</dd>
+                </div>
+              </dl>
+            </section>
 
-            <dl v-if="extraRows.length" class="facts side-facts">
-              <div v-for="row in extraRows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </div>
-            </dl>
+            <section v-if="runParamRows.length" class="side-block">
+              <h3 class="side-title">运行参数</h3>
+              <dl class="facts side-facts">
+                <div
+                  v-for="row in runParamRows"
+                  :key="row.label"
+                  class="kv"
+                  :class="{ wide: row.wide }"
+                >
+                  <dt>{{ row.label }}</dt>
+                  <dd>{{ row.value }}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section v-if="extraRows.length" class="side-block">
+              <h3 class="side-title">来源与输入</h3>
+              <dl class="facts side-facts">
+                <div
+                  v-for="row in extraRows"
+                  :key="row.label"
+                  class="kv"
+                  :class="{ wide: row.wide }"
+                >
+                  <dt>{{ row.label }}</dt>
+                  <dd
+                    v-if="row.promptId"
+                    class="linkable"
+                    :title="row.title"
+                    @click.stop="jumpToPrompt(row.promptId!)"
+                  >
+                    {{ row.value }}
+                  </dd>
+                  <dd v-else :title="row.title">{{ row.value }}</dd>
+                </div>
+              </dl>
+            </section>
 
             <p class="prompt-tip">
-              这张图没有关联提示词库记录，以上内容来自出图时的参数快照。
+              <template v-if="item.prompt_id">
+                这张图关联了提示词库记录；参数来自任务记录、出图参数快照与 ComfyUI 执行记录。
+                提示词正文优先展示出图时的快照，缺失时回退到提示词库当前版本。
+              </template>
+              <template v-else>
+                这张图没有关联提示词库记录；以上内容来自任务记录、出图参数快照与 ComfyUI 执行记录。
+              </template>
             </p>
           </aside>
         </div>
@@ -1244,12 +1494,56 @@ function onKey(event: KeyboardEvent) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: var(--gap-sm);
+}
+
+/* 正向占满剩余高度；负面按内容高度（上限 30%），不再挤在右栏 */
+.text-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.neg-section {
+  flex: 0 1 auto;
+  max-height: 30%;
+}
+
+.text-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.text-note {
+  color: var(--muted);
+}
+
+.text-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 提示词名可能很长：入口本身给足点击宽度，但别把标题挤掉 */
+.prompt-jump {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prompt-side {
   flex: none;
-  width: 340px;
+  /* 两列短字段需要的最小宽度；长字段（路径/模型）仍独占整行 */
+  width: 440px;
   min-height: 0;
   overflow-y: auto;
   display: flex;
@@ -1280,22 +1574,22 @@ function onKey(event: KeyboardEvent) {
   word-break: break-all;
 }
 
-.side-row {
-  display: flex;
-  gap: 8px;
-  font-size: var(--fs-sm);
-}
-
-.side-row span {
-  flex: none;
-  width: 62px;
+.side-tag {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
   color: var(--muted);
 }
 
-.side-row b {
-  font-weight: 600;
-  color: var(--text);
-  word-break: break-all;
+.linkable {
+  cursor: pointer;
+  color: var(--primary);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.linkable:hover {
+  text-decoration-style: solid;
 }
 
 .side-head {
@@ -1312,28 +1606,44 @@ function onKey(event: KeyboardEvent) {
   font-weight: 600;
 }
 
-.side-heading.copyable,
 .side-filename.copyable {
   cursor: copy;
 }
 
-.side-heading.copyable:hover,
 .side-filename.copyable:hover {
   color: var(--primary);
 }
 
-.side-copy {
-  flex: none;
-  width: 100%;
-}
-
+/* 短字段两列，长字段（路径 / 模型 / 文件名）由 .wide 独占整行 */
 .side-facts {
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 14px;
   flex: none;
 }
 
-.side-facts div {
+.side-facts .kv {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
   font-size: var(--fs-sm);
+}
+
+.side-facts .kv.wide {
+  grid-column: 1 / -1;
+}
+
+.side-facts dt {
+  flex: none;
+  width: 58px;
+  color: var(--muted);
+}
+
+.side-facts dd {
+  margin: 0;
+  min-width: 0;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 提示词容器：只套一层边框，不再有标题栏占高度 */
@@ -1368,10 +1678,14 @@ function onKey(event: KeyboardEvent) {
   min-height: 0;
 }
 
-/* 右栏负面提示词保持小高度，避免把参数挤下去 */
-.side-prompt {
-  max-height: 140px;
-  padding-top: 2px;
+/* 负面提示词在左栏底部，按内容高度、上限 30% */
+.neg-prompt {
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
 }
 
 .prompt-tip {
@@ -1389,6 +1703,20 @@ function onKey(event: KeyboardEvent) {
   .prompt-side {
     width: auto;
     max-height: 40%;
+  }
+}
+
+@media (max-width: 560px) {
+  .side-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .side-facts .kv {
+    grid-column: 1 / -1;
+  }
+
+  .prompt-jump {
+    max-width: 150px;
   }
 }
 </style>

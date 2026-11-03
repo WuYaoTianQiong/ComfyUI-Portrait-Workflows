@@ -66,6 +66,18 @@ def _load_meta(path: Path) -> tuple[float, dict[str, bool], dict, str]:
         workflow = load_workflow(str(path))
         caps = detect_workflow_caps(workflow)
         params = detect_workflow_params(workflow)
+        # 工作流可在 extra.atelier 里声明可选画质档位（如 Qwen 去掉低于原生的档）。
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            atelier = (raw.get("extra") or {}).get("atelier") if isinstance(raw, dict) else None
+            if isinstance(atelier, dict):
+                tiers = atelier.get("quality_tiers")
+                if isinstance(tiers, list) and tiers:
+                    params["quality_tiers"] = [str(t) for t in tiers]
+                if isinstance(atelier.get("default_quality"), str):
+                    params["default_quality"] = atelier["default_quality"]
+        except Exception:
+            pass
         media_kind = "video" if is_video_workflow(workflow) else "image"
     except Exception as exc:
         logger.debug("探测工作流能力失败 %s：%s", path.name, exc)

@@ -594,6 +594,16 @@ def _migrate_v4_fragments_to_prompts(database):
     return migrated
 
 
+def _migrate_v5_quality_keys(database):
+    """画质内部键归一：2K/4K/6K/8K/12K/high → 0.75x…2.0x。"""
+    from app.services.quality_keys import ALIASES
+
+    for old, new in ALIASES.items():
+        database.execute_sql(
+            "UPDATE gen_jobs SET quality = ? WHERE quality = ?", (new, old)
+        )
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -603,6 +613,8 @@ MIGRATIONS = [
     (3, "补齐高频筛选/排序索引", lambda database: _migrate_v3_indexes(database)),
     (4, "碎片也变成 prompt：fragments 表转单块 prompt，碎片库不再独立存在",
         lambda database: _migrate_v4_fragments_to_prompts(database)),
+    (5, "画质内部键归一：2K/4K/6K/8K/12K/high → 0.75x/1.0x/1.25x/1.5x/2.0x",
+        lambda database: _migrate_v5_quality_keys(database)),
 ]
 
 

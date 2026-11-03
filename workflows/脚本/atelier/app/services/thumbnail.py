@@ -5,6 +5,7 @@ from typing import Optional
 from PIL import Image as PILImage
 
 from app.config import settings
+from app.services import image_formats  # noqa: F401  注册 HEIC/HEIF 解码
 from app.services.paths import resolve_image_path
 
 THUMBNAIL_DIR = settings.thumbnail_dir

@@ -6,6 +6,8 @@ import { apiGet, apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import WorkflowParams from './WorkflowParams.vue'
 import { useGenerate } from '../composables/useGenerate'
@@ -34,9 +36,13 @@ interface MissingItem {
   height: number | null
 }
 
-const { workflowPath, quality, orientation } = useSettings()
+const { workflowPath, orientation } = useSettings()
+const quality = useWorkflowQuality(workflowPath)
+const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { workflows, allWorkflows } = useWorkflows()
-const { caps, qualityOptions } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
+  workflowPath, allWorkflows, aspectRatio,
+)
 const { track } = useGenerate()
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -99,6 +105,7 @@ async function submit() {
       workflow_content: customWorkflowContent(workflowPath.value),
       quality: caps.value.quality ? quality.value : '4K',
       orientation: caps.value.orientation ? orientation.value : 'keep',
+      aspect_ratio: aspectRatio.value || defaultRatio.value,
     })
     if (!result.job_id) {
       toast.info(result.message || '没有需要补跑的条目')
@@ -137,6 +144,9 @@ async function submit() {
         <WorkflowParams
           v-model:quality="quality"
           v-model:orientation="orientation"
+          v-model:aspect-ratio="aspectRatio"
+          :aspect-ratios="aspectRatios"
+          :default-ratio="defaultRatio"
           :workflow-path="workflowPath"
           :caps="caps"
           :quality-options="qualityOptions"
@@ -190,6 +200,7 @@ async function submit() {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-sm);
   padding: var(--gap-sm) var(--gap-lg);

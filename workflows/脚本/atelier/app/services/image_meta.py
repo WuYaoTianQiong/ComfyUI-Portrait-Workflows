@@ -6,8 +6,9 @@ subfolder 逐段 junction 解析）。
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
+from app.services import image_formats  # noqa: F401  注册 HEIC/HEIF 解码
 from app.services.paths import resolve_image_path
 
 logger = logging.getLogger("atelier.image_meta")
@@ -189,3 +190,128 @@ def extract_model_name(filename: str, subfolder: str, img_type: str) -> str | No
 def extract_model_from_comfy_prompt(prompt_dict) -> str | None:
     """从 ComfyUI history API 的 prompt 字典（{node_id: {class_type, inputs}}）提取模型名。"""
     return _extract_model_from_workflow(prompt_dict)
+
+
+def _comfy_prompt_graph(wf) -> dict:
+    """取出 API 格式的 prompt 图：{node_id: {class_type, inputs}}。"""
+    if not isinstance(wf, dict):
+        return {}
+    wrapped = wf.get("prompt")
+    if isinstance(wrapped, dict):
+        return wrapped
+    return wf
+
+
+def extract_run_params(wf) -> dict:
+    """从 ComfyUI prompt 图里提取实际采样参数。
+
+    只认 API 格式（inputs 是带键的字典）；PNG 里的 `workflow` 是 GUI 格式，
+    参数在 widgets_values 里且顺序不稳定，这里不猜。双程工作流取第一个采样节点，
+    足够回答"用了什么步数 / 采样器 / CFG"。
+    """
+    graph = _comfy_prompt_graph(wf)
+    node_inputs = {}
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        if "sampler_name" in inputs or ("steps" in inputs and "cfg" in inputs):
+            node_inputs = inputs
+            break
+
+    params: dict = {}
+    if node_inputs:
+        if isinstance(node_inputs.get("steps"), (int, float)):
+            params["steps"] = int(node_inputs["steps"])
+        if isinstance(node_inputs.get("cfg"), (int, float)):
+            params["cfg_scale"] = float(node_inputs["cfg"])
+        sampler = node_inputs.get("sampler_name")
+        if isinstance(sampler, str) and sampler:
+            params["sampler"] = sampler
+        scheduler = node_inputs.get("scheduler")
+        if isinstance(scheduler, str) and scheduler:
+            params["scheduler"] = scheduler
+        seed = node_inputs.get("seed", node_inputs.get("noise_seed"))
+        if isinstance(seed, (int, float)):
+            params["seed"] = int(seed)
+        denoise = node_inputs.get("denoise")
+        if isinstance(denoise, (int, float)):
+            params["denoise"] = float(denoise)
+
+    model = _extract_model_from_workflow(graph)
+    if model:
+        params["model"] = model
+    return params
+
+
+def _iso_from_ms(ms: float) -> str:
+    return (
+        datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def extract_run_times(entry) -> dict:
+    """从 ComfyUI history 条目的 status.messages 取开始/结束时间与耗时。
+
+    ComfyUI 在 `execution_start` / `execution_success` 消息里带毫秒时间戳，
+    这是唯一能拿到"单张实际跑了多久"的地方（任务表的 created/updated 只到秒且含排队）。
+    """
+    status = entry.get("status") if isinstance(entry, dict) else None
+    messages = (status or {}).get("messages") or []
+    start = end = None
+    for msg in messages:
+        if not isinstance(msg, (list, tuple)) or len(msg) < 2:
+            continue
+        name, data = msg[0], msg[1]
+        data = data if isinstance(data, dict) else {}
+        ts = data.get("timestamp")
+        if not isinstance(ts, (int, float)):
+            continue
+        if name == "execution_start" and start is None:
+            start = ts
+        elif name in ("execution_success", "execution_error", "execution_interrupted"):
+            end = ts
+
+    times: dict = {}
+    if start:
+        times["started_at"] = _iso_from_ms(start)
+    if end:
+        times["finished_at"] = _iso_from_ms(end)
+    if start and end and end >= start:
+        times["duration_seconds"] = round((end - start) / 1000, 1)
+    return times
+
+
+def read_embedded_run_params(filename: str, subfolder: str, img_type: str) -> dict:
+    """读 PNG 内嵌的 ComfyUI `prompt` 元数据里的采样参数。
+
+    老图没有把参数写进 prompt_params，但 ComfyUI 把完整 prompt 图嵌在 PNG 里；
+    读这里比依赖 ComfyUI history（只保留最近 500 条）更可靠。
+    """
+    path = resolve_image_path(filename, subfolder, img_type)
+    if path is None:
+        return {}
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as img:
+            info = dict(img.info)
+    except Exception:
+        return {}
+    for key in ("prompt", "workflow"):
+        raw = info.get(key)
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        params = extract_run_params(data)
+        if params:
+            return params
+    return {}
+

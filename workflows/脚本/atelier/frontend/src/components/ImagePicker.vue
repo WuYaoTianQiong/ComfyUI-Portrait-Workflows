@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, thumbnailUrl } from '../api/client'
+import { useToast } from '../composables/useToast'
 import EmptyState from './EmptyState.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
 import { imageAspect } from '../utils/image'
@@ -26,6 +27,8 @@ const emit = defineEmits<{
 
 const search = ref('')
 const { revealImage } = useImageLocation()
+const toast = useToast()
+const validating = ref(false)
 
 const { data, isFetching } = useQuery<HistoryPage>({
   queryKey: computed(() => ['picker', search.value.trim()]),
@@ -61,6 +64,37 @@ function toggle(id: number) {
 function clear() {
   emit('update:modelValue', [])
 }
+
+/**
+ * 清理已选里「记录已删除 / 文件缺失」的图片。
+ *
+ * 列表接口默认不返回软删记录，`missing` 标记文件是否还在；两者都不可用，
+ * 不清理它们会变成计数里有、网格里看不到的“幽灵选择”。
+ */
+async function pruneMissing() {
+  if (!props.modelValue.length || validating.value) return
+  validating.value = true
+  try {
+    const page = await apiGet<HistoryPage>('/api/images', {
+      ids: props.modelValue.join(','),
+      // ids 精确查询不受默认分页影响：按已选数量取回，避免漏判被截断的 id
+      page_size: Math.max(1, props.modelValue.length),
+    })
+    const valid = new Set(page.items.filter((item) => !item.missing).map((item) => item.id))
+    const kept = props.modelValue.filter((id) => valid.has(id))
+    const removed = props.modelValue.length - kept.length
+    if (!removed) {
+      toast.info('没有失效的已选图片')
+      return
+    }
+    emit('update:modelValue', kept)
+    toast.success(`已清理 ${removed} 张失效图片`)
+  } catch (e) {
+    toast.error(`清理失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    validating.value = false
+  }
+}
 </script>
 
 <template>
@@ -68,6 +102,15 @@ function clear() {
     <header class="picker-head">
       <span class="title">{{ title }}</span>
       <span class="count">已选 {{ modelValue.length }}<span v-if="isFetching"> · 加载中</span></span>
+      <button
+        v-if="modelValue.length"
+        class="btn btn-sm cleanup"
+        :disabled="validating"
+        title="移除已删除或文件缺失的已选图片"
+        @click="pruneMissing"
+      >
+        {{ validating ? '校验中…' : '清理失效' }}
+      </button>
       <button v-if="modelValue.length" class="btn btn-sm" @click="clear">清空</button>
     </header>
 

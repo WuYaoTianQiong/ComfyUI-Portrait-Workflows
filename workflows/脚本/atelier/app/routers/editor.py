@@ -38,6 +38,7 @@ from app.routers.jobs import (
     update_job_items,
 )
 from app.services.image_inputs import (
+    clean_dest_name as _clean_dest_name,
     compose_masked_target as _compose_masked_target,
     dest_name as _dest_name,
 )
@@ -49,12 +50,14 @@ from app.services.output_location import (
 from app.services.submission import SubmitTask, enqueue_submission
 from app.services.paths import resolve_image_path
 from app.services.workflow_parser import (
+    detect_workflow_caps,
     find_loadimage_nodes,
     find_size_source_loadimage,
     inject_input_image,
     inject_prompt,
     load_workflow,
     set_output_prefix,
+    set_save_subfolder,
 )
 
 router = APIRouter(tags=["批量图像编辑"])
@@ -67,7 +70,7 @@ DEFAULT_PROMPT = (
 # 一个工作流从上到下最多注入「目标图 + 参考图1 + 参考图2」三张
 MAX_INPUTS = 3
 # 笛卡尔积上限：三组素材全组合很容易爆炸，超限直接让用户收窄选择
-MAX_COMBOS = 10
+MAX_COMBOS = 100
 
 ROLE_ORDER = ("target", "ref1", "ref2")
 
@@ -107,6 +110,10 @@ class FaceswapRequest(BaseModel):
     ref2_node: str | None = None   # 参考图2
     dry_run: bool = False
     output_subfolder: str = ""     # 可选：output 下的相对子目录，空 = 平铺
+    # 批量超分页专用（编辑页不传，保持旧行为）：空 = 沿用 QUALITY 常量
+    quality: str = ""
+    job_label: str = ""            # 任务标题前缀；空 = 旧文案「图像编辑」
+    clean_source_name: bool = False  # 拷进 input 时保留原文件名（SaveImageFromSource 取源图名）
     idempotency_key: str = ""
 
 
@@ -320,10 +327,13 @@ def faceswap_batch(req: FaceswapRequest):
     if not workflow_path and not req.workflow_content:
         raise HTTPException(400, "缺少工作流")
 
+    # 编辑页不传 quality，沿用旧常量；批量超分页传 2K/4K/6K…
+    quality = (req.quality or "").strip() or QUALITY
+
     try:
         subfolder_preview = expand_subfolder(
             req.output_subfolder, workflow_path=workflow_path, job_id=0,
-            quality=QUALITY, orientation=ORIENTATION,
+            quality=quality, orientation=ORIENTATION,
         )
     except OutputLocationError as e:
         raise HTTPException(400, str(e))
@@ -423,11 +433,19 @@ def faceswap_batch(req: FaceswapRequest):
     plan = []
     for i, combo in enumerate(combos):
         labels = [src["label"] for src in combo]
+        # 记录「保留源图名」：重试时也要按同一份 input 子目录注入，
+        # 否则失败重跑会退回 atelier_fs_ 前缀，成品名前后不一致。
+        metas = []
+        for role, src in zip(roles, combo):
+            meta = src["meta"]
+            if req.clean_source_name and role == "target" and not meta.get("mask"):
+                meta = {**meta, "keep_source_name": True}
+            metas.append(meta)
         plan.append({
             "index": i + 1,
             "labels": labels,
             "roles": roles,
-            "metas": [src["meta"] for src in combo],
+            "metas": metas,
             "seed": _resolve_seed(req.seed_mode, req.seed, i),
             "label": " × ".join(labels),
             # 出图文件名规则（默认平铺在 output 根目录；填了子目录才分层），
@@ -439,7 +457,12 @@ def faceswap_batch(req: FaceswapRequest):
         return {"success": True, "dry_run": True, "total": len(plan),
                 "nodes": node_info, "plan": plan}
 
-    prompt_text = (req.prompt or "").strip() or DEFAULT_PROMPT
+    # 纯图像工作流（超分等）没有文本编码节点：不要塞编辑用的默认提示词，
+    # 否则任务记录 / 画廊会挂上一段根本没参与执行的假提示词。
+    caps = detect_workflow_caps(api_wf)
+    prompt_text = (req.prompt or "").strip()
+    if not prompt_text and caps["prompt"]:
+        prompt_text = DEFAULT_PROMPT
 
     # 4) 建任务记录（前端马上能拿到 job_id 开始轮询）
     items = []
@@ -473,14 +496,15 @@ def faceswap_batch(req: FaceswapRequest):
     if req.idempotency_key.strip():
         extra["idempotency_key"] = req.idempotency_key.strip()
         extra["idempotency_scope"] = "faceswap"
+    job_title = f"{req.job_label.strip()} {counts}" if req.job_label.strip() else f"图像编辑 {counts}"
     job_id = create_job(
-        "faceswap", f"图像编辑 {counts}",
-        items, workflow_path, ORIENTATION, QUALITY,
+        "faceswap", job_title,
+        items, workflow_path, ORIENTATION, quality,
         extra=extra,
     )
     subfolder = expand_subfolder(
         req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-        quality=QUALITY, orientation=ORIENTATION,
+        quality=quality, orientation=ORIENTATION,
     )
 
     # 5) 构造每条 workflow 的函数交给后台提交线程；请求立即返回 job_id
@@ -494,7 +518,7 @@ def faceswap_batch(req: FaceswapRequest):
             "negative_prompt": req.negative_prompt or "",
             "seed_override": plan[i]["seed"],
             "orientation": ORIENTATION,
-            "quality": QUALITY,
+            "quality": quality,
         })
         # 按角色逐个注入 LoadImage；有遮罩的目标图换成 alpha 合成后的副本
         for role, src in zip(roles, combo):
@@ -511,11 +535,14 @@ def faceswap_batch(req: FaceswapRequest):
                         f"{src['path']}|{mask_path}".encode("utf-8")
                     ).hexdigest()[:10]
                     dest_name = f"atelier_fs_{digest}_{src['name']}"
+                elif req.clean_source_name:
+                    dest_name = _clean_dest_name(src)
             inject_input_image(api_wf, str(source_path), input_dir,
                                node_id=node_id, dest_name=dest_name)
         set_output_prefix(
             api_wf, with_subfolder(subfolder, output_prefix(job_id, plan[i]["labels"]))
         )
+        set_save_subfolder(api_wf, subfolder)
         return api_wf
 
     update_job_items(job_id, items, status="running")

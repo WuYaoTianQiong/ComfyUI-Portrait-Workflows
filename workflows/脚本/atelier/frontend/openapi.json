@@ -90,6 +90,11 @@
       },
       "BatchRandomRunRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "category_id": {
             "anyOf": [
               {
@@ -195,19 +200,12 @@
       },
       "BatchReplaceRequest": {
         "properties": {
-          "content": {
-            "default": "",
-            "title": "Content",
-            "type": "string"
-          },
-          "missing": {
-            "default": "skip",
-            "enum": [
-              "skip",
-              "append"
-            ],
-            "title": "Missing",
-            "type": "string"
+          "replacements": {
+            "items": {
+              "$ref": "#/components/schemas/ReplacementItem"
+            },
+            "title": "Replacements",
+            "type": "array"
           },
           "texts": {
             "items": {
@@ -215,36 +213,19 @@
             },
             "title": "Texts",
             "type": "array"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
           }
         },
-        "required": [
-          "type"
-        ],
         "title": "BatchReplaceRequest",
         "type": "object"
       },
       "BatchReplaceResponse": {
         "properties": {
-          "appended": {
-            "default": 0,
-            "title": "Appended",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ReplaceResult"
             },
             "title": "Items",
             "type": "array"
-          },
-          "skipped": {
-            "default": 0,
-            "title": "Skipped",
-            "type": "integer"
           }
         },
         "title": "BatchReplaceResponse",
@@ -252,6 +233,11 @@
       },
       "BatchRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "idempotency_key": {
             "default": "",
             "title": "Idempotency Key",
@@ -473,8 +459,45 @@
         "title": "CategoryUpdate",
         "type": "object"
       },
+      "CompilePromptRequest": {
+        "properties": {
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "CompilePromptRequest",
+        "type": "object"
+      },
       "ComposerRunRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
@@ -542,6 +565,11 @@
       },
       "FaceswapRequest": {
         "properties": {
+          "clean_source_name": {
+            "default": false,
+            "title": "Clean Source Name",
+            "type": "boolean"
+          },
           "dry_run": {
             "default": false,
             "title": "Dry Run",
@@ -550,6 +578,11 @@
           "idempotency_key": {
             "default": "",
             "title": "Idempotency Key",
+            "type": "string"
+          },
+          "job_label": {
+            "default": "",
+            "title": "Job Label",
             "type": "string"
           },
           "main_ids": {
@@ -605,6 +638,11 @@
           "prompt": {
             "default": "",
             "title": "Prompt",
+            "type": "string"
+          },
+          "quality": {
+            "default": "",
+            "title": "Quality",
             "type": "string"
           },
           "ref2_ids": {
@@ -916,6 +954,11 @@
       "GenerateMissingRequest": {
         "description": "为所有「没有生成过图片」的提示词批量出图",
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "idempotency_key": {
             "default": "",
             "title": "Idempotency Key",
@@ -1200,6 +1243,314 @@
           }
         },
         "title": "HistoryListResponse",
+        "type": "object"
+      },
+      "ImageDetailResponse": {
+        "properties": {
+          "captured_at": {
+            "default": "",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "comfyui_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comfyui Prompt Id"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "img_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Img Type"
+          },
+          "is_favorite": {
+            "default": false,
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "job_status": {
+            "default": "",
+            "title": "Job Status",
+            "type": "string"
+          },
+          "job_title": {
+            "default": "",
+            "title": "Job Title",
+            "type": "string"
+          },
+          "job_type": {
+            "default": "",
+            "title": "Job Type",
+            "type": "string"
+          },
+          "missing": {
+            "default": false,
+            "title": "Missing",
+            "type": "boolean"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id"
+          },
+          "prompt_name": {
+            "default": "",
+            "title": "Prompt Name",
+            "type": "string"
+          },
+          "prompt_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Params"
+          },
+          "run": {
+            "$ref": "#/components/schemas/ImageRunInfo"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "subfolder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subfolder"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagRef"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "view_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Url"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "ImageDetailResponse",
+        "type": "object"
+      },
+      "ImageRunInfo": {
+        "description": "一次出图的完整上下文：来自任务行 + 参数快照 + ComfyUI history/PNG 元数据。",
+        "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
+          "cfg_scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cfg Scale"
+          },
+          "denoise": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denoise"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "finished_at": {
+            "default": "",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
+            "type": "string"
+          },
+          "quality": {
+            "default": "",
+            "title": "Quality",
+            "type": "string"
+          },
+          "sampler": {
+            "default": "",
+            "title": "Sampler",
+            "type": "string"
+          },
+          "scheduler": {
+            "default": "",
+            "title": "Scheduler",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "started_at": {
+            "default": "",
+            "title": "Started At",
+            "type": "string"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "submitted_at": {
+            "default": "",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "workflow_name": {
+            "default": "",
+            "title": "Workflow Name",
+            "type": "string"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "ImageRunInfo",
         "type": "object"
       },
       "JobImage": {
@@ -1538,6 +1889,11 @@
       },
       "ProcessImageRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
@@ -2165,24 +2521,16 @@
       },
       "ReplaceResult": {
         "properties": {
-          "action": {
-            "default": "replaced",
-            "enum": [
-              "replaced",
-              "appended",
-              "skipped"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "integer"
           },
-          "old_content": {
-            "default": "",
-            "title": "Old Content",
-            "type": "string"
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/TypeOutcome"
+            },
+            "title": "Outcomes",
+            "type": "array"
           },
           "replaced": {
             "anyOf": [
@@ -2218,6 +2566,31 @@
           "id"
         ],
         "title": "ReplaceText",
+        "type": "object"
+      },
+      "ReplacementItem": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "missing": {
+            "default": "skip",
+            "enum": [
+              "skip",
+              "append"
+            ],
+            "title": "Missing",
+            "type": "string"
+          },
+          "type": {
+            "default": "",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "ReplacementItem",
         "type": "object"
       },
       "RetryRequest": {
@@ -2274,6 +2647,11 @@
       },
       "RunRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2323,6 +2701,11 @@
       },
       "RunTextRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
@@ -2601,8 +2984,43 @@
         "title": "TemplateUpdate",
         "type": "object"
       },
+      "TypeOutcome": {
+        "properties": {
+          "action": {
+            "default": "replaced",
+            "enum": [
+              "replaced",
+              "appended",
+              "skipped"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "old_content": {
+            "default": "",
+            "title": "Old Content",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "TypeOutcome",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -2635,11 +3053,27 @@
         "type": "object"
       },
       "WorkflowCaps": {
-        "description": "工作流能接受哪些注入项；前端据此隐藏无效旋钮。\n\n默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。",
+        "description": "工作流能接受哪些注入项；前端据此隐藏无效旋钮。\n\n默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。\n`negative` 只表示结构上有没有负向输入；`negative_effective` 才表示\n它是否真的参与采样（负向来自文本节点且 cfg>1）。",
         "properties": {
           "negative": {
             "default": true,
             "title": "Negative",
+            "type": "boolean"
+          },
+          "negative_cfg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Cfg"
+          },
+          "negative_effective": {
+            "default": true,
+            "title": "Negative Effective",
             "type": "boolean"
           },
           "orientation": {
@@ -2680,8 +3114,15 @@
         "type": "object"
       },
       "WorkflowParams": {
-        "description": "画质 / 方向参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。",
+        "description": "分辨率 / 画质参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。",
         "properties": {
+          "aspect_ratios": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aspect Ratios",
+            "type": "array"
+          },
           "base_height": {
             "anyOf": [
               {
@@ -2714,6 +3155,16 @@
               }
             ],
             "title": "Base Width"
+          },
+          "default_ratio": {
+            "default": "",
+            "title": "Default Ratio",
+            "type": "string"
+          },
+          "multiple": {
+            "default": 16,
+            "title": "Multiple",
+            "type": "integer"
           },
           "orientation_mode": {
             "default": "none",
@@ -2803,7 +3254,7 @@
   "paths": {
     "/api/browser/image": {
       "get": {
-        "description": "任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）",
+        "description": "任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）。\n\nHEIC/HEIF（包括改名成 .jpg 的）浏览器无法直接渲染，这里返回转换后的 WebP。",
         "operationId": "browser_image_api_browser_image_get",
         "parameters": [
           {
@@ -3464,7 +3915,7 @@
     },
     "/api/composition/batch_replace": {
       "post": {
-        "description": "批量替换指定类型的正文；可选在缺少该类型时追加到末尾。",
+        "description": "按替换清单批量改写提示词；每个类型可独立选择缺失时跳过或追加。",
         "operationId": "batch_replace_composition_api_composition_batch_replace_post",
         "requestBody": {
           "content": {
@@ -4928,6 +5379,49 @@
         ]
       }
     },
+    "/api/images/{item_id}/detail": {
+      "get": {
+        "description": "补全单张图的出图上下文：任务（工作流/质量/比例）+ 实际采样参数 + 耗时。\n\n参数来源按可信度补空：任务记录的 prompt_params（提交/完成时写入）\n→ ComfyUI history（实际执行值）→ PNG 内嵌 prompt（老图也能读出来）。",
+        "operationId": "image_detail_api_images__item_id__detail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Image Detail",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
     "/api/images/{item_id}/download": {
       "get": {
         "operationId": "download_history_item_api_images__item_id__download_get",
@@ -5991,6 +6485,46 @@
         "summary": "Batch Favorite Prompts",
         "tags": [
           "提示词"
+        ]
+      }
+    },
+    "/api/prompts/compile": {
+      "post": {
+        "description": "只编译、不出图：返回实际会提交的正向/负向与改写说明。",
+        "operationId": "compile_prompt_preview_api_prompts_compile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompilePromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Prompt Preview",
+        "tags": [
+          "ComfyUI"
         ]
       }
     },

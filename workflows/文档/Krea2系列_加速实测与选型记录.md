@@ -307,6 +307,8 @@
 2. **`ResolutionSelector` 的实际输出不等于名字**。
    9:16 + 1MP → 752x1336；9:16 + 2.16MP → 1128x2008；2:3 + 2.16MP → 1232x1840。都以实测为准，别按名字推。
 
+   > 单位提醒：`ResolutionSelector` 的 `megapixels` 是 **1024²（MiP）**，所以 2.16 对应 1128×2008。本文 SeedVR2 段的 `1200x1800 = 2.16MP` 是 **1e6** 口径，两者不是同一个像素数；写文档时必须带单位，或直接写像素尺寸。
+
 3. **`EmptyLatentImage` 里显示的宽高只是占位值**，实际由 `ResolutionSelector` 驱动，改分辨率请改 megapixels。
 
 4. **上传到 ComfyUI 的图必须落在 `input` 目录**（本机为 `F:\ComfyUI_Migration\input`），`LoadImage` 只认这里。

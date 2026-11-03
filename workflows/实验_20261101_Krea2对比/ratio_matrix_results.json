@@ -1,0 +1,72 @@
+[
+  {
+    "label": "Qwen21_ratio_9x16",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_ratio_9x16_00001_.png",
+        "width": 752,
+        "height": 1344,
+        "bytes": 1489285
+      }
+    ],
+    "error": "",
+    "elapsed_s": 13.81,
+    "status": "success"
+  },
+  {
+    "label": "Qwen21_ratio_21x9",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_ratio_21x9_00001_.png",
+        "width": 1536,
+        "height": 656,
+        "bytes": 1408242
+      }
+    ],
+    "error": "",
+    "elapsed_s": 11.57,
+    "status": "success"
+  },
+  {
+    "label": "Krea2_ratio_4x3",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Krea2_ratio_4x3_00001_.png",
+        "width": 1736,
+        "height": 1304,
+        "bytes": 2168011
+      }
+    ],
+    "error": "",
+    "elapsed_s": 32.25,
+    "status": "success"
+  },
+  {
+    "label": "ZIT_ratio_21x9",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\ZIT_ratio_21x9_00001_.png",
+        "width": 2040,
+        "height": 872,
+        "bytes": 1751068
+      }
+    ],
+    "error": "",
+    "elapsed_s": 36.56,
+    "status": "success"
+  },
+  {
+    "label": "Flux2_ratio_16x9",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Flux2_ratio_16x9_00001_.png",
+        "width": 1344,
+        "height": 752,
+        "bytes": 1547259
+      }
+    ],
+    "error": "",
+    "elapsed_s": 23.81,
+    "status": "success"
+  }
+]

@@ -42,6 +42,7 @@ class RunRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     seed_override: int = 0
     output_subfolder: str = ""
 
@@ -53,6 +54,7 @@ class RunTextRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     seed: int = 0
     source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
     output_subfolder: str = ""
@@ -71,6 +73,7 @@ class BatchRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     title: str = "批量生成"
     output_subfolder: str = ""
     idempotency_key: str = ""
@@ -82,6 +85,7 @@ class GenerateMissingRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     prompt_ids: list[int] | None = None  # 可选：仅补全指定提示词（与缺图集合取交集）
     output_subfolder: str = ""
     idempotency_key: str = ""
@@ -163,6 +167,7 @@ def run_prompt(req: RunRequest):
             "seed_override": req.seed_override,
             "orientation": req.orientation,
             "quality": req.quality,
+            "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
 
@@ -174,6 +179,7 @@ def run_prompt(req: RunRequest):
             "steps": p.steps, "cfg_scale": p.cfg_scale,
             "sampler": p.sampler or "", "model": p.model or "",
             "width": p.width, "height": p.height,
+            "aspect_ratio": req.aspect_ratio,
             "source": "prompt_run",
         }
         items = [{
@@ -184,7 +190,8 @@ def run_prompt(req: RunRequest):
         }]
         job_id = create_job(
             "single", "单图生成", items, workflow_path, req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
+                            aspect_ratio=req.aspect_ratio),
         )
 
         # 推送 ComfyUI
@@ -240,6 +247,7 @@ def run_text_prompt(req: RunTextRequest):
             "seed": req.seed or 0,
             "orientation": req.orientation,
             "quality": req.quality,
+            "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
 
@@ -247,6 +255,7 @@ def run_text_prompt(req: RunTextRequest):
             "prompt": req.prompt or "",
             "negative_prompt": req.negative_prompt or "",
             "seed": req.seed or 0,
+            "aspect_ratio": req.aspect_ratio,
             "source": "text_run",
             "source_prompt_id": req.source_prompt_id or 0,
         }
@@ -260,7 +269,8 @@ def run_text_prompt(req: RunTextRequest):
         }]
         job_id = create_job(
             "single", "文本跑图", items, workflow_path, req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
+                            aspect_ratio=req.aspect_ratio),
         )
 
         subfolder = expand_subfolder(
@@ -367,6 +377,7 @@ def batch_generate(req: BatchRequest):
                 "model": p.model or "",
                 "width": p.width,
                 "height": p.height,
+                "aspect_ratio": req.aspect_ratio,
                 "source_prompt_id": pid,
                 "source_prompt_name": p.name or "",
             }, ensure_ascii=False)
@@ -383,6 +394,7 @@ def batch_generate(req: BatchRequest):
                 "model": p.model or "",
                 "width": p.width,
                 "height": p.height,
+                "aspect_ratio": req.aspect_ratio,
                 "source_prompt_id": pid,
                 "source_prompt_name": p.name or "",
             }, ensure_ascii=False)
@@ -390,7 +402,10 @@ def batch_generate(req: BatchRequest):
         prompts[i] = p
         indexes.append(i)
 
-    extra = build_job_extra(workflow_path, req.workflow_content, req.output_subfolder)
+    extra = build_job_extra(
+        workflow_path, req.workflow_content, req.output_subfolder,
+        aspect_ratio=req.aspect_ratio,
+    )
     if req.idempotency_key.strip():
         extra["idempotency_key"] = req.idempotency_key.strip()
         extra["idempotency_scope"] = "runs_batch"
@@ -424,6 +439,7 @@ def batch_generate(req: BatchRequest):
             "sampler": p.sampler,
             "orientation": req.orientation,
             "quality": req.quality,
+            "aspect_ratio": req.aspect_ratio,
         })
         apply_output_subfolder(api_wf, subfolder)
         return api_wf
@@ -533,6 +549,7 @@ def generate_missing(req: GenerateMissingRequest):
         workflow_content=req.workflow_content,
         orientation=req.orientation,
         quality=req.quality,
+        aspect_ratio=req.aspect_ratio,
         title=f"补全缺图 ({len(missing_ids)} 条)",
         output_subfolder=req.output_subfolder,
         idempotency_key=req.idempotency_key,

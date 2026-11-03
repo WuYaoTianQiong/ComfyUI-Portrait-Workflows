@@ -136,6 +136,43 @@ def replace_type(text: str | None, fragment_type: str, content: str | None) -> s
     return "\n\n".join(out).strip()
 
 
+def replace_types(
+    text: str | None,
+    replacements: list[dict],
+) -> tuple[str | None, list[dict]]:
+    """按清单顺序应用多条「类型→内容」，返回最终全文与每条的命中结果。
+
+    每条可选 `missing`：类型不存在时 `append` 在末尾补一段，`skip` 只记录跳过。
+    后面的条目看到的是前面已改过的文本；类型或内容为空的条目直接忽略。
+    全部条目都跳过时全文返回 None —— 批量替换据此不生成"什么都没改"的任务。
+    """
+    current = text or ""
+    outcomes: list[dict] = []
+    changed = False
+    for item in replacements or []:
+        ftype = (item.get("type") or "").strip()
+        content = (item.get("content") or "").strip()
+        if not ftype or not content:
+            continue
+        replaced = replace_type(current, ftype, content)
+        if replaced is not None:
+            outcomes.append({
+                "type": ftype,
+                "old_content": extract(current, ftype),
+                "action": "replaced",
+            })
+            current = replaced
+            changed = True
+        elif item.get("missing") == "append":
+            base = current.rstrip()
+            current = f"{base}\n\n【{ftype}】\n{content}" if base else f"【{ftype}】\n{content}"
+            outcomes.append({"type": ftype, "old_content": "", "action": "appended"})
+            changed = True
+        else:
+            outcomes.append({"type": ftype, "old_content": "", "action": "skipped"})
+    return (current.strip() if changed else None), outcomes
+
+
 def classify(text: str | None) -> str | None:
     """按类型数量分档：>=4 组合 / 1-3 单项 / 0 零散。与旧版 models.classify_prompt_text 等价。"""
     if not text:

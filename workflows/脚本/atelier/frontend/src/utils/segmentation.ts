@@ -165,11 +165,23 @@ interface ParseResponse {
   leftover: string
 }
 
-export interface ReplaceOutcome {
+export interface ReplacementItem {
+  type: string
+  content: string
+  /** 该类型不存在时：skip = 跳过；append = 在末尾追加 */
+  missing?: 'skip' | 'append'
+}
+
+export interface TypeOutcome {
+  type: string
   oldContent: string
-  /** 该类型不存在且选择跳过时为 null */
-  replaced: string | null
   action: 'replaced' | 'appended' | 'skipped'
+}
+
+export interface ReplaceOutcome {
+  /** 应用整份替换清单后的全文；所有类型都跳过时为 null */
+  replaced: string | null
+  outcomes: TypeOutcome[]
 }
 
 /** 解析一段提示词：已标记块（type → content）+ 未标记残留文字。 */
@@ -217,34 +229,43 @@ export function renderAllSegments(segments: Record<string, string>): Promise<str
 }
 
 /**
- * 批量替换指定类型的正文：返回 id → { 替换前内容, 替换后全文 }。
+ * 按「替换清单」批量改写提示词：返回 id → { 替换后全文, 每个类型的结果 }。
  *
- * 全文替换在后端做（`replace_type`），其他块原样保留 —— 前端不重排用户库里的
- * 换行格式，也不自己拼 `【类型】` 串。
+ * 清单里的类型按顺序由后端应用（`replace_types`），其他块原样保留 —— 前端不重排
+ * 用户库里的换行格式，也不自己拼 `【类型】` 串。
  */
 export async function batchReplaceSegments(
   texts: Array<{ id: number; text: string }>,
-  type: string,
-  content: string,
-  missing: 'skip' | 'append' = 'skip',
+  replacements: ReplacementItem[],
 ): Promise<Map<number, ReplaceOutcome>> {
   const out = new Map<number, ReplaceOutcome>()
-  if (!texts.length || !type) return out
+  if (!texts.length || !replacements.length) return out
   const data = await apiPost<{
     items: Array<{
       id: number
-      old_content: string
       replaced: string | null
-      action?: ReplaceOutcome['action']
+      outcomes: Array<{
+        type: string
+        old_content: string
+        action: TypeOutcome['action']
+      }>
     }>
-  }>('/api/composition/batch_replace', { texts, type, content, missing })
+  }>('/api/composition/batch_replace', {
+    texts,
+    replacements: replacements.map((r) => ({
+      type: r.type,
+      content: r.content,
+      missing: r.missing ?? 'skip',
+    })),
+  })
   for (const item of data.items) {
-    const action =
-      item.action ?? (item.replaced === null ? 'skipped' : 'replaced')
     out.set(item.id, {
-      oldContent: item.old_content,
       replaced: item.replaced,
-      action,
+      outcomes: item.outcomes.map((o) => ({
+        type: o.type,
+        oldContent: o.old_content,
+        action: o.action,
+      })),
     })
   }
   return out

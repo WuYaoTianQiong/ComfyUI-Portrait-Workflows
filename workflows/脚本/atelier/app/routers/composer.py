@@ -125,6 +125,7 @@ class ComposerRunRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     output_subfolder: str = ""
 
 
@@ -150,6 +151,7 @@ def composer_run(req: ComposerRunRequest):
             "seed_override": 0,
             "orientation": req.orientation,
             "quality": req.quality,
+            "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
 
@@ -161,13 +163,15 @@ def composer_run(req: ComposerRunRequest):
             "prompt_params": json.dumps({
                 "prompt": req.prompt,
                 "negative_prompt": req.negative_prompt,
+                "aspect_ratio": req.aspect_ratio,
                 "source": "composer",
             }, ensure_ascii=False),
         }]
         job_id = create_job(
             "single", "组合创作", items, workflow_path,
             req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder),
+            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
+                            aspect_ratio=req.aspect_ratio),
         )
 
         subfolder = expand_subfolder(
@@ -199,6 +203,7 @@ class BatchRandomRunRequest(BaseModel):
     workflow_content: str | None = None
     orientation: str = "portrait"
     quality: str = "4K"
+    aspect_ratio: str = ""
     negative_prompt: str = ""
     search: str = ""  # 碎片筛选条件
     category_id: int | None = None
@@ -332,6 +337,7 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
                 "seed_override": task_seed,
                 "orientation": req.orientation,
                 "quality": req.quality,
+                "aspect_ratio": req.aspect_ratio,
             }
             inject_prompt(api_wf, prompt_data)
             apply_output_subfolder(api_wf, subfolder)

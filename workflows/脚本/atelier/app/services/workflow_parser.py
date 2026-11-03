@@ -5,6 +5,8 @@ import math
 import re
 
 from app.services.comfyui_client import get_object_info
+from app.services.image_formats import convert_heif_to_png, is_heif
+from app.services.quality_keys import normalize_quality, quality_scale
 
 logger = logging.getLogger("atelier.workflow")
 
@@ -25,6 +27,138 @@ _SAVE_NODE_TYPES = {
     "VHS_SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG",
     "ImageSave", "SaveLatent", "ETN_SaveImage",
 }
+
+# 可注入宽高的空 latent 节点：SD3/Flux2/Z-Image 用各自的类名，宽高字段一致
+_LATENT_NODE_TYPES = {"EmptyLatentImage", "EmptySD3LatentImage", "EmptyFlux2LatentImage"}
+
+# 项目统一比例；包含 ResolutionSelector 的 8 个选项 + 21:9 的竖版 9:21。
+CANONICAL_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "9:21")
+_RATIO_VALUES = {
+    ratio: int(ratio.split(":")[0]) / int(ratio.split(":")[1]) for ratio in CANONICAL_RATIOS
+}
+
+
+def normalize_aspect_ratio(value: object) -> str | None:
+    """把 '9:16 (Portrait Widescreen)' / '640x960（2:3）' 归一到 8 个标准比例之一。"""
+    if not isinstance(value, str):
+        return None
+    m = _RATIO_RE.match(value) or _RATIO_RE.search(value)
+    if not m:
+        return None
+    a, b = float(m.group(1)), float(m.group(2))
+    if a <= 0 or b <= 0:
+        return None
+    got = a / b
+    for ratio in CANONICAL_RATIOS:
+        if abs(_RATIO_VALUES[ratio] - got) < 1e-6:
+            return ratio
+    return None
+
+
+def _closest_ratio(width: int, height: int) -> str:
+    if not width or not height:
+        return "1:1"
+    value = width / height
+    return min(CANONICAL_RATIOS, key=lambda r: abs(math.log(value / _RATIO_VALUES[r])))
+
+
+def _round_to(value: float, multiple: int) -> int:
+    return max(multiple, int(round(value / multiple)) * multiple)
+
+
+def compute_aspect_size(ratio: str, megapixels: float, multiple: int = 16,
+                        unit: int = 1_000_000) -> tuple[int, int]:
+    """按目标总像素和比例算宽高；对齐到 multiple，避免 VAE patch 非整除。
+
+    unit 是调用方的 MP 单位：字面量/preset 用 1e6，ResolutionSelector 用 1024²（MiP）。
+    """
+    r = _RATIO_VALUES.get(ratio, 1.0)
+    width = math.sqrt(max(0.01, megapixels) * unit * r)
+    height = width / r
+    return _round_to(width, multiple), _round_to(height, multiple)
+
+
+def _parse_preset(text: object) -> tuple[int, int, str] | None:
+    """'640x960（2:3）' -> (640, 960, '2:3')。"""
+    if not isinstance(text, str):
+        return None
+    m = _SIZE_RE.match(text)
+    if not m:
+        return None
+    width, height = int(m.group(1)), int(m.group(2))
+    if width <= 0 or height <= 0:
+        return None
+    return width, height, normalize_aspect_ratio(text) or _closest_ratio(width, height)
+
+
+def _latent_info(api_workflow: dict) -> dict | None:
+    """找出空 latent 的真实尺寸来源。
+
+    mode:
+      - literal：width/height 是字面量，项目可直接改
+      - resolver：上游有 aspect_ratio + megapixels（ResolutionSelector）
+      - preset：上游是固定尺寸 preset（ResolutionPresetPicker）
+      - megapixels：只有 megapixels，没有比例旋钮
+
+    unit：字面量/preset 用 1e6；ResolutionSelector 与 ImageScaleToTotalPixels
+    的 megapixels 实际是 1024²（MiP），按错单位会偏小约 2.4%/边。
+    """
+    for node_id, node in api_workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in _LATENT_NODE_TYPES:
+            continue
+        inputs = node.get("inputs") or {}
+        width = _as_int(inputs.get("width"))
+        height = _as_int(inputs.get("height"))
+        if width and height:
+            return {
+                "mode": "literal", "id": node_id, "node": node,
+                "width": width, "height": height,
+                "megapixels": width * height / 1_000_000,
+                "ratio": _closest_ratio(width, height), "multiple": 16,
+                "unit": 1_000_000,
+            }
+
+        src = _linked_node(api_workflow, inputs.get("width")) or \
+            _linked_node(api_workflow, inputs.get("height"))
+        if not isinstance(src, dict):
+            continue
+        src_inputs = src.get("inputs") or {}
+        ratio_raw = src_inputs.get("aspect_ratio") or src_inputs.get("resolution") or \
+            src_inputs.get("size")
+        ratio = normalize_aspect_ratio(ratio_raw)
+        mp = src_inputs.get("megapixels")
+        raw_multiple = _as_int(src_inputs.get("multiple"))
+        if ratio and isinstance(mp, (int, float)) and not isinstance(mp, bool):
+            multiple = raw_multiple or 8  # ResolutionSelector 的默认 multiple 是 8
+            unit = 1024 * 1024
+            width, height = compute_aspect_size(ratio, float(mp), multiple, unit)
+            return {
+                "mode": "resolver", "id": node_id, "node": node, "src": src,
+                "width": width, "height": height, "megapixels": float(mp),
+                "ratio": ratio, "multiple": multiple, "unit": unit,
+            }
+
+        preset = _parse_preset(src_inputs.get("preset"))
+        if preset:
+            width, height, ratio = preset
+            return {
+                "mode": "preset", "id": node_id, "node": node, "src": src,
+                "width": width, "height": height,
+                "megapixels": width * height / 1_000_000,
+                "ratio": ratio, "multiple": 16, "unit": 1_000_000,
+            }
+
+        if isinstance(mp, (int, float)) and not isinstance(mp, bool):
+            ratio = _closest_ratio(1, 1)
+            multiple = raw_multiple or 16
+            unit = 1024 * 1024
+            width, height = compute_aspect_size(ratio, float(mp), multiple, unit)
+            return {
+                "mode": "megapixels", "id": node_id, "node": node, "src": src,
+                "width": width, "height": height, "megapixels": float(mp),
+                "ratio": ratio, "multiple": multiple, "unit": unit,
+            }
+    return None
 
 # 文本编码节点：类名 → (正面字段, 负面粉字段 / None)
 # 新模型常带专用编码节点（如 Qwen-Image 2.1 的 TextEncodeQwenImage21，提示词是
@@ -110,93 +244,17 @@ def _get_combo_options(node_type: str, input_name: str) -> list[str]:
         return []
 
 
-def _parse_ratio(text: str) -> float | None:
-    """'9:16 (Portrait Widescreen)' -> 0.5625"""
-    m = _RATIO_RE.match(str(text))
-    if not m:
-        return None
-    a, b = float(m.group(1)), float(m.group(2))
-    if a <= 0 or b <= 0:
-        return None
-    return a / b
+def _reciprocal_ratio(ratio: str) -> str:
+    """与 ratio 互为倒数的标准比例（2:3 ↔ 3:2，21:9 ↔ 9:21）。"""
+    value = _RATIO_VALUES[ratio]
+    return min(CANONICAL_RATIOS, key=lambda r: abs(_RATIO_VALUES[r] - 1 / value))
 
 
-def _parse_size_ratio(text: str) -> float | None:
-    """'640x960 （2:3）' -> 0.6667"""
-    m = _SIZE_RE.match(str(text))
-    if not m:
-        return None
-    w, h = int(m.group(1)), int(m.group(2))
-    if w <= 0 or h <= 0:
-        return None
-    return w / h
-
-
-# 尺寸由上游节点计算时，按顺序尝试这些「横竖比旋钮」：(输入名, 选项解析方式)
-_ORIENTATION_KNOBS = (
-    ("aspect_ratio", _parse_ratio),   # ResolutionSelector: "9:16 (Portrait Widescreen)"
-    ("resolution", _parse_ratio),     # 部分自定义节点沿用这个命名
-    ("preset", _parse_size_ratio),    # ResolutionPresetPicker: "640x960 （2:3）"
-    ("size", _parse_size_ratio),
-)
-
-
-def _pick_orientation_option(options: list[str], current: str, orientation: str,
-                             parser) -> str | None:
-    """在合法选项里挑一个「与当前比例互为倒数、且处于目标方向」的值。
-
-    已经是目标方向 / 1:1 方图时返回 None（无需改动）。
-    """
-    if orientation not in ("portrait", "landscape"):
-        return None
-    want_landscape = orientation == "landscape"
-    cur = parser(current)
-    if cur is None or cur <= 0:
-        return None
-    if abs(cur - 1.0) < 1e-9:
-        return None  # 方图无横竖可分
-    if (cur > 1) == want_landscape:
-        return None  # 已经是目标方向
-    target = 1.0 / cur
-    best, best_score = None, None
-    for opt in options:
-        r = parser(opt)
-        if r is None or r <= 0:
-            continue
-        if (r > 1) != want_landscape:
-            continue
-        score = abs(math.log(r / target))
-        if best_score is None or score < best_score:
-            best, best_score = opt, score
-    return best
-
-
-def _apply_orientation_to_size_source(api_workflow: dict, latent_inputs: dict,
-                                      orientation: str) -> bool:
-    """尺寸由上游节点计算时（EmptyLatentImage 的 width/height 是连线），
-    改上游那个决定比例的旋钮来实现横竖屏切换。"""
-    src = _linked_node(api_workflow, latent_inputs.get("width")) or \
-        _linked_node(api_workflow, latent_inputs.get("height"))
-    if src is None:
-        return False
-    src_inputs = src.get("inputs") or {}
-    cls = src.get("class_type", "")
-    for key, parser in _ORIENTATION_KNOBS:
-        current = src_inputs.get(key)
-        if not isinstance(current, str) or not current:
-            continue
-        options = _get_combo_options(cls, key)
-        if not options:
-            logger.debug("%s.%s 拿不到合法选项，跳过横竖屏切换", cls, key)
-            return False
-        picked = _pick_orientation_option(options, current, orientation, parser)
-        if picked and picked != current:
-            src_inputs[key] = picked
-            logger.info("横竖屏 %s：%s.%s = %s", orientation, cls, key, picked)
-            return True
-        return False
-    logger.debug("%s 没有可切换的横竖比旋钮，跳过横竖屏切换", cls)
-    return False
+def _matches_orientation(ratio: str, orientation: str) -> bool:
+    value = _RATIO_VALUES[ratio]
+    if abs(value - 1.0) < 1e-9:
+        return True
+    return value > 1.0 if orientation == "landscape" else value < 1.0
 
 
 def _pytype_matches_comfy(py_val: object, comfy_type: str) -> bool:
@@ -635,34 +693,69 @@ def detect_workflow_caps(api_workflow: dict) -> dict[str, bool]:
         spec = _TEXT_ENCODE_NODES[text_nodes[0].get("class_type")]
         caps["negative"] = bool(spec[1]) or len(text_nodes) >= 2
 
+    has_image_input = any(
+        isinstance(n, dict) and str(n.get("class_type", "")).startswith("LoadImage")
+        for n in api_workflow.values()
+    )
+
     for node in api_workflow.values():
         if not isinstance(node, dict):
             continue
         cls = node.get("class_type")
         if cls == "SeedVR2VideoUpscaler":
             caps["quality"] = True  # 4a：超分分辨率
-        if cls != "EmptyLatentImage":
+        if cls not in _LATENT_NODE_TYPES:
+            continue
+        # 图生图/编辑工作流的尺寸由输入图决定，不暴露比例和画质
+        if has_image_input:
             continue
         inputs = node.get("inputs") or {}
         w = _as_int(inputs.get("width"))
         h = _as_int(inputs.get("height"))
         if w is not None and h is not None:
-            caps["quality"] = True  # 4b：按比例缩放字面量尺寸
-            # 方图没有横竖可分，inject_prompt 也只是交换 w/h，换不出方向
-            caps["orientation"] = w != h
+            caps["quality"] = True  # 按比例缩放字面量尺寸
+            # 统一比例契约下，方图也能切到 9:16 等非方图
+            caps["orientation"] = True
             continue
-        # 尺寸由上游节点计算：改横竖比旋钮 / megapixels
+        # 尺寸由上游节点计算：无论有没有旋钮，都能按比例退回字面量宽高
         src = _linked_node(api_workflow, inputs.get("width")) or \
             _linked_node(api_workflow, inputs.get("height"))
         if not isinstance(src, dict):
             continue
-        src_inputs = src.get("inputs") or {}
-        if any(isinstance(src_inputs.get(key), str) for key, _ in _ORIENTATION_KNOBS):
-            caps["orientation"] = True
-        mp = src_inputs.get("megapixels")
-        if isinstance(mp, (int, float)) and not isinstance(mp, bool):
-            caps["quality"] = True
+        caps["quality"] = True
+        caps["orientation"] = True
     return caps
+
+
+def _output_scale(api_workflow: dict, latent_id: str) -> float:
+    """沿 latent 到输出节点的路径累计 LatentUpscaleBy 的倍率。
+
+    只看 API 图：被 bypass（mode=4）的节点不会出现在这里，所以 Krea2 里
+    那个失效的 1.5× 不会被误算，ZIT 的 1.7× 会被算进来。
+    """
+    scale = 1.0
+    seen: set[str] = set()
+    stack = [latent_id]
+    while stack:
+        nid = stack.pop()
+        if nid in seen:
+            continue
+        seen.add(nid)
+        for cid, cnode in api_workflow.items():
+            if not isinstance(cnode, dict):
+                continue
+            inputs = cnode.get("inputs") or {}
+            if not any(
+                isinstance(v, (list, tuple)) and len(v) == 2 and str(v[0]) == str(nid)
+                for v in inputs.values()
+            ):
+                continue
+            if cnode.get("class_type") == "LatentUpscaleBy":
+                value = inputs.get("scale_by")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    scale *= float(value)
+            stack.append(cid)
+    return round(scale, 4)
 
 
 def detect_workflow_params(api_workflow: dict) -> dict:
@@ -685,7 +778,12 @@ def detect_workflow_params(api_workflow: dict) -> dict:
         "base_width": None,
         "base_height": None,
         "base_megapixels": None,
+        "mp_unit": "mp",
+        "post_scale": 1.0,
         "orientation_mode": "none",
+        "aspect_ratios": [],
+        "default_ratio": "",
+        "multiple": 16,
     }
     has_seedvr = any(
         isinstance(n, dict) and n.get("class_type") == "SeedVR2VideoUpscaler"
@@ -694,33 +792,97 @@ def detect_workflow_params(api_workflow: dict) -> dict:
     if has_seedvr:
         params["quality_mode"] = "seedvr"
 
-    for node in api_workflow.values():
-        if not isinstance(node, dict) or node.get("class_type") != "EmptyLatentImage":
-            continue
-        inputs = node.get("inputs") or {}
-        w = _as_int(inputs.get("width"))
-        h = _as_int(inputs.get("height"))
-        if w is not None and h is not None:
-            if not has_seedvr:
-                params["quality_mode"] = "scale"
-                params["base_width"] = w
-                params["base_height"] = h
-            params["orientation_mode"] = "swap" if w != h else "none"
-            break
-
-        src = _linked_node(api_workflow, inputs.get("width")) or \
-            _linked_node(api_workflow, inputs.get("height"))
-        if not isinstance(src, dict):
-            break
-        src_inputs = src.get("inputs") or {}
-        if any(isinstance(src_inputs.get(key), str) for key, _ in _ORIENTATION_KNOBS):
-            params["orientation_mode"] = "knob"
-        mp = src_inputs.get("megapixels")
-        if not has_seedvr and isinstance(mp, (int, float)) and not isinstance(mp, bool):
-            params["quality_mode"] = "megapixels"
-            params["base_megapixels"] = round(float(mp), 3)
-        break
+    info = _latent_info(api_workflow)
+    if info is not None and not has_seedvr:
+        params["base_width"] = info["width"]
+        params["base_height"] = info["height"]
+        params["base_megapixels"] = round(float(info["megapixels"]), 3)
+        params["mp_unit"] = "mip" if info["unit"] == 1024 * 1024 else "mp"
+        params["post_scale"] = _output_scale(api_workflow, info["id"])
+        params["default_ratio"] = info["ratio"]
+        params["aspect_ratios"] = list(CANONICAL_RATIOS)
+        params["multiple"] = info["multiple"]
+        params["quality_mode"] = "megapixels" if info["mode"] in ("resolver", "megapixels") else "scale"
+        params["orientation_mode"] = "swap" if info["mode"] == "literal" else "knob"
     return params
+
+
+def _set_latent_size(info: dict, width: float, height: float) -> None:
+    inputs = info["node"].setdefault("inputs", {})
+    inputs["width"] = max(256, min(4096, int(round(width))))
+    inputs["height"] = max(256, min(4096, int(round(height))))
+
+
+def _pick_ratio_option(options: list[str], ratio: str) -> str | None:
+    for option in options:
+        if normalize_aspect_ratio(option) == ratio:
+            return option
+    return None
+
+
+def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
+    """统一分辨率注入：比例 + 画质；未传比例时按工作流默认比例 + 横竖推导。"""
+    quality = prompt_data.get("quality", "1.0x")
+    scale = quality_scale(quality)
+    quality_key = normalize_quality(quality)
+
+    seedvr_quality_map = {
+        "0.75x": (2160, 3840), "1.0x": (2560, 4096),
+        "1.25x": (3200, 5120), "1.5x": (3840, 6400), "2.0x": (5120, 8192),
+    }
+    if quality_key in seedvr_quality_map:
+        res, max_res = seedvr_quality_map[quality_key]
+        for node in api_workflow.values():
+            if isinstance(node, dict) and node.get("class_type") == "SeedVR2VideoUpscaler":
+                node["inputs"]["resolution"] = res
+                node["inputs"]["max_resolution"] = max_res
+                return
+
+    info = _latent_info(api_workflow)
+    if info is None:
+        return
+
+    requested = normalize_aspect_ratio(prompt_data.get("aspect_ratio"))
+    orientation = prompt_data.get("orientation", "portrait")
+    implicit_ratio = requested is None
+
+    # 没传比例时按工作流默认比例；横竖只决定用默认比例还是它的倒数比例。
+    # 不再退回"宽高 × 倍率"，否则同一个档位会因调用方是否传比例产生两种尺寸。
+    if implicit_ratio:
+        requested = info["ratio"]
+        if not _matches_orientation(requested, orientation):
+            requested = _reciprocal_ratio(requested)
+
+    target_mp = float(info["megapixels"]) * scale * scale
+
+    if info["mode"] == "resolver":
+        src = info.get("src") or {}
+        src_inputs = src.get("inputs", {}) if isinstance(src, dict) else {}
+        picked = _pick_ratio_option(
+            _get_combo_options(src.get("class_type", ""), "aspect_ratio"), requested,
+        )
+        if picked and isinstance(src_inputs.get("megapixels"), (int, float)):
+            src_inputs["aspect_ratio"] = picked
+            src_inputs["megapixels"] = round(max(0.1, min(16.0, target_mp)), 3)
+            logger.info("分辨率：%s aspect_ratio=%s, megapixels=%s",
+                        src.get("class_type"), picked, src_inputs["megapixels"])
+            return
+        # 旋钮不支持该比例时退回字面量，单位与旋钮一致（MiP）
+        width, height = compute_aspect_size(requested, target_mp, info["multiple"], info["unit"])
+        _set_latent_size(info, width, height)
+        return
+
+    # literal / preset / megapixels：默认比例 + 1.0× 保持原生尺寸，其余按比例重算
+    if requested == info["ratio"] and abs(scale - 1.0) < 1e-9:
+        _set_latent_size(info, info["width"], info["height"])
+        return
+    # 旧调用只给横竖时，倒数比例 + 1.0× 仍是"原生宽高交换"，与历史输出逐像素一致
+    if implicit_ratio and info["mode"] == "literal" and abs(scale - 1.0) < 1e-9 \
+            and requested == _reciprocal_ratio(info["ratio"]):
+        _set_latent_size(info, info["height"], info["width"])
+        return
+    width, height = compute_aspect_size(requested, target_mp, info["multiple"], info["unit"])
+    _set_latent_size(info, width, height)
 
 
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
@@ -788,71 +950,8 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
             # 界面上的 randomize 是前端行为，走 API 后会退化成工作流里的字面量种子。
             inputs["noise_seed"] = seed_val
 
-    # 3. 注入方向（横竖屏）
-    #    EmptyLatentImage 的 width/height 可能是 ["节点id", 槽位] 连线引用
-    #    （如 ResolutionSelector / ResolutionPresetPicker 算出的尺寸）：
-    #    这时改不了字面量，改为切换上游节点的横竖比旋钮。
-    orientation = prompt_data.get("orientation", "portrait")
-    for node_id, node in api_workflow.items():
-        if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
-            inputs = node["inputs"]
-            w = _as_int(inputs.get("width"))
-            h = _as_int(inputs.get("height"))
-            if w is not None and h is not None:
-                if orientation == "landscape" and h > w:
-                    inputs["width"], inputs["height"] = h, w
-                elif orientation == "portrait" and w > h:
-                    inputs["width"], inputs["height"] = h, w
-            else:
-                _apply_orientation_to_size_source(api_workflow, inputs, orientation)
-            break
-
-    # 4. 注入画质
-    quality = prompt_data.get("quality", "4K")
-    quality_scale_map = {"2K": 0.75, "4K": 1.0, "6K": 1.25, "8K": 1.5, "12K": 2.0}
-    scale = quality_scale_map.get(quality, 1.0)
-
-    # 4a. SeedVR 工作流：设置超分分辨率
-    seedvr_quality_map = {
-        "2K": (2160, 3840), "4K": (2560, 4096),
-        "6K": (3200, 5120), "8K": (3840, 6400), "12K": (5120, 8192),
-    }
-    has_seedvr = False
-    if quality in seedvr_quality_map:
-        res, max_res = seedvr_quality_map[quality]
-        for node_id, node in api_workflow.items():
-            if isinstance(node, dict) and node.get("class_type") == "SeedVR2VideoUpscaler":
-                node["inputs"]["resolution"] = res
-                node["inputs"]["max_resolution"] = max_res
-                has_seedvr = True
-                break
-
-    # 4b. 非 SeedVR 工作流：按比例缩放 EmptyLatentImage 尺寸
-    if not has_seedvr and scale != 1.0:
-        for node_id, node in api_workflow.items():
-            if isinstance(node, dict) and node.get("class_type") == "EmptyLatentImage":
-                inputs = node["inputs"]
-                w = _as_int(inputs.get("width"))
-                h = _as_int(inputs.get("height"))
-                if w is not None and h is not None:
-                    inputs["width"] = max(256, min(4096, int(w * scale)))
-                    inputs["height"] = max(256, min(4096, int(h * scale)))
-                else:
-                    # 尺寸由上游节点计算（如 ResolutionSelector：aspect_ratio + megapixels），
-                    # 无法直接改字面量；只能改上游的 megapixels，且面积按 scale² 缩放
-                    # 才等价于两轴同时乘 scale。
-                    for key in ("width", "height"):
-                        src = _linked_node(api_workflow, inputs.get(key))
-                        if src is None:
-                            continue
-                        src_inputs = src.get("inputs", {})
-                        mp = src_inputs.get("megapixels")
-                        if isinstance(mp, (int, float)) and not isinstance(mp, bool):
-                            src_inputs["megapixels"] = round(float(mp) * scale * scale, 3)
-                            logger.info("画质 %s：%s.megapixels = %s（尺寸由上游节点决定）",
-                                        quality, src.get("class_type"), src_inputs["megapixels"])
-                        break
-                break
+    # 3. 注入分辨率（比例 + 画质）；旧调用只传 orientation 时行为保持一致
+    _inject_resolution(api_workflow, prompt_data)
 
     # 5. 为输出节点注入唯一文件名前缀，避免批量跑图时文件互相覆盖
     import time
@@ -898,6 +997,29 @@ def set_output_prefix(api_workflow: dict, prefix: str) -> int:
         cls = node.get("class_type", "")
         if cls in _SAVE_NODE_TYPES or "Save" in cls or "Export" in cls or "Output" in cls:
             inputs["filename_prefix"] = prefix
+            n += 1
+    return n
+
+
+def set_save_subfolder(api_workflow: dict, subfolder: str) -> int:
+    """把输出子目录写进自带 `subfolder` 输入的自定义保存节点。
+
+    常见 `SaveImage` 用 `filename_prefix` 承载子目录（见 `prepend_output_subfolder`），
+    但 `SaveImageFromSource` 用的是独立的 `subfolder` 字段，前两个函数对它都是空转。
+    这里只认这一个已知类名，避免误改其它自定义保存节点的同名输入。
+    """
+    prefix = (subfolder or "").strip().strip("/\\")
+    if not prefix:
+        return 0
+    n = 0
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") != "SaveImageFromSource":
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and isinstance(inputs.get("subfolder"), str):
+            inputs["subfolder"] = prefix
             n += 1
     return n
 
@@ -999,17 +1121,33 @@ def inject_input_image(
     if not src.exists():
         raise FileNotFoundError(f"源图片不存在: {source_path}")
 
+    # HEIC/HEIF（包括改名成 .jpg 的）ComfyUI 读不了：先转成 PNG 再注入
+    heif = is_heif(src)
+
+    def materialize(dst: Path) -> None:
+        if heif:
+            convert_heif_to_png(src, dst)
+        else:
+            shutil.copy2(str(src), str(dst))
+
     if dest_name:
         dst_name = dest_name
+        if heif:
+            # 只换扩展名，保留 atelier_upscale/... 这种子目录写法与原分隔符
+            base, dot, _ = dst_name.rpartition(".")
+            dst_name = f"{base}.png" if dot else f"{dst_name}.png"
         dst_path = Path(dest_dir) / dst_name
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
         if not dst_path.exists():  # 同名已存在则复用，不重复拷贝
-            shutil.copy2(str(src), str(dst_path))
+            materialize(dst_path)
     else:
         # 生成唯一文件名，避免覆盖
         ts = int(time.time() * 1000)
-        dst_name = f"atelier_process_{ts}_{src.name}"
+        name = f"{src.stem}.png" if heif else src.name
+        dst_name = f"atelier_process_{ts}_{name}"
         dst_path = Path(dest_dir) / dst_name
-        shutil.copy2(str(src), str(dst_path))
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        materialize(dst_path)
 
     # 目标节点：显式指定优先，否则退回第一个 LoadImage（保持旧行为）
     target = api_workflow.get(str(node_id)) if node_id is not None else None

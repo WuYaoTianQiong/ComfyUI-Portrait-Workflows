@@ -6,6 +6,7 @@ import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
 import Modal from './Modal.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
+import DiskPathList from './DiskPathList.vue'
 
 /**
  * 磁盘选图：在任意文件夹里挑图，交给换脸这类需要"主图 / 参考图"的场景。
@@ -92,12 +93,68 @@ watch(
   },
 )
 
+/** 筛选/排序只作用于本地已返回的列表，输入时不额外打后端。 */
+const query = ref('')
+const sortMode = ref<'name' | 'mtime_desc' | 'mtime_asc'>('name')
+const typeFilter = ref('')
+
+const currentImages = computed(() => data.value?.images ?? [])
+
+const typeOptions = computed(() => {
+  const types = new Set<string>()
+  for (const img of currentImages.value) {
+    const dot = img.name.lastIndexOf('.')
+    if (dot > 0) types.add(img.name.slice(dot).toLowerCase())
+  }
+  return Array.from(types).sort()
+})
+
+const filteredImages = computed(() => {
+  let list = currentImages.value
+  const keyword = query.value.trim().toLowerCase()
+  if (keyword) list = list.filter((img) => img.name.toLowerCase().includes(keyword))
+  if (typeFilter.value) {
+    list = list.filter((img) => img.name.toLowerCase().endsWith(typeFilter.value))
+  }
+  if (sortMode.value === 'mtime_desc') {
+    list = [...list].sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
+  } else if (sortMode.value === 'mtime_asc') {
+    list = [...list].sort((a, b) => (a.mtime ?? 0) - (b.mtime ?? 0))
+  }
+  return list
+})
+
+/** 全选只选「当前筛选后」的图片；跨目录已选不会丢。 */
+function selectAll() {
+  const next = new Set(picked.value)
+  for (const img of filteredImages.value) next.add(img.path)
+  picked.value = Array.from(next)
+}
+
+function invert() {
+  const next = new Set(picked.value)
+  for (const img of filteredImages.value) {
+    if (next.has(img.path)) next.delete(img.path)
+    else next.add(img.path)
+  }
+  picked.value = Array.from(next)
+}
+
+function clearAll() {
+  picked.value = []
+}
+
 function enter(path: string) {
   dir.value = path
+  query.value = ''
+  typeFilter.value = ''
 }
 
 function goUp() {
-  if (data.value?.parent) dir.value = data.value.parent
+  if (!data.value?.parent) return
+  dir.value = data.value.parent
+  query.value = ''
+  typeFilter.value = ''
 }
 
 function toggle(path: string) {
@@ -167,6 +224,34 @@ function rememberRatio(img: FsEntry, event: Event) {
         <span v-if="isFetching" class="muted">加载中…</span>
       </div>
 
+      <div class="filters">
+        <input v-model="query" class="search" type="search" placeholder="按文件名搜索…" />
+        <select v-model="sortMode" class="sort" title="排序方式">
+          <option value="name">按名称</option>
+          <option value="mtime_desc">时间 新→旧</option>
+          <option value="mtime_asc">时间 旧→新</option>
+        </select>
+        <select v-if="typeOptions.length > 1" v-model="typeFilter" class="type" title="按格式筛选">
+          <option value="">全部格式</option>
+          <option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
+        </select>
+        <span class="muted small">本目录 {{ filteredImages.length }} / {{ currentImages.length }} 张</span>
+        <span v-if="data?.truncated" class="warn small" title="后端单目录上限 800 张">
+          超过 800 张，仅显示前 800
+        </span>
+        <span class="spacer" />
+        <button class="btn btn-sm" :disabled="!filteredImages.length" @click="selectAll">
+          全选（{{ filteredImages.length }}）
+        </button>
+        <button class="btn btn-sm" :disabled="!filteredImages.length" @click="invert">反选</button>
+        <button class="btn btn-sm" :disabled="!picked.length" @click="clearAll">清空已选</button>
+      </div>
+
+      <div v-if="picked.length" class="picked-bar">
+        <span class="picked-title">已选清单</span>
+        <DiskPathList v-model="picked" />
+      </div>
+
       <div class="body">
         <div class="dirs">
           <button
@@ -183,8 +268,8 @@ function rememberRatio(img: FsEntry, event: Event) {
 
         <div class="grid">
           <JustifiedGrid
-            v-if="(data?.images ?? []).length"
-            :items="data?.images ?? []"
+            v-if="filteredImages.length"
+            :items="filteredImages"
             :ratio="fsRatio"
             :key-of="fsKey"
             :target-row-height="150"
@@ -210,8 +295,8 @@ function rememberRatio(img: FsEntry, event: Event) {
               </button>
             </template>
           </JustifiedGrid>
-          <div v-if="!(data?.images ?? []).length && !isFetching" class="muted small">
-            这个目录里没有图片
+          <div v-if="!filteredImages.length && !isFetching" class="muted small">
+            {{ currentImages.length ? '没有匹配的图片' : '这个目录里没有图片' }}
           </div>
         </div>
       </div>
@@ -259,6 +344,58 @@ function rememberRatio(img: FsEntry, event: Event) {
 
 .jump {
   width: 190px;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-lg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.filters .search {
+  width: 180px;
+}
+
+.filters .sort {
+  width: 130px;
+}
+
+.filters .type {
+  width: 100px;
+}
+
+/* 筛选行里的辅助文案不沿用 .small 的块级内边距 */
+.filters .small {
+  padding: 0;
+  white-space: nowrap;
+}
+
+.filters .warn {
+  color: var(--warn);
+}
+
+/* 跨目录选中的图集中在这里，避免切目录后“已选 N 张”但找不到是哪几张 */
+.picked-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  max-height: 110px;
+  padding: var(--gap-sm) var(--gap-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.picked-title {
+  flex: none;
+  padding-top: 3px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.picked-bar :deep(.path-list) {
+  max-height: 82px;
 }
 
 .cur-path {

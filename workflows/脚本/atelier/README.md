@@ -125,7 +125,7 @@ atelier/
 ```powershell
 python -m pytest -q          # 契约 + 单元（临时库，绝不碰生产库）
 python tools\smoke.py        # 真起 uvicorn（库副本 + 临时端口），打关键接口并扫日志
-python tests\e2e\run_e2e.py  # Playwright 过 7 个页签
+python tests\e2e\run_e2e.py  # Playwright 过主要页签（含批量超分）
 ```
 
 `tools/ci.ps1` 串起五道关：pytest → vue-tsc → vitest → vite build → smoke（+ E2E）。

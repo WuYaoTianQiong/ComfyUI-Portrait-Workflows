@@ -11,8 +11,8 @@ from app.services.migrations import applied_versions, apply_migrations
 
 
 def test_schema_version_recorded():
-    """conftest 里已经 init_db 过，v1（基线）/ v2（标签收敛）/ v3（索引）必须都已登记。"""
-    assert applied_versions(db) == [1, 2, 3, 4]
+    """conftest 里已经 init_db 过，v1-v5 必须都已登记。"""
+    assert applied_versions(db) == [1, 2, 3, 4, 5]
 
 
 def test_apply_migrations_is_idempotent():
@@ -45,3 +45,18 @@ def test_failed_migration_rolls_back_and_is_not_recorded():
         "SELECT name FROM sqlite_master WHERE name='_mig_probe'"
     ).fetchone()
     assert probe is None, "迁移失败后 DDL 没有回滚"
+
+
+def test_v5_normalizes_legacy_quality_keys():
+    """历史库里的 2K..12K/high 必须落成倍率键，且重复执行不改坏。"""
+    from app.models import GenJob, _migrate_v5_quality_keys
+
+    job = GenJob.create(
+        job_type="single", status="done", title="画质键", total=1,
+        done_count=1, error_count=0, items="[]", quality="8K",
+    )
+    _migrate_v5_quality_keys(db)
+    assert GenJob.get_by_id(job.id).quality == "1.5x"
+
+    _migrate_v5_quality_keys(db)
+    assert GenJob.get_by_id(job.id).quality == "1.5x"

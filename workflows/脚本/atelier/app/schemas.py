@@ -94,6 +94,34 @@ class HistoryListResponse(BaseModel):
     page_size: int = 0
 
 
+class ImageRunInfo(BaseModel):
+    """一次出图的完整上下文：来自任务行 + 参数快照 + ComfyUI history/PNG 元数据。"""
+
+    workflow_path: str = ""
+    workflow_name: str = ""
+    quality: str = ""
+    aspect_ratio: str = ""
+    output_subfolder: str = ""
+    submitted_at: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    duration_seconds: Optional[float] = None
+    steps: Optional[int] = None
+    cfg_scale: Optional[float] = None
+    sampler: str = ""
+    scheduler: str = ""
+    seed: Optional[int] = None
+    denoise: Optional[float] = None
+    model: str = ""
+
+
+class ImageDetailResponse(HistoryItem):
+    job_type: str = ""
+    job_status: str = ""
+    job_title: str = ""
+    run: ImageRunInfo = Field(default_factory=ImageRunInfo)
+
+
 class FacetsResponse(BaseModel):
     source: dict[str, int] = Field(default_factory=dict)
     date: dict[str, int] = Field(default_factory=dict)
@@ -251,13 +279,17 @@ class WorkflowCaps(BaseModel):
 
 
 class WorkflowParams(BaseModel):
-    """画质 / 方向参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。"""
+    """分辨率 / 画质参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。"""
 
     quality_mode: str = "none"  # seedvr / scale / megapixels / none
     base_width: int | None = None
     base_height: int | None = None
     base_megapixels: float | None = None
     orientation_mode: str = "none"  # swap / knob / none
+    # 统一比例契约：所有非特殊工作流都应支持这 8 个比例
+    aspect_ratios: list[str] = Field(default_factory=list)
+    default_ratio: str = ""
+    multiple: int = 16
 
 
 class WorkflowRow(BaseModel):

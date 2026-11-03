@@ -16,7 +16,7 @@ from app.models import GenJob, Prompt
 from app.services import job_state
 from app.services.comfyui_client import push_prompt
 from app.services.fragment_syntax import strip_headers
-from app.services.image_inputs import compose_masked_target, dest_name
+from app.services.image_inputs import clean_dest_name, compose_masked_target, dest_name
 from app.services.output_location import (
     OutputLocationError,
     apply_output_subfolder,
@@ -29,6 +29,7 @@ from app.services.workflow_parser import (
     inject_prompt,
     load_workflow,
     set_output_prefix,
+    set_save_subfolder,
 )
 
 RETRY_STATUSES = {"error", "cancelled", "stopped"}
@@ -123,6 +124,7 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
         "sampler": sampler or "",
         "orientation": job.get("orientation", "portrait"),
         "quality": job.get("quality", "4K"),
+        "aspect_ratio": extra.get("aspect_ratio", ""),
     })
 
     input_image = pp.get("input_image")
@@ -149,6 +151,7 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
         "seed_override": seed,
         "orientation": job.get("orientation", "portrait"),
         "quality": job.get("quality", "4K"),
+        "aspect_ratio": extra.get("aspect_ratio", ""),
     })
 
     inputs = item.get("inputs") or []
@@ -160,6 +163,9 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
         if source is None:
             raise RetryError(f"素材文件不存在: {meta.get('filename') or meta.get('path') or '未知'}")
         dest = dest_name({"path": str(source), "name": source.name})
+        # 批量超分任务保留原文件名；重试沿用同一份 input 子目录，成品名不变
+        if meta.get("keep_source_name"):
+            dest = clean_dest_name({"path": str(source), "name": source.name})
         mask = meta.get("mask")
         if mask:
             mask_path = Path(mask)
@@ -177,6 +183,7 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
         subfolder, f"retry{new_job_id}_{_safe_part(item.get('prompt_preview', ''))}"
     )
     set_output_prefix(api_wf, prefix)
+    set_save_subfolder(api_wf, subfolder)
     return api_wf
 
 

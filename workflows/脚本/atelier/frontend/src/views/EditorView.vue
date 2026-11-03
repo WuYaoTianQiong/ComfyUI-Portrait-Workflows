@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
+import DiskPathList from '../components/DiskPathList.vue'
 import FilePicker from '../components/FilePicker.vue'
 import MaskEditorModal from '../components/MaskEditorModal.vue'
 import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
@@ -12,6 +13,7 @@ import { useImageLocation } from '../composables/useImageLocation'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { statusLabel } from '../utils/format'
 import { confirmDialog } from '../utils/naive'
+import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { useToast } from '../composables/useToast'
 import { readSession, writeSession } from '../composables/useSessionState'
 import type { HistoryItem, HistoryPage } from '../api/types'
@@ -251,6 +253,18 @@ function clearMask(key: string) {
   maskEntries.value = next
 }
 
+/** 从目标图里移除一张（画廊 id 或磁盘路径）；对应遮罩随 targetKeys 变化自动清掉。 */
+function removeTarget(key: string) {
+  const [target] = groups.value
+  if (key.startsWith('id:')) {
+    const id = Number(key.slice(3))
+    target.ids = target.ids.filter((x) => x !== id)
+  } else if (key.startsWith('file:')) {
+    const path = key.slice(5)
+    target.paths = target.paths.filter((x) => x !== path)
+  }
+}
+
 // ---------------- 涂抹遮罩 ----------------
 
 const maskEditorOpen = ref(false)
@@ -332,8 +346,21 @@ const zipMismatch = computed(
     activeCounts.value.some((c) => c !== activeCounts.value[0]),
 )
 
-const maxCombos = computed(() => nodeInfo.value?.max_combos ?? 10)
-const comboOverLimit = computed(() => comboCount.value > maxCombos.value)
+const maxCombos = computed(() => nodeInfo.value?.max_combos ?? 100)
+/**
+ * 组合上限只约束「多角色 × 全组合」。
+ *
+ * 单图工作流（1 个 LoadImage）其实是批量处理多张目标图，后端按单组直接提交、
+ * 没有 10 张上限；这里沿用旧逻辑一刀切会导致 16 张被静默禁用（按钮点不动，
+ * 又因为组合方式分区只在多列时显示，用户看不到任何原因）。
+ * 1:1 配对的组数相等，同样不受全组合上限约束。
+ */
+const comboOverLimit = computed(
+  () =>
+    columnCount.value > 1 &&
+    pairMode.value === 'cross' &&
+    comboCount.value > maxCombos.value,
+)
 
 const summaryText = computed(() =>
   activeCounts.value.map((c, i) => `${roleMeta(i).label} ${c}`).join(' × '),
@@ -367,6 +394,7 @@ async function submit() {
     content: `将提交 ${comboCount.value} 张（${summaryText.value}），确认继续？`,
     positiveText: '提交',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.editorSubmit.key,
   })
   if (!ok) return
   const [target, ref1, ref2] = groups.value
@@ -413,6 +441,13 @@ async function submit() {
         </button>
       </div>
       <ImagePicker v-model="group.ids" title="" />
+      <div v-if="group.paths.length" class="disk-picked">
+        <div class="disk-picked-head">
+          <span>磁盘已选 {{ group.paths.length }} 张</span>
+          <button class="btn btn-sm" @click="group.paths = []">清空</button>
+        </div>
+        <DiskPathList v-model="group.paths" show-thumbs :thumb-size="96" />
+      </div>
     </div>
 
     <aside class="panel">
@@ -500,6 +535,13 @@ async function submit() {
                 @click="clearMask(row.key)"
               >
                 ×
+              </button>
+              <button
+                class="btn btn-sm"
+                title="从目标图中移除这张"
+                @click="removeTarget(row.key)"
+              >
+                移除
               </button>
             </div>
           </div>
@@ -627,6 +669,34 @@ async function submit() {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* 画廊选择器占据剩余高度；磁盘缩略图区固定在下方并自行滚动 */
+.picker-col :deep(.picker) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.disk-picked {
+  flex: 0 0 auto;
+  max-height: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.disk-picked-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.disk-picked :deep(.path-list) {
+  max-height: 190px;
 }
 
 .picker-head {

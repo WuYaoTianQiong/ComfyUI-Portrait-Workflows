@@ -5,16 +5,30 @@ import { describe, expect, it, vi } from 'vitest'
 import ImagePicker from './ImagePicker.vue'
 
 vi.mock('../api/client', () => ({
-  apiGet: vi.fn(async () => ({
-    items: [
-      { id: 1, filename: 'a.png' },
-      { id: 2, filename: 'b.png' },
-      { id: 3, filename: 'c.png' },
-    ],
-    total: 3,
-    page: 1,
-    page_size: 100,
-  })),
+  apiGet: vi.fn(async (_path: string, params?: Record<string, unknown>) => {
+    // 「清理失效」按 ids 精确校验：只返回仍存在的记录，id=2 标记文件缺失
+    if (params && 'ids' in params) {
+      const wanted = String(params.ids)
+        .split(',')
+        .filter(Boolean)
+        .map(Number)
+      const items = [
+        { id: 1, filename: 'a.png' },
+        { id: 2, filename: 'b.png', missing: true },
+      ].filter((item) => wanted.includes(item.id))
+      return { items, total: items.length, page: 1, page_size: items.length }
+    }
+    return {
+      items: [
+        { id: 1, filename: 'a.png' },
+        { id: 2, filename: 'b.png' },
+        { id: 3, filename: 'c.png' },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 100,
+    }
+  }),
   thumbnailUrl: (i: { filename: string }) => '/api/thumb?filename=' + i.filename,
 }))
 
@@ -69,8 +83,21 @@ describe('ImagePicker', () => {
 
   it('清空按钮 emit 空数组', async () => {
     const wrapper = await mountPicker([1])
-    await wrapper.find('.picker-head .btn').trigger('click')
+    const clear = wrapper.findAll('.picker-head button').find((b) => b.text() === '清空')!
+    await clear.trigger('click')
     const emitted = wrapper.emitted('update:modelValue') as number[][][]
     expect(emitted[0][0]).toEqual([])
+  })
+
+  it('清理失效移除已删除记录与文件缺失的已选 id', async () => {
+    const wrapper = await mountPicker([1, 2, 3])
+    await wrapper.find('.picker-head .cleanup').trigger('click')
+    await flushPromises()
+    const emitted = wrapper.emitted('update:modelValue') as number[][][]
+    expect(emitted[0][0]).toEqual([1])
+
+    // 受控组件：父组件回传后计数应跟着降下来
+    await wrapper.setProps({ modelValue: emitted[0][0] })
+    expect(wrapper.find('.count').text()).toContain('已选 1')
   })
 })

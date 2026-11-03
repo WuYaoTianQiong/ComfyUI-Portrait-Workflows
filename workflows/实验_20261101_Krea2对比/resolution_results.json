@@ -1,0 +1,44 @@
+[
+  {
+    "label": "Qwen21_res_1.0x_832x1216",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_res_1.0x_832x1216_00001_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1445559
+      }
+    ],
+    "error": "",
+    "elapsed_s": 20.46,
+    "status": "success"
+  },
+  {
+    "label": "Qwen21_res_1.25x_1040x1520",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_res_1.25x_1040x1520_00001_.png",
+        "width": 1040,
+        "height": 1520,
+        "bytes": 2353633
+      }
+    ],
+    "error": "",
+    "elapsed_s": 20.35,
+    "status": "success"
+  },
+  {
+    "label": "Qwen21_res_1.5x_1248x1824",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_res_1.5x_1248x1824_00001_.png",
+        "width": 1248,
+        "height": 1824,
+        "bytes": 3200322
+      }
+    ],
+    "error": "",
+    "elapsed_s": 30.26,
+    "status": "success"
+  }
+]

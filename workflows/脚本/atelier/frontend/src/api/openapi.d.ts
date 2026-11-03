@@ -13,7 +13,9 @@ export interface paths {
         };
         /**
          * Browser Image
-         * @description 任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）
+         * @description 任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）。
+         *
+         *     HEIC/HEIF（包括改名成 .jpg 的）浏览器无法直接渲染，这里返回转换后的 WebP。
          */
         get: operations["browser_image_api_browser_image_get"];
         put?: never;
@@ -248,7 +250,7 @@ export interface paths {
         put?: never;
         /**
          * Batch Replace Composition
-         * @description 批量替换指定类型的正文；可选在缺少该类型时追加到末尾。
+         * @description 按替换清单批量改写提示词；每个类型可独立选择缺失时跳过或追加。
          */
         post: operations["batch_replace_composition_api_composition_batch_replace_post"];
         delete?: never;
@@ -686,6 +688,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/{item_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Image Detail
+         * @description 补全单张图的出图上下文：任务（工作流/质量/比例）+ 实际采样参数 + 耗时。
+         *
+         *     参数来源按可信度补空：任务记录的 prompt_params（提交/完成时写入）
+         *     → ComfyUI history（实际执行值）→ PNG 内嵌 prompt（老图也能读出来）。
+         */
+        get: operations["image_detail_api_images__item_id__detail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/{item_id}/download": {
         parameters: {
             query?: never;
@@ -1032,6 +1057,26 @@ export interface paths {
          * @description 批量设置/取消收藏
          */
         post: operations["batch_favorite_prompts_api_prompts_batch_favorite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/compile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compile Prompt Preview
+         * @description 只编译、不出图：返回实际会提交的正向/负向与改写说明。
+         */
+        post: operations["compile_prompt_preview_api_prompts_compile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1721,6 +1766,11 @@ export interface components {
         };
         /** BatchRandomRunRequest */
         BatchRandomRunRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /** Category Id */
             category_id?: number | null;
             /** Composed Prompts */
@@ -1776,39 +1826,23 @@ export interface components {
         };
         /** BatchReplaceRequest */
         BatchReplaceRequest: {
-            /**
-             * Content
-             * @default
-             */
-            content: string;
-            /**
-             * Missing
-             * @default skip
-             * @enum {string}
-             */
-            missing: "skip" | "append";
+            /** Replacements */
+            replacements?: components["schemas"]["ReplacementItem"][];
             /** Texts */
             texts?: components["schemas"]["ReplaceText"][];
-            /** Type */
-            type: string;
         };
         /** BatchReplaceResponse */
         BatchReplaceResponse: {
-            /**
-             * Appended
-             * @default 0
-             */
-            appended: number;
             /** Items */
             items?: components["schemas"]["ReplaceResult"][];
-            /**
-             * Skipped
-             * @default 0
-             */
-            skipped: number;
         };
         /** BatchRequest */
         BatchRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /**
              * Idempotency Key
              * @default
@@ -1904,8 +1938,33 @@ export interface components {
             /** Sort Order */
             sort_order?: number | null;
         };
+        /** CompilePromptRequest */
+        CompilePromptRequest: {
+            /**
+             * Negative Prompt
+             * @default
+             */
+            negative_prompt: string;
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /** Workflow Content */
+            workflow_content?: string | null;
+            /**
+             * Workflow Path
+             * @default
+             */
+            workflow_path: string;
+        };
         /** ComposerRunRequest */
         ComposerRunRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /**
              * Negative Prompt
              * @default
@@ -1949,6 +2008,11 @@ export interface components {
         /** FaceswapRequest */
         FaceswapRequest: {
             /**
+             * Clean Source Name
+             * @default false
+             */
+            clean_source_name: boolean;
+            /**
              * Dry Run
              * @default false
              */
@@ -1958,6 +2022,11 @@ export interface components {
              * @default
              */
             idempotency_key: string;
+            /**
+             * Job Label
+             * @default
+             */
+            job_label: string;
             /**
              * Main Ids
              * @default []
@@ -1995,6 +2064,11 @@ export interface components {
              * @default
              */
             prompt: string;
+            /**
+             * Quality
+             * @default
+             */
+            quality: string;
             /**
              * Ref2 Ids
              * @default []
@@ -2173,6 +2247,11 @@ export interface components {
          */
         GenerateMissingRequest: {
             /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
+            /**
              * Idempotency Key
              * @default
              */
@@ -2299,6 +2378,156 @@ export interface components {
              * @default 0
              */
             total: number;
+        };
+        /** ImageDetailResponse */
+        ImageDetailResponse: {
+            /**
+             * Captured At
+             * @default
+             */
+            captured_at: string;
+            /** Categories */
+            categories?: components["schemas"]["CategoryRef"][];
+            /** Comfyui Prompt Id */
+            comfyui_prompt_id?: string | null;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /** File Size */
+            file_size?: number | null;
+            /** Filename */
+            filename: string;
+            /** Height */
+            height?: number | null;
+            /** Id */
+            id: number;
+            /** Img Type */
+            img_type?: string | null;
+            /**
+             * Is Favorite
+             * @default false
+             */
+            is_favorite: boolean;
+            /** Job Id */
+            job_id?: number | null;
+            /**
+             * Job Status
+             * @default
+             */
+            job_status: string;
+            /**
+             * Job Title
+             * @default
+             */
+            job_title: string;
+            /**
+             * Job Type
+             * @default
+             */
+            job_type: string;
+            /**
+             * Missing
+             * @default false
+             */
+            missing: boolean;
+            /** Prompt Id */
+            prompt_id?: number | null;
+            /**
+             * Prompt Name
+             * @default
+             */
+            prompt_name: string;
+            /** Prompt Params */
+            prompt_params?: {
+                [key: string]: unknown;
+            } | null;
+            run?: components["schemas"]["ImageRunInfo"];
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /** Subfolder */
+            subfolder?: string | null;
+            /** Tags */
+            tags?: components["schemas"]["TagRef"][];
+            /** View Url */
+            view_url?: string | null;
+            /** Width */
+            width?: number | null;
+        };
+        /**
+         * ImageRunInfo
+         * @description 一次出图的完整上下文：来自任务行 + 参数快照 + ComfyUI history/PNG 元数据。
+         */
+        ImageRunInfo: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
+            /** Cfg Scale */
+            cfg_scale?: number | null;
+            /** Denoise */
+            denoise?: number | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Finished At
+             * @default
+             */
+            finished_at: string;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
+            /**
+             * Quality
+             * @default
+             */
+            quality: string;
+            /**
+             * Sampler
+             * @default
+             */
+            sampler: string;
+            /**
+             * Scheduler
+             * @default
+             */
+            scheduler: string;
+            /** Seed */
+            seed?: number | null;
+            /**
+             * Started At
+             * @default
+             */
+            started_at: string;
+            /** Steps */
+            steps?: number | null;
+            /**
+             * Submitted At
+             * @default
+             */
+            submitted_at: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /**
+             * Workflow Path
+             * @default
+             */
+            workflow_path: string;
         };
         /** JobImage */
         JobImage: {
@@ -2434,6 +2663,11 @@ export interface components {
         };
         /** ProcessImageRequest */
         ProcessImageRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /**
              * Orientation
              * @default portrait
@@ -2724,19 +2958,10 @@ export interface components {
         };
         /** ReplaceResult */
         ReplaceResult: {
-            /**
-             * Action
-             * @default replaced
-             * @enum {string}
-             */
-            action: "replaced" | "appended" | "skipped";
             /** Id */
             id: number;
-            /**
-             * Old Content
-             * @default
-             */
-            old_content: string;
+            /** Outcomes */
+            outcomes?: components["schemas"]["TypeOutcome"][];
             /** Replaced */
             replaced?: string | null;
         };
@@ -2749,6 +2974,25 @@ export interface components {
              * @default
              */
             text: string;
+        };
+        /** ReplacementItem */
+        ReplacementItem: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Missing
+             * @default skip
+             * @enum {string}
+             */
+            missing: "skip" | "append";
+            /**
+             * Type
+             * @default
+             */
+            type: string;
         };
         /** RetryRequest */
         RetryRequest: {
@@ -2777,6 +3021,11 @@ export interface components {
         };
         /** RunRequest */
         RunRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /** Id */
             id: number;
             /**
@@ -2809,6 +3058,11 @@ export interface components {
         };
         /** RunTextRequest */
         RunTextRequest: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
             /**
              * Negative Prompt
              * @default
@@ -2947,8 +3201,28 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /** TypeOutcome */
+        TypeOutcome: {
+            /**
+             * Action
+             * @default replaced
+             * @enum {string}
+             */
+            action: "replaced" | "appended" | "skipped";
+            /**
+             * Old Content
+             * @default
+             */
+            old_content: string;
+            /** Type */
+            type: string;
+        };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -2961,6 +3235,8 @@ export interface components {
          * @description 工作流能接受哪些注入项；前端据此隐藏无效旋钮。
          *
          *     默认全为 True：探测失败时宁可保持旧行为，也不要把功能藏掉。
+         *     `negative` 只表示结构上有没有负向输入；`negative_effective` 才表示
+         *     它是否真的参与采样（负向来自文本节点且 cfg>1）。
          */
         WorkflowCaps: {
             /**
@@ -2968,6 +3244,13 @@ export interface components {
              * @default true
              */
             negative: boolean;
+            /** Negative Cfg */
+            negative_cfg?: number | null;
+            /**
+             * Negative Effective
+             * @default true
+             */
+            negative_effective: boolean;
             /**
              * Orientation
              * @default true
@@ -2996,15 +3279,27 @@ export interface components {
         };
         /**
          * WorkflowParams
-         * @description 画质 / 方向参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。
+         * @description 分辨率 / 画质参数的描述，前端据此生成真实档位（而不是固定的 2K..12K）。
          */
         WorkflowParams: {
+            /** Aspect Ratios */
+            aspect_ratios?: string[];
             /** Base Height */
             base_height?: number | null;
             /** Base Megapixels */
             base_megapixels?: number | null;
             /** Base Width */
             base_width?: number | null;
+            /**
+             * Default Ratio
+             * @default
+             */
+            default_ratio: string;
+            /**
+             * Multiple
+             * @default 16
+             */
+            multiple: number;
             /**
              * Orientation Mode
              * @default none
@@ -4355,6 +4650,37 @@ export interface operations {
             };
         };
     };
+    image_detail_api_images__item_id__detail_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_history_item_api_images__item_id__download_get: {
         parameters: {
             query?: never;
@@ -5002,6 +5328,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BatchIdsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compile_prompt_preview_api_prompts_compile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompilePromptRequest"];
             };
         };
         responses: {

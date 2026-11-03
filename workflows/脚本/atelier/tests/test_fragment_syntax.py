@@ -8,6 +8,7 @@ from app.services.fragment_syntax import (
     parse,
     render,
     replace_type,
+    replace_types,
     split_marked,
     strip_headers,
     types_in,
@@ -117,3 +118,47 @@ def test_replace_type_returns_none_when_type_absent():
     assert replace_type("【人物面部】黑色长发", "人物身材", "新身材") is None
     assert replace_type("一整段没有分块的提示词", "人物身材", "新身材") is None
     assert replace_type("", "人物身材", "新身材") is None
+
+
+# ---------------------------------------------------------------------------
+# replace_types —— 「替换清单」一次改多个类型
+# ---------------------------------------------------------------------------
+
+
+def test_replace_types_applies_each_item_in_order():
+    text = "【人物面部】黑色长发\n\n【人物身材】旧身材\n\n【场景环境】街道"
+    replaced, outcomes = replace_types(text, [
+        {"type": "人物面部", "content": "银发"},
+        {"type": "人物身材", "content": "统一身材", "missing": "skip"},
+    ])
+    assert replaced == "【人物面部】\n银发\n\n【人物身材】\n统一身材\n\n【场景环境】街道"
+    assert outcomes == [
+        {"type": "人物面部", "old_content": "黑色长发", "action": "replaced"},
+        {"type": "人物身材", "old_content": "旧身材", "action": "replaced"},
+    ]
+
+
+def test_replace_types_honours_missing_policy_per_item():
+    replaced, outcomes = replace_types("【人物面部】黑色长发", [
+        {"type": "人物服饰", "content": "统一服饰", "missing": "append"},
+        {"type": "人物身材", "content": "纤细修长"},
+    ])
+    assert replaced == "【人物面部】黑色长发\n\n【人物服饰】\n统一服饰"
+    assert [o["action"] for o in outcomes] == ["appended", "skipped"]
+
+
+def test_replace_types_returns_none_when_nothing_applies():
+    replaced, outcomes = replace_types("【人物面部】黑色长发", [
+        {"type": "人物服饰", "content": "统一服饰"},
+    ])
+    assert replaced is None
+    assert outcomes == [{"type": "人物服饰", "old_content": "", "action": "skipped"}]
+
+
+def test_replace_types_ignores_empty_type_or_content():
+    replaced, outcomes = replace_types("【人物面部】黑色长发", [
+        {"type": "", "content": "x"},
+        {"type": "人物服饰", "content": "  "},
+    ])
+    assert replaced is None
+    assert outcomes == []

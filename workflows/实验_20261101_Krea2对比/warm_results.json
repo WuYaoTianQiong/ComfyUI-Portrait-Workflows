@@ -1,0 +1,44 @@
+[
+  {
+    "label": "Qwen21_turboNSFW_8step_832_warm",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Qwen21_turboNSFW_8step_832_warm_00001_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1396215
+      }
+    ],
+    "error": "",
+    "elapsed_s": 15.39,
+    "status": "success"
+  },
+  {
+    "label": "ZImageTurbo_neineiLoRA_832_warm",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\ZImageTurbo_neineiLoRA_832_warm_00001_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1174569
+      }
+    ],
+    "error": "",
+    "elapsed_s": 33.43,
+    "status": "success"
+  },
+  {
+    "label": "Flux2Klein9B_Chinese_832_warm",
+    "images": [
+      {
+        "path": "F:\\ComfyUI_Migration\\output\\exp_20261101\\Flux2Klein9B_Chinese_832_00002_.png",
+        "width": 832,
+        "height": 1216,
+        "bytes": 1598330
+      }
+    ],
+    "error": "",
+    "elapsed_s": 27.83,
+    "status": "success"
+  }
+]

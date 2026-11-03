@@ -21,13 +21,14 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from peewee import fn
 
 from app.config import settings
 from app.models import Image, GenJob, db, inherit_prompt_taxonomy
 from app.services.image_store import upsert_image
+from app.services.quality_keys import normalize_quality
 from app.services.comfyui_client import (
     delete_queue_items,
     get_history,
@@ -39,6 +40,8 @@ from app.services.image_meta import (
     captured_at_for_image,
     compute_orientation,
     extract_model_name,
+    extract_run_params,
+    extract_run_times,
     get_image_metadata,
 )
 from app.services.paths import build_view_url, resolve_image_path
@@ -63,6 +66,54 @@ def _job_age_seconds(job: dict) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+
+def _utcnow() -> datetime:
+    """与 SQLite CURRENT_TIMESTAMP 一致的 UTC 无时区时间。
+
+    历史事故：created_at 由 CURRENT_TIMESTAMP 写 UTC，updated_at 却用
+    datetime.now() 写本地时间，任务页于是恒定多出 8 小时。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def to_utc_iso(value, anchor: datetime | None = None) -> str:
+    """把库里的时间统一成带时区的 ISO 字符串，前端 `new Date()` 才不会按本地解析。
+
+    旧数据里 updated_at 可能是本地时间（datetime.now()），而 created_at 始终由
+    SQLite CURRENT_TIMESTAMP 写 UTC。仅凭 updated_at 无法区分（过了 8 小时后就
+    不在"未来"了），所以用 created_at 当锚：差值与本地时区偏移相近时按旧格式纠正。
+    """
+    if not value:
+        return ""
+    if isinstance(value, str):
+        text = value.strip().replace("Z", "")
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return value
+    elif isinstance(value, datetime):
+        dt = value
+    else:
+        return str(value)
+
+    if dt.tzinfo is None:
+        offset = datetime.now().astimezone().utcoffset() or timedelta(0)
+        shifted = dt - offset if offset else dt
+        looks_legacy = False
+        if anchor is not None:
+            diff = dt - anchor
+            # 真实耗时通常几分钟；差值落在「时区偏移 -10min ~ +6h」只可能是旧格式
+            looks_legacy = (offset - timedelta(minutes=10)) <= diff <= (offset + timedelta(hours=6))
+        if looks_legacy and shifted >= anchor:
+            dt = shifted
+        elif dt > _utcnow() + timedelta(minutes=5):
+            # 兜底：比当前 UTC 还超前，只能是本地时间
+            dt = shifted
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
 # 所有 gen_jobs / gen_history 的任务相关写入都在这把锁内完成
 _lock = threading.RLock()
 
@@ -76,6 +127,13 @@ _sub_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 def row_to_dict(r) -> dict:
+    created_iso = to_utc_iso(r.created_at)
+    anchor = None
+    if created_iso:
+        try:
+            anchor = datetime.fromisoformat(created_iso.replace("Z", ""))
+        except ValueError:
+            anchor = None
     return {
         "id": r.id,
         "job_type": r.job_type,
@@ -90,8 +148,8 @@ def row_to_dict(r) -> dict:
         "quality": r.quality,
         # extra 存的是 JSON 字符串，对外给对象 —— 前端要直接取字段（节点映射等）
         "extra": _parse_extra(r.extra),
-        "created_at": str(r.created_at) if r.created_at else "",
-        "updated_at": str(r.updated_at) if r.updated_at else "",
+        "created_at": created_iso,
+        "updated_at": to_utc_iso(r.updated_at, anchor=anchor),
     }
 
 
@@ -214,7 +272,7 @@ def create_job(
             items=json.dumps(items, ensure_ascii=False),
             workflow_path=workflow_path,
             orientation=orientation,
-            quality=quality,
+            quality=normalize_quality(quality),
             extra=json.dumps(extra) if extra else None,
         )
     publish(read_snapshot(r.id))
@@ -231,7 +289,7 @@ def update_job_items(job_id: int, items: list[dict], status: str | None = None):
             done_count=done,
             error_count=errors,
             items=json.dumps(items, ensure_ascii=False),
-            updated_at=datetime.now(),
+            updated_at=_utcnow(),
         ).where(GenJob.id == job_id).execute()
     snap = read_snapshot(job_id)
     if snap:
@@ -276,7 +334,7 @@ def update_job_item(
             done_count=done,
             error_count=errors,
             items=json.dumps(items, ensure_ascii=False),
-            updated_at=datetime.now(),
+            updated_at=_utcnow(),
         ).where(GenJob.id == job_id).execute()
     snap = read_snapshot(job_id)
     if snap:
@@ -307,7 +365,7 @@ def finish_submission(job_id: int, reason: str = "提交队列中断，请重试
                 done_count=done,
                 error_count=errors,
                 items=json.dumps(items, ensure_ascii=False),
-                updated_at=datetime.now(),
+                updated_at=_utcnow(),
             ).where(GenJob.id == job_id).execute()
     snap = read_snapshot(job_id)
     if snap:
@@ -448,6 +506,9 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
     current_pid = snap.current_pid
 
     newly_done: list[dict] = []
+    # 完成瞬间把 ComfyUI history 里的实际参数与耗时留下来，
+    # 之后画廊的「出图参数」不依赖 history 是否还留着这条
+    run_meta_by_pid: dict[str, dict] = {}
     done_count = 0
     error_count = 0
 
@@ -479,6 +540,10 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
             done_count += 1
             if prev_status != "done":
                 newly_done.append(item)
+                run_meta_by_pid[pid] = {
+                    **extract_run_params(hist[pid].get("prompt")),
+                    **extract_run_times(hist[pid]),
+                }
         elif pid and pid in running:
             status = "running"
             if pid == current_pid and progress_data:
@@ -534,6 +599,8 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
         error_count=error_count,
         items=items,
     )
+    # 内部传递用，不落库、不进 API 响应（row_to_dict 每次都是新 dict）
+    job["_run_meta"] = run_meta_by_pid
     return job, newly_done
 
 
@@ -594,7 +661,7 @@ def _counts_and_status(items: list[dict], fallback: str, db_status: str) -> tupl
 
 def _insert_history_for_item(
     job_id: int, prompt_id, comfy_pid: str, images: list[dict],
-    preview: str = "", prompt_params=None,
+    preview: str = "", prompt_params=None, run_meta: dict | None = None,
 ):
     """把新完成的出图写入 gen_history（upsert 到部分唯一索引）。"""
     if isinstance(prompt_params, str):
@@ -603,7 +670,13 @@ def _insert_history_for_item(
         except ValueError:
             pp = {}
     else:
-        pp = prompt_params or {}
+        pp = dict(prompt_params or {})
+
+    # history 里是工作流真正执行时的参数；提示词记录可能没填 steps/sampler，
+    # 这里补上实际值，出图参数面板才能看到完整信息
+    for key, value in (run_meta or {}).items():
+        if value not in (None, ""):
+            pp[key] = value
 
     if not pp.get("model") and images:
         first = images[0]
@@ -697,6 +770,7 @@ def refresh_job(job_id: int, snapshot: ComfySnapshot | None = None) -> dict | No
         computed, newly_done = _compute(job)
     else:
         computed, newly_done = _compute(job, snapshot)
+    run_meta_by_pid = computed.pop("_run_meta", {}) or {}
 
     with _lock:
         current = GenJob.get_or_none(GenJob.id == job_id)
@@ -718,6 +792,7 @@ def refresh_job(job_id: int, snapshot: ComfySnapshot | None = None) -> dict | No
                 job_id, item.get("prompt_id"), item.get("comfyui_prompt_id"),
                 item.get("images") or [], item.get("prompt_preview", ""),
                 item.get("prompt_params"),
+                run_meta=run_meta_by_pid.get(item.get("comfyui_prompt_id")),
             )
 
         GenJob.update(
@@ -725,7 +800,7 @@ def refresh_job(job_id: int, snapshot: ComfySnapshot | None = None) -> dict | No
             done_count=done,
             error_count=errors,
             items=json.dumps(merged, ensure_ascii=False),
-            updated_at=datetime.now(),
+            updated_at=_utcnow(),
         ).where(GenJob.id == job_id).execute()
 
         stored = normalize(row_to_dict(GenJob.get_by_id(job_id)))
@@ -770,7 +845,7 @@ def cancel_job(job_id: int) -> bool:
         GenJob.update(
             status="stopped",
             items=json.dumps(items, ensure_ascii=False),
-            updated_at=datetime.now(),
+            updated_at=_utcnow(),
         ).where(GenJob.id == job_id).execute()
 
     if running_mine:

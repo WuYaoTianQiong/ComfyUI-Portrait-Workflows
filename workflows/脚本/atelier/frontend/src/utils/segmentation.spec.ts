@@ -98,58 +98,66 @@ describe('【类型】语法全部走后端（POST /api/composition/*）', () =>
     expect(apiPost).not.toHaveBeenCalled()
   })
 
-  it('batchReplaceSegments 返回 id → 替换前后内容，缺该类型时 replaced 为 null', async () => {
+  it('batchReplaceSegments 按清单返回每个类型的结果，全部跳过时 replaced 为 null', async () => {
     apiPost.mockResolvedValue({
       items: [
-        { id: 1, old_content: '白色连衣裙', replaced: '【人物服饰】\n统一服饰', action: 'replaced' },
-        { id: 2, old_content: '', replaced: null, action: 'skipped' },
+        {
+          id: 1,
+          replaced: '【人物服饰】\n统一服饰\n\n【人物面部】\n银发',
+          outcomes: [
+            { type: '人物服饰', old_content: '白色连衣裙', action: 'replaced' },
+            { type: '人物面部', old_content: '黑色长发', action: 'replaced' },
+          ],
+        },
+        { id: 2, replaced: null, outcomes: [{ type: '人物服饰', old_content: '', action: 'skipped' }] },
       ],
     })
 
     const outcomes = await batchReplaceSegments(
       [{ id: 1, text: 'a' }, { id: 2, text: 'b' }],
-      '人物服饰',
-      '统一服饰',
+      [
+        { type: '人物服饰', content: '统一服饰' },
+        { type: '人物面部', content: '银发' },
+      ],
     )
 
     expect(apiPost).toHaveBeenCalledWith('/api/composition/batch_replace', {
       texts: [{ id: 1, text: 'a' }, { id: 2, text: 'b' }],
-      type: '人物服饰',
-      content: '统一服饰',
-      missing: 'skip',
+      replacements: [
+        { type: '人物服饰', content: '统一服饰', missing: 'skip' },
+        { type: '人物面部', content: '银发', missing: 'skip' },
+      ],
     })
     expect(outcomes.get(1)).toEqual({
-      oldContent: '白色连衣裙',
-      replaced: '【人物服饰】\n统一服饰',
-      action: 'replaced',
+      replaced: '【人物服饰】\n统一服饰\n\n【人物面部】\n银发',
+      outcomes: [
+        { type: '人物服饰', oldContent: '白色连衣裙', action: 'replaced' },
+        { type: '人物面部', oldContent: '黑色长发', action: 'replaced' },
+      ],
     })
     expect(outcomes.get(2)?.replaced).toBeNull()
-    expect(outcomes.get(2)?.action).toBe('skipped')
+    expect(outcomes.get(2)?.outcomes[0].action).toBe('skipped')
   })
 
-  it('batchReplaceSegments 可要求缺失类型时追加', async () => {
+  it('batchReplaceSegments 把每个类型的缺失策略原样带给后端', async () => {
     apiPost.mockResolvedValue({
-      items: [{ id: 2, old_content: '', replaced: '【人物服饰】\n统一服饰', action: 'appended' }],
+      items: [{ id: 2, replaced: '【人物服饰】\n统一服饰', outcomes: [] }],
     })
 
-    const outcomes = await batchReplaceSegments(
+    await batchReplaceSegments(
       [{ id: 2, text: 'b' }],
-      '人物服饰',
-      '统一服饰',
-      'append',
+      [{ type: '人物服饰', content: '统一服饰', missing: 'append' }],
     )
 
     expect(apiPost).toHaveBeenCalledWith('/api/composition/batch_replace', {
       texts: [{ id: 2, text: 'b' }],
-      type: '人物服饰',
-      content: '统一服饰',
-      missing: 'append',
+      replacements: [{ type: '人物服饰', content: '统一服饰', missing: 'append' }],
     })
-    expect(outcomes.get(2)?.action).toBe('appended')
   })
 
   it('batchReplaceSegments 没有输入时不发请求', async () => {
-    await batchReplaceSegments([], '人物服饰', '统一服饰')
+    await batchReplaceSegments([], [{ type: '人物服饰', content: '统一服饰' }])
+    await batchReplaceSegments([{ id: 1, text: 'a' }], [])
     expect(apiPost).not.toHaveBeenCalled()
   })
 })

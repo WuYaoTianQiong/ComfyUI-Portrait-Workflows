@@ -377,4 +377,35 @@ describe('PromptView 外部跳转与草稿恢复', () => {
 
     expect((wrapper.find('.search').element as HTMLInputElement).value).toBe('关键词')
   })
+
+  it('刷新后恢复左侧勾选', async () => {
+    localStorage.setItem(
+      'pb.session.prompt',
+      JSON.stringify({
+        page: 1,
+        search: '',
+        categoryId: null,
+        tagIds: [],
+        tagMatch: 'all',
+        selectedId: null,
+        selectedIds: [1],
+        scrollTop: 0,
+      }),
+    )
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.row[data-id="1"] .row-check').classes()).toContain('on')
+    expect(wrapper.find('.bulk-count').text()).toBe('已选 1 条')
+  })
+
+  it('勾选变化写入会话，下次打开还能恢复', async () => {
+    const wrapper = await mountView()
+
+    await wrapper.find('.row[data-id="1"] .row-check').trigger('click')
+    await flushPromises()
+
+    const saved = JSON.parse(localStorage.getItem('pb.session.prompt') ?? '{}')
+    expect(saved.selectedIds).toEqual([1])
+  })
 })

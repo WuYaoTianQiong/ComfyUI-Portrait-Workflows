@@ -163,6 +163,17 @@ def run_browser_checks() -> None:
         cells = page.locator(".picker .cell")
         check(cells.count() > 0, "换脸页能列出生图", f"{cells.count()} 张")
 
+        # ---- 批量超分（/upscale）----
+        page.click("button:has-text('批量超分')")
+        page.wait_for_selector(".upscale", timeout=15000)
+        page.wait_for_timeout(800)
+        check(page.url.endswith("/upscale"), "批量超分页路由是 /upscale", page.url)
+        check(page.locator(".upscale .picker").count() == 1, "批量超分页只有一列图片选择器")
+        check(
+            page.locator(".upscale .panel select").count() >= 1,
+            "批量超分页有工作流下拉",
+        )
+
         # ---- 分类与标签（P2c 由「管理」改名，路径 /taxonomy）----
         page.click("button:has-text('分类与标签')")
         page.wait_for_selector(".taxonomy", timeout=15000)

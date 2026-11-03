@@ -17,6 +17,8 @@ import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useGenerate } from '../composables/useGenerate'
 import { findHistoryItem } from '../composables/useImagePreview'
 import { useSettings } from '../composables/useSettings'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useImageLocation } from '../composables/useImageLocation'
 import { useGallerySelection } from '../composables/useGallerySelection'
 import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
@@ -24,6 +26,7 @@ import { formatSize, resolution } from '../utils/format'
 import { flattenCategories } from '../utils/categories'
 import { imageAspect } from '../utils/image'
 import { confirmDialog, confirmDialogWithCheckbox } from '../utils/naive'
+import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { readSession, writeSession } from '../composables/useSessionState'
 
 /**
@@ -459,7 +462,9 @@ function openCompare() {
  * 走统一的出图入口 useGenerate.run —— 同样的工作流/画质/画幅设置，
  * 进度照旧用 SSE 跟踪。
  */
-const { workflowPath, quality, orientation: outOrientation, deleteFiles, outputSubfolder } = useSettings()
+const { workflowPath, orientation: outOrientation, deleteFiles, outputSubfolder } = useSettings()
+const quality = useWorkflowQuality(workflowPath)
+const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { revealImage } = useImageLocation()
 const { run, runText, busy: regenerating, error: generateError } = useGenerate()
 
@@ -480,6 +485,7 @@ async function regenerate(target: HistoryItem) {
         workflowPath: workflowPath.value,
         quality: caps.value.quality ? quality.value : '4K',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
+        aspectRatio: aspectRatio.value || defaultRatio.value,
       })
     } else if (typeof params.prompt === 'string' && params.prompt.trim()) {
       await runText({
@@ -489,6 +495,7 @@ async function regenerate(target: HistoryItem) {
         workflowPath: workflowPath.value,
         quality: caps.value.quality ? quality.value : '4K',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
+        aspectRatio: aspectRatio.value || defaultRatio.value,
       })
     } else {
       toast.error('这张图没有可复用的出图参数')
@@ -568,6 +575,7 @@ async function backfillTaxonomy() {
     content: '为所有缺少分类/标签的图片补齐（一次性全库操作，可能要跑一会儿）。继续？',
     positiveText: '开始',
     negativeText: '取消',
+    rememberKey: CONFIRM_PROMPTS.backfillTaxonomy.key,
   })
   if (!ok) return
   try {
@@ -623,7 +631,7 @@ watch(lightboxIndex, saveSession)
 /** 灯箱里要能直接选工作流（投喂给工作流处理）。 */
 const { workflows, allWorkflows } = useWorkflows()
 /** 重跑用的是提示词页的工作流；不支持画质/横竖时不发无效参数。 */
-const { caps } = useWorkflowCaps(workflowPath, allWorkflows)
+const { caps, defaultRatio } = useWorkflowCaps(workflowPath, allWorkflows, aspectRatio)
 const lightboxOpen = computed(() => lightboxIndex.value !== null)
 
 function openLightbox(index: number) {

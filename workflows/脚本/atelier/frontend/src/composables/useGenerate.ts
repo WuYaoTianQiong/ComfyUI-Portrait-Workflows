@@ -226,7 +226,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
 
   async function run(
     promptId: number,
-    options: { workflowPath: string; quality: string; orientation: string },
+    options: { workflowPath: string; quality: string; orientation: string; aspectRatio?: string },
   ) {
     error.value = ''
     if (!options.workflowPath) {
@@ -242,6 +242,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
+        aspect_ratio: options.aspectRatio ?? '',
         output_subfolder: outputSubfolder.value,
       })
       if (!result.success) {
@@ -262,7 +263,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
    */
   async function runBatch(
     promptIds: number[],
-    options: { workflowPath: string; quality: string; orientation: string; title?: string },
+    options: { workflowPath: string; quality: string; orientation: string; aspectRatio?: string; title?: string },
   ) {
     error.value = ''
     if (!options.workflowPath) {
@@ -279,6 +280,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
+        aspect_ratio: options.aspectRatio ?? '',
         title: options.title ?? `批量生成 ${promptIds.length} 条`,
         output_subfolder: outputSubfolder.value,
       })
@@ -296,7 +298,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
    */
   async function runBatchReplace(
     items: Array<{ promptId: number; seed: number; promptOverride: string }>,
-    options: { workflowPath: string; quality: string; orientation: string; title?: string },
+    options: { workflowPath: string; quality: string; orientation: string; aspectRatio?: string; title?: string },
   ) {
     error.value = ''
     if (!options.workflowPath) {
@@ -316,10 +318,12 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         workflow_content: customWorkflowContent(options.workflowPath),
         quality: options.quality,
         orientation: options.orientation,
+        aspect_ratio: options.aspectRatio ?? '',
         title: options.title ?? `批量替换碎片 ${items.length} 条`,
         output_subfolder: outputSubfolder.value,
       })
       subscribe(result.job_id)
+      return result.job_id
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
       busy.value = false
@@ -340,6 +344,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
       workflowPath: string
       quality: string
       orientation: string
+      aspectRatio?: string
     },
   ) {
     error.value = ''
@@ -357,6 +362,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         workflow_content: customWorkflowContent(options.workflowPath),
         orientation: options.orientation,
         quality: options.quality,
+        aspect_ratio: options.aspectRatio ?? '',
         seed: options.seed ?? 0,
         output_subfolder: outputSubfolder.value,
       })
