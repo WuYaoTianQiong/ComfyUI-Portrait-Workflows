@@ -16,7 +16,7 @@ import { apiGet } from './client'
 type Schemas = components['schemas']
 
 export type ReferenceLibraryKey = 'pose' | 'costume' | 'portrait' | 'costume-anime'
-export type ReferenceImageKind = 'thumb' | 'image' | 'depth'
+export type ReferenceImageKind = 'thumb' | 'image' | 'depth' | 'depth_thumb'
 
 export type ReferenceFacetValue = Required<Schemas['ReferenceFacetValue']>
 
@@ -84,6 +84,7 @@ export function getReferenceItem(library: string, id: string): Promise<Reference
 /** 从 DTO 里取对应版本的图片地址；外链条目的深度图为 null。 */
 export function referenceImageUrl(item: ReferenceItem, kind: ReferenceImageKind): string {
   if (kind === 'depth') return item.depth_url ?? ''
+  if (kind === 'depth_thumb') return item.depth_thumb_url ?? ''
   if (kind === 'image') return item.image_url
   return item.thumb_url
 }

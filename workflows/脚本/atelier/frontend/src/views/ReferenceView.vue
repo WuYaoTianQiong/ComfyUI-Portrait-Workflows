@@ -3,12 +3,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 
+import DropZone from '../components/DropZone.vue'
 import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Pager from '../components/Pager.vue'
 import QueryState from '../components/QueryState.vue'
 import ReferenceSheetButton from '../components/ReferenceSheetButton.vue'
 import RefLightbox from '../components/RefLightbox.vue'
 import { apiPost } from '../api/client'
+import type { UploadedReference } from '../api/upload'
 import {
   listReferenceItems,
   listReferenceLibraries,
@@ -36,8 +38,8 @@ import { confirmDialog } from '../utils/naive'
  *   这样 JustifiedGrid 的「不裁切」在参考库上也成立；
  * - 同一姿势的多角度按 `(体系, 姿势编号)` 聚合：当前页只有部分角度，
  *   点箭头时用 `search=姿势编号` 拉全组并缓存，之后前端只换 id；
- * - 18+ 默认关闭。后端总闸没开时（`visible < total` 说明有敏感条目被过滤），
- *   开关置灰，避免前端出现一套后端不认的状态。
+ * - 18+ 开关是否可用由 `/reference/libraries` 的 `allow_nsfw` 决定；
+ *   总闸关闭时置灰，不再用 `visible < total` 反推。
  */
 
 interface TabDef {
@@ -101,14 +103,8 @@ const statsByLib = computed<Record<string, ReferenceLibraryStats | undefined>>((
 
 const currentStats = computed(() => statsByLib.value[activeLibrary.value])
 
-/**
- * 后端总闸是否打开：`ALLOW_NSFW=0` 时 `visible < total`（敏感条目被过滤），
- * `ALLOW_NSFW=1` 时两者相等。没有单独的配置端点，这里用这个差值判断；
- * 如果部署时把 NSFW 名单配成空，会误判为已开启（属于配置边界）。
- */
-const nsfwAllowed = computed(
-  () => libraries.value.length > 0 && !libraries.value.some((lib) => lib.visible < lib.total),
-)
+/** 后端总闸：由 `/reference/libraries` 的 `allow_nsfw` 驱动，不再用条数差反推。 */
+const nsfwAllowed = computed(() => librariesData.value?.allow_nsfw ?? false)
 
 const nsfwTitle = computed(() =>
   nsfwAllowed.value
@@ -438,7 +434,12 @@ function isDepth(item: ReferenceItem): boolean {
   return depthCards.value.has(item.id)
 }
 
+function hasDepth(item: ReferenceItem): boolean {
+  return !!displayItem(item).depth_thumb_url
+}
+
 function setCardMode(item: ReferenceItem, depth: boolean) {
+  if (depth && !hasDepth(item)) return
   const next = new Set(depthCards.value)
   if (depth) next.add(item.id)
   else next.delete(item.id)
@@ -447,7 +448,7 @@ function setCardMode(item: ReferenceItem, depth: boolean) {
 
 function cardSrc(item: ReferenceItem): string {
   const current = displayItem(item)
-  if (isDepth(item) && current.depth_url) return current.depth_url
+  if (isDepth(item) && current.depth_thumb_url) return current.depth_thumb_url
   return current.thumb_url
 }
 
@@ -501,9 +502,9 @@ function captionMeta(item: ReferenceItem): string {
 type CoreSlot = 'portrait' | 'costume' | 'pose'
 
 const CORE_SLOTS: Array<{ key: CoreSlot; label: string; empty: string }> = [
-  { key: 'portrait', label: '人像', empty: '在左侧人像库点「选」' },
-  { key: 'costume', label: '服装', empty: '在左侧服装库点「选」' },
-  { key: 'pose', label: '姿势', empty: '在左侧姿势库点「选」' },
+  { key: 'portrait', label: '人像', empty: '在左侧人像库点「选」，或直接上传' },
+  { key: 'costume', label: '服装', empty: '在左侧服装库点「选」，或直接上传' },
+  { key: 'pose', label: '姿势', empty: '在左侧姿势库点「选」，或直接上传' },
 ]
 
 const router = useRouter()
@@ -515,7 +516,13 @@ const picks = ref<Record<CoreSlot, ReferenceItem | null>>({
   costume: null,
   pose: null,
 })
+const uploads = ref<Record<CoreSlot, UploadedReference | null>>({
+  portrait: null,
+  costume: null,
+  pose: null,
+})
 const extraPick = ref<ReferenceItem | null>(null)
+const extraUpload = ref<UploadedReference | null>(null)
 
 const stylePreset = ref<'realistic' | 'none'>('realistic')
 const promptSuffix = ref('')
@@ -540,6 +547,38 @@ function sameItem(a: ReferenceItem | null, b: ReferenceItem): boolean {
   return !!a && a.id === b.id && a.library === b.library
 }
 
+function slotLabel(slot: CoreSlot): string {
+  return CORE_SLOTS.find((item) => item.key === slot)?.label ?? ''
+}
+
+function uploadOf(slot: CoreSlot): UploadedReference | null {
+  return uploads.value[slot]
+}
+
+function slotFilled(slot: CoreSlot): boolean {
+  return !!picks.value[slot] || !!uploads.value[slot]
+}
+
+function slotSourceKind(slot: CoreSlot): '' | 'library' | 'upload' {
+  if (picks.value[slot]) return 'library'
+  if (uploads.value[slot]) return 'upload'
+  return ''
+}
+
+const extraSourceKind = computed<'' | 'library' | 'upload'>(() => {
+  if (extraPick.value) return 'library'
+  if (extraUpload.value) return 'upload'
+  return ''
+})
+
+function uploadThumb(upload: UploadedReference): string {
+  return `/api/browser/thumb?path=${encodeURIComponent(upload.path)}&size=120`
+}
+
+function uploadMeta(upload: UploadedReference): string {
+  return `上传 · ${upload.width}×${upload.height}`
+}
+
 function isCorePicked(item: ReferenceItem): boolean {
   const slot = coreSlotOf(item)
   return slot ? sameItem(picks.value[slot], item) : false
@@ -548,10 +587,9 @@ function isCorePicked(item: ReferenceItem): boolean {
 function toggleCore(item: ReferenceItem) {
   const slot = coreSlotOf(item)
   if (!slot || item.remote) return
-  picks.value = {
-    ...picks.value,
-    [slot]: sameItem(picks.value[slot], item) ? null : item,
-  }
+  const next = sameItem(picks.value[slot], item) ? null : item
+  picks.value = { ...picks.value, [slot]: next }
+  if (next) uploads.value = { ...uploads.value, [slot]: null }
 }
 
 function isExtraPicked(item: ReferenceItem): boolean {
@@ -560,11 +598,39 @@ function isExtraPicked(item: ReferenceItem): boolean {
 
 function toggleExtra(item: ReferenceItem) {
   if (item.remote) return
-  extraPick.value = sameItem(extraPick.value, item) ? null : item
+  const next = sameItem(extraPick.value, item) ? null : item
+  extraPick.value = next
+  if (next) extraUpload.value = null
 }
 
 function clearSlot(slot: CoreSlot) {
   picks.value = { ...picks.value, [slot]: null }
+  uploads.value = { ...uploads.value, [slot]: null }
+}
+
+function backToLibrary(slot: CoreSlot) {
+  uploads.value = { ...uploads.value, [slot]: null }
+}
+
+function onSlotUpload(slot: CoreSlot, items: UploadedReference[]) {
+  const upload = items[0]
+  if (!upload) return
+  picks.value = { ...picks.value, [slot]: null }
+  uploads.value = { ...uploads.value, [slot]: upload }
+  toast.success(`已上传${slotLabel(slot)}参考图`)
+}
+
+function clearExtra() {
+  extraPick.value = null
+  extraUpload.value = null
+}
+
+function onExtraUpload(items: UploadedReference[]) {
+  const upload = items[0]
+  if (!upload) return
+  extraPick.value = null
+  extraUpload.value = upload
+  toast.success('已上传第 4 张参考图')
 }
 
 function slotOf(slot: CoreSlot): ReferenceItem | null {
@@ -572,14 +638,12 @@ function slotOf(slot: CoreSlot): ReferenceItem | null {
 }
 
 const canGenerate = computed(
-  () => !busy.value && CORE_SLOTS.every((slot) => !!picks.value[slot.key]),
+  () => !busy.value && CORE_SLOTS.every((slot) => slotFilled(slot.key)),
 )
 
-const extraNode = computed(() => (extraPick.value ? extraPick.value.id : ''))
-
-/** 参考板至少需要一张已选本地条目；外链条目本来就不会进 picks。 */
+/** 参考板核心槽只接受库条目；第 4 槽的上传图可作为 extra 追加第四列。 */
 const canExportSheet = computed(
-  () => !!(picks.value.portrait || picks.value.costume || picks.value.pose),
+  () => !!(picks.value.portrait || picks.value.costume || picks.value.pose || extraUpload.value),
 )
 
 // ---------------------------------------------------------------------------
@@ -634,14 +698,17 @@ async function submitRecipe(dryRun: boolean) {
   const portrait = picks.value.portrait
   const costume = picks.value.costume
   const pose = picks.value.pose
-  if (!portrait || !costume || !pose) return
   try {
     const result = await submitAndTrack<RecipeResponse>('/api/reference/recipes', {
-      portrait_id: portrait.id,
-      costume_id: costume.id,
-      pose_id: pose.id,
+      portrait_id: portrait?.id ?? '',
+      portrait_path: uploads.value.portrait?.path ?? '',
+      costume_id: costume?.id ?? '',
+      costume_path: uploads.value.costume?.path ?? '',
+      pose_id: pose?.id ?? '',
+      pose_path: uploads.value.pose?.path ?? '',
       extra_library: extraPick.value?.library ?? '',
-      extra_id: extraNode.value,
+      extra_id: extraPick.value?.id ?? '',
+      extra_path: extraUpload.value?.path ?? '',
       style: stylePreset.value,
       prompt_suffix: promptSuffix.value.trim(),
       seed: seed.value,
@@ -828,7 +895,7 @@ const gridEl = ref<HTMLElement | null>(null)
                   <button
                     class="mini"
                     :class="{ active: isDepth(item) }"
-                    :disabled="!displayItem(item).depth_url"
+                    :disabled="!displayItem(item).depth_thumb_url"
                     title="深度图"
                     @click="setCardMode(item, true)"
                   >
@@ -898,10 +965,29 @@ const gridEl = ref<HTMLElement | null>(null)
 
         <div v-for="slot in CORE_SLOTS" :key="slot.key" class="slot">
           <div class="slot-head">
-            <span class="slot-label">{{ slot.label }}</span>
-            <button v-if="slotOf(slot.key)" class="btn btn-sm" @click="clearSlot(slot.key)">
-              清除
-            </button>
+            <span class="slot-label">
+              {{ slot.label }}
+              <span
+                v-if="slotSourceKind(slot.key)"
+                class="source-badge"
+                :class="slotSourceKind(slot.key)"
+              >
+                {{ slotSourceKind(slot.key) === 'library' ? '图库' : '上传' }}
+              </span>
+            </span>
+            <span class="slot-head-actions">
+              <button
+                v-if="uploadOf(slot.key)"
+                class="btn btn-sm"
+                title="清空上传图，回到左侧图库选择"
+                @click="backToLibrary(slot.key)"
+              >
+                退回图库
+              </button>
+              <button v-if="slotFilled(slot.key)" class="btn btn-sm" @click="clearSlot(slot.key)">
+                清除
+              </button>
+            </span>
           </div>
           <div v-if="slotOf(slot.key)" class="slot-picked">
             <img :src="referenceImageUrl(slotOf(slot.key)!, 'thumb')" :alt="slot.label" loading="lazy" />
@@ -912,13 +998,48 @@ const gridEl = ref<HTMLElement | null>(null)
               <span class="slot-meta">{{ captionMeta(slotOf(slot.key)!) }}</span>
             </div>
           </div>
-          <div v-else class="slot-empty">{{ slot.empty }}</div>
+          <div v-else-if="uploadOf(slot.key)" class="slot-picked">
+            <img :src="uploadThumb(uploadOf(slot.key)!)" :alt="uploadOf(slot.key)!.name" loading="lazy" />
+            <div class="slot-info">
+              <span class="slot-name" :title="uploadOf(slot.key)!.name">
+                {{ uploadOf(slot.key)!.name }}
+              </span>
+              <span class="slot-meta">{{ uploadMeta(uploadOf(slot.key)!) }}</span>
+            </div>
+          </div>
+          <template v-else>
+            <div class="slot-empty">{{ slot.empty }}</div>
+            <DropZone
+              :label="`上传${slot.label}图`"
+              hint="拖拽 / 粘贴 / 点击，单张"
+              :multiple="false"
+              @uploaded="onSlotUpload(slot.key, $event)"
+              @error="toast.error($event)"
+            />
+          </template>
         </div>
 
         <div class="slot">
           <div class="slot-head">
-            <span class="slot-label">第 4 张</span>
-            <button v-if="extraPick" class="btn btn-sm" @click="extraPick = null">清除</button>
+            <span class="slot-label">
+              第 4 张
+              <span v-if="extraSourceKind" class="source-badge" :class="extraSourceKind">
+                {{ extraSourceKind === 'library' ? '图库' : '上传' }}
+              </span>
+            </span>
+            <span class="slot-head-actions">
+              <button
+                v-if="extraUpload"
+                class="btn btn-sm"
+                title="清空上传图，回到左侧图库选择"
+                @click="extraUpload = null"
+              >
+                退回图库
+              </button>
+              <button v-if="extraPick || extraUpload" class="btn btn-sm" @click="clearExtra">
+                清除
+              </button>
+            </span>
           </div>
           <div v-if="extraPick" class="slot-picked">
             <img :src="referenceImageUrl(extraPick, 'thumb')" alt="第 4 张" loading="lazy" />
@@ -927,7 +1048,23 @@ const gridEl = ref<HTMLElement | null>(null)
               <span class="slot-meta">{{ captionMeta(extraPick) }}</span>
             </div>
           </div>
-          <div v-else class="slot-empty">可选：在左侧任一库点「4」</div>
+          <div v-else-if="extraUpload" class="slot-picked">
+            <img :src="uploadThumb(extraUpload)" :alt="extraUpload.name" loading="lazy" />
+            <div class="slot-info">
+              <span class="slot-name" :title="extraUpload.name">{{ extraUpload.name }}</span>
+              <span class="slot-meta">{{ uploadMeta(extraUpload) }}</span>
+            </div>
+          </div>
+          <template v-else>
+            <div class="slot-empty">可选：在左侧任一库点「4」，或直接上传</div>
+            <DropZone
+              label="上传第 4 张"
+              hint="拖拽 / 粘贴 / 点击，单张"
+              :multiple="false"
+              @uploaded="onExtraUpload($event)"
+              @error="toast.error($event)"
+            />
+          </template>
           <p class="slot-hint">
             第 4 张只补鞋包/配饰/场景，不要放第二套完整服装或第二张人像
           </p>
@@ -970,9 +1107,12 @@ const gridEl = ref<HTMLElement | null>(null)
             :pose="picks.pose?.id ?? null"
             :costume="picks.costume?.id ?? null"
             :portrait="picks.portrait?.id ?? null"
+            :extra="extraUpload?.path ?? null"
             :disabled="!canExportSheet"
           />
-          <span class="sheet-hint">按「人像 → 服装 → 姿势」拼成 1800×1200</span>
+          <span class="sheet-hint">
+            按「人像 → 服装 → 姿势」拼成 1800×1200；第 4 槽为上传图时追加第四列
+          </span>
         </div>
 
         <div v-if="submitError" class="panel-error">{{ submitError }}</div>
@@ -1280,12 +1420,52 @@ const gridEl = ref<HTMLElement | null>(null)
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--gap-xs);
+}
+
+.slot-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .slot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-xs);
   color: var(--text);
   opacity: 0.8;
+}
+
+.source-badge {
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  opacity: 1;
+}
+
+.source-badge.library {
+  color: var(--primary);
+}
+
+.source-badge.upload {
+  color: var(--warn);
+}
+
+.slot :deep(.dropzone) {
+  padding: 4px 8px;
+  gap: 6px;
+}
+
+.slot :deep(.dz-paste) {
+  display: none;
+}
+
+.slot :deep(.dz-btn) {
+  padding: 1px 6px;
 }
 
 .slot-picked {

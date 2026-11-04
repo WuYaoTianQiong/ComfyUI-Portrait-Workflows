@@ -7,6 +7,7 @@ import DiskPathList from '../components/DiskPathList.vue'
 import DropZone from '../components/DropZone.vue'
 import FilePicker from '../components/FilePicker.vue'
 import MaskEditorModal from '../components/MaskEditorModal.vue'
+import ReferenceSheetButton from '../components/ReferenceSheetButton.vue'
 import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
 import type { UploadedReference } from '../api/upload'
 import { useGenerate } from '../composables/useGenerate'
@@ -359,6 +360,15 @@ const visibleGroups = computed(() => groups.value.slice(0, columnCount.value))
 const groupCounts = computed(() => groups.value.map((g) => g.ids.length + g.paths.length))
 const activeCounts = computed(() => groupCounts.value.slice(0, columnCount.value))
 
+
+const UPLOADS_SEGMENT = /(^|[/\\])uploads[/\\]/i
+
+const ref3UploadPath = computed<string | null>(() => {
+  const ref3 = groups.value[3]
+  if (!ref3) return null
+  return ref3.paths.find((path) => UPLOADS_SEGMENT.test(path)) ?? null
+})
+
 const comboCount = computed(() => {
   if (activeCounts.value.some((c) => c === 0)) return 0
   if (columnCount.value === 1) return activeCounts.value[0]
@@ -643,6 +653,18 @@ async function submit() {
           </button>
         </div>
         <textarea v-model="promptText" spellcheck="false" :placeholder="DEFAULT_PROMPT" />
+      </div>
+
+      <div v-if="columnCount >= 4" class="section sheet">
+        <span class="label">参考板</span>
+        <ReferenceSheetButton
+          :extra="ref3UploadPath"
+          :disabled="!ref3UploadPath"
+          label="导出第 4 槽上传图"
+        />
+        <div class="hint">
+          把参考图3槽里的上传图作为附加图导出为 1800×1200；核心三图请在参考图库页导出
+        </div>
       </div>
 
       <div class="summary">

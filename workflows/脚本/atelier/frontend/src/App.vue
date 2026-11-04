@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import ToastHost from './components/ToastHost.vue'
 import OutputLocationField from './components/OutputLocationField.vue'
-import { getSystemStatus, listJobs } from './api/endpoints'
+import { getSystemStatus, listJobs, type SystemStatus } from './api/endpoints'
 import { setupNaive } from './utils/naive'
 
 // 只初始化一次；测试不挂载 App，不会触发
@@ -34,6 +34,13 @@ const { data: status } = useQuery({
 })
 
 const online = computed(() => status.value?.comfyui === 'online')
+
+
+const referenceEnabled = computed(
+  () =>
+    (status.value as (SystemStatus & { reference_enabled?: boolean }) | undefined)
+      ?.reference_enabled !== false,
+)
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +75,7 @@ function jumpToPrompt(promptId: number) {
           画廊
         </button>
         <button
+          v-if="referenceEnabled"
           class="btn btn-sm"
           :class="{ active: activeKey === 'reference' }"
           @click="go('reference')"
