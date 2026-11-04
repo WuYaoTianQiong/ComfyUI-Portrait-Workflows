@@ -1362,6 +1362,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reference/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reference Items */
+        get: operations["list_reference_items_api_reference_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/items/{library}/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reference Item */
+        get: operations["get_reference_item_api_reference_items__library___item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/items/{library}/{item_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reference Image */
+        get: operations["get_reference_image_api_reference_items__library___item_id__image_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reference Libraries */
+        get: operations["list_reference_libraries_api_reference_libraries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reference/ping": {
         parameters: {
             query?: never;
@@ -3048,6 +3116,123 @@ export interface components {
             tags?: string | null;
             /** Width */
             width?: number | null;
+        };
+        /** ReferenceFacetValue */
+        ReferenceFacetValue: {
+            /** Count */
+            count: number;
+            /** Value */
+            value: string;
+        };
+        /** ReferenceItem */
+        ReferenceItem: {
+            /**
+             * Angle
+             * @default
+             */
+            angle: string;
+            /** Depth Url */
+            depth_url?: string | null;
+            /**
+             * Facet
+             * @default
+             */
+            facet: string;
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
+            /**
+             * Group
+             * @default
+             */
+            group: string;
+            /**
+             * Hot
+             * @default false
+             */
+            hot: boolean;
+            /** Id */
+            id: string;
+            /** Image Url */
+            image_url: string;
+            /**
+             * Keywords
+             * @default
+             */
+            keywords: string;
+            /** Library */
+            library: string;
+            /** Name */
+            name: string;
+            /**
+             * Nsfw
+             * @default false
+             */
+            nsfw: boolean;
+            /**
+             * Remote
+             * @default false
+             */
+            remote: boolean;
+            /**
+             * Subtitle
+             * @default
+             */
+            subtitle: string;
+            /** Tags */
+            tags?: string[];
+            /** Thumb Url */
+            thumb_url: string;
+        };
+        /** ReferenceItemListResponse */
+        ReferenceItemListResponse: {
+            /** Items */
+            items?: components["schemas"]["ReferenceItem"][];
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 60
+             */
+            page_size: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /** ReferenceLibraryListResponse */
+        ReferenceLibraryListResponse: {
+            /** Libraries */
+            libraries?: components["schemas"]["ReferenceLibraryStats"][];
+        };
+        /** ReferenceLibraryStats */
+        ReferenceLibraryStats: {
+            /** Angles */
+            angles?: components["schemas"]["ReferenceFacetValue"][];
+            /** Available */
+            available: boolean;
+            /** Facets */
+            facets?: components["schemas"]["ReferenceFacetValue"][];
+            /** Groups */
+            groups?: components["schemas"]["ReferenceFacetValue"][];
+            /** Label */
+            label: string;
+            /** Library */
+            library: string;
+            /** Local */
+            local: number;
+            /** Remote */
+            remote: number;
+            /** Total */
+            total: number;
+            /** Visible */
+            visible: number;
         };
         /** RenderRequest */
         RenderRequest: {
@@ -5989,6 +6174,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reference_items_api_reference_items_get: {
+        parameters: {
+            query?: {
+                /** @description pose / costume / portrait / costume-anime */
+                library?: string;
+                /** @description 直接匹配上游预拼好的「检索」串 */
+                search?: string;
+                group?: string;
+                facet?: string;
+                angle?: string;
+                /** @description 仅在 ATELIER_REFERENCE_ALLOW_NSFW=1 时生效 */
+                nsfw?: boolean | null;
+                page?: number;
+                /** @description 0 表示使用 ATELIER_REFERENCE_PAGE_SIZE */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceItemListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reference_item_api_reference_items__library___item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reference_image_api_reference_items__library___item_id__image_get: {
+        parameters: {
+            query?: {
+                /** @description thumb / image / depth */
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                library: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reference_libraries_api_reference_libraries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceLibraryListResponse"];
                 };
             };
         };

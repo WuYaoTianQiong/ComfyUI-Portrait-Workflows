@@ -1,0 +1,475 @@
+"""AI 参考图库 · 只读适配层。
+
+上游 `ai-pose-gallery-zh` 是素材与元数据层，atelier 只读不写：
+- 四份 JSON 中文键**逐库不同**（pose/costume/portrait/costume-anime），
+  这里为每库维护一张显式映射表，绝不做"统一字段"假设；
+- 图片路径只取 JSON 里的相对路径字段，**不拼扩展名**
+  （pose 是 `.jpg`/`.png`，其余是 `.webp`）；
+- 图片解析后必须落在 `reference_root` 之内，越界一律拒绝；
+- 上游 `检索` 字段已是预拼好的全字段检索串，直接子串匹配即可；
+- 敏感名单从配置读取，前后端都不硬编码。
+
+缓存按文件 mtime 失效：上游 `git pull` 或手工换图后不需要重启 atelier。
+"""
+from __future__ import annotations
+
+import json
+import mimetypes
+import os
+import threading
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+from app.config import settings
+from app.services.paths import IMAGE_EXTENSIONS, _relative_parts, _resolve_if_reparse
+
+LIBRARIES: tuple[str, ...] = ("pose", "costume", "portrait", "costume-anime")
+
+LIBRARY_FILES: dict[str, str] = {
+    "pose": "data/pose-zh.json",
+    "costume": "data/costume-zh.json",
+    "portrait": "data/portrait-zh.json",
+    "costume-anime": "data/costume-anime-zh.json",
+}
+
+LIBRARY_LABELS: dict[str, str] = {
+    "pose": "姿势库",
+    "costume": "服装库",
+    "portrait": "人像库",
+    "costume-anime": "外链服装",
+}
+
+#: 每库字段映射（中文键 → DTO 字段）。`None` 表示该库没有这个字段。
+#: `subtitle` / `nsfw` / `remote` / `depth` 有库专属逻辑，在 `_to_record` 里处理。
+FIELD_MAP: dict[str, dict[str, str | None]] = {
+    "pose": {
+        "name": "姿势名称",
+        "group": "体系",
+        "facet": "分类",
+        "angle": "角度",
+        "thumb": "缩略图",
+        "image": "原图",
+        "search": "检索",
+    },
+    "costume": {
+        "name": "服装名称",
+        "group": "分类",
+        "facet": None,
+        "angle": None,
+        "thumb": "缩略图",
+        "image": "原图",
+        "search": "检索",
+    },
+    "portrait": {
+        "name": "标题",
+        "group": "分区",
+        "facet": "发长",
+        "angle": None,
+        "thumb": "缩略图",
+        "image": "原图",
+        "search": "检索",
+    },
+    "costume-anime": {
+        "name": "服装名称",
+        "group": "一级分类",
+        "facet": "分类",
+        "angle": None,
+        "thumb": "缩略图",
+        "image": "原图",
+        "search": "检索",
+    },
+}
+
+IMAGE_KINDS: tuple[str, ...] = ("thumb", "image", "depth")
+
+
+class ReferenceImageError(Exception):
+    """图片解析失败：`status_code` 直接映射到 HTTP 状态码。"""
+
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class _CacheEntry:
+    mtime_ns: int
+    items: list[dict[str, Any]]
+
+
+_LOCK = threading.RLock()
+_CACHE: dict[tuple[str, str], _CacheEntry] = {}
+
+
+# ---------------------------------------------------------------------------
+# 路径与加载
+# ---------------------------------------------------------------------------
+
+
+def reference_root() -> Path:
+    """参考库真实根目录；junction 先解析，避免 Windows WinError 448。"""
+    return _strip_extended(_resolve_if_reparse(settings.reference_dir))
+
+
+def _strip_extended(path: Path) -> Path:
+    """去掉 `\\\\?\\` 扩展前缀：junction 解析结果可能带它，直接比较路径会错。"""
+    text = str(path)
+    if text.startswith("\\\\?\\"):
+        return Path(text[4:])
+    return path
+
+
+def _library_path(library: str) -> Path:
+    return reference_root() / LIBRARY_FILES[library]
+
+
+def _mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _text(obj: dict[str, Any], key: str | None, default: str = "") -> str:
+    if not key:
+        return default
+    value = obj.get(key, default)
+    if value is None:
+        return default
+    if isinstance(value, (list, tuple)):
+        return "、".join(str(v) for v in value if v)
+    return str(value).strip()
+
+
+def _tags(obj: dict[str, Any]) -> list[str]:
+    value = obj.get("标签")
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return []
+
+
+def _subtitle(library: str, obj: dict[str, Any]) -> str:
+    if library == "pose":
+        parts = [_text(obj, "姿势编号"), _text(obj, "角度")]
+        return " · ".join(p for p in parts if p)
+    if library == "portrait":
+        return _text(obj, "发型名称")
+    if library == "costume-anime":
+        return _text(obj, "日文名称")
+    return ""
+
+
+def _is_nsfw(library: str, obj: dict[str, Any], group: str) -> bool:
+    if library == "pose":
+        return group in settings.nsfw_pose_systems
+    if library == "costume":
+        return group in settings.nsfw_costume_categories
+    if library == "costume-anime":
+        return bool(obj.get("敏感"))
+    # portrait 上游不标敏感
+    return False
+
+
+def _search_text(library: str, obj: dict[str, Any], fields: dict[str, str]) -> str:
+    raw = _text(obj, FIELD_MAP[library]["search"])
+    if raw:
+        return raw
+    pieces = [
+        fields["id"],
+        fields["name"],
+        fields["subtitle"],
+        fields["group"],
+        fields["facet"],
+        fields["angle"],
+    ]
+    pieces.extend(_tags(obj))
+    pieces.append(_text(obj, "关键词"))
+    return " ".join(p for p in pieces if p)
+
+
+def _image_url(library: str, item_id: str, kind: str) -> str:
+    return (
+        f"/api/reference/items/{quote(library, safe='')}/"
+        f"{quote(item_id, safe='')}/image?kind={kind}"
+    )
+
+
+def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
+    item_id = _text(obj, "id")
+    if not item_id:
+        return None
+
+    mapping = FIELD_MAP[library]
+    group = _text(obj, mapping["group"])
+    facet = _text(obj, mapping["facet"])
+    angle = _text(obj, mapping["angle"])
+    name = _text(obj, mapping["name"])
+    subtitle = _subtitle(library, obj)
+    remote = library == "costume-anime"
+
+    fields = {
+        "id": item_id,
+        "library": library,
+        "name": name,
+        "subtitle": subtitle,
+        "group": group,
+        "facet": facet,
+        "angle": angle,
+        "tags": _tags(obj),
+        "keywords": _text(obj, "关键词"),
+    }
+    search_text = _search_text(library, obj, fields)
+
+    thumb_rel = "" if remote else _text(obj, mapping["thumb"])
+    image_rel = "" if remote else _text(obj, mapping["image"])
+    if remote:
+        thumb_url = _text(obj, mapping["thumb"])
+        image_url = _text(obj, mapping["image"]) or thumb_url
+        depth_url: str | None = None
+    else:
+        thumb_url = _image_url(library, item_id, "thumb")
+        image_url = _image_url(library, item_id, "image")
+        depth_url = _image_url(library, item_id, "depth") if library == "pose" else None
+
+    return {
+        **fields,
+        "thumb_url": thumb_url,
+        "image_url": image_url,
+        "depth_url": depth_url,
+        "hot": bool(obj.get("热门", False)),
+        "featured": bool(obj.get("精选", False)),
+        "nsfw": _is_nsfw(library, obj, group),
+        "remote": remote,
+        "_search": search_text.lower(),
+        "_thumb_rel": thumb_rel,
+        "_image_rel": image_rel,
+    }
+
+
+def _load(library: str) -> list[dict[str, Any]]:
+    """按 mtime 缓存加载单库；文件缺失或 JSON 损坏时降级为空列表。"""
+    if library not in LIBRARY_FILES:
+        return []
+    path = _library_path(library)
+    mtime = _mtime_ns(path)
+    key = (str(path), library)
+    if mtime is None:
+        return []
+    with _LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached.mtime_ns == mtime:
+            return cached.items
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(raw, list):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for obj in raw:
+        if not isinstance(obj, dict):
+            continue
+        record = _to_record(library, obj)
+        if record is not None:
+            items.append(record)
+
+    with _LOCK:
+        _CACHE[key] = _CacheEntry(mtime_ns=mtime, items=items)
+    return items
+
+
+def clear_cache() -> None:
+    """测试与热更新用：清空 mtime 缓存。"""
+    with _LOCK:
+        _CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# 可见性 / 过滤
+# ---------------------------------------------------------------------------
+
+
+def _visible(record: dict[str, Any]) -> bool:
+    return settings.reference_allow_nsfw or not record["nsfw"]
+
+
+def _visible_items(library: str) -> list[dict[str, Any]]:
+    return [r for r in _load(library) if _visible(r)]
+
+
+def _public(record: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in record.items() if not k.startswith("_")}
+
+
+def _match_nsfw(record: dict[str, Any], nsfw: bool | None) -> bool:
+    """allow_nsfw 开启后 `nsfw` 参数才生效；关闭时参数被忽略（不是 403）。"""
+    if not settings.reference_allow_nsfw or nsfw is None:
+        return True
+    return record["nsfw"] is nsfw
+
+
+def _facet_values(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    counter = Counter(r[key] for r in items if r.get(key))
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 对外查询
+# ---------------------------------------------------------------------------
+
+
+def library_stats() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for library in LIBRARIES:
+        all_items = _load(library)
+        visible = [r for r in all_items if _visible(r)]
+        path = _library_path(library)
+        try:
+            available = path.is_file()
+        except OSError:
+            available = False
+        out.append(
+            {
+                "library": library,
+                "label": LIBRARY_LABELS[library],
+                "total": len(all_items),
+                "local": sum(1 for r in all_items if not r["remote"]),
+                "remote": sum(1 for r in all_items if r["remote"]),
+                "visible": len(visible),
+                "available": available,
+                "groups": _facet_values(visible, "group"),
+                "facets": _facet_values(visible, "facet"),
+                "angles": _facet_values(visible, "angle"),
+            }
+        )
+    return out
+
+
+def query_items(
+    library: str,
+    search: str = "",
+    group: str = "",
+    facet: str = "",
+    angle: str = "",
+    nsfw: bool | None = None,
+    page: int = 1,
+    page_size: int | None = None,
+) -> dict[str, Any]:
+    """分页查询；响应结构与全站一致：`{items,total,page,page_size}`。"""
+    size = page_size or settings.reference_page_size
+    size = max(1, min(size, 200))
+    page = max(1, page)
+
+    items = _visible_items(library)
+    needle = (search or "").strip().lower()
+    if needle:
+        items = [r for r in items if needle in r["_search"]]
+    if group:
+        items = [r for r in items if r["group"] == group]
+    if facet:
+        items = [r for r in items if r["facet"] == facet]
+    if angle:
+        items = [r for r in items if r["angle"] == angle]
+    items = [r for r in items if _match_nsfw(r, nsfw)]
+
+    total = len(items)
+    start = (page - 1) * size
+    return {
+        "items": [_public(r) for r in items[start:start + size]],
+        "total": total,
+        "page": page,
+        "page_size": size,
+    }
+
+
+def get_item(library: str, item_id: str) -> dict[str, Any] | None:
+    record = _find_record(library, item_id)
+    if record is None or not _visible(record):
+        return None
+    return _public(record)
+
+
+def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
+    if library not in LIBRARY_FILES or not item_id:
+        return None
+    for record in _load(library):
+        if record["id"] == item_id:
+            return record
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 图片解析（root 包含校验）
+# ---------------------------------------------------------------------------
+
+
+def _is_inside_root(candidate: Path) -> bool:
+    """词法比较，不访问磁盘：junction 上 exists()/resolve() 会抛 WinError 448。"""
+    try:
+        root = os.path.abspath(os.path.normcase(str(reference_root())))
+        target = os.path.abspath(os.path.normcase(str(candidate)))
+        return os.path.commonpath([root, target]) == root
+    except (OSError, ValueError):
+        return False
+
+
+def _safe_image_path(rel: str) -> Path:
+    """把 JSON 里的相对路径解析成真实文件；越界 400、缺失 404。"""
+    parts = _relative_parts(rel)
+    if parts is None:
+        raise ReferenceImageError(400, "非法的图片路径")
+    if not parts:
+        raise ReferenceImageError(404, "图片不存在")
+
+    cur = reference_root()
+    for part in parts:
+        cur = _strip_extended(_resolve_if_reparse(cur / part))
+
+    if not _is_inside_root(cur):
+        raise ReferenceImageError(400, "图片路径越界")
+    if cur.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise ReferenceImageError(404, "图片不存在")
+    try:
+        if not cur.is_file():
+            raise ReferenceImageError(404, "图片不存在")
+    except OSError:
+        raise ReferenceImageError(404, "图片不存在") from None
+    return cur
+
+
+def resolve_image(library: str, item_id: str, kind: str) -> Path:
+    """按 kind 解析本地图片；`remote`/NSFW 不可见/不支持的类型分别返回 400/404。"""
+    if kind not in IMAGE_KINDS:
+        raise ReferenceImageError(404, "不支持的图片类型")
+    record = _find_record(library, item_id)
+    if record is None or not _visible(record):
+        raise ReferenceImageError(404, "参考条目不存在")
+    if record["remote"]:
+        raise ReferenceImageError(400, "外链条目不提供本地图片")
+
+    if kind == "depth":
+        if library != "pose":
+            raise ReferenceImageError(404, "该库没有深度图")
+        rel = f"img/depth/{item_id}.webp"
+    elif kind == "thumb":
+        rel = record["_thumb_rel"]
+    else:
+        rel = record["_image_rel"]
+
+    if not rel:
+        raise ReferenceImageError(404, "图片不存在")
+    return _safe_image_path(rel)
+
+
+def media_type_for(path: Path) -> str:
+    mt, _ = mimetypes.guess_type(str(path))
+    return mt or "image/webp"

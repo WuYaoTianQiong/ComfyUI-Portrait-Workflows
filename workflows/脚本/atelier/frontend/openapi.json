@@ -2548,6 +2548,225 @@
         "title": "PromptUpdate",
         "type": "object"
       },
+      "ReferenceFacetValue": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "ReferenceFacetValue",
+        "type": "object"
+      },
+      "ReferenceItem": {
+        "properties": {
+          "angle": {
+            "default": "",
+            "title": "Angle",
+            "type": "string"
+          },
+          "depth_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth Url"
+          },
+          "facet": {
+            "default": "",
+            "title": "Facet",
+            "type": "string"
+          },
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
+          "group": {
+            "default": "",
+            "title": "Group",
+            "type": "string"
+          },
+          "hot": {
+            "default": false,
+            "title": "Hot",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "title": "Image Url",
+            "type": "string"
+          },
+          "keywords": {
+            "default": "",
+            "title": "Keywords",
+            "type": "string"
+          },
+          "library": {
+            "title": "Library",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nsfw": {
+            "default": false,
+            "title": "Nsfw",
+            "type": "boolean"
+          },
+          "remote": {
+            "default": false,
+            "title": "Remote",
+            "type": "boolean"
+          },
+          "subtitle": {
+            "default": "",
+            "title": "Subtitle",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "thumb_url": {
+            "title": "Thumb Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "library",
+          "name",
+          "thumb_url",
+          "image_url"
+        ],
+        "title": "ReferenceItem",
+        "type": "object"
+      },
+      "ReferenceItemListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 60,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "ReferenceItemListResponse",
+        "type": "object"
+      },
+      "ReferenceLibraryListResponse": {
+        "properties": {
+          "libraries": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceLibraryStats"
+            },
+            "title": "Libraries",
+            "type": "array"
+          }
+        },
+        "title": "ReferenceLibraryListResponse",
+        "type": "object"
+      },
+      "ReferenceLibraryStats": {
+        "properties": {
+          "angles": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFacetValue"
+            },
+            "title": "Angles",
+            "type": "array"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "facets": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFacetValue"
+            },
+            "title": "Facets",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFacetValue"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "library": {
+            "title": "Library",
+            "type": "string"
+          },
+          "local": {
+            "title": "Local",
+            "type": "integer"
+          },
+          "remote": {
+            "title": "Remote",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "visible": {
+            "title": "Visible",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "library",
+          "label",
+          "total",
+          "local",
+          "remote",
+          "visible",
+          "available"
+        ],
+        "title": "ReferenceLibraryStats",
+        "type": "object"
+      },
       "RenderRequest": {
         "properties": {
           "items": {
@@ -7444,6 +7663,266 @@
         "summary": "Mark Prompt Used",
         "tags": [
           "提示词"
+        ]
+      }
+    },
+    "/api/reference/items": {
+      "get": {
+        "operationId": "list_reference_items_api_reference_items_get",
+        "parameters": [
+          {
+            "description": "pose / costume / portrait / costume-anime",
+            "in": "query",
+            "name": "library",
+            "required": false,
+            "schema": {
+              "default": "pose",
+              "description": "pose / costume / portrait / costume-anime",
+              "title": "Library",
+              "type": "string"
+            }
+          },
+          {
+            "description": "直接匹配上游预拼好的「检索」串",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "直接匹配上游预拼好的「检索」串",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Group",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Facet",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "angle",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Angle",
+              "type": "string"
+            }
+          },
+          {
+            "description": "仅在 ATELIER_REFERENCE_ALLOW_NSFW=1 时生效",
+            "in": "query",
+            "name": "nsfw",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "仅在 ATELIER_REFERENCE_ALLOW_NSFW=1 时生效",
+              "title": "Nsfw"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "0 表示使用 ATELIER_REFERENCE_PAGE_SIZE",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "0 表示使用 ATELIER_REFERENCE_PAGE_SIZE",
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceItemListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Reference Items",
+        "tags": [
+          "参考图库"
+        ]
+      }
+    },
+    "/api/reference/items/{library}/{item_id}": {
+      "get": {
+        "operationId": "get_reference_item_api_reference_items__library___item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library",
+            "required": true,
+            "schema": {
+              "title": "Library",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reference Item",
+        "tags": [
+          "参考图库"
+        ]
+      }
+    },
+    "/api/reference/items/{library}/{item_id}/image": {
+      "get": {
+        "operationId": "get_reference_image_api_reference_items__library___item_id__image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library",
+            "required": true,
+            "schema": {
+              "title": "Library",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "thumb / image / depth",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "thumb",
+              "description": "thumb / image / depth",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reference Image",
+        "tags": [
+          "参考图库"
+        ]
+      }
+    },
+    "/api/reference/libraries": {
+      "get": {
+        "operationId": "list_reference_libraries_api_reference_libraries_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceLibraryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Reference Libraries",
+        "tags": [
+          "参考图库"
         ]
       }
     },
