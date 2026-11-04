@@ -619,6 +619,18 @@ B 与 C 文件不重叠，可同时开；A 必须先完成（前端要等新字�
 | `frontend/src/views/ReferenceView.vue`、`views/EditorView.vue`、`App.vue`、`api/reference.ts`、`api/sheet.ts` | B |
 | `tests/test_reference_sheet.py`、`tests/test_reference_recipes.py`、`frontend/src/components/RefLightbox.spec.ts`、`frontend/src/views/ReferenceView.spec.ts`、`tools/smoke.py` | C |
 
+### 13.5 完成情况（2026-11-04 核验）
+
+| 阶段 | 状态 | 提交 |
+|---|---|---|
+| A 后端补齐 | 完成 | `94b1066` |
+| B 前端接新契约 | 完成 | `fdf6e78` |
+| C 测试与门禁 | 完成 | `5f8901d`、`f590e9d` |
+
+核验结论（详见[验收记录](./AI参考图库_验收记录_20261104.md) §6）：门禁全绿（pytest 388 / vitest 34 spec / build / smoke 24 / e2e 24），新增能力逐条实测通过。
+
+**遗留**：① 混源真出图未留痕（ComfyUI 离线，待补一次）；② `recipes.references` 只带 id，路径在 `plan[].metas`，口径待统一；③ 参考库页无 E2E 覆盖。
+
 ### 13.4 验收（二期）
 
 - [ ] 三个核心槽 + 第 4 槽都能"库条目 / 上传图"二选一，混源出图成功一次（如：上传自己的人像 + 图库服装 + 图库姿势）
