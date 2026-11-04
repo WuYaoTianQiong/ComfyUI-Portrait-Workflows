@@ -1,4 +1,5 @@
 """FastAPI 应用入口"""
+import asyncio
 import logging
 import mimetypes
 import threading
@@ -8,7 +9,8 @@ import webbrowser
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request
+import websockets
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -319,6 +321,58 @@ async def _comfy_proxy(path: str, request: Request):
     _skip = {"content-length", "content-encoding", "transfer-encoding", "connection"}
     resp_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _skip}
     return StreamingResponse(_stream(), status_code=upstream.status_code, headers=resp_headers)
+
+
+@app.websocket("/comfy/ws")
+async def _comfy_ws_proxy(ws: WebSocket):
+    """同源反代 ComfyUI 的 /ws：合成台的实时进度、预览、队列状态都走这条。
+
+    上游前端把 `/comfy` 当 ComfyUI 地址时会去连 `ws://<host>/comfy/ws?clientId=...`，
+    只代理 HTTP 时这里返回 403（浏览器 9 条 console 报错），进度只能靠轮询兜底。
+    """
+    query = f"?{ws.url.query}" if ws.url.query else ""
+    upstream_url = (
+        settings.comfyui_api.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
+        + "/ws"
+        + query
+    )
+    await ws.accept()
+    try:
+        async with websockets.connect(upstream_url, max_size=None) as upstream:
+
+            async def client_to_upstream():
+                while True:
+                    message = await ws.receive()
+                    if message["type"] == "websocket.disconnect":
+                        break
+                    if message.get("text") is not None:
+                        await upstream.send(message["text"])
+                    elif message.get("bytes") is not None:
+                        await upstream.send(message["bytes"])
+
+            async def upstream_to_client():
+                async for payload in upstream:
+                    if isinstance(payload, bytes):
+                        await ws.send_bytes(payload)
+                    else:
+                        await ws.send_text(payload)
+
+            tasks = {
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client()),
+            }
+            _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ComfyUI WebSocket 反代失败 %s: %s", upstream_url, exc)
+    finally:
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
