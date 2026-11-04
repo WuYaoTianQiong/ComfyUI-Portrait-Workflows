@@ -171,3 +171,7 @@ workflows/_cleanup/
 
 
 workflows/node_modules/
+
+# 参考图库上游（junction -> F:\ComfyUI_Migration\custom_nodes\ai-pose-gallery-zh）
+# 1.1GB 素材只读引用，不入库；需要时用 mklink /J 重建入口
+workflows/ai-pose-gallery-zh/
