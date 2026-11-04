@@ -45,10 +45,10 @@ const creating = ref(false)
 
 const themeOverrides = {
   common: {
-    primaryColor: '#6366f1',
-    primaryColorHover: '#7c7ff5',
-    primaryColorPressed: '#5558e6',
-    borderRadius: '6px',
+    primaryColor: 'rgb(99 102 241)',
+    primaryColorHover: 'rgb(124 127 245)',
+    primaryColorPressed: 'rgb(85 88 230)',
+    borderRadius: 'var(--radius-sm)',
   },
 }
 
@@ -98,7 +98,8 @@ async function createFolder() {
     await queryClient.invalidateQueries({ queryKey: ['output-folders'] })
     toast.success(`已创建：${result.path}`)
   } catch (e) {
-    toast.error(`创建失败：${e instanceof Error ? e.message : String(e)}`)
+    const reason = e instanceof Error ? e.message : String(e)
+    toast.error(`现象：新建出图子目录失败。原因：${reason}。下一步：换一个名称或确认目录权限后重试。`)
   } finally {
     creating.value = false
   }
@@ -174,15 +175,23 @@ async function createFolder() {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--gap);
 }
 
 .root {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-sm);
   align-items: center;
   font-size: var(--fs-sm);
   min-width: 0;
@@ -201,14 +210,14 @@ async function createFolder() {
   white-space: nowrap;
   color: var(--text);
   background: var(--panel-2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-sm);
   min-width: 0;
 }
 
@@ -231,15 +240,18 @@ async function createFolder() {
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-sm);
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--gap-sm) var(--gap);
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .row:hover {
@@ -252,19 +264,19 @@ async function createFolder() {
 
 .new-row {
   display: flex;
-  gap: 6px;
+  gap: var(--gap-sm);
 }
 
 .hint {
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-xs);
-  line-height: 1.6;
+  line-height: var(--lh-md);
 }
 
 .foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--gap-sm);
 }
 </style>

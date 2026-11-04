@@ -108,7 +108,7 @@ async function apply() {
     const bw = box.x2 - box.x1
     const bh = box.y2 - box.y1
     if (bw < 8 || bh < 8) {
-      error.value = '选区太小，请框住完整印章或文字'
+      error.value = '现象：框选区域太小。原因：印章或文字没有被完整框住。下一步：重新拖拽一个更大的选区。'
       return
     }
     const ratio = (bw * bh) / (img.naturalWidth * img.naturalHeight)
@@ -151,7 +151,8 @@ async function apply() {
     clearSelection()
     emit('close')
   } catch (e) {
-    error.value = `清理失败：${e instanceof Error ? e.message : String(e)}`
+    const reason = e instanceof Error ? e.message : String(e)
+    error.value = `现象：手动清理未能完成。原因：${reason}。下一步：确认后端服务在线后重新框选并重试。`
   } finally {
     busy.value = false
   }
@@ -206,6 +207,14 @@ watch(
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .manual-cleanup {
   height: 100%;
   box-sizing: border-box;

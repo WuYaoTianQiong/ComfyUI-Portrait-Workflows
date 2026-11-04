@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
+import EmptyState from './EmptyState.vue'
 import type { WorkflowRow } from '../composables/useWorkflows'
 
 /**
@@ -113,7 +114,14 @@ onBeforeUnmount(() => {
         >
           {{ displayName(wf.name) }}
         </button>
-        <span v-if="!filtered.length" class="wf-empty">没有匹配的工作流</span>
+        <EmptyState
+          v-if="!filtered.length"
+          compact
+          text="没有匹配的工作流"
+          hint="换个关键词，或到「分类与标签 → 工作流」上传 JSON。"
+          action-text="清空搜索"
+          @action="query = ''"
+        />
       </div>
       <div class="wf-hint">
         其他目录的工作流请到「分类与标签 → 工作流」上传自定义 JSON
@@ -123,6 +131,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .wf-picker {
   position: relative;
   /* 这一行里只有工作流名可以省略，所以压缩优先发生在它身上，下拉保持内容宽度 */
@@ -134,7 +150,7 @@ onBeforeUnmount(() => {
 .wf-trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-sm);
   width: 100%;
   padding: 5px 8px;
   text-align: left;
@@ -142,6 +158,11 @@ onBeforeUnmount(() => {
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .wf-trigger:hover,
@@ -191,7 +212,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--gap-xs);
   padding: 0 6px 6px;
 }
 
@@ -204,9 +225,12 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-sm);
   font-size: var(--fs-sm);
-  line-height: 1.4;
+  line-height: var(--lh-lg);
   white-space: normal;
   word-break: break-all;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .wf-option:hover {
@@ -219,7 +243,7 @@ onBeforeUnmount(() => {
 }
 
 .wf-empty {
-  padding: 16px;
+  padding: var(--gap-md);
   text-align: center;
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -230,6 +254,6 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--fs-xs);
-  line-height: 1.4;
+  line-height: var(--lh-lg);
 }
 </style>

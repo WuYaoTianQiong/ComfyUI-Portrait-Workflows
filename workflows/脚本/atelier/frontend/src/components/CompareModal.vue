@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { viewUrl } from '../api/client'
+import EmptyState from './EmptyState.vue'
 import type { HistoryItem } from '../api/types'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useImageLocation } from '../composables/useImageLocation'
@@ -210,12 +211,27 @@ onBeforeUnmount(() => {
         </figcaption>
       </figure>
 
-      <p v-if="items.length < 2" class="empty">至少选择 2 张图片才能对比</p>
+      <EmptyState
+        v-if="items.length < 2"
+        class="empty"
+        text="至少选择 2 张图片才能对比"
+        hint="回到画廊按住 Ctrl 多选 2–4 张，再点「对比」。"
+        action-text="关闭"
+        @action="emit('close')"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .compare {
   position: fixed;
   inset: 0;
@@ -255,6 +271,10 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   padding: 3px 9px;
   font-size: var(--fs-sm);
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .tool:hover {
@@ -340,8 +360,8 @@ onBeforeUnmount(() => {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 10px;
+  gap: var(--gap-sm);
+  font-size: var(--fs-xs);
   color: var(--muted);
   padding: 3px 6px;
   overflow: hidden;
@@ -360,11 +380,14 @@ onBeforeUnmount(() => {
   flex: none;
   padding: 0 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .cell figcaption .locate:hover {
@@ -374,9 +397,6 @@ onBeforeUnmount(() => {
 
 .empty {
   grid-column: 1 / -1;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  font-size: var(--fs-sm);
+  place-self: center;
 }
 </style>

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
+import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
 import DiskPathList from './DiskPathList.vue'
@@ -59,7 +60,7 @@ async function openCurrentDir() {
   }
 }
 
-const { data, isFetching } = useQuery<FsListing>({
+const { data, isFetching, refetch } = useQuery<FsListing>({
   queryKey: computed(() => ['fs-list', dir.value]),
   queryFn: () => apiGet('/api/browser/list', { path: dir.value }),
   enabled: computed(() => props.open),
@@ -263,7 +264,14 @@ function rememberRatio(img: FsEntry, event: Event) {
           >
             📁 {{ d.name }}
           </button>
-          <div v-if="!(data?.dirs ?? []).length" class="muted small">没有子目录</div>
+          <EmptyState
+            v-if="!(data?.dirs ?? []).length"
+            compact
+            text="没有子目录"
+            hint="返回上级，或用「快速跳转」切换盘符。"
+            action-text="上级"
+            @action="goUp"
+          />
         </div>
 
         <div class="grid">
@@ -295,9 +303,14 @@ function rememberRatio(img: FsEntry, event: Event) {
               </button>
             </template>
           </JustifiedGrid>
-          <div v-if="!filteredImages.length && !isFetching" class="muted small">
-            {{ currentImages.length ? '没有匹配的图片' : '这个目录里没有图片' }}
-          </div>
+          <EmptyState
+            v-if="!filteredImages.length && !isFetching"
+            compact
+            :text="currentImages.length ? '没有匹配的图片' : '这个目录里没有图片'"
+            hint="换个文件名关键词、清空格式筛选，或进入别的目录。"
+            action-text="刷新"
+            @action="refetch()"
+          />
         </div>
       </div>
 
@@ -321,9 +334,13 @@ function rememberRatio(img: FsEntry, event: Event) {
 </template>
 
 <style scoped>
-
-
-
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
 
 .count {
   font-size: var(--fs-xs);
@@ -421,7 +438,7 @@ function rememberRatio(img: FsEntry, event: Event) {
   padding: var(--gap-sm);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--gap-xs);
 }
 
 .dir {
@@ -434,6 +451,7 @@ function rememberRatio(img: FsEntry, event: Event) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .dir:hover {
@@ -454,6 +472,10 @@ function rememberRatio(img: FsEntry, event: Event) {
   border: none;
   background: transparent;
   text-align: left;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .thumb {
@@ -463,6 +485,7 @@ function rememberRatio(img: FsEntry, event: Event) {
   border-radius: var(--radius-sm);
   background: var(--panel-3);
   box-shadow: 0 0 0 1px var(--border);
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 
 .thumb img {
@@ -482,7 +505,7 @@ function rememberRatio(img: FsEntry, event: Event) {
 
 .cell .name {
   display: block;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   padding: 2px 2px 0;
   color: var(--muted);
   overflow: hidden;

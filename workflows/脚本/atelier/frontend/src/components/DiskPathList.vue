@@ -48,6 +48,14 @@ function remove(index: number) {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .path-list {
   flex: 1 1 auto;
   min-width: 0;
@@ -62,7 +70,7 @@ function remove(index: number) {
 .path-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   max-width: 100%;
   min-width: 0;
   padding: 2px 6px;
@@ -89,6 +97,7 @@ function remove(index: number) {
   font-size: var(--fs-sm);
   line-height: 1;
   cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .remove:hover {
@@ -126,7 +135,7 @@ function remove(index: number) {
   width: 100%;
   padding: 2px 2px 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .thumbs .remove {
@@ -138,7 +147,7 @@ function remove(index: number) {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgb(22 27 34 / 82%);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   color: var(--text);
   opacity: 0.9;
 }

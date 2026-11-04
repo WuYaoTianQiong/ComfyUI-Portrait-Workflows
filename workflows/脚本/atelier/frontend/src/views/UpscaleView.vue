@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 import ImagePicker from '../components/ImagePicker.vue'
 import DiskPathList from '../components/DiskPathList.vue'
 import FilePicker from '../components/FilePicker.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { apiPost } from '../api/client'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
@@ -68,13 +69,18 @@ const { data: nodeInfo, error: nodeError, isFetching: probing } = useQuery<NodeI
 const loadCount = computed(() => nodeInfo.value?.loadimages.length ?? 0)
 
 const nodeMessage = computed(() => {
-  if (!workflowPath.value) return '先选择一个超分工作流'
-  if (probing.value) return '探测工作流中…'
-  if (nodeError.value) return nodeError.value.message
+  if (!workflowPath.value) return '现象：还没有选择超分工作流。下一步：在右侧选择一份超分工作流。'
+  if (probing.value) return '正在探测工作流节点…'
+  if (nodeError.value) {
+    const reason = nodeError.value.message
+    return `现象：无法读取工作流节点映射。原因：${reason}。下一步：确认工作流文件存在后重新选择。`
+  }
   if (!nodeInfo.value) return ''
-  if (loadCount.value === 0) return '该工作流没有 LoadImage，不能投喂图片'
+  if (loadCount.value === 0) {
+    return '现象：该工作流没有 LoadImage 节点。原因：超分需要把图片投喂给 LoadImage。下一步：换一份带 LoadImage 的超分工作流。'
+  }
   if (loadCount.value > 1) {
-    return `该工作流有 ${loadCount.value} 个 LoadImage，批量超分只支持 1 个`
+    return `现象：该工作流有 ${loadCount.value} 个 LoadImage，批量超分只支持 1 个。原因：超分是单图进 / 单图出。下一步：换一份单 LoadImage 工作流，或改用图像编辑页。`
   }
   return ''
 })
@@ -176,7 +182,14 @@ async function submit() {
 
       <div class="section disk-section">
         <span class="label">磁盘图（{{ paths.length }}）</span>
-        <div v-if="!paths.length" class="hint">点上方「📁 磁盘」从任意文件夹多选</div>
+        <EmptyState
+          v-if="!paths.length"
+          compact
+          text="还没有选择磁盘图"
+          hint="超分候选可来自画廊多选，也可直接从任意文件夹导入。"
+          action-text="从磁盘选图"
+          @action="pickerOpen = true"
+        />
         <div v-else class="disk-list">
           <DiskPathList v-model="paths" />
         </div>
@@ -215,6 +228,14 @@ async function submit() {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .upscale {
   display: flex;
   height: 100%;

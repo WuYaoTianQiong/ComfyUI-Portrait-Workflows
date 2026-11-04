@@ -159,12 +159,31 @@ const {
   data: nodeInfo,
   error: nodeError,
   isFetching: probing,
+  refetch: refetchNodes,
 } = useQuery<NodeInfo>({
   queryKey: computed(() => ['fs-nodes', workflowPath.value]),
   queryFn: () => apiPost<NodeInfo>('/api/editor/faceswap/nodes', { workflow_path: workflowPath.value }),
   enabled: computed(() => !!workflowPath.value),
   retry: false,
 })
+
+/** 错误提示统一成「现象 + 原因 + 下一步」，不把裸状态码直接甩给用户。 */
+function describeError(symptom: string, error: unknown, next: string): string {
+  const reason = error instanceof Error ? error.message : String(error || '未知错误')
+  return `现象：${symptom}。原因：${reason}。下一步：${next}`
+}
+
+const nodeErrorText = computed(() =>
+  nodeError.value
+    ? describeError('无法读取工作流节点映射', nodeError.value, '确认工作流 JSON 存在后重试，或换一个工作流')
+    : '',
+)
+
+const generateErrorText = computed(() =>
+  generateError.value
+    ? describeError('出图请求未能完成', generateError.value, '检查后端与 ComfyUI 是否在线，然后重试')
+    : '',
+)
 
 /** 目标图的文件名/缩略图：遮罩按图配，行里得让用户认得出是哪张。 */
 const { data: targetBriefs } = useQuery<HistoryPage>({
@@ -513,7 +532,10 @@ async function submit() {
       <div class="section nodes">
         <span class="label">节点映射</span>
         <template v-if="probing">探测中…</template>
-        <div v-else-if="nodeError" class="err-text">{{ nodeError.message }}</div>
+        <div v-else-if="nodeError" class="err-block">
+          <span class="err-text">{{ nodeErrorText }}</span>
+          <button class="btn btn-sm" @click="refetchNodes()">重试</button>
+        </div>
         <template v-else-if="nodeInfo">
           <div v-if="nodeReady" class="node-row">
             <template v-for="(item, i) in nodeInfo.inputs" :key="item.role">
@@ -542,7 +564,10 @@ async function submit() {
           先选择支持遮罩的单图 / 双图工作流，选好目标图后这里会出现「涂抹」按钮
         </div>
         <div v-else-if="probing" class="hint">探测工作流中…</div>
-        <div v-else-if="nodeError" class="err-text">{{ nodeError.message }}</div>
+        <div v-else-if="nodeError" class="err-block">
+          <span class="err-text">{{ nodeErrorText }}</span>
+          <button class="btn btn-sm" @click="refetchNodes()">重试</button>
+        </div>
         <div v-else-if="nodeInfo && !nodeInfo.mask" class="hint">
           该工作流没有遮罩链路（参考类工作流不支持遮罩）
         </div>
@@ -674,7 +699,7 @@ async function submit() {
       </div>
 
       <div class="actions">
-        <span v-if="generateError" class="err-text">{{ generateError }}</span>
+        <span v-if="generateError" class="err-text">{{ generateErrorText }}</span>
         <span v-else-if="activeJob" class="job-state" :class="activeJob.status">
           {{ statusLabel(activeJob.status) }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
         </span>
@@ -715,6 +740,14 @@ async function submit() {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .faceswap {
   display: flex;
   height: 100%;
@@ -836,7 +869,7 @@ async function submit() {
 .mask-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   max-height: 190px;
   overflow-y: auto;
 }
@@ -844,7 +877,7 @@ async function submit() {
 .mask-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
 }
 
@@ -907,14 +940,25 @@ async function submit() {
 }
 
 .hint {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
-  line-height: 1.5;
+  line-height: var(--lh-xs);
 }
 
 .err-text {
   font-size: var(--fs-xs);
   color: var(--danger);
+}
+
+.err-block {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.err-block .err-text {
+  flex: 1 1 100%;
 }
 
 .seed-input {
@@ -936,7 +980,7 @@ textarea {
 .summary {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--gap-xs);
   font-size: var(--fs-sm);
   color: var(--muted);
   border-top: 1px solid var(--border);
@@ -979,7 +1023,11 @@ textarea {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: white;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .btn.primary:disabled {

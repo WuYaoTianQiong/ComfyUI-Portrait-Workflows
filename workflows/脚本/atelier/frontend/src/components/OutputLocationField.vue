@@ -55,7 +55,8 @@ async function openOutputDir() {
     if (result.success) toast.success(`已打开：${result.path}`)
     else toast.info(result.message || '无法打开出图目录')
   } catch (e) {
-    toast.error(`打开失败：${e instanceof Error ? e.message : String(e)}`)
+    const reason = e instanceof Error ? e.message : String(e)
+    toast.error(`现象：无法打开出图目录。原因：${reason}。下一步：确认 ComfyUI output 目录存在后重试。`)
   } finally {
     opening.value = false
   }
@@ -124,6 +125,14 @@ async function openOutputDir() {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .output-location {
   position: relative;
   display: inline-flex;
@@ -150,28 +159,28 @@ async function openOutputDir() {
 
 .popover {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + var(--gap-sm));
   right: 0;
   z-index: 1200;
   width: min(360px, 86vw);
-  padding: var(--gap-md, 12px);
+  padding: var(--gap);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
-  background: var(--panel, #1e1e28);
-  box-shadow: var(--shadow-lg, 0 12px 32px rgb(0 0 0 / 35%));
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-3);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--gap-sm);
 }
 
 .root-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--gap-sm);
+  font-size: var(--fs-sm);
   min-width: 0;
 }
 
@@ -186,21 +195,21 @@ async function openOutputDir() {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  background: var(--panel-2, #262632);
-  border-radius: 4px;
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
 }
 
 .root-hint {
-  margin: 6px 0 0;
+  margin: var(--gap-sm) 0 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .input-row {
   display: flex;
-  gap: 6px;
+  gap: var(--gap-sm);
   min-width: 0;
 }
 
@@ -211,35 +220,35 @@ async function openOutputDir() {
 
 .field span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .field input {
   font: inherit;
   color: var(--text);
-  background: var(--panel-2, #262632);
+  background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
 }
 
 .presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
 }
 
 .hint {
-  margin: 8px 0;
+  margin: var(--gap-sm) 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--gap-sm);
 }
 </style>

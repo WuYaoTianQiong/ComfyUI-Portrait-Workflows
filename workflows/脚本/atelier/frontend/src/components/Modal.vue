@@ -118,11 +118,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
-  background: rgba(0, 0, 0, 0.55);
+  background: rgb(0 0 0 / .55);
   display: grid;
   place-items: center;
 }
@@ -139,7 +147,7 @@ onBeforeUnmount(() => {
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-3);
   overflow: hidden;
 }
 

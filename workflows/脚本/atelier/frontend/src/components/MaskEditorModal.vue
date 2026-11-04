@@ -109,7 +109,7 @@ function draw() {
 
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.fillStyle = '#141414'
+  ctx.fillStyle = 'rgb(20 20 20)'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.save()
   ctx.translate(view.x, view.y)
@@ -167,7 +167,7 @@ function paintDot(dot: { x: number; y: number }) {
   const m = mask.value
   const ctx = ctxOf(m)
   if (!m || !ctx) return
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = 'white'
   ctx.globalCompositeOperation = tool.value === 'eraser' ? 'destination-out' : 'source-over'
   ctx.beginPath()
   ctx.arc(dot.x, dot.y, brushSize.value / 2, 0, Math.PI * 2)
@@ -184,7 +184,7 @@ function paintSegment(
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.lineWidth = brushSize.value
-  ctx.strokeStyle = '#ffffff'
+  ctx.strokeStyle = 'white'
   ctx.globalCompositeOperation = tool.value === 'eraser' ? 'destination-out' : 'source-over'
   ctx.beginPath()
   ctx.moveTo(from.x, from.y)
@@ -465,7 +465,7 @@ async function setup() {
 
   const img = await loadImage(props.imageUrl)
   if (!img) {
-    errorText.value = '目标图加载失败，无法涂抹'
+    errorText.value = '现象：目标图加载失败，无法涂抹。原因：图片地址无效或文件已被移动。下一步：关闭后重新从画廊或磁盘选一张图。'
     loading.value = false
     return
   }
@@ -507,7 +507,7 @@ function save() {
   const ctx = ctxOf(out)
   if (!ctx) return
   // 遮罩文件按「白=重绘、黑=保留」，不带 alpha，后端按亮度识别
-  ctx.fillStyle = '#000000'
+  ctx.fillStyle = 'black'
   ctx.fillRect(0, 0, out.width, out.height)
   ctx.drawImage(m, 0, 0)
   const data = ctx.getImageData(0, 0, out.width, out.height).data
@@ -655,6 +655,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .mask-editor {
   display: flex;
   flex-direction: column;
@@ -678,13 +686,13 @@ onBeforeUnmount(() => {
 
 .seg-wand {
   display: flex;
-  gap: 2px;
+  gap: var(--gap-xs);
 }
 
 .size {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   color: var(--muted);
 }
@@ -713,7 +721,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #0f0f0f;
+  background: var(--bg);
 }
 
 .paint-canvas {
@@ -744,7 +752,11 @@ onBeforeUnmount(() => {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: white;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .btn.primary:disabled {

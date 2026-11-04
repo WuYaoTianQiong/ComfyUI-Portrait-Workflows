@@ -30,7 +30,7 @@ const { revealImage } = useImageLocation()
 const toast = useToast()
 const validating = ref(false)
 
-const { data, isFetching } = useQuery<HistoryPage>({
+const { data, isFetching, refetch } = useQuery<HistoryPage>({
   queryKey: computed(() => ['picker', search.value.trim()]),
   queryFn: () =>
     apiGet<HistoryPage>('/api/images', {
@@ -146,12 +146,26 @@ async function pruneMissing() {
           </div>
         </template>
       </JustifiedGrid>
-      <EmptyState v-if="!items.length && !isFetching" text="没有可选图片" />
+      <EmptyState
+        v-if="!items.length && !isFetching"
+        text="没有可选图片"
+        hint="画廊里还没有可用图片，或当前搜索没有结果。"
+        action-text="刷新"
+        @action="refetch()"
+      />
     </div>
   </section>
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .picker {
   display: flex;
   flex-direction: column;
@@ -198,7 +212,10 @@ async function pruneMissing() {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: 0.12s;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .locate {
@@ -207,13 +224,16 @@ async function pruneMissing() {
   bottom: 2px;
   padding: 0 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: rgb(22 27 34 / 82%);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   color: var(--text);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
   opacity: 0;
-  transition: 0.12s;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .cell:hover .locate,
@@ -229,6 +249,7 @@ async function pruneMissing() {
   border-radius: var(--radius-sm);
   background: var(--panel-3);
   box-shadow: 0 0 0 1px var(--border);
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 
 .thumb img {
@@ -250,7 +271,7 @@ async function pruneMissing() {
 .name {
   display: block;
   padding: 2px 2px 0;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -267,8 +288,8 @@ async function pruneMissing() {
   place-items: center;
   border-radius: 50%;
   background: var(--primary);
-  color: #fff;
-  font-size: 10px;
+  color: white;
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 

@@ -387,6 +387,18 @@ const compileBusy = ref(false)
 const compileError = ref('')
 const compileResult = ref<CompilePreview | null>(null)
 
+/** 错误提示统一成「现象 + 原因 + 下一步」。 */
+function describeError(symptom: string, error: unknown, next: string): string {
+  const reason = error instanceof Error ? error.message : String(error || '未知错误')
+  return `现象：${symptom}。原因：${reason}。下一步：${next}`
+}
+
+const generateErrorText = computed(() =>
+  generateError.value
+    ? describeError('出图请求未能完成', generateError.value, '检查后端与 ComfyUI 是否在线，然后重试')
+    : '',
+)
+
 async function openCompilePreview() {
   if (!composedPrompt.value) {
     toast.error('画布是空的')
@@ -408,7 +420,7 @@ async function openCompilePreview() {
       workflow_content: customWorkflowContent(workflowPath.value),
     })
   } catch (e) {
-    compileError.value = `编译失败：${e instanceof Error ? e.message : String(e)}`
+    compileError.value = describeError('提示词编译失败', e, '确认提示词与工作流可用后重新编译')
   } finally {
     compileBusy.value = false
   }
@@ -1051,7 +1063,7 @@ function toggleTag(id: number) {
       >
         {{ generating ? '提交中…' : '🚀 试跑' }}
       </button>
-      <span v-if="generateError" class="gen-error">{{ generateError }}</span>
+      <span v-if="generateError" class="gen-error">{{ generateErrorText }}</span>
       <button
         v-if="activeCount"
         class="job-state queue"
@@ -1227,6 +1239,7 @@ function toggleTag(id: number) {
             v-if="!(grouped[type] ?? []).length && !canvas[type]"
             compact
             text="暂无碎片"
+            hint="到提示词库为这一栏添加碎片，或点下方「自定义」。"
           />
 
           <button class="card add" @click="openCustom(type)">✎ 自定义…</button>
@@ -1273,7 +1286,14 @@ function toggleTag(id: number) {
             <button class="btn btn-sm" @click="applyTemplateById(tpl.id)">套用</button>
             <button class="btn btn-sm danger" @click="deleteTemplateById(tpl.id)">删</button>
           </div>
-          <EmptyState v-if="!filteredTemplates.length" compact text="没有匹配的模板" />
+          <EmptyState
+            v-if="!filteredTemplates.length"
+            compact
+            text="没有匹配的模板"
+            hint="换个关键词，或先存一份当前组合为模板。"
+            action-text="清空搜索"
+            @action="templateSearch = ''"
+          />
         </div>
       </div>
       <template #footer>
@@ -1341,6 +1361,14 @@ function toggleTag(id: number) {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .composer {
   display: flex;
   flex-direction: column;
@@ -1399,7 +1427,7 @@ function toggleTag(id: number) {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -1416,6 +1444,11 @@ function toggleTag(id: number) {
   border: none;
   background: transparent;
   color: var(--muted);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.drawer-head .close:hover {
+  color: var(--text);
 }
 
 /* 负面提示词弹窗：整块可用区域都给文本框，不再挤在 320px 的小抽屉里 */
@@ -1439,12 +1472,12 @@ function toggleTag(id: number) {
 }
 
 .cap-badge {
-  margin-left: 4px;
-  padding: 0 4px;
+  margin-left: var(--gap-xs);
+  padding: 0 var(--gap-xs);
   border: 1px solid currentColor;
-  border-radius: 3px;
-  font-size: 10px;
-  line-height: 16px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
   color: var(--warn);
 }
 
@@ -1531,8 +1564,8 @@ function toggleTag(id: number) {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 5px;
-  padding: 6px;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm);
   overflow-x: auto;
 }
 
@@ -1552,12 +1585,13 @@ function toggleTag(id: number) {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
   cursor: pointer;
   user-select: none;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 /* 整行表头都能切锁定，不必去点小图标 */
@@ -1578,7 +1612,7 @@ function toggleTag(id: number) {
 .pin-ico {
   flex: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1;
 }
 
@@ -1591,7 +1625,7 @@ function toggleTag(id: number) {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: 2px 6px;
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-xs);
@@ -1617,6 +1651,7 @@ function toggleTag(id: number) {
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .picked-x:hover {
@@ -1633,7 +1668,7 @@ function toggleTag(id: number) {
 .tpl-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   max-height: 56vh;
   overflow-y: auto;
 }
@@ -1642,7 +1677,7 @@ function toggleTag(id: number) {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 4px 8px;
+  padding: var(--gap-xs) var(--gap-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
@@ -1662,8 +1697,8 @@ function toggleTag(id: number) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 4px;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs);
 }
 
 /* 列尾留白：最后一张卡片也要能滚到列中间。
@@ -1677,13 +1712,17 @@ function toggleTag(id: number) {
 .card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--gap-xs);
   text-align: left;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
   padding: 5px 7px;
-  transition: 0.12s;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .card:hover {
@@ -1719,7 +1758,7 @@ function toggleTag(id: number) {
 }
 
 .card-meta {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1729,9 +1768,9 @@ function toggleTag(id: number) {
 .tag-self {
   color: var(--primary);
   border: 1px solid currentColor;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 2px;
-  margin-left: 4px;
+  margin-left: var(--gap-xs);
 }
 
 .more {
@@ -1740,7 +1779,11 @@ function toggleTag(id: number) {
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-xs);
-  padding: 4px;
+  padding: var(--gap-xs);
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .more:hover {
@@ -1766,11 +1809,15 @@ function toggleTag(id: number) {
 /* 「队列 N」是个按钮（点心开结果中心），去掉浏览器默认外观 */
 .job-state.queue {
   border: 1px solid var(--primary);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--primary);
   padding: 1px 8px;
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .custom-body {

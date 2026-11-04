@@ -121,7 +121,13 @@ function tagColor(color: string | undefined): string {
             {{ tag.name }}<i>{{ tag.count }}</i>
           </span>
         </div>
-        <EmptyState v-if="!(stats?.top_tags ?? []).length && !isFetching" text="还没有标签" />
+        <EmptyState
+          v-if="!(stats?.top_tags ?? []).length && !isFetching"
+          text="还没有标签"
+          hint="给提示词或图片打上标签后，这里会汇总使用频次。"
+          action-text="刷新"
+          @action="retry"
+        />
       </section>
 
       <section class="panel">
@@ -131,7 +137,13 @@ function tagColor(color: string | undefined): string {
           <span class="bar-track"><i :style="{ width: `${row.percent}%` }" /></span>
           <span class="bar-num">{{ row.count }}</span>
         </div>
-        <EmptyState v-if="!sourceBars.length" text="还没有图片" />
+        <EmptyState
+          v-if="!sourceBars.length"
+          text="还没有图片"
+          hint="先出图，或到画廊同步已有图片，这里会自动更新。"
+          action-text="刷新"
+          @action="retry"
+        />
       </section>
 
       <section class="panel">
@@ -141,7 +153,13 @@ function tagColor(color: string | undefined): string {
           <span class="bar-track"><i :style="{ width: `${row.percent}%` }" /></span>
           <span class="bar-num">{{ row.count }}</span>
         </div>
-        <EmptyState v-if="!orientationBars.length" text="还没有图片" />
+        <EmptyState
+          v-if="!orientationBars.length"
+          text="还没有图片"
+          hint="先出图，或到画廊同步已有图片，这里会自动更新。"
+          action-text="刷新"
+          @action="retry"
+        />
       </section>
 
       <section class="panel">
@@ -151,7 +169,13 @@ function tagColor(color: string | undefined): string {
           <span class="bar-track"><i :style="{ width: `${row.percent}%` }" /></span>
           <span class="bar-num">{{ row.count }}</span>
         </div>
-        <EmptyState v-if="!modelBars.length" text="还没有图片" />
+        <EmptyState
+          v-if="!modelBars.length"
+          text="还没有图片"
+          hint="先出图，或到画廊同步已有图片，这里会自动更新。"
+          action-text="刷新"
+          @action="retry"
+        />
       </section>
     </div>
     </QueryState>
@@ -159,6 +183,14 @@ function tagColor(color: string | undefined): string {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .stats {
   height: 100%;
   overflow-y: auto;
@@ -181,13 +213,21 @@ function tagColor(color: string | undefined): string {
   padding: var(--gap);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--gap-xs);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
 }
 
 .card .num {
-  font-size: 26px;
+  font-size: var(--fs-xl);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: var(--lh-xl);
 }
 
 .card .label {
@@ -219,16 +259,16 @@ function tagColor(color: string | undefined): string {
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--gap-xs);
 }
 
 .tag {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--c) 18%, transparent);
   border: 1px solid var(--c);
   color: var(--text);
@@ -260,7 +300,7 @@ function tagColor(color: string | undefined): string {
   flex: 1;
   min-width: 0;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel-3);
   overflow: hidden;
 }
@@ -269,7 +309,8 @@ function tagColor(color: string | undefined): string {
   display: block;
   height: 100%;
   background: var(--primary);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
+  transition: width var(--dur) var(--ease);
 }
 
 .bar-num {

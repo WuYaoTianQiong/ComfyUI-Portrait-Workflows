@@ -267,6 +267,14 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .tabs {
   display: flex;
   gap: var(--gap-xs);
@@ -305,11 +313,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
 .res-chip {
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-xs);
   padding: 1px 8px;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .res-chip.on {
@@ -354,7 +366,8 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   padding: 4px 8px 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--gap-xs);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 
 .res-card.on {
@@ -364,7 +377,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 .res-head {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   color: var(--muted);
 }
@@ -372,14 +385,14 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 .pick {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   cursor: pointer;
 }
 
 .res-text {
   margin: 2px 0 0;
   font-size: var(--fs-xs);
-  line-height: 1.55;
+  line-height: var(--lh-sm);
   white-space: pre-wrap;
   max-height: 34vh;
   overflow-y: auto;
@@ -423,6 +436,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   font-size: var(--fs-sm);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .job-title:hover {
@@ -445,7 +459,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 .job-items {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: 0 6px 6px;
 }
 
@@ -474,6 +488,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   border: none;
   padding: 0;
   cursor: zoom-in;
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
 .shot:hover img {
@@ -491,11 +506,15 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   align-self: center;
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .locate:hover {
@@ -511,7 +530,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 .job-pre {
   margin: 0;
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  line-height: var(--lh-sm);
   white-space: pre-wrap;
   max-height: 12vh;
   overflow-y: auto;
@@ -521,7 +540,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   margin-top: 2px;
 }
 

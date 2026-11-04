@@ -162,6 +162,14 @@ const isLandscape = computed(() => {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .wf-param-select {
   /* 按当前文案取自然宽度（field-sizing）；空间不足时按下面的优先级收缩 */
   flex: 0 1 auto;

@@ -369,7 +369,17 @@ function openInGallery(filename: string) {
 
       </article>
 
-      <EmptyState v-if="!visible.length" :text="onlyActive ? '没有进行中的任务' : '还没有任务记录'" />
+      <EmptyState
+        v-if="!visible.length"
+        :text="onlyActive ? '没有进行中的任务' : '还没有任务记录'"
+        :hint="
+          onlyActive
+            ? '当前筛选只看进行中；取消筛选即可查看历史任务。'
+            : '提交一次出图后，这里会实时显示进度与耗时。'
+        "
+        :action-text="onlyActive ? '查看全部' : '刷新'"
+        @action="onlyActive ? (onlyActive = false) : refetchJobs()"
+      />
     </div>
 
     <div v-if="selectedJob" class="drawer-scrim" @click="closeJob" />
@@ -478,6 +488,14 @@ function openInGallery(filename: string) {
 </template>
 
 <style scoped>
+.btn {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
 .jobs {
   display: flex;
   flex-direction: column;
@@ -501,7 +519,7 @@ function openInGallery(filename: string) {
   font-size: var(--fs-xs);
   color: var(--primary);
   border: 1px solid var(--primary);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
 }
 
@@ -556,6 +574,10 @@ function openInGallery(filename: string) {
 
 .job-head:hover {
   background: var(--panel-2);
+}
+
+.job-head {
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .type {
@@ -633,10 +655,10 @@ function openInGallery(filename: string) {
 
 .job-facts {
   margin: 0 0 var(--gap-sm);
-  padding: 6px 8px;
+  padding: var(--gap-sm);
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 4px 16px;
+  gap: var(--gap-xs) var(--gap-md);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
@@ -644,7 +666,7 @@ function openInGallery(filename: string) {
 
 .job-facts div {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-sm);
   min-width: 0;
   font-size: var(--fs-xs);
 }
@@ -687,7 +709,11 @@ function openInGallery(filename: string) {
 
 .btn.cancel {
   border-color: var(--danger);
-  color: #fecaca;
+  color: color-mix(in srgb, var(--danger) 35%, white);
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .progress {
@@ -698,7 +724,7 @@ function openInGallery(filename: string) {
 .bar {
   height: 100%;
   background: var(--primary);
-  transition: width 0.3s;
+  transition: width var(--dur) var(--ease);
 }
 
 .bar.done {
@@ -714,7 +740,7 @@ function openInGallery(filename: string) {
   padding: var(--gap-sm) var(--gap);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   max-height: 320px;
   overflow-y: auto;
 }
@@ -746,7 +772,7 @@ function openInGallery(filename: string) {
 .locate {
   flex: none;
   align-self: center;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   padding: 1px 6px;
 }
 
@@ -765,7 +791,7 @@ function openInGallery(filename: string) {
 .item-meta {
   display: flex;
   gap: var(--gap-sm);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   align-items: center;
 }
 
@@ -804,7 +830,7 @@ function openInGallery(filename: string) {
   flex-direction: column;
   background: var(--panel);
   border-left: 1px solid var(--border);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-3);
 }
 
 .drawer-head {
