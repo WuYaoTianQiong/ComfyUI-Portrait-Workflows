@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
     stop_submit_worker()
     stop_event.set()
     writer.join(timeout=5)
+    if _comfy_http is not None and not _comfy_http.is_closed:
+        await _comfy_http.aclose()
     db.close()
 
 
@@ -262,6 +264,24 @@ for _prefix, _sub in (("/data", "data"), ("/thumbs", "thumbs"), ("/img", "img"))
         logger.warning("参考图库目录不存在，跳过 %s 挂载：%s", _prefix, _mount_dir)
 
 
+# ComfyUI 反代复用同一个 httpx 客户端。
+# 旧实现每个请求新建 AsyncClient，而 httpx 会在 __init__ 里**同步**构建 SSLContext
+# （Windows 证书库约 1.3–1.5s），在事件循环里阻塞：实测 14 个并发 object_info 被完全串行化
+# （总耗时 34s，单请求 2.6s），合成台的 8s 预检超时后报「请求 /comfy 超时」。
+# 复用后既省掉这次构建，也拿到连接池：单请求从 2.6s 降到几十毫秒。
+_comfy_http: httpx.AsyncClient | None = None
+
+
+def _comfy_client() -> httpx.AsyncClient:
+    global _comfy_http
+    if _comfy_http is None or _comfy_http.is_closed:
+        _comfy_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=10.0),
+            limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+        )
+    return _comfy_http
+
+
 @app.api_route(
     "/comfy/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -279,14 +299,13 @@ async def _comfy_proxy(path: str, request: Request):
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _drop}
     body = await request.body()
 
-    client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+    client = _comfy_client()
     try:
         upstream = await client.send(
             client.build_request(request.method, target, headers=headers, content=body),
             stream=True,
         )
     except httpx.HTTPError as exc:
-        await client.aclose()
         logger.warning("ComfyUI 反代失败 %s %s: %s", request.method, target, exc)
         return JSONResponse(status_code=502, content={"error": f"ComfyUI 反代失败: {exc}"})
 
@@ -296,7 +315,6 @@ async def _comfy_proxy(path: str, request: Request):
                 yield chunk
         finally:
             await upstream.aclose()
-            await client.aclose()
 
     _skip = {"content-length", "content-encoding", "transfer-encoding", "connection"}
     resp_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _skip}
