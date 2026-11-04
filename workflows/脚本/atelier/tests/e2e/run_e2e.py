@@ -168,38 +168,68 @@ def run_browser_checks() -> None:
         cells = page.locator(".picker .cell")
         check(cells.count() > 0, "换脸页能列出生图", f"{cells.count()} 张")
 
-        # ---- 参考图库（/reference）----
-        # 只读素材层：验证导航可达、网格渲染、深度切换、18+ 闸门与参考板按钮状态
-        page.click("button:has-text('参考图库')")
-        page.wait_for_selector(".reference-page", timeout=20000)
-        page.wait_for_timeout(1500)
-        check(page.url.endswith("/reference"), "参考图库页路由是 /reference", page.url)
-        check(page.locator(".tab-row .tab").count() == 3, "参考图库有三个库页签",
-              f"{page.locator('.tab-row .tab').count()} 个")
-        cells = page.locator(".jgrid .jcell").count()
-        lib_total = api("/api/reference/libraries")["libraries"][0]["visible"]
-        check(cells > 0 and cells <= lib_total, "参考图库网格渲染出卡片", f"{cells} 张 / 共 {lib_total}")
+        # ---- 参考图库（/ref-web：atelier 托管的上游 React 台）----
+        # 旧断言针对已下线的 Vue 参考库页（.reference-page / .jgrid / .nsfw-toggle /
+        # .sheet-btn）。E 起 `/reference` 整页跳到 `/ref-web/`，旧页不再是入口，
+        # 这批断言属**过期**而非回归：改为验收托管产物 —— 深链接不 404、网格有卡片、
+        # 缩略图真实解码、深度切换生效、无 console 错误。
+        entry = page.locator("a:has-text('参考图库')")
+        # 入口由 /api/system/status 的 reference_web_url 驱动，而该接口在 ComfyUI
+        # 离线时要 ~6.5s（is_online 5s 超时 + 重试）才返回；e2e 跑到这里可能还没拿到，
+        # 必须显式等待而不是靠时序碰运气（实测入口在 DOM 里于首屏后 ~8s 出现）。
+        try:
+            entry.first.wait_for(state="visible", timeout=25000)
+        except Exception:
+            pass
+        check(entry.count() == 1, "顶栏有参考图库入口", f"{entry.count()} 个")
+        entry_href = entry.first.get_attribute("href") if entry.count() else ""
+        check("/ref-web" in (entry_href or ""), "参考图库入口指向 /ref-web", entry_href or "无 href")
 
-        depth_btn = page.locator("button[title='深度图']")
-        if depth_btn.count():
-            depth_btn.first.click()
-            page.wait_for_timeout(1200)
-            check(page.locator(".jgrid .jcell").count() > 0, "切深度模式后网格仍有内容")
-            page.locator("button[title='白模图']").first.click()
-            page.wait_for_timeout(600)
+        errors_before_ref = len(errors)
+        page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded")
+        page.wait_for_selector('img[src*="/thumbs/"]', timeout=30000)
+        page.wait_for_timeout(1200)
+        check(page.url.endswith("/ref-web/poses"), "深链接 /ref-web/poses 不 404", page.url)
+        check("动作姿势库" in page.inner_text("body"), "参考图库 poses 页渲染出页头")
 
-        nsfw_box = page.locator(".nsfw-toggle input")
-        check(nsfw_box.count() == 1, "参考图库有 18+ 开关")
-        allow_nsfw = api("/api/reference/libraries")["allow_nsfw"]
+        thumbs = page.locator('img[src*="/thumbs/"]')
+        check(thumbs.count() > 0, "参考图库网格渲染出姿势卡片", f"{thumbs.count()} 张缩略图")
         check(
-            nsfw_box.first.is_disabled() == (not allow_nsfw),
-            "18+ 开关的可用性由后端总闸决定",
-            f"allow_nsfw={allow_nsfw} disabled={nsfw_box.first.is_disabled()}",
+            page.locator("button:has-text('全部 (')").count() >= 1,
+            "体系药丸有「全部 (N)」",
         )
 
-        sheet_btn = page.locator(".sheet-btn")
-        check(sheet_btn.count() == 1, "参考板按钮存在")
-        check(sheet_btn.first.is_disabled(), "未选图时参考板按钮禁用")
+        decoded = page.evaluate(
+            """() => Array.from(document.querySelectorAll('img[src*="/thumbs/"]'))
+                .slice(0, 5)
+                .filter((i) => i.complete && i.naturalWidth > 0).length"""
+        )
+        check(decoded >= 5, "首屏缩略图真实解码", f"{decoded}/5 张 naturalWidth>0")
+
+        page.locator("button:has-text('深度图 (Depth)')").first.click()
+        page.wait_for_timeout(1500)
+        depth_thumbs = page.locator('img[src*="/thumbs/depth/"]').count()
+        check(depth_thumbs > 0, "切深度模式后缩略图换成 depth 版", f"{depth_thumbs} 张")
+        page.locator("button:has-text('素体白模')").first.click()
+        page.wait_for_timeout(600)
+
+        libs = api("/api/reference/libraries")
+        check(
+            bool(libs.get("libraries")),
+            "/api/reference/* 后端契约仍可用",
+            f"{len(libs.get('libraries') or [])} 库",
+        )
+
+        page.goto(BASE + "/ref-web/costumes", wait_until="domcontentloaded")
+        page.wait_for_timeout(2500)
+        check(page.url.endswith("/ref-web/costumes"), "深链接 /ref-web/costumes 不 404", page.url)
+
+        ref_errors = errors[errors_before_ref:]
+        check(not ref_errors, "参考图库无 console 错误", "; ".join(ref_errors[:3]))
+
+        # 回到 atelier 自己的 Vue 应用，后面几段仍用顶栏导航
+        page.goto(BASE + "/gallery", wait_until="domcontentloaded")
+        page.wait_for_selector(".card", timeout=20000)
 
         # ---- 批量超分（/upscale）----
         page.click("button:has-text('批量超分')")
