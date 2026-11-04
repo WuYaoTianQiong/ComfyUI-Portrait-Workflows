@@ -39,7 +39,8 @@ const online = computed(() => status.value?.comfyui === 'online')
 /**
  * 参考图库 Web（上游 React 台）入口。
  *
- * 后端未下发地址（旧后端）或显式置空时不渲染；`/reference` 旧页保留可直达。
+ * 后端未下发地址（旧后端）或显式置空时不渲染；v0.8 起同源 `/ref-web`，
+ * 因此同标签打开，不再新开窗口。
  */
 const referenceWebUrl = computed(
   () =>
@@ -83,10 +84,8 @@ function jumpToPrompt(promptId: number) {
           v-if="referenceWebUrl"
           class="btn btn-sm"
           :href="referenceWebUrl"
-          target="_blank"
-          rel="noopener noreferrer"
         >
-          参考图库（新版）
+          参考图库
         </a>
         <button
           class="btn btn-sm"

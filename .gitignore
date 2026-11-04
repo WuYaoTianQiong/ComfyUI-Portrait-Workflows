@@ -160,6 +160,9 @@ workflows/.codeartsdoer/
 # 前端工程（S2）：依赖目录与开发期日志不入库
 workflows/脚本/atelier/frontend/node_modules/
 workflows/脚本/atelier/frontend/_dev*.log
+# 参考图库 Web（v0.8 接管的 React 台）：依赖与构建缓存在本地生成
+workflows/脚本/atelier/gallery-web/node_modules/
+workflows/脚本/atelier/gallery-web/.vite/
 workflows/脚本/atelier/static/v2/
 workflows/脚本/atelier/web/
 workflows/脚本/atelier/_e2e_shot.png

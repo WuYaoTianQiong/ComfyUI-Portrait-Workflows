@@ -1,16 +1,18 @@
 """FastAPI 应用入口"""
 import logging
+import mimetypes
 import threading
 import time
 import uuid
 import webbrowser
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app import __version__
 from app.config import settings
@@ -20,6 +22,14 @@ from app.services.logging_setup import setup_logging
 from app.services.workflow_parser import RatioNotSupported
 
 logger = logging.getLogger("atelier")
+
+# Windows 的 mimetypes 注册表不一定认识 webp/avif，补上避免静态挂载返回 text/plain。
+for _ext, _type in (
+    (".webp", "image/webp"),
+    (".avif", "image/avif"),
+    (".woff2", "font/woff2"),
+):
+    mimetypes.add_type(_type, _ext)
 
 
 # ======== 应用生命周期 ========
@@ -207,6 +217,92 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
                 return resp
         return response
 
+# 参考图库 Web 深链接兜底：StaticFiles(html=True) 只处理目录请求，
+# /ref-web/poses 这类前端路由需要回 gallery-web 的 index.html。
+class RefWebFallbackMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, index_file=None):
+        super().__init__(app)
+        self._index_file = index_file
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        index_file = self._index_file
+        if (
+            response.status_code == 404
+            and request.url.path.startswith("/ref-web")
+            and index_file is not None
+            and index_file.exists()
+        ):
+            resp = FileResponse(index_file)
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return resp
+        return response
+
+# 参考图库 Web（接管来的上游 React 台）：构建产物在 gallery-web/dist。
+# /comfy 反代必须与上游前端默认地址一致（本机访问时它默认用 `/comfy`），
+# 转发时删掉 Origin/Referer，否则 ComfyUI 对异源请求返回 403。
+_gallery_web_dir = settings.app_root / "gallery-web"
+_gallery_dist = _gallery_web_dir / "dist"
+_gallery_index = _gallery_dist / "index.html"
+
+if _gallery_index.exists():
+    app.mount("/ref-web", StaticFiles(directory=str(_gallery_dist), html=True), name="ref-web")
+    print(f"  [mount] /ref-web -> {_gallery_dist}")
+else:
+    logger.warning("参考图库 Web 未构建：缺少 %s，跳过 /ref-web 挂载", _gallery_index)
+
+# 图片数据外挂到上游目录（只读），junction 先解析，避免 WinError 448。
+_ref_dir = _resolve_if_reparse(settings.reference_dir)
+for _prefix, _sub in (("/data", "data"), ("/thumbs", "thumbs"), ("/img", "img")):
+    _mount_dir = _resolve_if_reparse(_ref_dir / _sub)
+    if _mount_dir.is_dir():
+        app.mount(_prefix, StaticFiles(directory=str(_mount_dir)), name=_prefix.lstrip("/"))
+        print(f"  [mount] {_prefix} -> {_mount_dir}")
+    else:
+        logger.warning("参考图库目录不存在，跳过 %s 挂载：%s", _prefix, _mount_dir)
+
+
+@app.api_route(
+    "/comfy/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    # 同源反代不是业务接口，不能进入 OpenAPI 契约（会制造快照漂移）。
+    include_in_schema=False,
+)
+async def _comfy_proxy(path: str, request: Request):
+    """同源反代 ComfyUI；上游前端默认把 `/comfy` 当 ComfyUI 地址。"""
+    target = f"{settings.comfyui_api.rstrip('/')}/{path}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+
+    # Origin/Referer 会让 ComfyUI 直接 403；Host/Content-Length 由 httpx 重算。
+    _drop = {"host", "origin", "referer", "content-length", "connection", "transfer-encoding"}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _drop}
+    body = await request.body()
+
+    client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+    try:
+        upstream = await client.send(
+            client.build_request(request.method, target, headers=headers, content=body),
+            stream=True,
+        )
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        logger.warning("ComfyUI 反代失败 %s %s: %s", request.method, target, exc)
+        return JSONResponse(status_code=502, content={"error": f"ComfyUI 反代失败: {exc}"})
+
+    async def _stream():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    _skip = {"content-length", "content-encoding", "transfer-encoding", "connection"}
+    resp_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _skip}
+    return StreamingResponse(_stream(), status_code=upstream.status_code, headers=resp_headers)
+
+
 # 挂载 ComfyUI 输出目录为静态文件（图片直读，不走 Python FileResponse）
 # 注意：comfyui_root/output 可能是跨卷 junction，未解析时 .exists() 在 Windows
 # “不受信任装入点”上会抛 WinError 448 导致整个服务启动崩溃，必须先解析。
@@ -230,6 +326,11 @@ if _temp_dir.exists():
 # 未执行 npm run build 时服务照样能起来，只是根路径没有页面（启动日志会提示）。
 _front_dir = settings.web_dir
 _front_index = _front_dir / "index.html"
+
+# 先注册 RefWeb 兜底，再注册 SPA 兜底：中间件后添加者在外层，
+# 这样 /ref-web 的 404 会先被本中间件改写，不会被 Vue 的 index.html 抢走。
+if _gallery_index.exists():
+    app.add_middleware(RefWebFallbackMiddleware, index_file=_gallery_index)
 
 if _front_index.exists():
     if (_front_dir / "assets").exists():

@@ -95,7 +95,8 @@ class Settings(BaseSettings):
     reference_root: Path | None = None
     reference_allow_nsfw: bool = False
     # 上游 React 台（参考图库 Web）地址；置空则 atelier 顶栏不显示该入口。
-    reference_web_url: str = "http://127.0.0.1:8760/"
+    # v0.8 起由 atelier 自己在 /ref-web 单端口托管，默认同源子路径。
+    reference_web_url: str = "/ref-web"
     reference_page_size: int = 60
     reference_nsfw_pose_systems: str = "全身单人・性感系,双人缠绵"
     reference_nsfw_costume_categories: str = "内衣・睡衣,性感穿搭"
