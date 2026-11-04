@@ -94,6 +94,44 @@ def _resolve_if_reparse(p: Path) -> Path:
     return p
 
 
+def strip_extended_prefix(p: Path) -> Path:
+    """去掉 `\\\\?\\` 扩展前缀：junction 解析结果可能带它，路径比较会错位。"""
+    text = str(p)
+    return Path(text[4:]) if text.startswith("\\\\?\\") else p
+
+
+def resolve_plain(p: Path) -> Path:
+    """解析重解析点后再去扩展前缀；root 包含校验前的统一归一化。"""
+    return strip_extended_prefix(_resolve_if_reparse(p))
+
+
+def is_inside_dir(base: Path, candidate: Path) -> bool:
+    """词法包含校验，不访问磁盘：junction 上 exists()/resolve() 会抛 WinError 448。
+
+    参考库（图片、上传图、参考板）三处共用这一份实现，避免各写一遍导致安全逻辑漏改。
+    """
+    try:
+        root = os.path.abspath(os.path.normcase(str(base)))
+        target = os.path.abspath(os.path.normcase(str(candidate)))
+        return os.path.commonpath([root, target]) == root
+    except (OSError, ValueError):
+        return False
+
+
+def resolve_under(base: Path, raw: str) -> Path | None:
+    """把 `raw`（绝对路径，或相对 `base` 的相对路径）解析成 `base` 之内的路径。
+
+    只做路径归一与包含判断，**不要求文件存在**（存在性、扩展名由调用方按各自语义校验）。
+    越界、空值、盘符穿越一律返回 None。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    p = Path(text)
+    candidate = resolve_plain(p if p.is_absolute() else base / p)
+    return candidate if is_inside_dir(base, candidate) else None
+
+
 def image_base_dir(img_type: str) -> Path:
     """按 img_type 取 ComfyUI 的 input/output/temp 根目录（已解析重解析点）。"""
     if img_type == "input":

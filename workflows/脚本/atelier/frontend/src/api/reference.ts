@@ -81,12 +81,12 @@ export function getReferenceItem(library: string, id: string): Promise<Reference
   )
 }
 
-/** 从 DTO 里取对应版本的图片地址；外链条目的深度图为 null。 */
+/** 从 DTO 里取对应版本的图片地址；外链条目缺字段时返回空串（让 <img> 走失败占位）。 */
 export function referenceImageUrl(item: ReferenceItem, kind: ReferenceImageKind): string {
   if (kind === 'depth') return item.depth_url ?? ''
   if (kind === 'depth_thumb') return item.depth_thumb_url ?? ''
-  if (kind === 'image') return item.image_url
-  return item.thumb_url
+  if (kind === 'image') return item.image_url ?? ''
+  return item.thumb_url ?? ''
 }
 
 /** 姿势卡片的「姿势编号」：subtitle 形如 `P001 · 正面`。 */

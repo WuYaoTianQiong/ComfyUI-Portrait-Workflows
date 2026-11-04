@@ -100,13 +100,23 @@ def push_prompt(api_workflow: dict) -> dict:
         raise RuntimeError(f"ComfyUI 连接失败: {e}")
 
 
-def is_online(timeout: float = 2.0) -> bool:
-    """真实探活。不要用 get_queue() 判断在线：它在失败时返回 {}，会让状态永远是 online。"""
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            return client.get(f"{COMFYUI_API}/queue").status_code < 500
-    except Exception:
-        return False
+def is_online(timeout: float = 5.0, retries: int = 2) -> bool:
+    """真实探活。不要用 get_queue() 判断在线：它在失败时返回 {}，会让状态永远是 online。
+
+    `timeout` 5s + 重试 2 次：ComfyUI 刚重启、加载模型或跑图重负载时，`/queue` 可能
+    在 2 秒内不应答；旧的 2s 单次探活会把这种"忙"误判成"离线"，前端于是禁用提交按钮
+    （实测 2026-11-04 就遇到：状态报 offline，但提交与出图都正常）。
+    """
+    for attempt in range(max(1, retries)):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                if client.get(f"{COMFYUI_API}/queue").status_code < 500:
+                    return True
+        except Exception:
+            pass
+        if attempt + 1 < retries:
+            time.sleep(0.3)
+    return False
 
 
 def get_queue() -> dict:

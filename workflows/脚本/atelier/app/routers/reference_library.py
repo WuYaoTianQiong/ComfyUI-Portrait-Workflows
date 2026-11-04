@@ -9,7 +9,6 @@
 - GET /api/reference/items/{library}/{item_id}
 - GET /api/reference/items/{library}/{item_id}/image?kind=thumb|image|depth|depth_thumb
 """
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -19,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.services import reference_library, uploads
-from app.services.paths import IMAGE_EXTENSIONS, _resolve_if_reparse
+from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 from app.services.recipe_prompt import RecipeEntry, STYLE_PRESETS, build_recipe_prompt
 
 router = APIRouter(tags=["参考图库"])
@@ -49,8 +48,9 @@ class ReferenceItem(BaseModel):
     angle: str = ""
     tags: list[str] = Field(default_factory=list)
     keywords: str = ""
-    thumb_url: str
-    image_url: str
+    #: 外链条目字段缺失时给 None（空串会让前端 <img src=""> 请求当前页面）
+    thumb_url: str | None = None
+    image_url: str | None = None
     depth_url: str | None = None
     #: 仅 pose 且 `thumbs/depth/{id}.webp` 存在时非空；卡片用它，灯箱仍用 `depth_url`。
     depth_thumb_url: str | None = None
@@ -183,32 +183,14 @@ class RecipeRequest(BaseModel):
     dry_run: bool = False
 
 
-def _plain(path: Path) -> Path:
-    """去掉 `\\\\?\\` 前缀并解析 junction，避免 commonpath 比较错位。"""
-    resolved = _resolve_if_reparse(path)
-    text = str(resolved)
-    return Path(text[4:]) if text.startswith("\\\\?\\") else resolved
-
-
-def _inside(base: Path, candidate: Path) -> bool:
-    """词法包含校验，不访问磁盘（junction 上 exists()/resolve() 会抛 WinError 448）。"""
-    try:
-        root = os.path.abspath(os.path.normcase(str(base)))
-        target = os.path.abspath(os.path.normcase(str(candidate)))
-        return os.path.commonpath([root, target]) == root
-    except (OSError, ValueError):
-        return False
-
-
 def _upload_path(raw: str, label: str) -> Path:
     """校验上传图路径：必须在 uploads 内、扩展名合法、确实是文件，否则 400。
 
     相对路径按 uploads 目录解析（前端上传接口返回的是绝对路径，两种都接受）。
     """
-    base = _plain(uploads.uploads_dir())
-    path = Path((raw or "").strip())
-    candidate = _plain(path if path.is_absolute() else base / path)
-    if not _inside(base, candidate):
+    base = resolve_plain(uploads.uploads_dir())
+    candidate = resolve_under(base, raw)
+    if candidate is None:
         raise HTTPException(400, f"{label}必须是上传目录 uploads 内的文件")
     if candidate.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(400, f"{label}不是支持的图片类型")
@@ -273,6 +255,27 @@ def _as_entry(item: dict) -> RecipeEntry:
     )
 
 
+def _slot_info(role: str, item: dict | None, path: Path, library: str) -> dict:
+    """一个槽位的溯源信息：库条目与上传图统一成同一种形状，便于前端/日志核对。"""
+    if item is None:
+        return {
+            "role": role,
+            "source": "upload",
+            "library": "",
+            "id": "",
+            "name": path.name,
+            "path": str(path),
+        }
+    return {
+        "role": role,
+        "source": "library",
+        "library": library,
+        "id": item["id"],
+        "name": item.get("name", ""),
+        "path": str(path),
+    }
+
+
 @router.post("/reference/recipes")
 def create_reference_recipe(req: RecipeRequest):
     """三图/四图出图：组提示词后直接复用 editor 的批量提交入口。
@@ -331,11 +334,22 @@ def create_reference_recipe(req: RecipeRequest):
         job_label="参考库出图",
     )
     result = editor_router.faceswap_batch(payload)
+
+    slots = [
+        _slot_info("portrait", portrait, portrait_path, "portrait"),
+        _slot_info("costume", costume, costume_path, "costume"),
+        _slot_info("pose", pose, pose_path, "pose"),
+    ]
+    if extra_path is not None:
+        slots.append(_slot_info("extra", extra, extra_path, req.extra_library or ""))
+
     return {
         **result,
         "prompt": prompt,
         "style": req.style,
         "workflow_path": str(workflow_path),
+        #: 统一溯源：库条目与上传图同一形状（source/id/path）。`references` 保留兼容。
+        "slots": slots,
         "references": {
             "portrait": portrait["id"] if portrait else "",
             "costume": costume["id"] if costume else "",

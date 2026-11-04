@@ -2806,8 +2806,15 @@
             "type": "string"
           },
           "image_url": {
-            "title": "Image Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
           },
           "keywords": {
             "default": "",
@@ -2845,16 +2852,21 @@
             "type": "array"
           },
           "thumb_url": {
-            "title": "Thumb Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumb Url"
           }
         },
         "required": [
           "id",
           "library",
-          "name",
-          "thumb_url",
-          "image_url"
+          "name"
         ],
         "title": "ReferenceItem",
         "type": "object"

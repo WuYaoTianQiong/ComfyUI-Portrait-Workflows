@@ -3381,7 +3381,7 @@ export interface components {
             /** Id */
             id: string;
             /** Image Url */
-            image_url: string;
+            image_url?: string | null;
             /**
              * Keywords
              * @default
@@ -3409,7 +3409,7 @@ export interface components {
             /** Tags */
             tags?: string[];
             /** Thumb Url */
-            thumb_url: string;
+            thumb_url?: string | null;
         };
         /** ReferenceItemListResponse */
         ReferenceItemListResponse: {

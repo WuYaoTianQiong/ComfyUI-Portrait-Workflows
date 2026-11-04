@@ -365,6 +365,20 @@ def main() -> int:
                     ok = False
                     recipe_detail = f"HTTP {code} PARSE_ERR:{e!r}"
                 checks.append(("reference/recipes dry_run", 200 if ok else -2, recipe_detail))
+
+                # 槽位溯源：库条目与上传图统一成 source/id/path 形状
+                try:
+                    slots = recipe.get("slots") or []
+                    roles = [s.get("role") for s in slots]
+                    slot_ok = (
+                        roles == ["portrait", "costume", "pose"]
+                        and all(s.get("source") == "library" for s in slots)
+                        and all(s.get("path") for s in slots)
+                    )
+                    slot_detail = f"roles={roles} sources={[s.get('source') for s in slots]}"
+                except Exception as e:
+                    slot_ok, slot_detail = False, f"PARSE_ERR:{e!r}"
+                checks.append(("reference/recipes slots", 200 if slot_ok else -2, slot_detail))
             else:
                 checks.append((
                     "reference/recipes dry_run",

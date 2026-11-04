@@ -136,6 +136,19 @@ def test_heic_with_jpg_extension_is_converted_to_png(api, upload_root):
     assert len(list(upload_root.iterdir())) == 1
 
 
+def test_heic_extension_with_png_content_is_normalized(api, upload_root):
+    """扩展名骗人时以文件头为准：路 PNG 改名成 .heic 也要按 PNG 收下并统一转 PNG。"""
+    data = png_bytes(size=(40, 30))
+    resp = _post(api, "假装.heic", data)
+    assert resp.status_code == 200, resp.text
+
+    path = Path(resp.json()["path"])
+    assert path.suffix == ".png"
+    with Image.open(path) as img:
+        assert img.format == "PNG"
+        assert img.size == (40, 30)
+
+
 def test_uploaded_file_can_be_injected_into_comfyui_input(api, upload_root, tmp_path):
     body = _post(api, "slot.png", png_bytes(size=(32, 16))).json()
 

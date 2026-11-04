@@ -256,6 +256,46 @@ def test_one_slot_can_use_uploaded_path(api, recipe_env, captured):
     assert resp.json()["references"]["portrait"] == ""
 
 
+def test_slots_unify_library_and_upload(api, recipe_env, captured):
+    """响应里的 slots 把库条目与上传图统一成同一形状，便于溯源（references 只带 id）。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_path": str(recipe_env["portrait_upload"]),
+            "costume_id": "SPR-0001",
+            "pose_id": "P001_front",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    slots = {slot["role"]: slot for slot in resp.json()["slots"]}
+    assert set(slots) == {"portrait", "costume", "pose"}
+
+    upload = slots["portrait"]
+    assert upload["source"] == "upload"
+    assert upload["id"] == "" and upload["library"] == ""
+    assert Path(upload["path"]).name == "portrait.png"
+
+    library = slots["costume"]
+    assert library["source"] == "library"
+    assert library["library"] == "costume" and library["id"] == "SPR-0001"
+    assert Path(library["path"]).name == "SPR-0001.png"
+
+
+def test_slots_include_optional_fourth(api, recipe_env, captured):
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "extra_library": "costume",
+            "extra_id": "ACC-0001",
+        },
+    )
+    assert resp.status_code == 200
+    roles = [slot["role"] for slot in resp.json()["slots"]]
+    assert roles == ["portrait", "costume", "pose", "extra"]
+
+
 def test_id_takes_priority_over_path(api, recipe_env, captured):
     # 路径在 uploads 外，若被使用必然 400；这里应直接忽略路径走库条目
     outside = recipe_env["root"].parent / "outside.png"

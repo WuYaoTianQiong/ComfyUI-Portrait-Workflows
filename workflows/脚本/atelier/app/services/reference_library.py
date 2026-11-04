@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
-import os
 import threading
 from collections import Counter
 from dataclasses import dataclass
@@ -25,7 +24,13 @@ from typing import Any
 from urllib.parse import quote
 
 from app.config import settings
-from app.services.paths import IMAGE_EXTENSIONS, _relative_parts, _resolve_if_reparse
+from app.services.paths import (
+    IMAGE_EXTENSIONS,
+    _relative_parts,
+    _resolve_if_reparse,
+    is_inside_dir,
+    strip_extended_prefix,
+)
 
 LIBRARIES: tuple[str, ...] = ("pose", "costume", "portrait", "costume-anime")
 
@@ -111,6 +116,8 @@ class ReferenceImageError(Exception):
 class _CacheEntry:
     mtime_ns: int
     items: list[dict[str, Any]]
+    #: id → 记录：图片/详情端点每张图都要按 id 取记录，线性扫全库会随页大小放大
+    by_id: dict[str, dict[str, Any]]
 
 
 _LOCK = threading.RLock()
@@ -124,15 +131,7 @@ _CACHE: dict[tuple[str, str], _CacheEntry] = {}
 
 def reference_root() -> Path:
     """参考库真实根目录；junction 先解析，避免 Windows WinError 448。"""
-    return _strip_extended(_resolve_if_reparse(settings.reference_dir))
-
-
-def _strip_extended(path: Path) -> Path:
-    """去掉 `\\\\?\\` 扩展前缀：junction 解析结果可能带它，直接比较路径会错。"""
-    text = str(path)
-    if text.startswith("\\\\?\\"):
-        return Path(text[4:])
-    return path
+    return strip_extended_prefix(_resolve_if_reparse(settings.reference_dir))
 
 
 def _library_path(library: str) -> Path:
@@ -251,7 +250,8 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     thumb_rel = "" if remote else _text(obj, mapping["thumb"])
     image_rel = "" if remote else _text(obj, mapping["image"])
     if remote:
-        thumb_url = _text(obj, mapping["thumb"])
+        # 外链字段可能缺失：给 None 而不是 ""，否则前端 <img src=""> 会请求当前页面
+        thumb_url = _text(obj, mapping["thumb"]) or None
         image_url = _text(obj, mapping["image"]) or thumb_url
         depth_url: str | None = None
         depth_thumb_url: str | None = None
@@ -333,7 +333,11 @@ def _load(library: str) -> list[dict[str, Any]]:
 
     _log_loaded_count(library, len(items))
     with _LOCK:
-        _CACHE[key] = _CacheEntry(mtime_ns=mtime, items=items)
+        _CACHE[key] = _CacheEntry(
+            mtime_ns=mtime,
+            items=items,
+            by_id={record["id"]: record for record in items},
+        )
     return items
 
 
@@ -461,25 +465,16 @@ def get_item(library: str, item_id: str) -> dict[str, Any] | None:
 def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
     if library not in LIBRARY_FILES or not item_id:
         return None
-    for record in _load(library):
-        if record["id"] == item_id:
-            return record
-    return None
+    _load(library)  # 确保缓存已按 mtime 填充
+    key = (str(_library_path(library)), library)
+    with _LOCK:
+        entry = _CACHE.get(key)
+        return entry.by_id.get(item_id) if entry else None
 
 
 # ---------------------------------------------------------------------------
 # 图片解析（root 包含校验）
 # ---------------------------------------------------------------------------
-
-
-def _is_inside_root(candidate: Path) -> bool:
-    """词法比较，不访问磁盘：junction 上 exists()/resolve() 会抛 WinError 448。"""
-    try:
-        root = os.path.abspath(os.path.normcase(str(reference_root())))
-        target = os.path.abspath(os.path.normcase(str(candidate)))
-        return os.path.commonpath([root, target]) == root
-    except (OSError, ValueError):
-        return False
 
 
 def _safe_image_path(rel: str) -> Path:
@@ -492,9 +487,9 @@ def _safe_image_path(rel: str) -> Path:
 
     cur = reference_root()
     for part in parts:
-        cur = _strip_extended(_resolve_if_reparse(cur / part))
+        cur = strip_extended_prefix(_resolve_if_reparse(cur / part))
 
-    if not _is_inside_root(cur):
+    if not is_inside_dir(reference_root(), cur):
         raise ReferenceImageError(400, "图片路径越界")
     if cur.suffix.lower() not in IMAGE_EXTENSIONS:
         raise ReferenceImageError(404, "图片不存在")

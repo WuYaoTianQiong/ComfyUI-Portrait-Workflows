@@ -25,7 +25,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from app.services import reference_library, uploads
-from app.services.paths import IMAGE_EXTENSIONS, _resolve_if_reparse
+from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 
 #: 导出尺寸：与上游参考板比例一致，不随图片数量变化。
 SHEET_WIDTH = 1800
@@ -71,24 +71,6 @@ class SheetSlot:
 # ---------------------------------------------------------------------------
 
 
-def _plain(path: Path) -> Path:
-    """去掉 `\\\\?\\` 前缀并解析 junction，避免 commonpath 比较错位。"""
-    resolved = _resolve_if_reparse(path)
-    text = str(resolved)
-    if text.startswith("\\\\?\\"):
-        return Path(text[4:])
-    return resolved
-
-
-def _inside(base: Path, candidate: Path) -> bool:
-    try:
-        root = os.path.abspath(os.path.normcase(str(base)))
-        target = os.path.abspath(os.path.normcase(str(candidate)))
-        return os.path.commonpath([root, target]) == root
-    except (OSError, ValueError):
-        return False
-
-
 def _library_slot(kind: str, library: str, item_id: str) -> SheetSlot:
     """按库 id 取 DTO 与本地原图；remote / 不存在 / 缺图统一转 SheetError。"""
     item = reference_library.get_item(library, item_id)
@@ -110,11 +92,10 @@ def _library_slot(kind: str, library: str, item_id: str) -> SheetSlot:
 
 def _extra_slot(raw: str) -> SheetSlot:
     """第 4 张上传图：只允许 `library_root/uploads` 内的本地图片。"""
-    base = _plain(uploads.uploads_dir())
-    path = Path(raw)
-    candidate = _plain(path if path.is_absolute() else base / path)
+    base = resolve_plain(uploads.uploads_dir())
+    candidate = resolve_under(base, raw)
 
-    if not _inside(base, candidate):
+    if candidate is None:
         raise SheetError("附加图必须是上传目录（uploads）内的文件")
     if candidate.suffix.lower() not in IMAGE_EXTENSIONS:
         raise SheetError("附加图不是支持的图片类型")

@@ -147,8 +147,9 @@ def save_upload(filename: str, data: bytes, root: Path | None = None) -> dict:
     temp = base / f".incoming-{uuid.uuid4().hex}"
     try:
         temp.write_bytes(data)
-        heif_content = image_formats.is_heif(temp)
-        if heif_content or suffix in _HEIF_EXTENSIONS:
+        # 以**文件头**为准，扩展名只是提示：`.heic` 里装的可能是 PNG/JPEG（下载改名很常见），
+        # 这时按 HEIC 强行解码只会报"解码失败"，反而把好文件判死。
+        if image_formats.is_heif(temp):
             dest = base / f"{digest}.png"
             try:
                 image_formats.convert_heif_to_png(temp, dest)
@@ -156,6 +157,22 @@ def save_upload(filename: str, data: bytes, root: Path | None = None) -> dict:
                 raise UploadError(str(exc)) from None
             except Exception as exc:
                 raise UploadError(f"HEIC/HEIF 解码失败：{exc or type(exc).__name__}") from None
+        elif suffix in _HEIF_EXTENSIONS:
+            # 扩展名是 HEIC 但内容不是：按真实内容统一转成 PNG，避免下游按扩展名解错
+            dest = base / f"{digest}.png"
+            try:
+                from PIL import Image  # 与 _probe_size 一致：Pillow 按需导入
+
+                with Image.open(temp) as img:
+                    img.convert("RGBA").save(dest, "PNG")
+            except Exception as exc:
+                # 内容既不是 HEIC 又解不开：给出"装解码器"的提示，避免用户对着 .heic 干瞪眼
+                hint = (
+                    ""
+                    if image_formats.heif_available()
+                    else "；若文件确实是 HEIC/HEIF，需安装 pillow-heif"
+                )
+                raise UploadError(f"图片解码失败：{exc or type(exc).__name__}{hint}") from None
         else:
             dest = base / f"{digest}{suffix}"
             _store_bytes(dest, temp)

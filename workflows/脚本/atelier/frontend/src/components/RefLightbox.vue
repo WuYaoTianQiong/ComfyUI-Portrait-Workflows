@@ -256,7 +256,7 @@ const positionLabel = computed(() => {
           <a
             v-if="!item.remote"
             class="tool link"
-            :href="item.image_url"
+            :href="item.image_url ?? undefined"
             :download="downloadName"
             title="下载原图"
           >
@@ -265,7 +265,7 @@ const positionLabel = computed(() => {
           <a
             v-else
             class="tool link"
-            :href="item.image_url"
+            :href="item.image_url ?? undefined"
             target="_blank"
             rel="noopener noreferrer"
             title="在新窗口打开外链原图"
@@ -316,7 +316,7 @@ const positionLabel = computed(() => {
             <a
               v-if="item.remote"
               class="btn btn-sm"
-              :href="item.image_url"
+              :href="item.image_url ?? undefined"
               target="_blank"
               rel="noopener noreferrer"
               @click.stop
@@ -378,7 +378,7 @@ const positionLabel = computed(() => {
           :title="angleItem.angle || angleItem.id"
           @click="emit('update:index', i)"
         >
-          <img :src="angleItem.thumb_url" :alt="angleItem.angle || angleItem.id" loading="lazy" />
+          <img :src="angleItem.thumb_url ?? undefined" :alt="angleItem.angle || angleItem.id" loading="lazy" />
           <span>{{ angleItem.angle || i + 1 }}</span>
         </button>
       </div>

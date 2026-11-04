@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.models import Prompt, auto_classify_prompt, db
 from app.services import reference_library
+from app.services.recipe_prompt import BASE_HAIR_NAME
 from app.services.tagging import sync_prompt_tags
 
 router = APIRouter(tags=["参考图库转提示词"])
@@ -36,8 +37,6 @@ FRAGMENT_TYPE_BY_LIBRARY: dict[str, str] = {
     "costume-anime": "人物服饰",
 }
 
-#: 与 `recipe_prompt.BASE_HAIR_NAME` 一致：这个发型名等于「没有特殊发型」。
-BASE_HAIR_NAME = "标准基础款"
 
 
 class ReferenceFragmentRequest(BaseModel):

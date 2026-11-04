@@ -449,7 +449,8 @@ function setCardMode(item: ReferenceItem, depth: boolean) {
 function cardSrc(item: ReferenceItem): string {
   const current = displayItem(item)
   if (isDepth(item) && current.depth_thumb_url) return current.depth_thumb_url
-  return current.thumb_url
+  // 外链条目可能缺字段（后端给 null）：空串让 <img> 走失败占位，不会请求当前页面
+  return current.thumb_url ?? ''
 }
 
 function thumbKey(item: ReferenceItem): string {

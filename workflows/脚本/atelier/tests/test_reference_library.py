@@ -298,6 +298,29 @@ def test_libraries_expose_allow_nsfw(api, ref_root, monkeypatch):
     assert all(row["allow_nsfw"] is True for row in body["libraries"])
 
 
+def test_remote_item_without_urls_returns_none(api, tmp_path, monkeypatch):
+    """外链库字段缺失时给 None：空串会让前端 `<img src="">` 去请求当前页面。"""
+    root = tmp_path / "broken-gallery"
+    _write_json(root / "data" / "costume-anime-zh.json", [{
+        "id": "broken-1",
+        "一级分类": "二次元",
+        "分类": "制服",
+        "服装名称": "缺图条目",
+        "检索": "broken-1 缺图条目",
+    }])
+    for name in ("pose-zh.json", "costume-zh.json", "portrait-zh.json"):
+        _write_json(root / "data" / name, [])
+    monkeypatch.setattr(settings, "reference_root", root)
+    rl.clear_cache()
+    try:
+        body = api.get("/api/reference/items/costume-anime/broken-1").json()
+        assert body["remote"] is True
+        assert body["thumb_url"] is None
+        assert body["image_url"] is None
+    finally:
+        rl.clear_cache()
+
+
 def test_remote_library_depth_is_404(api, ref_root):
     for kind in ("depth", "depth_thumb"):
         resp = api.get(

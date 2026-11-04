@@ -168,6 +168,39 @@ def run_browser_checks() -> None:
         cells = page.locator(".picker .cell")
         check(cells.count() > 0, "换脸页能列出生图", f"{cells.count()} 张")
 
+        # ---- 参考图库（/reference）----
+        # 只读素材层：验证导航可达、网格渲染、深度切换、18+ 闸门与参考板按钮状态
+        page.click("button:has-text('参考图库')")
+        page.wait_for_selector(".reference-page", timeout=20000)
+        page.wait_for_timeout(1500)
+        check(page.url.endswith("/reference"), "参考图库页路由是 /reference", page.url)
+        check(page.locator(".tab-row .tab").count() == 3, "参考图库有三个库页签",
+              f"{page.locator('.tab-row .tab').count()} 个")
+        cells = page.locator(".jgrid .jcell").count()
+        lib_total = api("/api/reference/libraries")["libraries"][0]["visible"]
+        check(cells > 0 and cells <= lib_total, "参考图库网格渲染出卡片", f"{cells} 张 / 共 {lib_total}")
+
+        depth_btn = page.locator("button[title='深度图']")
+        if depth_btn.count():
+            depth_btn.first.click()
+            page.wait_for_timeout(1200)
+            check(page.locator(".jgrid .jcell").count() > 0, "切深度模式后网格仍有内容")
+            page.locator("button[title='白模图']").first.click()
+            page.wait_for_timeout(600)
+
+        nsfw_box = page.locator(".nsfw-toggle input")
+        check(nsfw_box.count() == 1, "参考图库有 18+ 开关")
+        allow_nsfw = api("/api/reference/libraries")["allow_nsfw"]
+        check(
+            nsfw_box.first.is_disabled() == (not allow_nsfw),
+            "18+ 开关的可用性由后端总闸决定",
+            f"allow_nsfw={allow_nsfw} disabled={nsfw_box.first.is_disabled()}",
+        )
+
+        sheet_btn = page.locator(".sheet-btn")
+        check(sheet_btn.count() == 1, "参考板按钮存在")
+        check(sheet_btn.first.is_disabled(), "未选图时参考板按钮禁用")
+
         # ---- 批量超分（/upscale）----
         page.click("button:has-text('批量超分')")
         page.wait_for_selector(".upscale", timeout=15000)
