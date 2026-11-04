@@ -187,12 +187,14 @@ def run_browser_checks() -> None:
 
         errors_before_ref = len(errors)
         page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded")
-        page.wait_for_selector('img[src*="/thumbs/"]', timeout=30000)
+        # 阶段三起图库图片统一走后端端点（kind=thumb|image|depth_thumb|depth），
+        # 不再有 /thumbs/ 静态路径；选择器必须按端点匹配。
+        page.wait_for_selector('img[src*="/api/reference/items/pose/"]', timeout=30000)
         page.wait_for_timeout(1200)
         check(page.url.endswith("/ref-web/poses"), "深链接 /ref-web/poses 不 404", page.url)
         check("动作姿势库" in page.inner_text("body"), "参考图库 poses 页渲染出页头")
 
-        thumbs = page.locator('img[src*="/thumbs/"]')
+        thumbs = page.locator('img[src*="/api/reference/items/pose/"]')
         check(thumbs.count() > 0, "参考图库网格渲染出姿势卡片", f"{thumbs.count()} 张缩略图")
         check(
             page.locator("button:has-text('全部 (')").count() >= 1,
@@ -200,7 +202,7 @@ def run_browser_checks() -> None:
         )
 
         decoded = page.evaluate(
-            """() => Array.from(document.querySelectorAll('img[src*="/thumbs/"]'))
+            """() => Array.from(document.querySelectorAll('img[src*="/api/reference/items/pose/"]'))
                 .slice(0, 5)
                 .filter((i) => i.complete && i.naturalWidth > 0).length"""
         )
@@ -208,7 +210,7 @@ def run_browser_checks() -> None:
 
         page.locator("button:has-text('深度图 (Depth)')").first.click()
         page.wait_for_timeout(1500)
-        depth_thumbs = page.locator('img[src*="/thumbs/depth/"]').count()
+        depth_thumbs = page.locator('img[src*="kind=depth_thumb"]').count()
         check(depth_thumbs > 0, "切深度模式后缩略图换成 depth 版", f"{depth_thumbs} 张")
         page.locator("button:has-text('素体白模')").first.click()
         page.wait_for_timeout(600)
