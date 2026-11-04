@@ -293,6 +293,20 @@
         "title": "BatchRequest",
         "type": "object"
       },
+      "Body_upload_reference_api_reference_uploads_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_reference_api_reference_uploads_post",
+        "type": "object"
+      },
       "CategoryCreate": {
         "properties": {
           "color": {
@@ -728,6 +742,33 @@
               "type": "string"
             },
             "title": "Ref2 Paths",
+            "type": "array"
+          },
+          "ref3_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ref3 Ids",
+            "type": "array"
+          },
+          "ref3_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref3 Node"
+          },
+          "ref3_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ref3 Paths",
             "type": "array"
           },
           "ref_ids": {
@@ -2548,6 +2589,68 @@
         "title": "PromptUpdate",
         "type": "object"
       },
+      "RecipeRequest": {
+        "description": "参考库三图出图；带 `extra_id` 时自动切四图工作流。",
+        "properties": {
+          "costume_id": {
+            "default": "",
+            "title": "Costume Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "extra_id": {
+            "default": "",
+            "title": "Extra Id",
+            "type": "string"
+          },
+          "extra_library": {
+            "default": "",
+            "title": "Extra Library",
+            "type": "string"
+          },
+          "output_subfolder": {
+            "default": "",
+            "title": "Output Subfolder",
+            "type": "string"
+          },
+          "portrait_id": {
+            "default": "",
+            "title": "Portrait Id",
+            "type": "string"
+          },
+          "pose_id": {
+            "default": "",
+            "title": "Pose Id",
+            "type": "string"
+          },
+          "prompt_suffix": {
+            "default": "",
+            "title": "Prompt Suffix",
+            "type": "string"
+          },
+          "seed": {
+            "default": 100000,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "seed_mode": {
+            "default": "fixed",
+            "title": "Seed Mode",
+            "type": "string"
+          },
+          "style": {
+            "default": "realistic",
+            "title": "Style",
+            "type": "string"
+          }
+        },
+        "title": "RecipeRequest",
+        "type": "object"
+      },
       "ReferenceFacetValue": {
         "properties": {
           "count": {
@@ -2564,6 +2667,69 @@
           "count"
         ],
         "title": "ReferenceFacetValue",
+        "type": "object"
+      },
+      "ReferenceFragmentRequest": {
+        "properties": {
+          "item_id": {
+            "description": "参考条目 id（上游 JSON 的 id）",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "library": {
+            "description": "pose / costume / portrait / costume-anime",
+            "title": "Library",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library",
+          "item_id"
+        ],
+        "title": "ReferenceFragmentRequest",
+        "type": "object"
+      },
+      "ReferenceFragmentResponse": {
+        "properties": {
+          "dedup": {
+            "default": false,
+            "title": "Dedup",
+            "type": "boolean"
+          },
+          "fragment_type": {
+            "title": "Fragment Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "tags": {
+            "title": "Tags",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "note",
+          "tags",
+          "fragment_type"
+        ],
+        "title": "ReferenceFragmentResponse",
         "type": "object"
       },
       "ReferenceItem": {
@@ -3287,6 +3453,44 @@
           "type"
         ],
         "title": "TypeOutcome",
+        "type": "object"
+      },
+      "UploadedReference": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "dedup": {
+            "default": false,
+            "title": "Dedup",
+            "type": "boolean"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "width",
+          "height",
+          "bytes"
+        ],
+        "title": "UploadedReference",
         "type": "object"
       },
       "ValidationError": {
@@ -4413,7 +4617,7 @@
     },
     "/api/editor/faceswap/nodes": {
       "post": {
-        "description": "探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2」映射",
+        "description": "探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2 / 参考图3」映射",
         "operationId": "faceswap_nodes_api_editor_faceswap_nodes_post",
         "requestBody": {
           "content": {
@@ -7666,6 +7870,48 @@
         ]
       }
     },
+    "/api/reference/fragments": {
+      "post": {
+        "description": "把单条参考转成提示词；重复转换返回已有条目（`dedup=true`）。",
+        "operationId": "create_reference_fragment_api_reference_fragments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceFragmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceFragmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Reference Fragment",
+        "tags": [
+          "参考图库转提示词"
+        ]
+      }
+    },
     "/api/reference/items": {
       "get": {
         "operationId": "list_reference_items_api_reference_items_get",
@@ -7928,7 +8174,7 @@
     },
     "/api/reference/ping": {
       "get": {
-        "operationId": "ping_reference_sheet_api_reference_ping_get",
+        "operationId": "ping_reference_fragments_api_reference_ping_get",
         "responses": {
           "200": {
             "content": {
@@ -7939,9 +8185,182 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Ping Reference Sheet",
+        "summary": "Ping Reference Fragments",
+        "tags": [
+          "参考图库转提示词"
+        ]
+      }
+    },
+    "/api/reference/recipes": {
+      "post": {
+        "description": "三图/四图出图：组提示词后直接复用 editor 的批量提交入口。\n\n这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、\n任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。",
+        "operationId": "create_reference_recipe_api_reference_recipes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Reference Recipe",
+        "tags": [
+          "参考图库"
+        ]
+      }
+    },
+    "/api/reference/sheet": {
+      "get": {
+        "operationId": "get_reference_sheet_api_reference_sheet_get",
+        "parameters": [
+          {
+            "description": "姿势库条目 id",
+            "in": "query",
+            "name": "pose",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "姿势库条目 id",
+              "title": "Pose",
+              "type": "string"
+            }
+          },
+          {
+            "description": "服装库条目 id",
+            "in": "query",
+            "name": "costume",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "服装库条目 id",
+              "title": "Costume",
+              "type": "string"
+            }
+          },
+          {
+            "description": "人像库条目 id",
+            "in": "query",
+            "name": "portrait",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "人像库条目 id",
+              "title": "Portrait",
+              "type": "string"
+            }
+          },
+          {
+            "description": "第 4 张上传图路径（必须是 uploads 目录内的文件）",
+            "in": "query",
+            "name": "extra",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "第 4 张上传图路径（必须是 uploads 目录内的文件）",
+              "title": "Extra",
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 画「图N · 名称」标题条，0 纯图拼接",
+            "in": "query",
+            "name": "labels",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "1 画「图N · 名称」标题条，0 纯图拼接",
+              "title": "Labels",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reference Sheet",
         "tags": [
           "参考图库参考板"
+        ]
+      }
+    },
+    "/api/reference/uploads": {
+      "post": {
+        "description": "接收单张参考图并落盘；同内容重复上传返回 `dedup=true`。",
+        "operationId": "upload_reference_api_reference_uploads_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_reference_api_reference_uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedReference"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Reference",
+        "tags": [
+          "参考图库上传"
         ]
       }
     },

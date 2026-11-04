@@ -350,7 +350,7 @@ export interface paths {
         put?: never;
         /**
          * Faceswap Nodes
-         * @description 探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2」映射
+         * @description 探测工作流的 LoadImage 节点，供工作台展示「目标图 / 参考图1 / 参考图2 / 参考图3」映射
          */
         post: operations["faceswap_nodes_api_editor_faceswap_nodes_post"];
         delete?: never;
@@ -1362,6 +1362,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reference/fragments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Reference Fragment
+         * @description 把单条参考转成提示词；重复转换返回已有条目（`dedup=true`）。
+         */
+        post: operations["create_reference_fragment_api_reference_fragments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reference/items": {
         parameters: {
             query?: never;
@@ -1437,10 +1457,70 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Ping Reference Sheet */
-        get: operations["ping_reference_sheet_api_reference_ping_get"];
+        /** Ping Reference Fragments */
+        get: operations["ping_reference_fragments_api_reference_ping_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Reference Recipe
+         * @description 三图/四图出图：组提示词后直接复用 editor 的批量提交入口。
+         *
+         *     这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、
+         *     任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。
+         */
+        post: operations["create_reference_recipe_api_reference_recipes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reference Sheet */
+        get: operations["get_reference_sheet_api_reference_sheet_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reference/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Reference
+         * @description 接收单张参考图并落盘；同内容重复上传返回 `dedup=true`。
+         */
+        post: operations["upload_reference_api_reference_uploads_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2023,6 +2103,14 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** Body_upload_reference_api_reference_uploads_post */
+        Body_upload_reference_api_reference_uploads_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
         /** CategoryCreate */
         CategoryCreate: {
             /**
@@ -2252,6 +2340,18 @@ export interface components {
              * @default []
              */
             ref2_paths: string[];
+            /**
+             * Ref3 Ids
+             * @default []
+             */
+            ref3_ids: number[];
+            /** Ref3 Node */
+            ref3_node?: string | null;
+            /**
+             * Ref3 Paths
+             * @default []
+             */
+            ref3_paths: string[];
             /**
              * Ref Ids
              * @default []
@@ -3117,12 +3217,109 @@ export interface components {
             /** Width */
             width?: number | null;
         };
+        /**
+         * RecipeRequest
+         * @description 参考库三图出图；带 `extra_id` 时自动切四图工作流。
+         */
+        RecipeRequest: {
+            /**
+             * Costume Id
+             * @default
+             */
+            costume_id: string;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /**
+             * Extra Id
+             * @default
+             */
+            extra_id: string;
+            /**
+             * Extra Library
+             * @default
+             */
+            extra_library: string;
+            /**
+             * Output Subfolder
+             * @default
+             */
+            output_subfolder: string;
+            /**
+             * Portrait Id
+             * @default
+             */
+            portrait_id: string;
+            /**
+             * Pose Id
+             * @default
+             */
+            pose_id: string;
+            /**
+             * Prompt Suffix
+             * @default
+             */
+            prompt_suffix: string;
+            /**
+             * Seed
+             * @default 100000
+             */
+            seed: number;
+            /**
+             * Seed Mode
+             * @default fixed
+             */
+            seed_mode: string;
+            /**
+             * Style
+             * @default realistic
+             */
+            style: string;
+        };
         /** ReferenceFacetValue */
         ReferenceFacetValue: {
             /** Count */
             count: number;
             /** Value */
             value: string;
+        };
+        /** ReferenceFragmentRequest */
+        ReferenceFragmentRequest: {
+            /**
+             * Item Id
+             * @description 参考条目 id（上游 JSON 的 id）
+             */
+            item_id: string;
+            /**
+             * Library
+             * @description pose / costume / portrait / costume-anime
+             */
+            library: string;
+        };
+        /** ReferenceFragmentResponse */
+        ReferenceFragmentResponse: {
+            /**
+             * Dedup
+             * @default false
+             */
+            dedup: boolean;
+            /** Fragment Type */
+            fragment_type: string;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Tags */
+            tags: string;
         };
         /** ReferenceItem */
         ReferenceItem: {
@@ -3504,6 +3701,24 @@ export interface components {
             old_content: string;
             /** Type */
             type: string;
+        };
+        /** UploadedReference */
+        UploadedReference: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Dedup
+             * @default false
+             */
+            dedup: boolean;
+            /** Height */
+            height: number;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Width */
+            width: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -6178,6 +6393,39 @@ export interface operations {
             };
         };
     };
+    create_reference_fragment_api_reference_fragments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceFragmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceFragmentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_reference_items_api_reference_items_get: {
         parameters: {
             query?: {
@@ -6307,7 +6555,7 @@ export interface operations {
             };
         };
     };
-    ping_reference_sheet_api_reference_ping_get: {
+    ping_reference_fragments_api_reference_ping_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6323,6 +6571,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_reference_recipe_api_reference_recipes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reference_sheet_api_reference_sheet_get: {
+        parameters: {
+            query?: {
+                /** @description 姿势库条目 id */
+                pose?: string;
+                /** @description 服装库条目 id */
+                costume?: string;
+                /** @description 人像库条目 id */
+                portrait?: string;
+                /** @description 第 4 张上传图路径（必须是 uploads 目录内的文件） */
+                extra?: string;
+                /** @description 1 画「图N · 名称」标题条，0 纯图拼接 */
+                labels?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_reference_api_reference_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_reference_api_reference_uploads_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedReference"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

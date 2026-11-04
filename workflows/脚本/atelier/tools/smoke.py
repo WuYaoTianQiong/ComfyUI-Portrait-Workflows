@@ -273,6 +273,34 @@ def main() -> int:
             else:
                 checks.append(("images/sync 跳过缺失文件", -3, "本次没有「文件已缺失」的历史条目"))
 
+            # AI 参考图库：只读端点走真实请求；写端点只做参数校验，
+            # 避免冒烟真的往库副本里写提示词或落盘上传文件。
+            code, body = _get(BASE + "/api/reference/libraries")
+            try:
+                lib_count = len(json.loads(body).get("libraries") or [])
+            except Exception:
+                lib_count = "PARSE_ERR"
+            checks.append(("reference/libraries", code, f"{lib_count} 库"))
+
+            code, body = _get(BASE + "/api/reference/items?library=pose&page_size=1")
+            try:
+                ref_total = json.loads(body).get("total")
+            except Exception:
+                ref_total = "PARSE_ERR"
+            checks.append(("reference/items(pose)", code, ref_total))
+
+            code, body = _get(BASE + "/api/reference/sheet")
+            checks.append(("reference/sheet 缺参数→400", 200 if code == 400 else -2,
+                           f"HTTP {code}"))
+
+            code, body = _post(BASE + "/api/reference/fragments", {})
+            checks.append(("reference/fragments 缺参数→422", 200 if code == 422 else -2,
+                           f"HTTP {code}"))
+
+            code, body = _post(BASE + "/api/reference/uploads", {})
+            checks.append(("reference/uploads 非 multipart→422", 200 if code == 422 else -2,
+                           f"HTTP {code}"))
+
             code, body = _get(BASE + "/api/jobs?active=1")
             checks.append(("jobs?active=1", code, ""))
 

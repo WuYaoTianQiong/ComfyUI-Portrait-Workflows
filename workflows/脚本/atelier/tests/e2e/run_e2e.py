@@ -115,13 +115,18 @@ def run_browser_checks() -> None:
         check(cards > 0 and cards <= expected, "画廊渲染出卡片", f"{cards} 张 / 共 {expected}")
 
         tags = page.locator(".sidebar .tag")
-        check(tags.count() > 0, "标签云有内容", f"{tags.count()} 个")
-
-        if tags.count() >= 1:
+        if tags.count():
+            check(True, "标签云有内容", f"{tags.count()} 个")
             tags.first.click()
             page.wait_for_timeout(1200)
             filtered = page.locator(".card").count()
             check(filtered != cards or expected == cards, "点击标签后结果集变化", f"{cards} → {filtered}")
+        else:
+            # 标签云只展示「确实有图片」的标签。生产库可能一张带标签的图都没有，
+            # 这是用户数据状态而不是代码回归；此时验证空状态正常渲染，
+            # 避免门禁被数据绑架（旧断言固定要求 >0 个，库一旦清标签就永久 FAIL）。
+            empty_text = page.locator(".sidebar .cloud").inner_text().strip()
+            check("暂无带图片的标签" in empty_text, "标签云空状态", empty_text[:40] or "空")
 
         # ---- 提示词 ----
         page.click("button:has-text('提示词')")

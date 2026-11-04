@@ -6,61 +6,43 @@
  * 后端的 `remote` 条目（440 条外链服装）在 DTO 里直接给远程 URL，
  * 前端只做热链展示，不能拿它出图。
  *
- * TODO(gen_api_types): 骨架生成的 openapi.d.ts 还没有 reference schema，
- * 这里的类型先手写；波次 D 由 `tools/gen_api_types.py` 统一替换。
+ * 类型来自 `./openapi`（`tools/gen_api_types.py` 生成），这里只做语义别名：
+ * 带默认值的字段在 schema 里是可选的，但 `response_model` 返回时一定带全，
+ * 所以对响应模型套 `Required<>`，分页信封再把 `items` 换成别名版本。
  */
+import type { components } from './openapi'
 import { apiGet } from './client'
+
+type Schemas = components['schemas']
 
 export type ReferenceLibraryKey = 'pose' | 'costume' | 'portrait' | 'costume-anime'
 export type ReferenceImageKind = 'thumb' | 'image' | 'depth'
 
-export interface ReferenceFacetValue {
-  value: string
-  count: number
-}
+export type ReferenceFacetValue = Required<Schemas['ReferenceFacetValue']>
 
-export interface ReferenceLibraryStats {
-  library: string
-  label: string
-  total: number
-  local: number
-  remote: number
-  /** NSFW 过滤后当前可见的条数（默认过滤敏感分类）。 */
-  visible: number
-  available: boolean
+export type ReferenceLibraryStats = Omit<
+  Required<Schemas['ReferenceLibraryStats']>,
+  'groups' | 'facets' | 'angles'
+> & {
   groups: ReferenceFacetValue[]
   facets: ReferenceFacetValue[]
   angles: ReferenceFacetValue[]
 }
 
-export interface ReferenceLibraryListResponse {
+export type ReferenceLibraryListResponse = Omit<
+  Required<Schemas['ReferenceLibraryListResponse']>,
+  'libraries'
+> & {
   libraries: ReferenceLibraryStats[]
 }
 
-export interface ReferenceItem {
-  id: string
-  library: string
-  name: string
-  subtitle: string
-  group: string
-  facet: string
-  angle: string
-  tags: string[]
-  keywords: string
-  thumb_url: string
-  image_url: string
-  depth_url: string | null
-  hot: boolean
-  featured: boolean
-  nsfw: boolean
-  remote: boolean
-}
+export type ReferenceItem = Required<Schemas['ReferenceItem']>
 
-export interface ReferenceItemPage {
+export type ReferenceItemPage = Omit<
+  Required<Schemas['ReferenceItemListResponse']>,
+  'items'
+> & {
   items: ReferenceItem[]
-  total: number
-  page: number
-  page_size: number
 }
 
 export interface ReferenceItemQuery {

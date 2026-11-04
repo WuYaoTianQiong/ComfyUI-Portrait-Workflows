@@ -6,7 +6,9 @@ import { useRouter } from 'vue-router'
 import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Pager from '../components/Pager.vue'
 import QueryState from '../components/QueryState.vue'
+import ReferenceSheetButton from '../components/ReferenceSheetButton.vue'
 import RefLightbox from '../components/RefLightbox.vue'
+import { apiPost } from '../api/client'
 import {
   listReferenceItems,
   listReferenceLibraries,
@@ -18,6 +20,7 @@ import {
   type ReferenceLibraryStats,
 } from '../api/reference'
 import { useGenerate } from '../composables/useGenerate'
+import { useToast } from '../composables/useToast'
 import { confirmDialog } from '../utils/naive'
 
 /**
@@ -505,6 +508,7 @@ const CORE_SLOTS: Array<{ key: CoreSlot; label: string; empty: string }> = [
 
 const router = useRouter()
 const { busy, error: submitError, submitAndTrack } = useGenerate()
+const toast = useToast()
 
 const picks = ref<Record<CoreSlot, ReferenceItem | null>>({
   portrait: null,
@@ -572,6 +576,57 @@ const canGenerate = computed(
 )
 
 const extraNode = computed(() => (extraPick.value ? extraPick.value.id : ''))
+
+/** 参考板至少需要一张已选本地条目；外链条目本来就不会进 picks。 */
+const canExportSheet = computed(
+  () => !!(picks.value.portrait || picks.value.costume || picks.value.pose),
+)
+
+// ---------------------------------------------------------------------------
+// 单条转提示词（M4）
+// ---------------------------------------------------------------------------
+
+interface FragmentResponse {
+  success: boolean
+  id: number
+  dedup: boolean
+  prompt: string
+}
+
+const fragmentBusy = ref<Set<string>>(new Set())
+
+async function saveAsFragment(item: ReferenceItem) {
+  const current = displayItem(item)
+  const key = `${current.library}/${current.id}`
+  if (fragmentBusy.value.has(key)) return
+
+  const ok = await confirmDialog({
+    title: '转为提示词',
+    content: `「${current.name || current.id}」会写入提示词库，参与组合创作的随机池。确定继续？`,
+    positiveText: '转换',
+    negativeText: '取消',
+  })
+  if (!ok) return
+
+  const busySet = new Set(fragmentBusy.value)
+  busySet.add(key)
+  fragmentBusy.value = busySet
+  try {
+    const result = await apiPost<FragmentResponse>('/api/reference/fragments', {
+      library: current.library,
+      item_id: current.id,
+    })
+    toast.success(
+      result.dedup ? '提示词已存在，未重复写入' : '已加入提示词库（组合创作随机池）',
+    )
+  } catch (e) {
+    toast.error(`转提示词失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    const next = new Set(fragmentBusy.value)
+    next.delete(key)
+    fragmentBusy.value = next
+  }
+}
 
 async function submitRecipe(dryRun: boolean) {
   if (!canGenerate.value) return
@@ -812,6 +867,14 @@ const gridEl = ref<HTMLElement | null>(null)
                   >
                     {{ isExtraPicked(displayItem(item)) ? '4✓' : '4' }}
                   </button>
+                  <button
+                    class="mini"
+                    :disabled="fragmentBusy.has(`${displayItem(item).library}/${displayItem(item).id}`)"
+                    title="转为提示词（会进入组合创作的随机池）"
+                    @click="saveAsFragment(item)"
+                  >
+                    词
+                  </button>
                 </div>
               </div>
 
@@ -900,6 +963,16 @@ const gridEl = ref<HTMLElement | null>(null)
           <button class="btn btn-sm primary" :disabled="!canGenerate" @click="submitRecipe(false)">
             {{ busy ? '提交中…' : '开始出图' }}
           </button>
+        </div>
+
+        <div class="sheet-actions">
+          <ReferenceSheetButton
+            :pose="picks.pose?.id ?? null"
+            :costume="picks.costume?.id ?? null"
+            :portrait="picks.portrait?.id ?? null"
+            :disabled="!canExportSheet"
+          />
+          <span class="sheet-hint">按「人像 → 服装 → 姿势」拼成 1800×1200</span>
         </div>
 
         <div v-if="submitError" class="panel-error">{{ submitError }}</div>
@@ -1289,6 +1362,19 @@ const gridEl = ref<HTMLElement | null>(null)
 
 .panel-actions .btn {
   flex: 1;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+}
+
+.sheet-hint {
+  font-size: var(--fs-xs);
+  color: var(--text);
+  opacity: 0.62;
 }
 
 .panel-error {

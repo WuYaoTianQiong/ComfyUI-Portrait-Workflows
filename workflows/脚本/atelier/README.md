@@ -41,8 +41,8 @@ atelier/
 │  ├─ models.py         # Peewee 模型（含 schema 迁移）
 │  ├─ schemas.py        # Pydantic 出入参
 │  ├─ main.py           # FastAPI 实例、中间件、路由注册、静态挂载
-│  ├─ routers/          # 只做 HTTP 入参/出参，不写业务
-│  └─ services/         # 业务与外部交互（工作流解析、任务状态机、缩略图…）
+│  ├─ routers/          # 只做 HTTP 入参/出参，不写业务（reference_* 为 AI 参考图库）
+│  └─ services/         # 业务与外部交互（reference_library / reference_sheet / uploads 为参考库链路）
 ├─ frontend/            # Vue3 + TS 源码
 ├─ web/                 # 前端构建产物（不入库）
 ├─ tests/               # pytest 契约/单元测试；tests/e2e 为 Playwright
@@ -78,6 +78,12 @@ atelier/
 | `ATELIER_DB_PATH` | `<library_root>/文档/提示词收藏.db` | 主库 |
 | `ATELIER_THUMBNAIL_DIR` | `<library_root>/thumbnails` | 缩略图缓存 |
 | `ATELIER_NO_BROWSER` | 未设置 | 设为 `1` 时启动不自动开浏览器（CI 用） |
+| `ATELIER_REFERENCE_ENABLED` | `1` | `0` = 参考库路由全部 404（整体回滚） |
+| `ATELIER_REFERENCE_ROOT` | `<library_root>/ai-pose-gallery-zh` | 上游只读参考库（junction，勿用 `../custom_nodes/...`） |
+| `ATELIER_REFERENCE_ALLOW_NSFW` | `0` | `1` = 允许查看敏感集合 |
+| `ATELIER_REFERENCE_PAGE_SIZE` | `60` | 参考库默认分页 |
+| `ATELIER_REFERENCE_NSFW_POSE_SYSTEMS` | `全身单人・性感系,双人缠绵` | 逗号分隔的敏感姿势体系 |
+| `ATELIER_REFERENCE_NSFW_COSTUME_CATEGORIES` | `内衣・睡衣,性感穿搭` | 逗号分隔的敏感服装分类 |
 
 ### 出图归档位置
 
