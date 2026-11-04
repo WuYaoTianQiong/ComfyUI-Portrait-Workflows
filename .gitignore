@@ -14,6 +14,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# 例外：gallery-web 的 src/lib 是前端源码，不是 Python 依赖目录
+!workflows/脚本/atelier/gallery-web/src/lib/
+!workflows/脚本/atelier/gallery-web/src/lib/**
 lib64/
 parts/
 sdist/
