@@ -10,6 +10,7 @@ import {
   CopyIcon,
   DicesIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   FileUpIcon,
   ImagePlusIcon,
   KeyRoundIcon,
@@ -36,7 +37,7 @@ import {
 } from '@/api/workflows'
 import { Field, Section } from '@/components/common/FormSection'
 import { WorkflowParameters } from '@/components/studio/WorkflowParameters'
-import { applyWorkflowOverrides, validateReferenceCombinations, workflowIdentity } from '@/lib/comfyWorkflowParameters'
+import { applyWorkflowOverrides, workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,6 +67,15 @@ export const Route = createFileRoute('/studio')({
   staticData: { title: 'AI 合成台' },
   component: StudioPage,
 })
+
+/** 与后端 STYLE_PRESETS 对齐的画风选项；其余旧画风提交时降级为 realistic。 */
+const STYLE_PRESET_OPTIONS = ['none', 'realistic'] as const
+
+/** 未决任务提交时间展示：时间戳缺失或非法时给出可读回退，避免渲染 Invalid Date。 */
+function formatSubmittedAt(timestamp: number): string {
+  const date = new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
+}
 
 function StudioPage() {
   const {
@@ -101,16 +111,20 @@ function StudioPage() {
   const slotInputRef = useRef<HTMLInputElement | null>(null)
   const uploadSlotRef = useRef<'portrait' | 'costume' | 'pose'>('portrait')
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null)
-  const [showReferenceErrors, setShowReferenceErrors] = useState(false)
-  const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
 
   const providerCfg = apiConfig.providers.comfyui
 
+  // 后端 recipes 只支持 none / realistic（C-REF-RECIPES@2）：
+  // 旧画风配置一律按写实预览与提交，避免下拉显示与后端出图不一致。
+  const submitStylePreset = apiConfig.stylePreset === 'none' ? 'none' : 'realistic'
+
   const activeWorkflowImages = recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
-  const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
+  const defaultPrompt = buildRecipePrompt(recipe, submitStylePreset, activeWorkflowImages)
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
+  // 只读预览由槽位生成；提交只发送这段独立的补充要求（prompt_suffix）。
+  const [promptSuffix, setPromptSuffix] = useState('')
   const [extraUrlInput, setExtraUrlInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
@@ -331,11 +345,19 @@ function StudioPage() {
     }
   }
 
-  const missingReferences = [
-    { label: '人像', node: apiConfig.comfyuiParams.portraitNodeId, image: recipe.portrait },
-    { label: '服装', node: apiConfig.comfyuiParams.costumeNodeId, image: recipe.costume },
-    { label: '姿势', node: apiConfig.comfyuiParams.poseNodeId, image: recipe.pose },
-  ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label)
+  // 后端 recipes 只接受图库条目 id：上传图当前只能本地预览，提交会被拦截。
+  const uploadedSlots = [
+    recipe.portrait?.source === 'upload' ? '人像' : '',
+    recipe.costume?.source === 'upload' ? '服装' : '',
+    recipe.pose?.source === 'upload' ? '姿势' : '',
+  ].filter(Boolean)
+
+  // 后端只在任务有总量时给 percent；这里再夹紧一次，避免脏数据画出越界进度条。
+  const rawPercent = generationProgress?.percent
+  const progressValue =
+    typeof rawPercent === 'number' && Number.isFinite(rawPercent)
+      ? Math.min(100, Math.max(0, Math.round(rawPercent)))
+      : null
 
   const extraImages = recipe.extraImages || []
   const hasStitchRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || extraImages.length > 0)
@@ -421,18 +443,11 @@ function StudioPage() {
     }
   }
 
+  // 提交不再做节点映射校验：槽位由后端固定节点映射解析，参数面板只影响本地预览。
+  // 只把独立补充要求作为 prompt_suffix 发出；空串用于覆盖可能存在的历史复用词，
+  // 避免把 textarea 里的完整提示词当成补充要求重复提交。
   const handleGenerate = () => {
-    const cp = apiConfig.comfyuiParams
-    const workflowImages = recipe.workflowImagesIdentity === workflowIdentity(cp.workflowJson) ? recipe.workflowImages || {} : {}
-    const selected = [recipe.portrait ? cp.portraitNodeId : '', recipe.costume ? cp.costumeNodeId : '', recipe.pose ? cp.poseNodeId : '', ...Object.keys(workflowImages)].filter((id) => id && id !== 'none')
-    const combinationError = validateReferenceCombinations(cp.workflowJson, selected)
-    if (combinationError) { toast.error(combinationError); setShowAdvanced(true); return }
-    if (missingReferences.length) {
-      setShowReferenceErrors(true)
-      requestAnimationFrame(() => referenceErrorsRef.current?.focus())
-      return
-    }
-    void startGeneration(prompt)
+    void startGeneration(promptSuffix.trim())
   }
 
   return (
@@ -499,15 +514,11 @@ function StudioPage() {
           >
 
             <input ref={slotInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlotUpload} />
-            {showReferenceErrors && missingReferences.length > 0 && (
-              <div id="reference-errors" ref={referenceErrorsRef} role="alert" tabIndex={-1} className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive focus-visible:outline-2">
-                请先选择或上传：{missingReferences.join('、')}。这些槽位已绑定工作流节点。
-              </div>
-            )}
+
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
             <div className="grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
               {/* 人像槽 */}
-              <div className={`relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5 ${showReferenceErrors && missingReferences.includes('人像') ? 'ring-1 ring-destructive' : ''}`}>
+              <div className="relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5">
                 {recipe.portrait ? (
                   <>
                     <button type="button" aria-label="放大人像参考图" className="shrink-0 cursor-zoom-in overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
@@ -548,7 +559,7 @@ function StudioPage() {
                       </div>
                       <span className="truncate text-xs">+ 选人像</span>
                     </Link>
-                    <Button type="button" variant="ghost" size="sm" aria-label="上传人像参考图" aria-describedby={showReferenceErrors && missingReferences.includes('人像') ? 'reference-errors' : undefined} aria-busy={uploadingSlot === 'portrait'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'portrait'; slotInputRef.current?.click() }}>
+                    <Button type="button" variant="ghost" size="sm" aria-label="上传人像参考图" aria-busy={uploadingSlot === 'portrait'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'portrait'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'portrait' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'portrait' ? '处理中' : '上传'}
                     </Button>
@@ -557,7 +568,7 @@ function StudioPage() {
               </div>
 
               {/* 服装槽 */}
-              <div className={`relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5 ${showReferenceErrors && missingReferences.includes('服装') ? 'ring-1 ring-destructive' : ''}`}>
+              <div className="relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5">
                 {recipe.costume ? (
                   <>
                     <button type="button" aria-label="放大服装参考图" className="shrink-0 cursor-zoom-in overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
@@ -598,7 +609,7 @@ function StudioPage() {
                       </div>
                       <span className="truncate text-xs">+ 选服装</span>
                     </Link>
-                    <Button type="button" variant="ghost" size="sm" aria-label="上传服装参考图" aria-describedby={showReferenceErrors && missingReferences.includes('服装') ? 'reference-errors' : undefined} aria-busy={uploadingSlot === 'costume'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'costume'; slotInputRef.current?.click() }}>
+                    <Button type="button" variant="ghost" size="sm" aria-label="上传服装参考图" aria-busy={uploadingSlot === 'costume'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'costume'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'costume' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'costume' ? '处理中' : '上传'}
                     </Button>
@@ -607,7 +618,7 @@ function StudioPage() {
               </div>
 
               {/* 姿势槽 */}
-              <div className={`relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5 ${showReferenceErrors && missingReferences.includes('姿势') ? 'ring-1 ring-destructive' : ''}`}>
+              <div className="relative flex min-w-0 items-start gap-2.5 rounded-xl bg-background p-2.5">
                 {recipe.pose ? (
                   <>
                     <button type="button" aria-label="放大姿势参考图" className="shrink-0 cursor-zoom-in overflow-hidden rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
@@ -687,7 +698,7 @@ function StudioPage() {
                       </div>
                       <span className="truncate text-xs">+ 选姿势</span>
                     </Link>
-                    <Button type="button" variant="ghost" size="sm" aria-label="上传姿势参考图" aria-describedby={showReferenceErrors && missingReferences.includes('姿势') ? 'reference-errors' : undefined} aria-busy={uploadingSlot === 'pose'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pose'; slotInputRef.current?.click() }}>
+                    <Button type="button" variant="ghost" size="sm" aria-label="上传姿势参考图" aria-busy={uploadingSlot === 'pose'} disabled={uploadingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pose'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'pose' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'pose' ? '处理中' : '上传'}
                     </Button>
@@ -695,6 +706,15 @@ function StudioPage() {
                 )}
               </div>
             </div>
+
+            {uploadedSlots.length > 0 && (
+              <div
+                role="note"
+                className="rounded-lg border border-amber-500/40 bg-amber-500/8 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300"
+              >
+                本地图片上传暂未接入后端，请从图库选择参考图（当前 {uploadedSlots.join('、')} 槽位是上传图，提交时会被拦截）。
+              </div>
+            )}
 
             {/* 附加参考图列表 + 可视化拖拽/粘贴上传框 */}
             <div className="space-y-2 pt-1">
@@ -962,16 +982,16 @@ function StudioPage() {
 
             <Field label="画风预设">
               <Select
-                value={apiConfig.stylePreset}
+                value={submitStylePreset}
                 onValueChange={(v) => updateApiConfig({ stylePreset: v })}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(STYLE_PRESETS).map(([key, info]) => (
+                  {STYLE_PRESET_OPTIONS.map((key) => (
                     <SelectItem key={key} value={key}>
-                      {info.label}
+                      {STYLE_PRESETS[key]?.label ?? key}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1110,22 +1130,41 @@ function StudioPage() {
                     </Field>
               </>
             )}
+            {/* D4 冻结：参数面板保留给用户预览/导出，但后端出图不读取它 */}
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              参数面板不改变后端出图的节点与工作流（D4 冻结）：提交只发送槽位库标识、画风与补充要求，节点映射由后端固定。
+            </p>
           </Section>
 
-          {activeTask && <Section title="未决任务" className="@lg/section:grid-cols-1">
-            <p className="break-all text-xs">{activeTask.task ? `任务 ${activeTask.task.promptId}：刷新后查询原任务，不重复提交。` : '提交结果未知或提交前被中断，请核对后端队列；不会自动重试提交。'}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button disabled={isGenerating || !activeTask.task} onClick={() => void resumeGeneration()}>恢复追踪</Button>
-              <Button variant="outline" onClick={() => void stopTracking()}>停止跟踪（不取消后端）</Button>
-            </div>
-          </Section>}
+          {activeTask && (
+            <Section title="未决任务" className="@lg/section:grid-cols-1">
+              <p className="break-all text-xs">
+                任务 #{activeTask.jobId}：{activeTask.summary}。刷新页面或切换回来后可按任务号恢复追踪，不会重复提交。
+              </p>
+              <p className="text-[11px] text-muted-foreground">提交于 {formatSubmittedAt(activeTask.submittedAt)}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button disabled={isGenerating} onClick={() => void resumeGeneration()}>恢复追踪</Button>
+                <Button variant="outline" onClick={() => void stopTracking()}>停止跟踪（不取消后端）</Button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                停止跟踪只中止本页轮询，后端任务可能仍在执行；如需取消该任务，请前往任务中心。
+              </p>
+            </Section>
+          )}
           {/* 3. 提示词与生成按钮 */}
           <Section
             title="3. 提示词 (Prompt)"
             className="@lg/section:grid-cols-1"
             actions={
               <div className="flex items-center gap-1.5">
-                <Button variant="ghost" size="sm" onClick={() => setCustomPrompt(null)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setCustomPrompt(null)
+                    setPromptSuffix('')
+                  }}
+                >
                   <RotateCcwIcon className="size-3.5" />
                   重置
                 </Button>
@@ -1145,10 +1184,24 @@ function StudioPage() {
           >
             <Textarea
               value={prompt}
-              onChange={(e) => setCustomPrompt(e.target.value)}
+              readOnly
               rows={5}
+              aria-label="提示词预览（只读，由槽位生成）"
               className="bg-background font-mono text-xs leading-relaxed"
             />
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              提示词由所选槽位自动生成，仅用于预览与复制；需要追加要求请填写下方「补充要求」。
+            </p>
+
+            <Field label="补充要求（可选）">
+              <Textarea
+                value={promptSuffix}
+                onChange={(e) => setPromptSuffix(e.target.value)}
+                rows={2}
+                placeholder="例如：暖色灯光、浅景深；作为 prompt_suffix 提交"
+                className="bg-background text-xs leading-relaxed"
+              />
+            </Field>
 
             <Button
               onClick={handleGenerate}
@@ -1192,27 +1245,37 @@ function StudioPage() {
                   <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                     <LoaderCircleIcon className="size-6 animate-spin" />
                   </div>
-                  <div className="space-y-1">
+                  <div className="w-full max-w-xs space-y-1">
                     <div className="text-sm font-semibold">正在生成角色图…</div>
                     {generatingModel && (
                       <Badge variant="secondary" className="font-mono text-[11px]">
                         {generatingModel}
                       </Badge>
                     )}
-                    {generationProgress && (
-                      <div className="w-56 max-w-full space-y-1.5 pt-1">
-                        <div className="text-xs text-foreground/80">{generationProgress.message}</div>
-                        {generationProgress.connection && <p className="text-xs text-muted-foreground">连接：{{connecting: 'WebSocket 连接中', connected: 'WebSocket 已连接', reconnecting: 'WebSocket 重连中，HTTP 保底跟踪', degraded: 'WebSocket 暂不可用，HTTP 保底跟踪'}[generationProgress.connection]}</p>}
-                        {generationProgress.percent !== undefined && (
-                          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-xs text-foreground/80">
+                        {generationProgress?.message ||
+                          (activeTask ? `任务 #${activeTask.jobId} 已提交，等待进度更新…` : '正在提交任务…')}
+                      </div>
+                      {progressValue !== null && (
+                        <div className="space-y-1">
+                          <div
+                            role="progressbar"
+                            aria-label="生成进度"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={progressValue}
+                            className="h-1.5 overflow-hidden rounded-full bg-muted"
+                          >
                             <div
                               className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${generationProgress.percent}%` }}
+                              style={{ width: `${progressValue}%` }}
                             />
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <div className="text-right text-[11px] text-muted-foreground">{progressValue}%</div>
+                        </div>
+                      )}
+                    </div>
                     <p className="pt-1 text-xs text-muted-foreground">
                       切换页面不会中断当前任务
                     </p>
@@ -1225,11 +1288,22 @@ function StudioPage() {
                   <p className="whitespace-pre-wrap break-all text-left text-xs leading-relaxed text-muted-foreground">
                     {generationError}
                   </p>
-                  {previewUrl && (
-                    <Button variant="ghost" size="sm" onClick={() => setZoomImageUrl(previewUrl)}>
-                      查看上一张结果
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerate}
+                      disabled={!hydrated || !!activeTask || isGenerating || uploadingSlot !== null}
+                    >
+                      <RotateCcwIcon className="size-3.5" />
+                      重试
                     </Button>
-                  )}
+                    {previewUrl && (
+                      <Button variant="ghost" size="sm" onClick={() => setZoomImageUrl(previewUrl)}>
+                        查看上一张结果
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ) : previewUrl ? (
                 <button type="button" aria-label="放大生成结果" onClick={() => setZoomImageUrl(previewUrl)} className="cursor-zoom-in rounded-xl focus-visible:outline-2 focus-visible:outline-ring"><img src={previewUrl} alt="生成结果" className="max-h-[480px] w-auto rounded-xl object-contain transition hover:opacity-95" /></button>
@@ -1239,6 +1313,19 @@ function StudioPage() {
                   <span className="text-xs">点击「生成角色图」后在此处展示生成结果</span>
                 </div>
               )}
+            </div>
+
+            {/* 任务中心是 atelier 的原生路由 /jobs；用 <a> 而不是 TanStack Link，
+                避免 basepath 把它拼成 /ref-web/jobs。 */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground">
+              <span>{activeTask ? `当前任务 #${activeTask.jobId}` : '任务由 atelier 后端排队执行'}</span>
+              <a
+                href="/jobs"
+                className="inline-flex items-center gap-1 font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <ExternalLinkIcon className="size-3.5" />
+                任务中心
+              </a>
             </div>
           </Section>
         </div>

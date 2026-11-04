@@ -37,6 +37,26 @@
    6. 缓存目录位于 `.cache/reference-remote`、不在 `data/`/`dist/`/`reference_root`，
       且被根 `.gitignore` 忽略（`git check-ignore` / `git status --ignored`）。
 
+阶段四（T13）追加检查（`C-REF-RECIPES@2` / `C-JOB-PROGRESS@1` / `C-BUILD-ARTIFACT@1`）：
+
+   1. 后端 TestClient：三图 dry_run 节点 1/2/3 + 三图工作流；第 4 张节点 78 +
+      四图工作流；`costume_library=costume-anime` + 已缓存条目成功；未知库 400；
+      另加缺 `extra_library`、未知画风、未知条目三项对抗探针。
+   2. Playwright 全新 context，8766：从人像/服装/姿势三个图库各选一条
+      （服装选二次元 CharaDB 条目），点击生成；网络记录必须出现
+      `POST /api/reference/recipes` 且请求体含 portrait_id/costume_id/pose_id/
+      costume_library/style，不得出现 POST /prompt、:8188、/comfy 提交；
+      必须出现 `GET /api/jobs/{id}` 轮询，进度文案与百分比可见。
+   3. 真实 ComfyUI 任务 5 分钟内完成时校验结果图 `naturalWidth > 0`；未完成或
+      后端失败时如实记录“真实出图未验证”，并改用 route mock
+      （mock recipes/jobs/media）独立验证结果图渲染。
+   4. 任务中心链接必须是原生 `a[href="/jobs"]`，点击可达 atelier 任务页；
+      失败分支（recipes 400 `{"detail":"测试用失败"}`）必须显示 detail 且
+      `isGenerating` 结束；上传槽位提示可见且提交被拦截；
+      参数面板冻结说明、只读提示词 + 独立补充要求、画风仅 none/realistic。
+
+   只跑阶段四可设置 `T3_E2E_ONLY=phase4`（仍执行静态检查与 dist 产物检查）。
+
 跑法（二选一，脚本会自动判断是否需要自起实例）：
 
     ATELIER_PORT=8766 ATELIER_REFERENCE_ALLOW_NSFW=1 python main.py   # 手动先起
@@ -112,6 +132,12 @@ LEGACY_DATA_LITERALS = [
 
 _results: list[tuple[bool, str, str]] = []
 _observations: list[tuple[str, str]] = []
+
+#: 阶段四：只跑阶段四时可设置 `T3_E2E_ONLY=phase4`（默认仍跑全量）。
+P4_ONLY = os.environ.get("T3_E2E_ONLY", "").strip().lower() == "phase4"
+#: mock 任务 id：仅用于结果图渲染验证，不写入真实后端。
+P4_MOCK_JOB_ID = 900001
+P4_PNG_BYTES = base64.b64decode(TINY_PNG_B64)
 
 
 # ---------------------------------------------------------------------------
@@ -2079,6 +2105,832 @@ def check_phase3_studio_default(browser, shots_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 阶段四（T13）：合成台提交 -> 轮询 -> 结果图 -> 任务中心
+#
+# 真实提交使用临时实例（8766）；ComfyUI 真实任务 5 分钟内未完成或失败时，
+# 结果图渲染改用 Playwright route mock 独立验证。报告中区分：
+#   - 实测确认：POST 请求体、GET /api/jobs 轮询、进度 UI、失败分支、上传拦截；
+#   - mock 确认：结果图 <img> 渲染与百分比进度条（仅 mock 场景）；
+#   - 真实出图是否完成：按后端 job 快照与页面实际状态如实输出。
+# ---------------------------------------------------------------------------
+_P4_PROGRESS_INIT_JS = r"""() => {
+    window.__p4Progress = { messages: [], percents: [] };
+    const add = (arr, value) => { if (!arr.includes(value)) arr.push(value); };
+    window.__p4Snap = () => {
+        const bar = document.querySelector('[aria-label="生成进度"]');
+        if (bar) add(window.__p4Progress.percents, Number(bar.getAttribute('aria-valuenow')));
+        const text = document.body.innerText || '';
+        for (const m of ['正在提交出图任务', '任务已提交，等待后端处理', '任务已提交，正在排队',
+                         '正在出图', '任务已完成，正在获取生成结果', '任务已结束']) {
+            if (text.includes(m)) add(window.__p4Progress.messages, m);
+        }
+    };
+    if (window.__p4Mo) window.__p4Mo.disconnect();
+    window.__p4Mo = new MutationObserver(window.__p4Snap);
+    window.__p4Mo.observe(document.body, { subtree: true, childList: true,
+                                            characterData: true, attributes: true });
+    window.__p4Snap();
+}"""
+
+_P4_PROGRESS_READ_JS = r"""() => {
+    if (window.__p4Snap) window.__p4Snap();
+    return window.__p4Progress || { messages: [], percents: [] };
+}"""
+
+_P4_RESULT_STATE_JS = r"""() => {
+    const img = document.querySelector('img[alt="生成结果"]');
+    const text = document.body.innerText || '';
+    const generating = text.includes('正在生成角色图…')
+        || Array.from(document.querySelectorAll('button'))
+            .some((b) => (b.textContent || '').includes('生成中…'));
+    return {
+        src: img ? (img.currentSrc || img.src) : '',
+        loaded: Boolean(img && img.complete && img.naturalWidth > 0),
+        generating,
+        error: text.includes('生成失败'),
+        noImage: text.includes('任务完成但未找到结果图'),
+    };
+}"""
+
+_P4_RECIPE_JS = r"""() => {
+    try {
+        const raw = JSON.parse(localStorage.getItem('pose_atlas_recipe_v3') || '{}');
+        return {
+            portrait: raw.portrait || null,
+            costume: raw.costume || null,
+            pose: raw.pose || null,
+        };
+    } catch (e) {
+        return { portrait: null, costume: null, pose: null };
+    }
+}"""
+
+
+class _P4Network:
+    """阶段四网络记录：提交、轮询、结果图与直连 ComfyUI 违规。"""
+
+    def __init__(self, page) -> None:
+        self.requests: list[tuple[str, str]] = []
+        self.recipe_requests: list[dict] = []
+        self.recipe_responses: list[dict] = []
+        self.job_requests: list[str] = []
+        self.media_requests: list[str] = []
+        self.forbidden: list[str] = []
+        page.on("request", self._on_request)
+        page.on("response", self._on_response)
+
+    def _on_request(self, req) -> None:
+        method = req.method.upper()
+        url = req.url
+        parsed = urlsplit(url)
+        path = parsed.path
+        self.requests.append((method, url))
+
+        if path == "/api/reference/recipes" and method == "POST":
+            body: object
+            try:
+                body = json.loads(req.post_data or "{}")
+            except Exception:
+                body = {"__unparsed__": req.post_data}
+            self.recipe_requests.append({"url": url, "body": body})
+        if method == "GET" and re.fullmatch(r"/api/jobs/\d+", path):
+            self.job_requests.append(url)
+        if path.startswith("/api/media/image"):
+            self.media_requests.append(url)
+
+        # 计划 C-JOB-PROGRESS@1-5：不得直连 ComfyUI 提交
+        if method == "POST" and path.rstrip("/").endswith("/prompt"):
+            self.forbidden.append(f"POST {url}")
+        if method in ("POST", "PUT", "PATCH") and (
+                path.startswith("/comfy") or "/comfy/" in path):
+            self.forbidden.append(f"{method} {url}")
+        if parsed.port == 8188:
+            self.forbidden.append(f"{method} {url}")
+
+    def _on_response(self, resp) -> None:
+        try:
+            path = urlsplit(resp.url).path
+        except Exception:
+            return
+        if path == "/api/reference/recipes" and resp.request.method.upper() == "POST":
+            entry = {"status": resp.status, "body": None, "error": ""}
+            try:
+                entry["body"] = resp.json()
+            except Exception as exc:
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+            self.recipe_responses.append(entry)
+
+
+def _p4_wait_cards(page, timeout_ms: int = 45000) -> None:
+    page.get_by_role("button", name="加入配方", exact=True).first.wait_for(
+        state="visible", timeout=timeout_ms)
+
+
+def _p4_read_recipe(page) -> dict:
+    return page.evaluate(_P4_RECIPE_JS)
+
+
+def _p4_pick_three_slots(page, shots_dir: Path) -> dict:
+    """从三个图库各选一条（服装必须是已缓存的二次元条目），最后回到合成台。"""
+    current = _p4_read_recipe(page)
+
+    if not current.get("portrait"):
+        goto_settle(page, "/ref-web/portraits", "人像颜值库")
+        _p4_wait_cards(page)
+        page.get_by_role("button", name="加入配方", exact=True).first.click()
+        page.wait_for_timeout(600)
+
+    costume = current.get("costume") or {}
+    if not costume or costume.get("library") != "costume-anime":
+        goto_settle(page, "/ref-web/costumes", "服装穿搭库")
+        _p4_wait_cards(page)
+        page.get_by_role("button", name="二次元", exact=True).click()
+        page.wait_for_timeout(1000)
+        _p4_wait_cards(page)
+        texts = _p3_card_texts(page)
+        idx = next((i for i, text in enumerate(texts) if "CharaDB" in text), 0)
+        buttons = page.get_by_role("button", name="加入配方", exact=True)
+        if buttons.count() > 0:
+            buttons.nth(min(idx, buttons.count() - 1)).click()
+        page.wait_for_timeout(600)
+
+    if not current.get("pose"):
+        goto_settle(page, "/ref-web/poses", "动作姿势库")
+        _p4_wait_cards(page)
+        page.get_by_role("button", name="加入配方", exact=True).first.click()
+        page.wait_for_timeout(600)
+
+    goto_settle(page, "/ref-web/studio", "AI 角色合成台")
+    try:
+        page.wait_for_function(
+            """() => {
+                try {
+                    const r = JSON.parse(localStorage.getItem('pose_atlas_recipe_v3') || '{}');
+                    return Boolean(r.portrait && r.costume && r.pose);
+                } catch { return false; }
+            }""",
+            timeout=20000,
+        )
+    except Exception:
+        pass
+    return _p4_read_recipe(page)
+
+
+def _p4_ensure_three_slots(page, shots_dir: Path) -> dict:
+    current = _p4_read_recipe(page)
+    if current.get("portrait") and current.get("costume") and current.get("pose"):
+        return current
+    return _p4_pick_three_slots(page, shots_dir)
+
+
+def _p4_install_progress_observer(page) -> None:
+    page.evaluate(_P4_PROGRESS_INIT_JS)
+
+
+def _p4_read_progress(page) -> dict:
+    return page.evaluate(_P4_PROGRESS_READ_JS)
+
+
+def _p4_wait_for_recipe_post(page, net: _P4Network, timeout_s: float = 90.0) -> None:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if net.recipe_requests and net.recipe_responses:
+            return
+        page.wait_for_timeout(400)
+
+
+def check_phase4_recipe_testclient() -> None:
+    section("阶段四-1 后端 recipes TestClient 契约（C-REF-RECIPES@2）")
+    if str(V4) not in sys.path:
+        sys.path.insert(0, str(V4))
+    try:
+        from fastapi.testclient import TestClient
+        from app.main import app
+    except Exception as exc:
+        check(False, "[阶段四] 导入 TestClient 与 app.main",
+              f"{type(exc).__name__}: {exc}")
+        return
+
+    client = TestClient(app)
+    try:
+        def _items(library: str, size: int = 5) -> list[dict]:
+            resp = client.get(f"/api/reference/items?library={library}&page_size={size}")
+            check(resp.status_code == 200, f"[阶段四] TestClient items {library} 返回 200",
+                  f"status={resp.status_code}")
+            return list((resp.json() or {}).get("items") or [])
+
+        portraits = _items("portrait", 1)
+        costumes = _items("costume", 1)
+        poses = _items("pose", 5)
+        anime_items = _items("costume-anime", 200)
+        if not (portraits and costumes and poses):
+            check(False, "[阶段四] TestClient 取得三个本地库条目",
+                  f"portrait={len(portraits)} costume={len(costumes)} pose={len(poses)}")
+            return
+
+        cached_ids = _cached_item_ids()
+        anime = next((it for it in anime_items if it.get("id") in cached_ids), None)
+        check(anime is not None,
+              "[阶段四] 找到可见且已缓存的 costume-anime 条目",
+              f"visible={len(anime_items)} cached={len(cached_ids)}")
+
+        base = {
+            "portrait_id": portraits[0]["id"],
+            "costume_id": costumes[0]["id"],
+            "pose_id": poses[0]["id"],
+            "dry_run": True,
+        }
+
+        resp = client.post("/api/reference/recipes", json=base)
+        check(resp.status_code == 200, "[阶段四] TestClient 三图 dry_run 200",
+              f"status={resp.status_code} body={resp.text[:180]}")
+        if resp.status_code == 200:
+            result = resp.json()
+            nodes = [(n.get("role"), n.get("id")) for n in result.get("nodes", {}).get("inputs", [])]
+            check(nodes == [("target", "1"), ("ref1", "2"), ("ref2", "3")],
+                  "[阶段四] TestClient 三图节点映射 1/2/3", f"nodes={nodes}")
+            check("三图角色合成" in (result.get("workflow_path") or ""),
+                  "[阶段四] TestClient 三图工作流", f"workflow={result.get('workflow_path')}")
+            check(result.get("dry_run") is True, "[阶段四] TestClient dry_run=true",
+                  f"dry_run={result.get('dry_run')}")
+            check("job_id" not in result, "[阶段四] TestClient dry_run 响应无 job_id",
+                  f"keys={sorted(result)}")
+
+        if len(poses) >= 2:
+            resp4 = client.post("/api/reference/recipes", json={
+                **base, "extra_library": "pose", "extra_id": poses[1]["id"],
+            })
+            check(resp4.status_code == 200, "[阶段四] TestClient 第 4 张 dry_run 200",
+                  f"status={resp4.status_code} body={resp4.text[:180]}")
+            if resp4.status_code == 200:
+                result4 = resp4.json()
+                nodes4 = [(n.get("role"), n.get("id"))
+                          for n in result4.get("nodes", {}).get("inputs", [])]
+                check(nodes4 == [("target", "1"), ("ref1", "2"), ("ref2", "3"),
+                                 ("ref3", "78")],
+                      "[阶段四] TestClient 四图节点映射 1/2/3/78", f"nodes={nodes4}")
+                check("四图参考" in (result4.get("workflow_path") or ""),
+                      "[阶段四] TestClient 四图工作流",
+                      f"workflow={result4.get('workflow_path')}")
+
+        if anime is not None:
+            resp_anime = client.post("/api/reference/recipes", json={
+                **base, "costume_id": anime["id"], "costume_library": "costume-anime",
+            })
+            check(resp_anime.status_code == 200,
+                  "[阶段四] TestClient 已缓存 anime 服装 200",
+                  f"status={resp_anime.status_code} body={resp_anime.text[:200]}")
+            if resp_anime.status_code == 200:
+                result_anime = resp_anime.json()
+                slot = next((s for s in result_anime.get("slots", [])
+                             if s.get("role") == "costume"), {})
+                check(slot.get("library") == "costume-anime",
+                      "[阶段四] TestClient 服装槽 library=costume-anime",
+                      f"slot={slot}")
+                check(str(CACHE_ROOT).lower() in (slot.get("path") or "").lower(),
+                      "[阶段四] TestClient 服装槽解析到本机缓存文件",
+                      f"path={slot.get('path')}")
+
+        bad = client.post("/api/reference/recipes", json={
+            **base, "costume_library": "bogus",
+        })
+        check(bad.status_code == 400, "[阶段四] TestClient 未知服装库 400",
+              f"status={bad.status_code} body={bad.text[:160]}")
+        check("不支持的服装库" in bad.text,
+              "[阶段四] TestClient 未知服装库 detail 可读", f"body={bad.text[:160]}")
+
+        # 对抗性探针：缺 extra_library / 未知画风 / 未知条目
+        missing_extra_lib = client.post("/api/reference/recipes", json={
+            **base, "extra_id": poses[0]["id"],
+        })
+        check(missing_extra_lib.status_code == 400,
+              "[阶段四] TestClient 第 4 张缺库标识 400",
+              f"status={missing_extra_lib.status_code} body={missing_extra_lib.text[:160]}")
+        check("第 4 张缺少参考库标识" in missing_extra_lib.text,
+              "[阶段四] TestClient 第 4 张缺库标识 detail",
+              f"body={missing_extra_lib.text[:160]}")
+
+        bad_style = client.post("/api/reference/recipes", json={
+            **base, "style": "fashion",
+        })
+        check(bad_style.status_code == 400, "[阶段四] TestClient 未知画风 400",
+              f"status={bad_style.status_code} body={bad_style.text[:160]}")
+        check("不支持的画风" in bad_style.text,
+              "[阶段四] TestClient 未知画风 detail", f"body={bad_style.text[:160]}")
+
+        bad_item = client.post("/api/reference/recipes", json={
+            **base, "costume_id": "no-such-item", "costume_library": "costume-anime",
+        })
+        check(bad_item.status_code == 404, "[阶段四] TestClient 未知 anime 条目 404",
+              f"status={bad_item.status_code} body={bad_item.text[:160]}")
+    finally:
+        client.close()
+
+
+def check_phase4_real_submit(browser, shots_dir: Path):
+    """真实提交：三图库选择 -> POST recipes -> GET jobs 轮询 -> 结果图。返回 storage_state。"""
+    section("阶段四-2 合成台真实提交（三图库选择 / POST recipes / GET jobs）")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p4-real")
+    net = _P4Network(page)
+    state = None
+    try:
+        pick: dict = {"portrait": None, "costume": None, "pose": None}
+        try:
+            pick = _p4_pick_three_slots(page, shots_dir)
+        except Exception as exc:
+            check(False, "[阶段四] 从三个图库选择条目",
+                  f"{type(exc).__name__}: {exc}")
+
+        check(pick.get("portrait") is not None, "[阶段四] 已选人像条目",
+              f"name={(pick.get('portrait') or {}).get('发型名称')}")
+        check(pick.get("costume") is not None, "[阶段四] 已选服装条目",
+              f"name={(pick.get('costume') or {}).get('服装名称')}")
+        check(pick.get("pose") is not None, "[阶段四] 已选姿势条目",
+              f"name={(pick.get('pose') or {}).get('姿势名称')}")
+        check((pick.get("costume") or {}).get("library") == "costume-anime",
+              "[阶段四] 所选服装来自 costume-anime（CharaDB）",
+              f"library={(pick.get('costume') or {}).get('library')}")
+
+        initial_src = page.evaluate(
+            """() => {
+                const img = document.querySelector('img[alt="生成结果"]');
+                return img ? (img.currentSrc || img.src) : '';
+            }"""
+        )
+        _p4_install_progress_observer(page)
+        page.screenshot(path=str(shots_dir / "phase4_studio_selected.png"))
+
+        if not all(pick.get(k) for k in ("portrait", "costume", "pose")):
+            observe("未选齐三个槽位，跳过真实提交", f"pick={pick}")
+        else:
+            page.get_by_role("button", name="生成角色图", exact=True).click()
+            _p4_wait_for_recipe_post(page, net, timeout_s=90.0)
+
+            check(bool(net.recipe_requests),
+                  "[阶段四] 出现 POST /api/reference/recipes",
+                  f"requests={[r['url'] for r in net.recipe_requests][:2]}")
+            body = net.recipe_requests[0]["body"] if net.recipe_requests else {}
+            if not isinstance(body, dict):
+                body = {}
+            for field in ("portrait_id", "costume_id", "pose_id",
+                          "costume_library", "style"):
+                check(bool(body.get(field)),
+                      f"[阶段四] 请求体含 {field}", f"value={body.get(field)!r}")
+            expected_library = (pick.get("costume") or {}).get("library") or "costume"
+            check(body.get("costume_library") == expected_library,
+                  "[阶段四] costume_library 与所选服装一致",
+                  f"request={body.get('costume_library')!r} selected={expected_library!r}")
+            check(body.get("style") in ("none", "realistic"),
+                  "[阶段四] style 仅 none/realistic", f"style={body.get('style')!r}")
+            check("prompt" not in body,
+                  "[阶段四] 请求体不含完整 prompt 字段",
+                  f"keys={sorted(body)}")
+            check(body.get("seed_mode") in ("fixed", "random", "increment"),
+                  "[阶段四] 请求体含合法 seed_mode", f"seed_mode={body.get('seed_mode')!r}")
+
+            check(bool(net.recipe_responses), "[阶段四] 收到 recipes 响应",
+                  f"responses={len(net.recipe_responses)}")
+            resp = net.recipe_responses[0] if net.recipe_responses else {}
+            check(resp.get("status") == 200, "[阶段四] recipes 返回 200",
+                  f"status={resp.get('status')} body={str(resp.get('body'))[:180]}")
+            job_id = 0
+            try:
+                job_id = int((resp.get("body") or {}).get("job_id") or 0)
+            except Exception:
+                job_id = 0
+            check(job_id > 0, "[阶段四] recipes 返回 job_id",
+                  f"job_id={job_id} error={resp.get('error')}")
+
+            if job_id > 0:
+                deadline = time.time() + 60
+                while time.time() < deadline and not any(
+                        url.endswith(f"/api/jobs/{job_id}") for url in net.job_requests):
+                    page.wait_for_timeout(300)
+                check(any(url.endswith(f"/api/jobs/{job_id}") for url in net.job_requests),
+                      f"[阶段四] 出现 GET /api/jobs/{job_id} 轮询",
+                      f"job_requests={net.job_requests[:3]}")
+
+                progress = {"messages": [], "percents": []}
+                deadline = time.time() + 30
+                while time.time() < deadline:
+                    progress = _p4_read_progress(page)
+                    if progress.get("messages") and progress.get("percents"):
+                        break
+                    page.wait_for_timeout(250)
+                check(bool(progress.get("messages")),
+                      "[阶段四] UI 出现进度文案", f"messages={progress.get('messages')}")
+                check(any(m != "正在提交出图任务"
+                          for m in progress.get("messages", [])),
+                      "[阶段四] 进度文案包含后端任务阶段",
+                      f"messages={progress.get('messages')}")
+                check(bool(progress.get("percents")),
+                      "[阶段四] total>0 时 UI 出现百分比进度条",
+                      f"percents={progress.get('percents')}")
+                check(all(0 <= int(p) <= 100 for p in progress.get("percents", [])
+                          if p == p),
+                      "[阶段四] 百分比范围 0-100",
+                      f"percents={progress.get('percents')}")
+                if progress.get("percents"):
+                    try:
+                        page.locator('[aria-label="生成进度"]').first.scroll_into_view_if_needed(
+                            timeout=5000)
+                    except Exception:
+                        pass
+                    check(page.locator('[aria-label="生成进度"]').count() > 0
+                          and page.locator('[aria-label="生成进度"]').first.is_visible(),
+                          "[阶段四] 百分比进度条在视口内可见", "")
+                page.screenshot(path=str(shots_dir / "phase4_progress_live.png"))
+
+                outcome = "timeout"
+                final_state: dict = {}
+                deadline = time.time() + 300
+                while time.time() < deadline:
+                    final_state = page.evaluate(_P4_RESULT_STATE_JS)
+                    changed = bool(final_state.get("src")) and \
+                        final_state.get("src") != initial_src
+                    if changed and final_state.get("loaded"):
+                        outcome = "image"
+                        break
+                    if final_state.get("noImage"):
+                        outcome = "no-image"
+                        break
+                    if final_state.get("error") and not final_state.get("generating"):
+                        outcome = "error"
+                        break
+                    page.wait_for_timeout(2000)
+
+                snapshot = None
+                try:
+                    snapshot = api_json(f"/api/jobs/{job_id}")
+                except Exception as exc:
+                    observe("读取后端任务快照失败", f"{type(exc).__name__}: {exc}")
+                status = (snapshot or {}).get("status", "")
+                try:
+                    page.locator('img[alt="生成结果"]').first.scroll_into_view_if_needed(
+                        timeout=5000)
+                except Exception:
+                    pass
+                page.screenshot(path=str(shots_dir / "phase4_result_after_wait.png"))
+
+                if outcome == "image":
+                    check(final_state.get("loaded") is True,
+                          "[阶段四] 真实任务结果图 naturalWidth > 0",
+                          f"src={final_state.get('src')}")
+                    check("/api/media/image" in (final_state.get("src") or ""),
+                          "[阶段四] 真实结果图走 /api/media/image",
+                          f"src={final_state.get('src')}")
+                    check(bool(net.media_requests),
+                          "[阶段四] 结果图请求已发生", f"count={len(net.media_requests)}")
+                    observe("真实出图在 5 分钟内完成",
+                            f"job={job_id} status={status} src={final_state.get('src')}")
+                else:
+                    detail = (f"job={job_id} status={status or '未知'} "
+                              f"outcome={outcome} "
+                              f"err={generation_error_text(page)[:120]!r}")
+                    if outcome == "error":
+                        observe("真实出图未验证：后端任务失败或出图失败，前端已显示失败文案", detail)
+                    elif outcome == "no-image":
+                        observe("真实出图未验证：任务完成但未找到结果图", detail)
+                    else:
+                        observe("真实出图未验证：ComfyUI 真实任务 5 分钟内未完成", detail)
+                    if status == "done":
+                        check(False, "[阶段四] 后端任务 done 时 UI 必须渲染结果图",
+                              detail)
+
+        forbidden = sorted(set(net.forbidden))
+        check(not forbidden,
+              "[阶段四] 无直连 ComfyUI 提交（POST /prompt、/comfy、:8188）",
+              f"violations={forbidden[:5]}")
+        check(not errors, "[阶段四] 真实提交链路无 console error / pageerror",
+              "; ".join(errors[:5]))
+    finally:
+        try:
+            state = ctx.storage_state()
+        except Exception:
+            state = None
+        page.close()
+        ctx.close()
+    return state
+
+
+def generation_error_text(page) -> str:
+    try:
+        return page.locator("p.whitespace-pre-wrap").first.inner_text()
+    except Exception:
+        return ""
+
+
+def check_phase4_mock_result(browser, shots_dir: Path, storage_state) -> None:
+    """route mock 验证结果图 <img> 渲染与百分比进度（真实出图未完成时的兜底证据）。"""
+    section("阶段四-3 结果图渲染（route mock: recipes/jobs/media）")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950},
+                              storage_state=storage_state)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p4-mock")
+    net = _P4Network(page)
+    counter = {"n": 0}
+
+    def recipes(route):
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "success": True, "job_id": P4_MOCK_JOB_ID, "total": 1, "submitted": 1,
+            "queued": 1, "errors": [], "async": True, "prompt": "mock prompt",
+            "workflow_path": "mock-workflow.json", "slots": [], "references": {},
+        }, ensure_ascii=False))
+
+    def jobs(route):
+        counter["n"] += 1
+        running = counter["n"] <= 2
+        snapshot = {
+            "id": P4_MOCK_JOB_ID, "job_type": "faceswap",
+            "status": "running" if running else "done", "title": "mock 任务",
+            "total": 1, "done_count": 0 if running else 1, "error_count": 0,
+            "items": [{
+                "prompt_id": 0, "status": "running" if running else "done",
+                "images": [] if running else [{
+                    "filename": "mock-result.png", "subfolder": "", "type": "output",
+                }],
+            }],
+            "workflow_path": "mock-workflow.json", "extra": None,
+            "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:01",
+        }
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(snapshot, ensure_ascii=False))
+
+    def media(route):
+        route.fulfill(status=200, content_type="image/png", body=P4_PNG_BYTES)
+
+    page.route(re.compile(r".*/api/reference/recipes$"), recipes)
+    page.route(re.compile(r".*/api/jobs/\d+$"), jobs)
+    page.route(re.compile(r".*/api/media/image.*"), media)
+
+    try:
+        goto_settle(page, "/ref-web/studio", "AI 角色合成台")
+        pick = _p4_ensure_three_slots(page, shots_dir)
+        check(all(pick.get(k) for k in ("portrait", "costume", "pose")),
+              "[阶段四-mock] 三个槽位已就绪", f"pick={ {k: bool(v) for k, v in pick.items()} }")
+        initial_src = page.evaluate(
+            """() => {
+                const img = document.querySelector('img[alt="生成结果"]');
+                return img ? (img.currentSrc || img.src) : '';
+            }"""
+        )
+        _p4_install_progress_observer(page)
+        page.get_by_role("button", name="生成角色图", exact=True).click()
+        _p4_wait_for_recipe_post(page, net, timeout_s=30.0)
+        check(bool(net.recipe_requests),
+              "[阶段四-mock] mock 拦截到 POST /api/reference/recipes",
+              f"count={len(net.recipe_requests)}")
+
+        try:
+            page.wait_for_function(
+                """(initial) => {
+                    const img = document.querySelector('img[alt="生成结果"]');
+                    return Boolean(img && img.complete && img.naturalWidth > 0
+                        && (img.currentSrc || img.src) !== initial);
+                }""",
+                arg=initial_src,
+                timeout=30000,
+            )
+        except Exception as exc:
+            check(False, "[阶段四-mock] 结果图在 30 秒内渲染", f"{type(exc).__name__}: {exc}")
+
+        state = page.evaluate(_P4_RESULT_STATE_JS)
+        check(state.get("loaded") is True,
+              "[阶段四-mock] 结果图 naturalWidth > 0", f"src={state.get('src')}")
+        check("/api/media/image" in (state.get("src") or ""),
+              "[阶段四-mock] 结果图 URL 走 /api/media/image", f"src={state.get('src')}")
+        check(bool(net.media_requests), "[阶段四-mock] 已请求 mock 媒体端点",
+              f"count={len(net.media_requests)}")
+        check(len(net.job_requests) >= 2, "[阶段四-mock] 轮询至少两次（running -> done）",
+              f"count={len(net.job_requests)}")
+
+        progress = _p4_read_progress(page)
+        check(bool(progress.get("messages")),
+              "[阶段四-mock] progress 文案可见", f"messages={progress.get('messages')}")
+        check(bool(progress.get("percents")),
+              "[阶段四-mock] 百分比进度条可见", f"percents={progress.get('percents')}")
+        check(all(0 <= int(p) <= 100 for p in progress.get("percents", []) if p == p),
+              "[阶段四-mock] 百分比范围 0-100", f"percents={progress.get('percents')}")
+        check(not state.get("error"), "[阶段四-mock] 未出现失败文案", "")
+        try:
+            page.locator('img[alt="生成结果"]').first.scroll_into_view_if_needed(timeout=5000)
+        except Exception:
+            pass
+        page.screenshot(path=str(shots_dir / "phase4_mock_result.png"))
+        check(not errors, "[阶段四-mock] 无 console error / pageerror",
+              "; ".join(errors[:5]))
+    finally:
+        page.close()
+        ctx.close()
+
+
+def check_phase4_failure_branch(browser, shots_dir: Path, storage_state) -> None:
+    """recipes 400：UI 显示 detail，isGenerating 必须结束。"""
+    section("阶段四-4 失败分支（recipes 400 detail 透传 + 结束生成态）")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950},
+                              storage_state=storage_state)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p4-failure")
+    net = _P4Network(page)
+
+    def recipes(route):
+        route.fulfill(status=400, content_type="application/json",
+                      body=json.dumps({"detail": "测试用失败"}, ensure_ascii=False))
+
+    page.route(re.compile(r".*/api/reference/recipes$"), recipes)
+    try:
+        goto_settle(page, "/ref-web/studio", "AI 角色合成台")
+        pick = _p4_ensure_three_slots(page, shots_dir)
+        check(all(pick.get(k) for k in ("portrait", "costume", "pose")),
+              "[阶段四-失败] 三个槽位已就绪",
+              f"pick={ {k: bool(v) for k, v in pick.items()} }")
+        page.get_by_role("button", name="生成角色图", exact=True).click()
+
+        deadline = time.time() + 30
+        detail_visible = False
+        while time.time() < deadline:
+            if page.get_by_text("测试用失败", exact=False).count() > 0:
+                detail_visible = True
+                break
+            page.wait_for_timeout(300)
+        check(detail_visible, "[阶段四-失败] UI 显示后端 detail「测试用失败」", "")
+        failure_title = page.get_by_text("生成失败", exact=True)
+        check(failure_title.count() >= 1 and failure_title.first.is_visible(),
+              "[阶段四-失败] UI 可见「生成失败」区域", "")
+        error_para = page.locator("p.whitespace-pre-wrap")
+        check(error_para.count() >= 1 and error_para.first.is_visible()
+              and "测试用失败" in error_para.first.inner_text(),
+              "[阶段四-失败] 错误卡片正文显示 detail（非仅 toast）",
+              f"text={(error_para.first.inner_text()[:120] if error_para.count() else '')!r}")
+
+        try:
+            page.wait_for_function(
+                """() => {
+                    const b = Array.from(document.querySelectorAll('button'))
+                        .find((x) => (x.textContent || '').trim() === '生成角色图');
+                    return Boolean(b && !b.disabled);
+                }""",
+                timeout=15000,
+            )
+        except Exception:
+            pass
+        button = page.get_by_role("button", name="生成角色图", exact=True)
+        check(button.count() >= 1 and button.first.is_enabled(),
+              "[阶段四-失败] isGenerating 结束（生成按钮恢复可点击）", "")
+        check(page.get_by_role("button", name=re.compile("生成中")).count() == 0,
+              "[阶段四-失败] 无「生成中…」无限转圈", "")
+        check(page.locator('[aria-label="生成进度"]').count() == 0,
+              "[阶段四-失败] 失败后不残留进度条", "")
+        check(bool(net.recipe_requests),
+              "[阶段四-失败] 失败分支仍走 POST /api/reference/recipes",
+              f"count={len(net.recipe_requests)}")
+        try:
+            failure_title.first.scroll_into_view_if_needed(timeout=5000)
+        except Exception:
+            pass
+        page.screenshot(path=str(shots_dir / "phase4_failure_branch.png"))
+        # 本用例故意让接口返回 400；Chromium 会把该请求记成一条
+        # "Failed to load resource: ... 400"，属于预期噪声，不算页面错误脚本。
+        expected_400 = [e for e in errors
+                        if "[p4-failure] console.error:" in e and "status of 400" in e]
+        unexpected = [e for e in errors if e not in expected_400]
+        check(not unexpected, "[阶段四-失败] 无预期外 console error / pageerror",
+              f"unexpected={unexpected[:5]} expected_400={len(expected_400)}")
+    finally:
+        page.close()
+        ctx.close()
+
+
+def check_phase4_upload_slot(browser, shots_dir: Path) -> None:
+    """上传槽位提示可见，且提交前被拦截（不发 POST）。"""
+    section("阶段四-5 上传槽位提示与提交拦截")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p4-upload")
+    net = _P4Network(page)
+    png_path = shots_dir / "p4_upload_portrait.png"
+    png_path.write_bytes(P4_PNG_BYTES)
+    try:
+        goto_settle(page, "/ref-web/studio", "AI 角色合成台")
+        with page.expect_file_chooser() as chooser_info:
+            page.get_by_role("button", name="上传人像参考图").click()
+        chooser_info.value.set_files(str(png_path))
+        page.wait_for_timeout(1500)
+
+        note = page.locator('[role="note"]:has-text("本地图片上传暂未接入后端")')
+        check(note.count() >= 1, "[阶段四-上传] 上传后提示文案可见", "")
+        note_text = note.first.inner_text() if note.count() else ""
+        check("本地图片上传暂未接入后端" in note_text and "人像" in note_text,
+              "[阶段四-上传] 提示文案含拦截说明与槽位名", f"text={note_text[:120]}")
+
+        page.get_by_role("button", name="生成角色图", exact=True).click()
+        page.wait_for_timeout(1800)
+        notices = " | ".join(_notice_texts(page))
+        check("请从图库选择参考图" in notices,
+              "[阶段四-上传] 提交前 toast 拦截上传图", f"notices={notices[:160]}")
+        check(not net.recipe_requests,
+              "[阶段四-上传] 上传图未发起 POST /api/reference/recipes",
+              f"count={len(net.recipe_requests)}")
+        try:
+            note.first.scroll_into_view_if_needed(timeout=5000)
+        except Exception:
+            pass
+        page.screenshot(path=str(shots_dir / "phase4_upload_intercept.png"))
+        check(not errors, "[阶段四-上传] 无 console error / pageerror",
+              "; ".join(errors[:5]))
+    finally:
+        page.close()
+        ctx.close()
+
+
+def check_phase4_ui_contract(browser, shots_dir: Path) -> None:
+    """参数面板冻结说明、只读提示词、补充要求、画风两项、任务中心链接。"""
+    section("阶段四-6 参数面板冻结/提示词只读/画风两项/任务中心")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p4-ui")
+    try:
+        goto_settle(page, "/ref-web/studio", "AI 角色合成台")
+
+        frozen = page.get_by_text(
+            "参数面板不改变后端出图的节点与工作流（D4 冻结）", exact=False)
+        check(frozen.count() >= 1, "[阶段四] 参数面板冻结说明可见", "")
+
+        prompt_area = page.locator('textarea[aria-label="提示词预览（只读，由槽位生成）"]')
+        check(prompt_area.count() == 1, "[阶段四] 提示词预览 textarea 存在",
+              f"count={prompt_area.count()}")
+        if prompt_area.count():
+            check(prompt_area.first.evaluate("el => el.readOnly") is True,
+                  "[阶段四] 提示词 textarea 只读", "")
+
+        suffix_label = page.locator('label:text-is("补充要求（可选）")')
+        check(suffix_label.count() == 1, "[阶段四] 独立「补充要求（可选）」输入存在",
+              f"count={suffix_label.count()}")
+        suffix_area = page.locator('textarea[placeholder*="prompt_suffix"]')
+        check(suffix_area.count() == 1, "[阶段四] 补充要求 textarea 存在",
+              f"count={suffix_area.count()}")
+        if suffix_area.count():
+            check(suffix_area.first.evaluate("el => el.readOnly") is False,
+                  "[阶段四] 补充要求 textarea 可编辑", "")
+
+        style_trigger = (
+            page.locator('label:text-is("画风预设")')
+            .locator("..").locator("..")
+            .locator('button[role="combobox"]').first
+        )
+        check(style_trigger.count() == 1, "[阶段四] 画风下拉存在",
+              f"count={style_trigger.count()}")
+        if style_trigger.count():
+            check("写实人像写真" in style_trigger.inner_text(),
+                  "[阶段四] 画风默认显示写实人像写真",
+                  f"text={style_trigger.inner_text()!r}")
+            style_trigger.click()
+            page.wait_for_timeout(500)
+            options = page.get_by_role("option")
+            texts = [options.nth(i).inner_text().strip() for i in range(options.count())]
+            check(len(texts) == 2 and set(texts) == {"无预设（跟随参考图）", "写实人像写真"},
+                  "[阶段四] 画风下拉仅 none / realistic 两项", f"options={texts}")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+
+        link = page.locator('a[href="/jobs"]:has-text("任务中心")')
+        check(link.count() == 1, "[阶段四] 任务中心是原生 a[href=\"/jobs\"]",
+              f"count={link.count()}")
+        if link.count():
+            check(link.first.get_attribute("href") == "/jobs",
+                  "[阶段四] 任务中心 href 精确为 /jobs",
+                  f"href={link.first.get_attribute('href')}")
+            try:
+                with page.expect_navigation(timeout=30000) as nav_info:
+                    link.first.click()
+                nav = nav_info.value
+                check(nav is not None and nav.status == 200,
+                      "[阶段四] 点击任务中心返回 200",
+                      f"status={nav.status if nav else None}")
+            except Exception as exc:
+                check(False, "[阶段四] 点击任务中心可导航", f"{type(exc).__name__}: {exc}")
+            try:
+                page.wait_for_selector(".jobs .title", timeout=20000)
+            except Exception:
+                pass
+            check("/jobs" in page.url, "[阶段四] 已到达 atelier /jobs",
+                  f"url={page.url}")
+            title = page.locator(".jobs .title").first
+            check(title.count() == 1 and title.inner_text().strip() == "任务",
+                  "[阶段四] atelier 任务页已渲染",
+                  f"title={title.inner_text().strip() if title.count() else 'n/a'}")
+            page.screenshot(path=str(shots_dir / "phase4_job_center.png"))
+
+        check(not errors, "[阶段四] UI 契约检查无 console error / pageerror",
+              "; ".join(errors[:5]))
+    finally:
+        page.close()
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 def main() -> int:
@@ -2105,8 +2957,14 @@ def main() -> int:
         check_dist_artifact()
         check_phase3_dist()
 
+        # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
+        check_phase4_recipe_testclient()
+
         # 阶段二：断网等价探针需要重启临时实例（只有脚本自己拉起的实例才可重启）
-        if proc is not None:
+        if P4_ONLY:
+            observe("T3_E2E_ONLY=phase4：跳过阶段一/二/三检查",
+                    "仅执行静态检查、dist 产物检查、阶段四 TestClient 与 Playwright")
+        elif proc is not None:
             stop_instance(proc)
             proc = None
             offline_proc = None
@@ -2125,38 +2983,47 @@ def main() -> int:
             observe("8766 由外部启动，脚本不能重启为断网实例；跳过服务端 502 探针",
                     "已缓存 200 仍由后续检查覆盖")
 
-        section("阶段二 HTTP 契约检查（C-REMOTE-CACHE@1 / C-REF-ITEM-DTO@2 / C-REF-RECIPES@2）")
-        check_phase2_dto()
-        check_phase2_image_cache()
-        check_phase2_recipes()
-        check_phase2_cache_location()
+        if not P4_ONLY:
+            section("阶段二 HTTP 契约检查（C-REMOTE-CACHE@1 / C-REF-ITEM-DTO@2 / C-REF-RECIPES@2）")
+            check_phase2_dto()
+            check_phase2_image_cache()
+            check_phase2_recipes()
+            check_phase2_cache_location()
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
-            check_routes(ctx_main, shots_dir)
-            check_gallery_entries_all(ctx_main, shots_dir)
-            check_library_images(ctx_main, shots_dir)
-            check_studio_workflow_default(ctx_main, shots_dir)
-            check_history_section(ctx_main, shots_dir)
-            ctx_main.close()
+            if not P4_ONLY:
+                ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
+                check_routes(ctx_main, shots_dir)
+                check_gallery_entries_all(ctx_main, shots_dir)
+                check_library_images(ctx_main, shots_dir)
+                check_studio_workflow_default(ctx_main, shots_dir)
+                check_history_section(ctx_main, shots_dir)
+                ctx_main.close()
 
-            check_nsfw_age_gate(browser, shots_dir)
-            check_library_images_offline(browser, shots_dir)
-            check_settings_export(browser, shots_dir)
-            check_history_empty_mock(browser, shots_dir)
-            check_phase2_pages(browser, shots_dir)
+                check_nsfw_age_gate(browser, shots_dir)
+                check_library_images_offline(browser, shots_dir)
+                check_settings_export(browser, shots_dir)
+                check_history_empty_mock(browser, shots_dir)
+                check_phase2_pages(browser, shots_dir)
 
-            # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
-            check_phase3_routes(browser, shots_dir)
-            check_phase3_normal_images(browser, shots_dir)
-            check_phase3_offline(browser, shots_dir)
-            check_phase3_entries(browser, shots_dir)
-            check_phase3_nsfw(browser, shots_dir)
-            check_phase3_pose_interactions(browser, shots_dir)
-            check_phase3_costume_interactions(browser, shots_dir)
-            check_phase3_portrait_interactions(browser, shots_dir)
-            check_phase3_studio_default(browser, shots_dir)
+                # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
+                check_phase3_routes(browser, shots_dir)
+                check_phase3_normal_images(browser, shots_dir)
+                check_phase3_offline(browser, shots_dir)
+                check_phase3_entries(browser, shots_dir)
+                check_phase3_nsfw(browser, shots_dir)
+                check_phase3_pose_interactions(browser, shots_dir)
+                check_phase3_costume_interactions(browser, shots_dir)
+                check_phase3_portrait_interactions(browser, shots_dir)
+                check_phase3_studio_default(browser, shots_dir)
+
+            # 阶段四（T13）关卡：真实提交 -> 轮询 -> 结果图 -> 任务中心。
+            phase4_state = check_phase4_real_submit(browser, shots_dir)
+            check_phase4_mock_result(browser, shots_dir, phase4_state)
+            check_phase4_failure_branch(browser, shots_dir, phase4_state)
+            check_phase4_upload_slot(browser, shots_dir)
+            check_phase4_ui_contract(browser, shots_dir)
 
             browser.close()
 

@@ -14,27 +14,26 @@ import {
 } from '@/components/ui/alert-dialog'
 import { idbRead, idbWrite } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
-import { snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
+import { buildRecipePrompt, PROVIDER_META, stitchRecipeCanvas } from '@/services/aiGenerator'
 import {
-  buildRecipePrompt,
-
-  generateCharacterImage,
-  resumeComfyTask,
-  ComfyTaskError,
-  ComfySubmissionRejectedError,
-  type ComfyTaskHandle,
+  describeJobProgress,
+  isJobSucceeded,
+  jobErrorMessages,
+  jobResultUrls,
+  pollJob,
+  submitRecipe,
+  type ActiveJobInfo,
   type GenerationProgress,
-  PROVIDER_META,
-  stitchRecipeCanvas,
-} from '@/services/aiGenerator'
+  type JobSnapshotDto,
+  type RecipeSubmitRequest,
+} from '@/services/recipeClient'
 import type {
   ApiConfig,
   ComfyUiParams,
   CostumeItem,
   ExtraReferenceImage,
   GenerationHistoryItem,
-  GenerationSnapshot,
   ImageProviderId,
   PortraitItem,
   PoseItem,
@@ -47,11 +46,92 @@ const RECIPE_KEY = 'pose_atlas_recipe_v3'
 // 仅保留常量供旧记录导出复用同一 key；本模块不再读写该 IndexedDB 历史。
 export const HISTORY_KEY = 'pose_atlas_history_v3'
 const TASK_KEY = 'pose_atlas_active_task_v1'
-type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
 const SAFE_MODE_KEY = 'pose_atlas_safe_mode_v1'
 // 18+ 首次确认标记：确认一次后本浏览器不再弹年龄确认框。
 // 顶栏「18+ 完整模式 → 安全模式」即撤销该确认（下次解锁会重新询问）。
 const NSFW_CONFIRMED_KEY = 'pose_atlas_nsfw_confirmed_v1'
+
+/** 后端 `RecipeRequest.seed` 的固定种子默认值与后端保持一致。 */
+const DEFAULT_RECIPE_SEED = 100000
+/** 任务完成但快照无结果图时，回退取画廊最新一条。 */
+const LATEST_IMAGE_ENDPOINT = '/api/images?page=1&page_size=1&sort=newest'
+
+/** 提交给后端的画风只有两项；旧 12 条预设统一降级为写实。 */
+type RecipeStyle = 'none' | 'realistic'
+
+function toRecipeStyle(preset: string): RecipeStyle {
+  return preset === 'none' ? 'none' : 'realistic'
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
+}
+
+/** 任务已进入失败终态（与网络抖动区分：失败终态才清除恢复记录）。 */
+class JobFailedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'JobFailedError'
+  }
+}
+
+/**
+ * 旧 `TASK_KEY` 结构为 `{task: {promptId, clientId, baseUrl}}`，无法映射到
+ * 后端的数字 jobId；读取时安全迁移为 null，避免刷新后反复尝试已失效的直连任务。
+ */
+function migrateActiveJob(raw: unknown): ActiveJobInfo | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  if ('task' in record) return null
+  const jobId = typeof record.jobId === 'number' ? record.jobId : Number(record.jobId)
+  if (!Number.isInteger(jobId) || jobId <= 0) return null
+  return {
+    jobId,
+    prompt: typeof record.prompt === 'string' ? record.prompt : '',
+    summary: typeof record.summary === 'string' ? record.summary : '',
+    submittedAt: typeof record.submittedAt === 'number' ? record.submittedAt : Date.now(),
+  }
+}
+
+/**
+ * 仅当图片地址明确位于 uploads 目录时才转成 `*_path`。
+ * `data:`、参考库图片和媒体端点都无法可靠映射为后端 uploads 路径。
+ */
+function toUploadPath(url: string): string {
+  const match = /(?:^|\/)uploads\/(.+)$/.exec(url)
+  return match ? `uploads/${match[1]}` : ''
+}
+
+/**
+ * 第 4 张参考（计划 2.3.5-4）：库标识与条目 id 同时存在才发送 `extra_*`；
+ * 否则只在图片明确位于 uploads 内时发送 `extra_path`；两者都没有则不发送。
+ */
+function resolveExtraFields(
+  extra?: ExtraReferenceImage
+): Pick<RecipeSubmitRequest, 'extra_library' | 'extra_id' | 'extra_path'> {
+  if (!extra) return {}
+  if (extra.library && extra.id) {
+    return { extra_library: extra.library, extra_id: extra.id }
+  }
+  const uploadPath = toUploadPath(extra.url)
+  return uploadPath ? { extra_path: uploadPath } : {}
+}
+
+/** 结果快照无图时回退到画廊最新一条 `view_url`；失败不抛错。 */
+async function fetchLatestPreviewUrl(): Promise<string> {
+  try {
+    const response = await fetch(LATEST_IMAGE_ENDPOINT)
+    if (!response.ok) return ''
+    const body = (await response.json()) as { items?: Array<{ view_url?: string | null }> }
+    const url = body?.items?.[0]?.view_url
+    return typeof url === 'string' ? url : ''
+  } catch {
+    return ''
+  }
+}
 
 function readNsfwConfirmed(): boolean {
   try {
@@ -163,7 +243,7 @@ function mergeStoredConfig(raw: unknown): ApiConfig {
 
 interface StudioContextValue {
   hydrated: boolean
-  activeTask: ActiveTask | null
+  activeTask: ActiveJobInfo | null
   resumeGeneration: () => Promise<void>
   stopTracking: () => Promise<void>
   recipe: RecipeState
@@ -257,9 +337,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null)
   const [generationError, setGenerationError] = useState('')
   const isGeneratingRef = useRef(false)
-  const [activeTask, setActiveTask] = useState<ActiveTask | null>(null)
-  const activeTaskRef = useRef<ActiveTask | null>(null)
+  const [activeTask, setActiveTask] = useState<ActiveJobInfo | null>(null)
+  const activeTaskRef = useRef<ActiveJobInfo | null>(null)
   const trackingRef = useRef<AbortController | null>(null)
+  const styleDowngradeNotifiedRef = useRef(false)
   const [idbHydrated, setIdbHydrated] = useState(false)
 
   // 从 IndexedDB 异步恢复含附图的配方与未决任务（历史记录不再走 IDB）
@@ -267,7 +348,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     let active = true
     Promise.all([
       idbRead<RecipeState>(RECIPE_KEY),
-      idbRead<ActiveTask | null>(TASK_KEY),
+      idbRead<unknown>(TASK_KEY),
     ]).then(([savedRecipe, savedTask]) => {
       if (!active) return
       if (savedRecipe) {
@@ -283,8 +364,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           extraImages: Array.isArray(savedRecipe.extraImages) ? savedRecipe.extraImages : [],
         })
       }
-      activeTaskRef.current = savedTask || null
-      setActiveTask(savedTask || null)
+      const restoredTask = migrateActiveJob(savedTask)
+      activeTaskRef.current = restoredTask
+      setActiveTask(restoredTask)
+      // 旧直连任务结构无法恢复，顺手清空持久化记录，避免每次刷新重复判断。
+      if (savedTask && !restoredTask) void idbWrite(TASK_KEY, null).catch(() => {})
       setIdbHydrated(true)
     }).catch(() => { if (active) toast.error('无法读取浏览器存储，已暂停生成以保护未决任务；请恢复存储后刷新') })
     return () => {
@@ -525,99 +609,209 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const saveActive = async (value: ActiveTask | null) => {
+  const saveActive = async (value: ActiveJobInfo | null) => {
     await idbWrite(TASK_KEY, value)
     activeTaskRef.current = value
     setActiveTask(value)
   }
-  const completeGeneration = async (result: {imageUrl: string; modelUsed: string; providerUsed: ImageProviderId}, signal: AbortSignal) => {
+
+  /**
+   * 终态快照 → 预览图：优先取任务结果图；成功但无图时回退画廊最新一条；
+   * 失败终态抛 JobFailedError，调用方据此清除恢复记录。
+   */
+  const applyJobSnapshot = async (snapshot: JobSnapshotDto): Promise<boolean> => {
+    const urls = jobResultUrls(snapshot)
+    if (urls.length) {
+      setPreviewUrl(urls[0])
+      return true
+    }
+    if (!isJobSucceeded(snapshot)) {
+      const errors = jobErrorMessages(snapshot)
+      const status = String(snapshot?.status ?? '').trim() || '未知状态'
+      throw new JobFailedError(errors.length ? errors.join('；') : `出图任务失败（${status}）`)
+    }
+    const fallback = await fetchLatestPreviewUrl()
+    if (fallback) {
+      setPreviewUrl(fallback)
+      return true
+    }
+    return false
+  }
+
+  const completeGeneration = async (snapshot: JobSnapshotDto, signal: AbortSignal) => {
     signal.throwIfAborted()
-    // 结果图直接用后端返回的同源 URL（/api/media/image?...），不再转 base64；
-    // 生成记录由后端画廊提供，这里不再写本地历史。
-    setPreviewUrl(result.imageUrl)
+    // 结果图直接使用后端同源 URL（/api/media/image?...），生成记录由后端画廊提供。
+    const found = await applyJobSnapshot(snapshot)
     signal.throwIfAborted()
     await saveActive(null)
-    toast.success('角色图已完成并保存')
+    if (found) {
+      toast.success('角色图已完成并保存')
+    } else {
+      setGenerationProgress({ stage: 'download', message: '任务完成但未找到结果图，请前往任务中心查看' })
+      toast.info('任务完成但未找到结果图，请前往任务中心查看')
+    }
   }
+
   const resumeGeneration = async () => {
     const record = activeTaskRef.current
-    if (!record?.task || isGeneratingRef.current) return
+    if (!record?.jobId || isGeneratingRef.current) return
     isGeneratingRef.current = true
     setIsGenerating(true)
     setGenerationError('')
+    setGenerationProgress({ stage: 'queued', message: '正在恢复任务状态…' })
     const controller = new AbortController()
     trackingRef.current = controller
     try {
-      const result = await resumeComfyTask({ task: record.task, apiKey: apiConfig.providers.comfyui.apiKey, timeoutSec: apiConfig.comfyuiParams.timeoutSec, onProgress: setGenerationProgress, signal: controller.signal })
+      const snapshot = await pollJob(record.jobId, {
+        signal: controller.signal,
+        onUpdate: (next) => setGenerationProgress(describeJobProgress(next)),
+      })
       controller.signal.throwIfAborted()
-      await completeGeneration(result, controller.signal)
+      await completeGeneration(snapshot, controller.signal)
     } catch (e) {
-      if (e instanceof ComfySubmissionRejectedError || (e instanceof ComfyTaskError && e.reason === 'failed')) { try { await saveActive(null) } catch { toast.error('任务记录清除失败') } }
+      if (e instanceof JobFailedError) {
+        try { await saveActive(null) } catch { toast.error('任务记录清除失败') }
+      }
       if (!controller.signal.aborted) setGenerationError(e instanceof Error ? e.message : '无法确认任务状态，记录已保留')
+    } finally {
+      isGeneratingRef.current = false
+      setIsGenerating(false)
+      if (trackingRef.current === controller) trackingRef.current = null
     }
-    finally { isGeneratingRef.current = false; setIsGenerating(false) }
   }
+
   const stopTracking = async () => {
     trackingRef.current?.abort()
     try { await saveActive(null); setGenerationError('已停止跟踪；后端任务可能仍在执行，请先确认队列再提交新任务') }
     catch { toast.error('停止跟踪记录保存失败') }
   }
+
   const resumeOnActivation = useEffectEvent(() => { void resumeGeneration() })
   // 刷新、重新激活与恢复联网只查询已有任务，不重新提交。
   useEffect(() => {
     if (!idbHydrated) return
     const resume = () => {
-      if (document.visibilityState === 'visible' && activeTaskRef.current?.task && !isGeneratingRef.current) resumeOnActivation()
+      if (document.visibilityState === 'visible' && activeTaskRef.current?.jobId && !isGeneratingRef.current) resumeOnActivation()
     }
     resume()
     window.addEventListener('online', resume)
     document.addEventListener('visibilitychange', resume)
     return () => { window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
-  }, [idbHydrated, apiConfig.providers.comfyui.apiKey])
+  }, [idbHydrated])
   useEffect(() => () => trackingRef.current?.abort(), [])
+
   const startGeneration = async (overridePrompt?: string) => {
     if (!idbHydrated || isGeneratingRef.current) return
     if (activeTaskRef.current) { toast.error('存在未决任务，请先恢复或明确停止跟踪'); return }
+
     const recipeSnapshot = recipe
     const configSnapshot = apiConfig
-    const finalPrompt = overridePrompt ?? customPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
-    let record: ActiveTask = { prompt: finalPrompt, summary: [recipeSnapshot.portrait?.发型名称, recipeSnapshot.costume?.服装名称, recipeSnapshot.pose?.姿势名称].filter(Boolean).join(' + ') || '自定义合成' }
+
+    // 上传图（base64）尚未接入后端 uploads：提交前拦截，保留拼图与预览能力。
+    const uploadSlots = [
+      recipeSnapshot.portrait?.source === 'upload' ? '人像' : '',
+      recipeSnapshot.costume?.source === 'upload' ? '服装' : '',
+      recipeSnapshot.pose?.source === 'upload' ? '姿势' : '',
+    ].filter(Boolean)
+    if (uploadSlots.length) {
+      toast.error('请从图库选择参考图；本地图片上传暂未接入后端')
+      return
+    }
+
+    // 后端要求三个槽位全部存在（C-REF-RECIPES@2），缺失时直接提示，避免无谓请求。
+    const missingSlots = [
+      recipeSnapshot.portrait ? '' : '人像',
+      recipeSnapshot.costume ? '' : '服装',
+      recipeSnapshot.pose ? '' : '姿势',
+    ].filter(Boolean)
+    if (missingSlots.length) {
+      toast.error(`请先选择：${missingSlots.join('、')}`)
+      return
+    }
+
+    const localPrompt = buildRecipePrompt(
+      recipeSnapshot,
+      configSnapshot.stylePreset,
+      recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson)
+        ? Object.values(recipeSnapshot.workflowImages || {})
+        : []
+    )
+    // textarea 的完整提示词只用于本地预览；仅「独立补充要求」作为 prompt_suffix 提交。
+    const requestedPrompt = overridePrompt ?? customPrompt ?? ''
+    const promptSuffix = requestedPrompt && requestedPrompt !== localPrompt ? requestedPrompt : ''
+    const style = toRecipeStyle(configSnapshot.stylePreset)
+    if (style !== configSnapshot.stylePreset && !styleDowngradeNotifiedRef.current) {
+      styleDowngradeNotifiedRef.current = true
+      toast.info('当前画风不在后端支持范围，本次按「写实人像写真」提交')
+    }
+
+    const summary =
+      [recipeSnapshot.portrait?.发型名称, recipeSnapshot.costume?.服装名称, recipeSnapshot.pose?.姿势名称]
+        .filter(Boolean)
+        .join(' + ') || '自定义合成'
+
+    const request: RecipeSubmitRequest = {
+      style,
+      seed: DEFAULT_RECIPE_SEED,
+      seed_mode: configSnapshot.comfyuiParams.randomizeSeed ? 'random' : 'fixed',
+      ...(promptSuffix.trim() ? { prompt_suffix: promptSuffix.trim() } : {}),
+      ...(recipeSnapshot.portrait ? { portrait_id: recipeSnapshot.portrait.id } : {}),
+      ...(recipeSnapshot.costume
+        ? {
+            costume_id: recipeSnapshot.costume.id,
+            costume_library: recipeSnapshot.costume.library ?? 'costume',
+          }
+        : {}),
+      ...(recipeSnapshot.pose ? { pose_id: recipeSnapshot.pose.id } : {}),
+      ...resolveExtraFields(recipeSnapshot.extraImages?.[0]),
+    }
+
     isGeneratingRef.current = true
     setIsGenerating(true)
     setGeneratingModel(configSnapshot.activeProvider)
     setGenerationError('')
-    setGenerationProgress(null)
+    setGenerationProgress({ stage: 'submit', message: '正在提交出图任务…' })
+
     const controller = new AbortController()
     trackingRef.current = controller
     try {
-      record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt)
+      const submitted = await submitRecipe(request)
       controller.signal.throwIfAborted()
-      if (configSnapshot.activeProvider === 'comfyui') await idbWrite(TASK_KEY, null)
-      const result = await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
-        onSubmitting: async (prepared) => {
-          controller.signal.throwIfAborted()
-          if (record.snapshot && prepared) record.snapshot.submittedWorkflowJson = JSON.stringify(prepared.workflow)
-          await saveActive({ ...record, unknown: true })
-          controller.signal.throwIfAborted()
-        },
-        onSubmitted: async (task) => {
-          if (controller.signal.aborted) return
-          record = { ...record, task }
-          activeTaskRef.current = record
-          setActiveTask(record)
-          if (!controller.signal.aborted) await saveActive(record)
-        },
+      if (!submitted?.success || !submitted.job_id) {
+        const detail = submitted?.errors?.filter(Boolean).join('；') || '后端未返回任务编号'
+        throw new JobFailedError(detail)
+      }
+
+      const record: ActiveJobInfo = {
+        jobId: submitted.job_id,
+        prompt: submitted.prompt || localPrompt,
+        summary,
+        submittedAt: Date.now(),
+      }
+      await saveActive(record)
+      controller.signal.throwIfAborted()
+      setGenerationProgress({ stage: 'queued', message: '任务已提交，等待后端处理…' })
+
+      const snapshot = await pollJob(submitted.job_id, {
+        signal: controller.signal,
+        onUpdate: (next) => setGenerationProgress(describeJobProgress(next)),
       })
       controller.signal.throwIfAborted()
-      await completeGeneration(result, controller.signal)
+      await completeGeneration(snapshot, controller.signal)
     } catch (e) {
-      if (e instanceof ComfySubmissionRejectedError || (e instanceof ComfyTaskError && e.reason === 'failed')) {
-        try { await saveActive(null) } catch { toast.error('任务失败记录未能清除，请停止跟踪后重试') }
+      if (!isAbortError(e)) {
+        if (e instanceof JobFailedError) {
+          try { await saveActive(null) } catch { toast.error('任务失败记录未能清除，请停止跟踪后重试') }
+        }
+        const msg = e instanceof Error ? e.message : '调用失败'
+        setGenerationError(msg)
+        toast.error(msg.split('\n')[0])
       }
-      const msg = e instanceof Error ? e.message : '调用失败'
-      setGenerationError(msg)
-      toast.error(msg.split('\n')[0])
-    } finally { isGeneratingRef.current = false; setIsGenerating(false) }
+    } finally {
+      isGeneratingRef.current = false
+      setIsGenerating(false)
+      if (trackingRef.current === controller) trackingRef.current = null
+    }
   }
 
   return (
