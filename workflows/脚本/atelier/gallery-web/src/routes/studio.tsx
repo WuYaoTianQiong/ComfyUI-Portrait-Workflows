@@ -51,7 +51,7 @@ import {
   fileToDataUrl,
   fetchComfyObjectInfo,
   parseComfyWorkflowNodes,
-  PROVIDER_META,
+
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
@@ -59,20 +59,12 @@ import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } f
 import { useStudio } from '@/store/studioStore'
 import type {
   ComfyUiParams,
-  DoubaoParams,
-  GeminiParams,
-  GptParams,
-  ImagePassMode,
-  ImageProviderId,
-  QwenParams,
 } from '@/types/gallery'
 
 export const Route = createFileRoute('/studio')({
   staticData: { title: 'AI 合成台' },
   component: StudioPage,
 })
-
-const PROVIDER_LIST: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
 
 function StudioPage() {
   const {
@@ -97,10 +89,7 @@ function StudioPage() {
     updateExtraImageName,
     updateApiConfig,
     updateProviderConfig,
-    updateGptParams,
-    updateGeminiParams,
-    updateQwenParams,
-    updateDoubaoParams,
+
     updateComfyUiParams,
     randomizeRecipe,
     removeHistoryItem,
@@ -115,11 +104,10 @@ function StudioPage() {
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
-  const activeProvider = apiConfig.activeProvider
-  const providerMeta = PROVIDER_META[activeProvider]
-  const providerCfg = apiConfig.providers[activeProvider]
 
-  const activeWorkflowImages = activeProvider === 'comfyui' && recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
+  const providerCfg = apiConfig.providers.comfyui
+
+  const activeWorkflowImages = recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -271,11 +259,11 @@ function StudioPage() {
     }
   }
 
-  const missingReferences = activeProvider === 'comfyui' ? [
+  const missingReferences = [
     { label: '人像', node: apiConfig.comfyuiParams.portraitNodeId, image: recipe.portrait },
     { label: '服装', node: apiConfig.comfyuiParams.costumeNodeId, image: recipe.costume },
     { label: '姿势', node: apiConfig.comfyuiParams.poseNodeId, image: recipe.pose },
-  ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label) : []
+  ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label)
 
   const extraImages = recipe.extraImages || []
   const hasStitchRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || extraImages.length > 0)
@@ -362,13 +350,11 @@ function StudioPage() {
   }
 
   const handleGenerate = () => {
-    if (activeProvider === 'comfyui') {
-      const cp = apiConfig.comfyuiParams
-      const workflowImages = recipe.workflowImagesIdentity === workflowIdentity(cp.workflowJson) ? recipe.workflowImages || {} : {}
-      const selected = [recipe.portrait ? cp.portraitNodeId : '', recipe.costume ? cp.costumeNodeId : '', recipe.pose ? cp.poseNodeId : '', ...Object.keys(workflowImages)].filter((id) => id && id !== 'none')
-      const combinationError = validateReferenceCombinations(cp.workflowJson, selected)
-      if (combinationError) { toast.error(combinationError); setShowAdvanced(true); return }
-    }
+    const cp = apiConfig.comfyuiParams
+    const workflowImages = recipe.workflowImagesIdentity === workflowIdentity(cp.workflowJson) ? recipe.workflowImages || {} : {}
+    const selected = [recipe.portrait ? cp.portraitNodeId : '', recipe.costume ? cp.costumeNodeId : '', recipe.pose ? cp.poseNodeId : '', ...Object.keys(workflowImages)].filter((id) => id && id !== 'none')
+    const combinationError = validateReferenceCombinations(cp.workflowJson, selected)
+    if (combinationError) { toast.error(combinationError); setShowAdvanced(true); return }
     if (missingReferences.length) {
       setShowReferenceErrors(true)
       requestAnimationFrame(() => referenceErrorsRef.current?.focus())
@@ -385,7 +371,7 @@ function StudioPage() {
           <Button variant="outline" size="sm" asChild>
             <Link to="/settings">
               <KeyRoundIcon className="size-4" />
-              {providerCfg.apiKey ? `${providerMeta.shortName} 已就绪` : '配置 API Key'}
+              ComfyUI 设置
             </Link>
           </Button>
         }
@@ -736,26 +722,7 @@ function StudioPage() {
               </Button>
             }
           >
-            <Field label="接口协议">
-              <Select
-                value={activeProvider}
-                onValueChange={(v) => updateApiConfig({ activeProvider: v as ImageProviderId })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_LIST.map((pid) => (
-                    <SelectItem key={pid} value={pid}>
-                      {PROVIDER_META[pid].name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {activeProvider === 'comfyui' ? (
-              <Field label="工作流模板 (API 格式)">
+            <Field label="工作流模板 (API 格式)">
                 <div className="space-y-2">
                   <Select
                     value={apiConfig.comfyuiParams.workflowPreset}
@@ -867,40 +834,6 @@ function StudioPage() {
                   )}
                 </div>
               </Field>
-            ) : (
-              <>
-                <Field label="模型 ID">
-                  <Select
-                    value={providerCfg.model}
-                    onValueChange={(v) => updateProviderConfig(activeProvider, { model: v })}
-                  >
-                    <SelectTrigger className="w-full font-mono text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providerMeta.models.map((m) => (
-                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-
-                {providerCfg.model === 'custom' && (
-                  <Field label="自定义模型 ID">
-                    <Input
-                      value={providerCfg.customModel}
-                      onChange={(e) =>
-                        updateProviderConfig(activeProvider, { customModel: e.target.value })
-                      }
-                      placeholder="输入模型 ID"
-                      className="bg-background font-mono text-xs"
-                    />
-                  </Field>
-                )}
-              </>
-            )}
 
             <Field label="画风预设">
               <Select
@@ -920,7 +853,6 @@ function StudioPage() {
               </Select>
             </Field>
 
-            {activeProvider === 'comfyui' && (
               <>
                 {!parsedComfyNodes.valid && (
                   <div className="col-span-full rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -1004,281 +936,12 @@ function StudioPage() {
                   </Select>
                 </Field>
               </>
-            )}
 
-            {activeProvider === 'comfyui' && showAdvanced && <WorkflowParameters onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
+            {showAdvanced && <WorkflowParameters onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
 
-            {/* 展开的高级协议专属参数 */}
+            {/* 展开的高级 ComfyUI 参数 */}
             {showAdvanced && (
               <>
-                {activeProvider === 'gemini' && (
-                  <>
-                    <Field label="Gemini 协议模式">
-                      <Select
-                        value={apiConfig.geminiParams.endpointMode}
-                        onValueChange={(v) =>
-                          updateGeminiParams({ endpointMode: v as GeminiParams['endpointMode'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="native">Native (:generateContent)</SelectItem>
-                          <SelectItem value="openai_chat">OpenAI Chat (/v1/chat/completions)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="宽高比 (aspectRatio)">
-                      <Select
-                        value={apiConfig.geminiParams.aspectRatio}
-                        onValueChange={(v) =>
-                          updateGeminiParams({ aspectRatio: v as GeminiParams['aspectRatio'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="3:4">3:4</SelectItem>
-                          <SelectItem value="9:16">9:16</SelectItem>
-                          <SelectItem value="1:1">1:1</SelectItem>
-                          <SelectItem value="4:3">4:3</SelectItem>
-                          <SelectItem value="16:9">16:9</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="分辨率 (imageSize)">
-                      <Select
-                        value={apiConfig.geminiParams.imageSize}
-                        onValueChange={(v) =>
-                          updateGeminiParams({ imageSize: v as GeminiParams['imageSize'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1K">1K</SelectItem>
-                          <SelectItem value="2K">2K</SelectItem>
-                          <SelectItem value="4K">4K</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  </>
-                )}
-
-                {activeProvider === 'gpt' && (
-                  <>
-                    <Field label="调用端点 (endpointMode)">
-                      <Select
-                        value={apiConfig.gptParams.endpointMode}
-                        onValueChange={(v) =>
-                          updateGptParams({ endpointMode: v as GptParams['endpointMode'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="images_edits_json">/v1/images/edits (JSON)</SelectItem>
-                          <SelectItem value="responses">/v1/responses</SelectItem>
-                          <SelectItem value="chat">/v1/chat/completions</SelectItem>
-                          <SelectItem value="images_edits">/v1/images/edits (Multipart)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="输出尺寸 (size)">
-                      <Select
-                        value={apiConfig.gptParams.size}
-                        onValueChange={(v) => updateGptParams({ size: v as GptParams['size'] })}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1024x1536">1024x1536</SelectItem>
-                          <SelectItem value="1024x1024">1024x1024</SelectItem>
-                          <SelectItem value="1536x1024">1536x1024</SelectItem>
-                          <SelectItem value="auto">auto</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="渲染质量 (quality)">
-                      <Select
-                        value={apiConfig.gptParams.quality}
-                        onValueChange={(v) => updateGptParams({ quality: v as GptParams['quality'] })}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="high">high</SelectItem>
-                          <SelectItem value="xhigh">xhigh</SelectItem>
-                          <SelectItem value="max">max</SelectItem>
-                          <SelectItem value="medium">medium</SelectItem>
-                          <SelectItem value="low">low</SelectItem>
-                          <SelectItem value="auto">auto</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="参考还原度 (input_fidelity)">
-                      <Select
-                        value={apiConfig.gptParams.inputFidelity}
-                        onValueChange={(v) =>
-                          updateGptParams({ inputFidelity: v as GptParams['inputFidelity'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="high">high</SelectItem>
-                          <SelectItem value="low">low</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="背景模式 (background)">
-                      <Select
-                        value={apiConfig.gptParams.background}
-                        onValueChange={(v) =>
-                          updateGptParams({ background: v as GptParams['background'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">auto</SelectItem>
-                          <SelectItem value="transparent">transparent</SelectItem>
-                          <SelectItem value="opaque">opaque</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="图片格式 (output_format)">
-                      <Select
-                        value={apiConfig.gptParams.outputFormat}
-                        onValueChange={(v) =>
-                          updateGptParams({ outputFormat: v as GptParams['outputFormat'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="png">png</SelectItem>
-                          <SelectItem value="webp">webp</SelectItem>
-                          <SelectItem value="jpeg">jpeg</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  </>
-                )}
-
-                {activeProvider === 'qwen' && (
-                  <>
-                    <Field label="输出尺寸 (size)">
-                      <Select
-                        value={apiConfig.qwenParams.size}
-                        onValueChange={(v) => updateQwenParams({ size: v as QwenParams['size'] })}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1024*1536">1024*1536</SelectItem>
-                          <SelectItem value="928*1664">928*1664</SelectItem>
-                          <SelectItem value="1328*1328">1328*1328</SelectItem>
-                          <SelectItem value="1664*928">1664*928</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="提示词扩写 (prompt_extend)">
-                      <div className="flex h-9 items-center justify-between rounded-xl border bg-background px-3">
-                        <span className="text-xs text-muted-foreground">
-                          {apiConfig.qwenParams.promptExtend ? '开启' : '关闭'}
-                        </span>
-                        <Switch
-                          checked={apiConfig.qwenParams.promptExtend}
-                          onCheckedChange={(v) => updateQwenParams({ promptExtend: v })}
-                        />
-                      </div>
-                    </Field>
-                    <Field label="反向提示词 (negative_prompt)">
-                      <Input
-                        value={apiConfig.qwenParams.negativePrompt}
-                        onChange={(e) => updateQwenParams({ negativePrompt: e.target.value })}
-                        placeholder="低分辨率，多余手指，扭曲"
-                        className="bg-background text-xs"
-                      />
-                    </Field>
-                  </>
-                )}
-
-                {activeProvider === 'doubao' && (
-                  <>
-                    <Field label="输出尺寸 (size)">
-                      <Select
-                        value={apiConfig.doubaoParams.size}
-                        onValueChange={(v) =>
-                          updateDoubaoParams({ size: v as DoubaoParams['size'] })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1728x2304">1728x2304</SelectItem>
-                          <SelectItem value="2K">2K</SelectItem>
-                          <SelectItem value="4K">4K</SelectItem>
-                          <SelectItem value="1440x2560">1440x2560</SelectItem>
-                          <SelectItem value="2048x2048">2048x2048</SelectItem>
-                          <SelectItem value="2560x1440">2560x1440</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="组图模式 (sequential)">
-                      <Select
-                        value={apiConfig.doubaoParams.sequentialImageGeneration}
-                        onValueChange={(v) =>
-                          updateDoubaoParams({
-                            sequentialImageGeneration:
-                              v as DoubaoParams['sequentialImageGeneration'],
-                          })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="disabled">disabled (单张)</SelectItem>
-                          <SelectItem value="auto">auto (组图)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="返回格式 (response_format)">
-                      <Select
-                        value={apiConfig.doubaoParams.responseFormat}
-                        onValueChange={(v) =>
-                          updateDoubaoParams({
-                            responseFormat: v as DoubaoParams['responseFormat'],
-                          })
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="b64_json">b64_json</SelectItem>
-                          <SelectItem value="url">url</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  </>
-                )}
-
-                {activeProvider === 'comfyui' && (
-                  <>
                     <Field label="三合一拼图节点 (可选)">
                       <Select
                         value={apiConfig.comfyuiParams.stitchedNodeId}
@@ -1320,39 +983,6 @@ function StudioPage() {
                         />
                       </div>
                     </Field>
-                  </>
-                )}
-
-                {activeProvider !== 'comfyui' && (
-                  <>
-                    <Field label="图片传参方式">
-                      <Select
-                        value={apiConfig.imagePassMode}
-                        onValueChange={(v) => updateApiConfig({ imagePassMode: v as ImagePassMode })}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="url">URL</SelectItem>
-                          <SelectItem value="base64">Base64</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-
-                    <Field label="附带合成拼图">
-                      <div className="flex h-9 items-center justify-between rounded-xl border bg-background px-3">
-                        <span className="text-xs text-muted-foreground">
-                          {apiConfig.sendStitchedSheet ? '同时发送拼图' : '仅发单图序列'}
-                        </span>
-                        <Switch
-                          checked={apiConfig.sendStitchedSheet}
-                          onCheckedChange={(v) => updateApiConfig({ sendStitchedSheet: v })}
-                        />
-                      </div>
-                    </Field>
-                  </>
-                )}
               </>
             )}
           </Section>

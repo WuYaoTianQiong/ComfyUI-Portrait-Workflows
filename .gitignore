@@ -184,3 +184,5 @@ workflows/ai-pose-gallery-zh/
 
 # 参考图上传目录（library_root/uploads，运行时写入，不入库）
 workflows/uploads/
+# 参考图库 Web 的构建产物随源码一起入库（运行时零 Node 依赖，见 gallery-web/UPSTREAM.md）
+!workflows/脚本/atelier/gallery-web/dist/

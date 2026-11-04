@@ -34,7 +34,7 @@ function GuidePage() {
           <Badge>3. 姿势 + 附图</Badge>
           <h3 className="mt-2 text-sm font-semibold">动作姿势库 (1,439)</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            挑选 5 视角 3D 素体白模或深度图（Depth），结合云端 API 或本地 ComfyUI 一键生成角色立绘。
+            挑选 5 视角 3D 素体白模或深度图（Depth），结合本地 ComfyUI 一键生成角色立绘。
           </p>
         </div>
       </Section>
@@ -54,7 +54,7 @@ function GuidePage() {
           </p>
           <p>
             <strong className="text-foreground">3. 隐私保护与使用者责任归属：</strong>
-            本工作台为纯前端本地应用，所有 AI 生图请求均由使用者自行配置的云端 API Key 或使用者本机 ComfyUI 环境直接执行，平台不收集、不存储任何用户上传的图片或生成结果。
+            本工作台为纯前端本地应用，所有 AI 生图请求均由使用者本机 ComfyUI 环境直接执行，平台不收集、不存储任何用户上传的图片或生成结果。
             <strong className="text-foreground">因使用者违规使用或不当传播所产生的一切法律责任，均由使用者本人独立承担，与本项目及维护者无关。</strong>
           </p>
         </div>

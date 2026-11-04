@@ -32,17 +32,13 @@ import type {
   ApiConfig,
   ComfyUiParams,
   CostumeItem,
-  DoubaoParams,
   ExtraReferenceImage,
-  GeminiParams,
   GenerationHistoryItem,
   GenerationSnapshot,
-  GptParams,
   ImageProviderId,
   PortraitItem,
   PoseItem,
   ProviderEndpointConfig,
-  QwenParams,
   RecipeState,
 } from '@/types/gallery'
 
@@ -55,73 +51,16 @@ const SAFE_MODE_KEY = 'pose_atlas_safe_mode_v1'
 
 const COMFY_CONFIG_VERSION = 3
 
-const shouldEnableProxyByDefault = (provider?: ImageProviderId) =>
-  provider === 'qwen' || provider === 'doubao'
-
 const DEFAULT_API_CONFIG: ApiConfig = {
-  activeProvider: 'gemini',
-  imagePassMode: 'url',
-  useProxy: false,
+  activeProvider: 'comfyui',
   stylePreset: 'realistic',
-  sendStitchedSheet: false,
   providers: {
-    gemini: {
-      baseUrl: PROVIDER_META.gemini.defaultBaseUrl,
-      apiKey: '',
-      model: PROVIDER_META.gemini.models[0].value,
-      customModel: '',
-    },
-    gpt: {
-      baseUrl: PROVIDER_META.gpt.defaultBaseUrl,
-      apiKey: '',
-      model: PROVIDER_META.gpt.models[0].value,
-      customModel: '',
-    },
-    qwen: {
-      baseUrl: PROVIDER_META.qwen.defaultBaseUrl,
-      apiKey: '',
-      model: PROVIDER_META.qwen.models[0].value,
-      customModel: '',
-    },
-    doubao: {
-      baseUrl: PROVIDER_META.doubao.defaultBaseUrl,
-      apiKey: '',
-      model: PROVIDER_META.doubao.models[0].value,
-      customModel: '',
-    },
     comfyui: {
       baseUrl: PROVIDER_META.comfyui.defaultBaseUrl,
       apiKey: '',
       model: PROVIDER_META.comfyui.models[0].value,
       customModel: '',
     },
-  },
-  gptParams: {
-    endpointMode: 'images_edits_json',
-    size: '1024x1536',
-    quality: 'high',
-    inputFidelity: 'high',
-    background: 'auto',
-    outputFormat: 'png',
-    moderation: 'auto',
-  },
-  geminiParams: {
-    endpointMode: 'native',
-    aspectRatio: '3:4',
-    imageSize: '2K',
-  },
-  qwenParams: {
-    size: '1024*1536',
-    promptExtend: true,
-    watermark: false,
-    negativePrompt: '',
-    n: 1,
-  },
-  doubaoParams: {
-    size: '2K',
-    sequentialImageGeneration: 'disabled',
-    watermark: false,
-    responseFormat: 'b64_json',
   },
   comfyuiParams: {
     workflowPreset: DEFAULT_COMFY_PRESET,
@@ -162,33 +101,14 @@ function migrateComfy(
 function mergeStoredConfig(raw: unknown): ApiConfig {
   if (!raw || typeof raw !== 'object') return DEFAULT_API_CONFIG
   const obj = raw as Partial<ApiConfig>
-  const storedVer = obj.comfyuiParams?.configVersion ?? 1
   const comfy = migrateComfy(
     { ...DEFAULT_API_CONFIG.providers.comfyui, ...obj.providers?.comfyui },
     { ...DEFAULT_API_CONFIG.comfyuiParams, configVersion: 1, ...obj.comfyuiParams }
   )
-  const activeProvider = obj.activeProvider ?? DEFAULT_API_CONFIG.activeProvider
-  // v3 起服务端 CORS 代理默认关闭，仅在切换到 Qwen / Doubao 时自动关联开启
-  const useProxy =
-    storedVer < 3
-      ? shouldEnableProxyByDefault(activeProvider)
-      : (obj.useProxy ?? shouldEnableProxyByDefault(activeProvider))
   return {
-    ...DEFAULT_API_CONFIG,
-    ...obj,
-    activeProvider,
-    useProxy,
-    providers: {
-      gemini: { ...DEFAULT_API_CONFIG.providers.gemini, ...obj.providers?.gemini },
-      gpt: { ...DEFAULT_API_CONFIG.providers.gpt, ...obj.providers?.gpt },
-      qwen: { ...DEFAULT_API_CONFIG.providers.qwen, ...obj.providers?.qwen },
-      doubao: { ...DEFAULT_API_CONFIG.providers.doubao, ...obj.providers?.doubao },
-      comfyui: comfy.provider,
-    },
-    gptParams: { ...DEFAULT_API_CONFIG.gptParams, ...obj.gptParams },
-    geminiParams: { ...DEFAULT_API_CONFIG.geminiParams, ...obj.geminiParams },
-    qwenParams: { ...DEFAULT_API_CONFIG.qwenParams, ...obj.qwenParams },
-    doubaoParams: { ...DEFAULT_API_CONFIG.doubaoParams, ...obj.doubaoParams },
+    activeProvider: 'comfyui',
+    stylePreset: obj.stylePreset ?? DEFAULT_API_CONFIG.stylePreset,
+    providers: { comfyui: comfy.provider },
     comfyuiParams: comfy.params,
   }
 }
@@ -232,10 +152,7 @@ interface StudioContextValue {
   randomizeRecipe: (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[] }) => void
   updateApiConfig: (patch: Partial<ApiConfig>) => void
   updateProviderConfig: (provider: ImageProviderId, patch: Partial<ProviderEndpointConfig>) => void
-  updateGptParams: (patch: Partial<GptParams>) => void
-  updateGeminiParams: (patch: Partial<GeminiParams>) => void
-  updateQwenParams: (patch: Partial<QwenParams>) => void
-  updateDoubaoParams: (patch: Partial<DoubaoParams>) => void
+
   updateComfyUiParams: (patch: Partial<ComfyUiParams>) => void
   addHistory: (item: Omit<GenerationHistoryItem, 'id' | 'createdAt'>) => void
   removeHistoryItem: (id: string) => void
@@ -517,13 +434,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const updateApiConfig = (patch: Partial<ApiConfig>) => {
-    setApiConfig((prev) => {
-      const next = { ...prev, ...patch }
-      if (patch.activeProvider && patch.useProxy === undefined) {
-        next.useProxy = shouldEnableProxyByDefault(patch.activeProvider)
-      }
-      return next
-    })
+    setApiConfig((prev) => ({ ...prev, ...patch }))
   }
 
   const updateProviderConfig = (provider: ImageProviderId, patch: Partial<ProviderEndpointConfig>) => {
@@ -539,21 +450,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const updateGptParams = (patch: Partial<GptParams>) => {
-    setApiConfig((prev) => ({ ...prev, gptParams: { ...prev.gptParams, ...patch } }))
-  }
-
-  const updateGeminiParams = (patch: Partial<GeminiParams>) => {
-    setApiConfig((prev) => ({ ...prev, geminiParams: { ...prev.geminiParams, ...patch } }))
-  }
-
-  const updateQwenParams = (patch: Partial<QwenParams>) => {
-    setApiConfig((prev) => ({ ...prev, qwenParams: { ...prev.qwenParams, ...patch } }))
-  }
-
-  const updateDoubaoParams = (patch: Partial<DoubaoParams>) => {
-    setApiConfig((prev) => ({ ...prev, doubaoParams: { ...prev.doubaoParams, ...patch } }))
-  }
 
   const updateComfyUiParams = (patch: Partial<ComfyUiParams>) => {
     setApiConfig((prev) => ({ ...prev, comfyuiParams: { ...prev.comfyuiParams, ...patch } }))
@@ -727,10 +623,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         randomizeRecipe,
         updateApiConfig,
         updateProviderConfig,
-        updateGptParams,
-        updateGeminiParams,
-        updateQwenParams,
-        updateDoubaoParams,
+
         updateComfyUiParams,
         addHistory,
         removeHistoryItem,

@@ -65,6 +65,20 @@ atelier/
 
 ---
 
+## 参考图库 Web（gallery-web）
+
+`gallery-web/` 是从上游 `ai-pose-gallery-zh` 接管进来的 React 工作台，由本后端挂在 `/ref-web` 子路径下，
+与 atelier 同端口访问（不再单独跑 8760 静态服务）。
+
+- 源码：`gallery-web/src/`；产物：`gallery-web/dist/`（**必须随源码一起提交**，运行时不需要 Node）
+- 构建：`cd gallery-web && pnpm run build:prod`（即 `vite build --base=/ref-web/ --emptyOutDir`，
+  每次构建都会清空 `dist/`，避免旧 hash 产物堆积；Git Bash 下加 `MSYS_NO_PATHCONV=1`，
+  否则基路径会被改写成 Git 安装路径）
+- 素材：`/data`、`/thumbs`、`/img` 三个挂载指向上游只读目录（junction 经 `_resolve_if_reparse`），不复制、不入库
+- 升级：来源、pin 的 commit 与合并步骤见 `gallery-web/UPSTREAM.md`；改完 `src/` 必须重新构建 `dist/`
+
+---
+
 ## 配置
 
 全部通过环境变量覆盖，前缀 `ATELIER_`（见 `app/config.py`）：

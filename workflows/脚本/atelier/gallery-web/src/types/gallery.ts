@@ -75,7 +75,7 @@ export interface RecipeState {
   extraImages?: ExtraReferenceImage[]
 }
 
-export type ImageProviderId = 'gemini' | 'gpt' | 'qwen' | 'doubao' | 'comfyui'
+export type ImageProviderId = 'comfyui'
 
 export interface ProviderEndpointConfig {
   baseUrl: string
@@ -83,8 +83,6 @@ export interface ProviderEndpointConfig {
   model: string
   customModel: string
 }
-
-export type ImagePassMode = 'url' | 'base64'
 
 export type WorkflowScalar = string | number | boolean
 
@@ -109,48 +107,10 @@ export interface ComfyUiParams {
   configVersion?: number
 }
 
-export interface GptParams {
-  endpointMode: 'images_edits_json' | 'images_edits' | 'responses' | 'chat'
-  size: 'auto' | '1024x1536' | '1024x1024' | '1536x1024'
-  quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  inputFidelity: 'high' | 'low'
-  background: 'auto' | 'opaque' | 'transparent'
-  outputFormat: 'png' | 'jpeg' | 'webp'
-  moderation: 'auto' | 'low'
-}
-
-export interface GeminiParams {
-  endpointMode: 'native' | 'openai_chat'
-  aspectRatio: '3:4' | '1:1' | '4:3' | '9:16' | '16:9'
-  imageSize: '1K' | '2K' | '4K'
-}
-
-export interface QwenParams {
-  size: '1024*1536' | '1328*1328' | '928*1664' | '1664*928'
-  promptExtend: boolean
-  watermark: boolean
-  negativePrompt: string
-  n: number
-}
-
-export interface DoubaoParams {
-  size: '2K' | '4K' | '1K' | '1728x2304' | '2048x2048' | '1440x2560' | '2560x1440'
-  sequentialImageGeneration: 'disabled' | 'auto'
-  watermark: boolean
-  responseFormat: 'b64_json' | 'url'
-}
-
 export interface ApiConfig {
   activeProvider: ImageProviderId
-  imagePassMode: ImagePassMode
-  useProxy: boolean
   stylePreset: string
-  sendStitchedSheet: boolean
   providers: Record<ImageProviderId, ProviderEndpointConfig>
-  gptParams: GptParams
-  geminiParams: GeminiParams
-  qwenParams: QwenParams
-  doubaoParams: DoubaoParams
   comfyuiParams: ComfyUiParams
 }
 
