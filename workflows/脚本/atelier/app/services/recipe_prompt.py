@@ -97,7 +97,9 @@ def build_recipe_prompt(
         )
         idx += 1
 
+    pose_idx = 0
     if pose:
+        pose_idx = idx
         wear = f"，穿着图{costume_idx}的服装" if costume_idx else ""
         body = (
             f"最终画面中的人物是真人，皮肤真实自然{wear}"
@@ -110,6 +112,23 @@ def build_recipe_prompt(
             f"图{idx}只是动作示意，{body}。"
         )
         idx += 1
+
+    # 双人姿势（库内 id 统一为 `pair*`）：必须显式声明人数与两人的服装归属。
+    # 实测（2026-11-04）：只写「按图3摆姿势」时，无论 Edit 还是 VNCCS 都只出一个；
+    # 且第二人容易没衣服。这里把人数、两人的衣装、禁止合并都写死。
+    is_pair = bool(pose and pose.id.startswith("pair"))
+    if is_pair:
+        pair_costume = (
+            f"其中一位穿图{costume_idx}的整套服装和配饰，另一位穿同色系素色简化款；"
+            if costume_idx
+            else "两人各自都有完整服装，第二位穿与第一位同色系的素色简化款；"
+        )
+        clauses.append(
+            "• 双人要求：画面中必须同时出现两位成年女性，两人都要完整入镜；"
+            f"{pair_costume}任何一位都不允许裸露或半裸。"
+            f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
+            "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+        )
 
     if faceless:
         clauses.append(
