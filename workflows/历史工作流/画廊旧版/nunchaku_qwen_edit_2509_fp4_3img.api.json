@@ -1,0 +1,228 @@
+{
+ "1": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "portrait_ref.png"
+  },
+  "_meta": {
+   "title": "图1：人像参考 (Portrait)"
+  }
+ },
+ "2": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "costume_ref.png"
+  },
+  "_meta": {
+   "title": "图2：服装参考 (Costume)"
+  }
+ },
+ "3": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "pose_ref.png"
+  },
+  "_meta": {
+   "title": "图3：姿势参考 (Pose)"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "qwen_image_vae.safetensors"
+  }
+ },
+ "5": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+   "type": "qwen_image",
+   "device": "default"
+  }
+ },
+ "6": {
+  "class_type": "NunchakuQwenImageDiTLoader",
+  "inputs": {
+   "model_name": "svdq-fp4_r32-qwen-image-edit-lightningv1.0-4steps.safetensors",
+   "cpu_offload": "auto"
+  },
+  "_meta": {
+   "title": "Nunchaku 4bit 加载器"
+  }
+ },
+ "7": {
+  "class_type": "ModelSamplingAuraFlow",
+  "inputs": {
+   "model": [
+    "6",
+    0
+   ],
+   "shift": 3.0
+  }
+ },
+ "8": {
+  "class_type": "CFGNorm",
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "strength": 1.0
+  }
+ },
+ "30": {
+  "class_type": "PoseTrimWhitespace",
+  "inputs": {
+   "image": [
+    "3",
+    0
+   ],
+   "tolerance": 12,
+   "padding": 24
+  },
+  "_meta": {
+   "title": "自动裁掉姿势图留白"
+  }
+ },
+ "9": {
+  "class_type": "TextEncodeQwenImageEditPlus",
+  "inputs": {
+   "clip": [
+    "5",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ],
+   "image1": [
+    "1",
+    0
+   ],
+   "image2": [
+    "2",
+    0
+   ],
+   "image3": [
+    "30",
+    0
+   ],
+   "prompt": ""
+  },
+  "_meta": {
+   "title": "正向提示词 (Positive Prompt)"
+  }
+ },
+ "15": {
+  "class_type": "TextEncodeQwenImageEditPlus",
+  "inputs": {
+   "clip": [
+    "5",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ],
+   "image1": [
+    "1",
+    0
+   ],
+   "image2": [
+    "2",
+    0
+   ],
+   "image3": [
+    "30",
+    0
+   ],
+   "prompt": ""
+  },
+  "_meta": {
+   "title": "反向提示词 (Negative Prompt)"
+  }
+ },
+ "10": {
+  "class_type": "ImageScaleToTotalPixels",
+  "inputs": {
+   "image": [
+    "30",
+    0
+   ],
+   "upscale_method": "lanczos",
+   "megapixels": 1.0,
+   "resolution_steps": 16
+  }
+ },
+ "11": {
+  "class_type": "VAEEncode",
+  "inputs": {
+   "pixels": [
+    "10",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ]
+  }
+ },
+ "12": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": [
+    "8",
+    0
+   ],
+   "positive": [
+    "9",
+    0
+   ],
+   "negative": [
+    "15",
+    0
+   ],
+   "latent_image": [
+    "11",
+    0
+   ],
+   "seed": 20261113,
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  },
+  "_meta": {
+   "studio": {
+    "hiddenInputs": [
+     "cfg",
+     "steps"
+    ]
+   }
+  }
+ },
+ "13": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "12",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ]
+  }
+ },
+ "14": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "13",
+    0
+   ],
+   "filename_prefix": "pose_studio/result"
+  }
+ }
+}
