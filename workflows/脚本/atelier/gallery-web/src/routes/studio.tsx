@@ -810,7 +810,9 @@ function StudioPage() {
                     <SelectContent>
                       {workflowList.map((workflow) => (
                         <SelectItem key={workflow.path} value={workflow.path} className="text-xs">
-                          {workflow.source !== '库根' ? `${workflow.source} · ` : ''}
+                          {workflow.source !== '库根' && !workflow.name.startsWith(workflow.source)
+                            ? `${workflow.source} · `
+                            : ''}
                           {workflow.name.replace(/\.api\.json$/i, '').replace(/\.json$/i, '')}
                           {workflow.image_slots ? `（${workflow.image_slots} 图）` : ''}
                         </SelectItem>
@@ -864,6 +866,10 @@ function StudioPage() {
                       )}
                     </p>
                   )}
+                  <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+                    新增工作流：把 .api.json 放进库的「图库专用工作流/」（官方）或「我的工作流/」（自建），
+                    刷新本页即出现；也可用下方「导入 .json」临时使用。
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     <input
                       ref={comfyFileInputRef}

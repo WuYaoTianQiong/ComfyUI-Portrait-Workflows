@@ -203,7 +203,7 @@ function DashboardPage() {
                 {name ? (
                   <div className="truncate text-xs font-medium">{name}</div>
                 ) : (
-                  <Link to={to} className="truncate text-xs font-medium text-primary hover:underline">
+                  <Link to={to} className="block truncate text-xs font-medium text-primary hover:underline">
                     {hint}
                   </Link>
                 )}

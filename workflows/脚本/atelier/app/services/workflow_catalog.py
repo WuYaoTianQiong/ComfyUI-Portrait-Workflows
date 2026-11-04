@@ -43,15 +43,19 @@ def studio_dirs() -> list[Path]:
     """参考图库合成台专用的工作流目录（按优先级）。
 
     合成台要的是"能塞进人像/服装/姿势参考图"的编辑类工作流，与库根那批
-    文生图 / 换衣 / 超分工作流不是一类东西。专用工作流一共三处：
+    文生图 / 换衣 / 超分工作流不是一类东西。扫描目录（按优先级）：
 
-    1. 上游开源项目自带的专用工作流：`<参考库>/src/workflows/*.api.json`
-       （本机改过的那份，例如 qwen_image_edit_2509_3img）；
-    2. 画廊本机改版：`历史工作流/画廊旧版/*.api.json`
-       （GGUF + Lightning 4 步那几条，是当前唯一验证过能出图的）；
-    3. 库根（用户临时放进来的编辑类工作流）。
+    1. `图库专用工作流/`：本机适配、实测能出图的三图合成（GGUF Q5_K_M / Nunchaku fp4），
+       文件名带 `图库专用_` 前缀，见该目录 README；
+    2. `我的工作流/`：用户自己丢进来的编辑类工作流，见该目录 README；
+    3. 上游开源项目自带的专用工作流：`<参考库>/src/workflows/*.api.json`
+       （例如 qwen_image_edit_2509_3img，引用本机没有的 2509 fp8，选中会报不匹配）；
+    4. `历史工作流/画廊旧版/`：旧位置，仅兜底（已被第 1 项取代）；
+    5. 库根：用户临时放进来的编辑类工作流。
     """
     dirs = [
+        settings.library_root / "图库专用工作流",
+        settings.library_root / "我的工作流",
         settings.reference_dir / "src" / "workflows",
         settings.library_root / "历史工作流" / "画廊旧版",
         settings.library_root,
@@ -190,19 +194,24 @@ def _path_source(path: Path) -> str:
         rel = path.relative_to(settings.library_root)
     except ValueError:
         return "外部"
+    head = rel.parts[0] if rel.parts else ""
+    if head == "图库专用工作流":
+        return "图库专用"
+    if head == "我的工作流":
+        return "我的工作流"
     if rel.parts[:2] == ("历史工作流", "画廊旧版"):
-        return "画廊本机改版"
+        return "旧版归档"
     if len(rel.parts) > 1:
-        return "参考库专用"
+        return "上游原版"
     return "库根"
 
 
-#: studio 下拉的排序权重：本机适配过的 > 上游专用 > 库根通用
-_STUDIO_SOURCE_RANK = {"画廊本机改版": 3, "参考库专用": 2, "库根": 1}
+#: studio 下拉的排序权重：图库专用 > 我的工作流 > 上游原版 > 旧版归档/库根
+_STUDIO_SOURCE_RANK = {"图库专用": 5, "我的工作流": 4, "上游原版": 3, "旧版归档": 2, "库根": 1}
 
 #: 本机实测能出图、作为默认选中的工作流（按优先级排列）。
-#: 只有与它同来源（画廊本机改版）的几个候选参与排序，所以这里写文件名即可。
-_PREFERRED_STUDIO_NAMES = ("qwen_image_edit_gguf_3img.api.json",)
+#: 与它在同一来源（图库专用工作流/）的候选按 mtime 排，所以这里写文件名即可。
+_PREFERRED_STUDIO_NAMES = ("图库专用_QwenEdit_GGUF-Q5KM_三图_4步_标准.api.json",)
 
 
 def studio_sort_key(item: dict) -> tuple:

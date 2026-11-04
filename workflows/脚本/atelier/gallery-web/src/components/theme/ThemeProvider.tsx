@@ -22,13 +22,15 @@ function isTheme(value: string | null): value is Theme {
 
 function readTheme(): Theme {
   try {
-    // 先读新键；新键缺失时回退旧键，再回退默认深色。
-    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
-    return isTheme(stored) ? stored : DEFAULT_THEME
+    // 先读新键；新键缺失或值无效时回退旧键，再回退默认深色。
+    const current = localStorage.getItem(STORAGE_KEY)
+    if (isTheme(current)) return current
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (isTheme(legacy)) return legacy
   } catch {
     // 隐私模式或禁用存储时 localStorage 会抛 SecurityError，回退默认值。
-    return DEFAULT_THEME
   }
+  return DEFAULT_THEME
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
