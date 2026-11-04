@@ -34,6 +34,12 @@ def _safe_is_dir(p: Path) -> bool:
         return False
 
 
+def _split_csv(raw: str) -> frozenset[str]:
+    """把逗号分隔的名单拆成集合；兼容全角逗号与首尾空白。"""
+    parts = (raw or "").replace("，", ",").split(",")
+    return frozenset(p.strip() for p in parts if p.strip())
+
+
 def _resolve_comfyui_root(library_root: Path, env_override: str | None = None) -> Path:
     """自适应 ComfyUI 安装目录：从 library_root 向上逐级查找首个含 output 子目录的根。
 
@@ -82,10 +88,35 @@ class Settings(BaseSettings):
     comfyui_root: Path = Path()
     thumbnail_dir: Path = library_root / "thumbnails"
 
+    # AI 参考图库（只读素材层，上游 ai-pose-gallery-zh）
+    reference_enabled: bool = True
+    # 由 model_validator 在 env 解析后计算；不要写成 library_root / "..."，
+    # 否则会固化成模块加载时的类默认值，ATELIER_LIBRARY_ROOT 覆盖后不会跟着变。
+    reference_root: Path | None = None
+    reference_allow_nsfw: bool = False
+    reference_page_size: int = 60
+    reference_nsfw_pose_systems: str = "全身单人・性感系,双人缠绵"
+    reference_nsfw_costume_categories: str = "内衣・睡衣,性感穿搭"
+
     @model_validator(mode="after")
     def _resolve_comfyui_root_field(self):
         self.comfyui_root = _resolve_comfyui_root(self.library_root, self.comfyui_root_env)
+        if self.reference_root is None:
+            self.reference_root = self.library_root / "ai-pose-gallery-zh"
         return self
+
+    @property
+    def reference_dir(self) -> Path:
+        """参考库根（只读）：默认走 <库>/ai-pose-gallery-zh 这个 junction。"""
+        return self.reference_root or (self.library_root / "ai-pose-gallery-zh")
+
+    @property
+    def nsfw_pose_systems(self) -> frozenset[str]:
+        return _split_csv(self.reference_nsfw_pose_systems)
+
+    @property
+    def nsfw_costume_categories(self) -> frozenset[str]:
+        return _split_csv(self.reference_nsfw_costume_categories)
 
     @property
     def output_dir(self) -> Path:
@@ -117,3 +148,4 @@ print(f"[config] comfyui_root = {settings.comfyui_root}")
 print(f"[config]   output dir = {settings.output_dir}")
 print(f"[config]   output dir exists = {_safe_is_dir(settings.output_dir)}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")
+print(f"[config]   reference_root = {settings.reference_dir} (enabled={settings.reference_enabled})")

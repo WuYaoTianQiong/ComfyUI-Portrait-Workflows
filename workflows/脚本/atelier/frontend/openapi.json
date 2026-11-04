@@ -7447,6 +7447,25 @@
         ]
       }
     },
+    "/api/reference/ping": {
+      "get": {
+        "operationId": "ping_reference_sheet_api_reference_ping_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ping Reference Sheet",
+        "tags": [
+          "参考图库参考板"
+        ]
+      }
+    },
     "/api/runs": {
       "post": {
         "description": "单图生成",

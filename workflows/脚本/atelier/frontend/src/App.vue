@@ -69,6 +69,13 @@ function jumpToPrompt(promptId: number) {
         </button>
         <button
           class="btn btn-sm"
+          :class="{ active: activeKey === 'reference' }"
+          @click="go('reference')"
+        >
+          参考图库
+        </button>
+        <button
+          class="btn btn-sm"
           :class="{ active: activeKey === 'prompt' }"
           @click="go('prompt')"
         >

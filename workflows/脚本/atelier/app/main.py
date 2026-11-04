@@ -150,6 +150,9 @@ from app.routers.templates import router as templates_router
 from app.routers.fragments import router as fragments_router
 from app.routers.system import router as system_router
 from app.routers.editor import router as editor_router
+from app.routers.reference_library import router as reference_library_router
+from app.routers.reference_upload import router as reference_upload_router
+from app.routers.reference_sheet import router as reference_sheet_router
 
 app.include_router(prompts_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
@@ -164,6 +167,13 @@ app.include_router(templates_router, prefix="/api")
 app.include_router(fragments_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
 app.include_router(editor_router, prefix="/api")
+
+# AI 参考图库：只读素材层。开关关闭时不注册路由（/api/reference/* 直接 404），
+# 回滚只需要 ATELIER_REFERENCE_ENABLED=0，无数据库变更。
+if settings.reference_enabled:
+    app.include_router(reference_library_router, prefix="/api")
+    app.include_router(reference_upload_router, prefix="/api")
+    app.include_router(reference_sheet_router, prefix="/api")
 
 # 旧路径 308 别名必须最后注册：注册在前面会抢走新路径的请求。
 from app.routers.legacy import router as legacy_router

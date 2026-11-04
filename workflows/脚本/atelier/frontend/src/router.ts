@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { defineAsyncComponent, defineComponent, h, type Component } from 'vue'
 
 import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
@@ -9,6 +10,33 @@ import JobCenterView from './views/JobCenterView.vue'
 import TaxonomyView from './views/TaxonomyView.vue'
 import StatsView from './views/StatsView.vue'
 import DesignView from './views/DesignView.vue'
+
+/**
+ * 参考图库路由：骨架阶段先挂占位页。
+ *
+ * 用 `import.meta.glob` 而不是静态 import —— 会话 1 只能改 router.ts，
+ * ReferenceView.vue 归会话 2；文件还没创建时静态 import 会直接把构建打挂。
+ * 文件一旦落地，glob 自动命中并切到真实页面，router.ts 不需要再改。
+ */
+const referenceViewModules = import.meta.glob<{ default: Component }>('./views/ReferenceView.vue')
+const referenceViewLoader = referenceViewModules['./views/ReferenceView.vue']
+
+const ReferencePlaceholder = defineComponent({
+  name: 'ReferencePlaceholder',
+  render: () =>
+    h('div', { style: 'padding: 32px' }, [
+      h('h2', { style: 'margin: 0 0 12px; font-size: 20px; color: #1f2430' }, 'AI 参考图库'),
+      h(
+        'p',
+        { style: 'margin: 0; font-size: 14px; color: #1f2430' },
+        '页面施工中：浏览、检索、灯箱与白模/深度切换由后续会话接入。',
+      ),
+    ]),
+})
+
+const ReferenceView = referenceViewLoader
+  ? defineAsyncComponent(() => referenceViewLoader().then((mod) => mod.default))
+  : ReferencePlaceholder
 
 /**
  * URL 路由：每个页签一个真实路径。
@@ -27,6 +55,7 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/gallery' },
     { path: '/gallery', name: 'gallery', component: GalleryView },
+    { path: '/reference', name: 'reference', component: ReferenceView },
     {
       path: '/prompt/:id?',
       name: 'prompt',
