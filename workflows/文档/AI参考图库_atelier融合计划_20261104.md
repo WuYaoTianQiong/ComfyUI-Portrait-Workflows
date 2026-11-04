@@ -149,7 +149,7 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/reference/libraries` | 四库条目数、本地/外链条数、可用性（目录是否存在） |
-| GET | `/api/reference/items` | 参数：`library`、`search`、`group`、`facet`、`angle`、`nsfw`、`page`、`page_size` |
+| GET | `/api/reference/items` | 参数：`library`、`search`、`group`、`facet`、`angle`、`nsfw`、`page`、`page_size`。`nsfw` 是**三态**：不传=全部、`false`=只看非敏感、`true`=只看敏感；`ALLOW_NSFW=0` 时该参数被忽略 |
 | GET | `/api/reference/items/{library}/{id}` | 单条详情 |
 | GET | `/api/reference/items/{library}/{id}/image` | `kind=thumb(image/depth)`，FileResponse |
 | POST | `/api/reference/recipes` | 三图 + 画风 + 补充提示词 → 透传给现有 editor 批量入口 |
@@ -629,7 +629,7 @@ B 与 C 文件不重叠，可同时开；A 必须先完成（前端要等新字�
 
 核验结论（详见[验收记录](./AI参考图库_验收记录_20261104.md) §6）：门禁全绿（pytest 388 / vitest 34 spec / build / smoke 24 / e2e 24），新增能力逐条实测通过。
 
-**遗留**：① ~~混源真出图未留痕~~ → **已补验通过**（`gen_jobs#192` / `gen_history#1210495`，上传姿势槽生效）；② `recipes.references` 只带 id，路径在 `plan[].metas`，口径待统一；③ 参考库页无 E2E 覆盖。
+**遗留**：① ~~混源真出图未留痕~~ → **已补验通过**（`gen_jobs#192` / `gen_history#1210495`，上传姿势槽生效）；② ~~`recipes.references` 只带 id~~ → 已加 `slots[]`，库条目与上传图同一形状；③ ~~参考库页无 E2E~~ → `run_e2e.py` 已覆盖（8 条断言）。**收口记录见[验收记录](./AI参考图库_验收记录_20261104.md) §七**。
 
 ### 13.4 验收（二期）
 
