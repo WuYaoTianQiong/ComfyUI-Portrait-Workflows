@@ -20,6 +20,7 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 V4 = Path(__file__).resolve().parents[2]
 PORT = int(os.environ.get("E2E_PORT", "8766"))
@@ -168,12 +169,13 @@ def run_browser_checks() -> None:
         cells = page.locator(".picker .cell")
         check(cells.count() > 0, "换脸页能列出生图", f"{cells.count()} 张")
 
-        # ---- 参考图库（/ref-web：atelier 托管的上游 React 台）----
-        # 旧断言针对已下线的 Vue 参考库页（.reference-page / .jgrid / .nsfw-toggle /
-        # .sheet-btn）。E 起 `/reference` 整页跳到 `/ref-web/`，旧页不再是入口，
-        # 这批断言属**过期**而非回归：改为验收托管产物 —— 深链接不 404、网格有卡片、
-        # 缩略图真实解码、深度切换生效、无 console 错误。
-        entry = page.locator("a:has-text('参考图库')")
+        # ---- 参考图库（/reference：Vue 用 iframe 承载上游 React 台 /ref-web）----
+        # T23 起顶栏入口由 `<a :href="referenceWebUrl">` 改为 `<button @click="go('reference')">`，
+        # `/reference` 由 ReferenceEmbedView 用 iframe 承载 `/ref-web/?embedded=1`。
+        # 旧断言（a 标签 + href 指向 /ref-web）随入口改造失效，属**脚本过期**而非回归：
+        # 改为验收按钮入口、前端路由、iframe 地址与内嵌内容加载。
+        # iframe 内是否隐藏自身导航属 T25（gallery-web 重建）验收项，此处不断言。
+        entry = page.locator("button:has-text('参考图库')")
         # 入口由 /api/system/status 的 reference_web_url 驱动，而该接口要先等一次探活
         # （离线实测 ~3s，另有 is_online 的 15s 结果缓存）；e2e 跑到这里可能还没拿到，
         # 必须显式等待而不是靠时序碰运气（修缓存前该接口 8.2s，入口 ~8s 后才出现）。
@@ -182,10 +184,47 @@ def run_browser_checks() -> None:
         except Exception:
             pass
         check(entry.count() == 1, "顶栏有参考图库入口", f"{entry.count()} 个")
-        entry_href = entry.first.get_attribute("href") if entry.count() else ""
-        check("/ref-web" in (entry_href or ""), "参考图库入口指向 /ref-web", entry_href or "无 href")
 
         errors_before_ref = len(errors)
+        if entry.count():
+            entry.first.click()
+        try:
+            page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
+
+        # 路由必须是 Vue 的 /reference，不能停在 /gallery，也不能整页跳去 /ref-web。
+        ref_path = urlparse(page.url).path.rstrip("/")
+        check(ref_path == "/reference", "参考图库入口路由是 /reference", page.url)
+
+        ref_iframe = page.locator(".reference-embed iframe")
+        check(ref_iframe.count() == 1, "参考图库页用 iframe 承载", f"{ref_iframe.count()} 个")
+        iframe_src = ref_iframe.first.get_attribute("src") if ref_iframe.count() else ""
+        # 两个条件缺一不可：指向上游台 + embedded=1（gallery-web 据此隐藏自身导航）。
+        check(
+            "/ref-web" in (iframe_src or "") and "embedded=1" in (iframe_src or ""),
+            "iframe src 指向 /ref-web 且带 embedded=1",
+            iframe_src or "无 src",
+        )
+
+        # 内嵌内容加载：等 React 挂载（#root 出现子节点）后再取正文，确认不是白屏。
+        frame = page.frame_locator(".reference-embed iframe")
+        try:
+            frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
+        except Exception:
+            pass
+        page.wait_for_timeout(1200)
+        frame_body = ""
+        try:
+            frame_body = frame.locator("body").inner_text(timeout=10000)
+        except Exception:
+            pass
+        check(
+            "参考图库" in frame_body,
+            "iframe 内参考图库内容已加载",
+            frame_body.strip()[:60] or "空",
+        )
         page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded")
         # 阶段三起图库图片统一走后端端点（kind=thumb|image|depth_thumb|depth），
         # 不再有 /thumbs/ 静态路径；选择器必须按端点匹配。

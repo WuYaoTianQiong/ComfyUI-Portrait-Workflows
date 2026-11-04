@@ -1,5 +1,6 @@
 import { useLocation } from '@tanstack/react-router'
 import { ATELIER_GALLERY_PATH, ATELIER_TOP_NAV } from '@/lib/atelierLinks'
+import { isEmbeddedMode } from '@/lib/embedded'
 import { cn } from '@/lib/utils'
 
 /** 参考图库自身的入口（gallery-web 的宿主子路径）。 */
@@ -28,6 +29,12 @@ function isReferenceWebCurrent(pathname: string): boolean {
  */
 export function AtelierTopNav() {
   const pathname = useLocation({ select: (l) => l.pathname })
+
+  // 双保险：AppHeader 已按内嵌模式做条件渲染，这里再兜一层，避免未来被
+  // 其他布局直接引用时又把全局导航渲染进 iframe。必须先调用完 hook 再返回，
+  // 以保证 hook 调用顺序稳定（embedded 状态本身在页面生命周期内不变）。
+  if (isEmbeddedMode()) return null
+
   const referenceWebCurrent = isReferenceWebCurrent(pathname)
 
   return (

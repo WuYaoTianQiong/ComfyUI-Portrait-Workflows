@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/sidebar'
 import { useStudio } from '@/store/studioStore'
 import { ATELIER_GALLERY_PATH } from '@/lib/atelierLinks'
+import { isEmbeddedMode } from '@/lib/embedded'
 import { activeNavTo, navGroups } from './nav'
 
 export function AppSidebar() {
@@ -22,6 +23,8 @@ export function AppSidebar() {
   const active = activeNavTo(pathname)
   const { recipe } = useStudio()
   const count = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length
+  // embedded 状态在页面生命周期内不变，渲染时同步求值即可，无需 state/effect。
+  const embedded = isEmbeddedMode()
 
   return (
     <Sidebar collapsible="icon">
@@ -29,8 +32,8 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="返回画室画廊">
-              {/* 整页导航回 atelier：TanStack Link 会把 basepath 拼成 /ref-web/gallery。 */}
-              <a href={ATELIER_GALLERY_PATH}>
+              {/* 整页导航回 atelier：TanStack Link 会把 basepath 拼成 /ref-web/gallery；内嵌时跳出 iframe。 */}
+              <a href={ATELIER_GALLERY_PATH} target={embedded ? '_top' : undefined}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <PaletteIcon className="size-4" />
                 </div>
@@ -45,12 +48,12 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
+        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明；内嵌时需跳出 iframe。 */}
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="返回画室画廊">
-                <a href={ATELIER_GALLERY_PATH}>
+                <a href={ATELIER_GALLERY_PATH} target={embedded ? '_top' : undefined}>
                   <ArrowLeftIcon />
                   <span className="flex-1 truncate">返回画廊</span>
                 </a>

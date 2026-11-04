@@ -450,7 +450,11 @@ def check_gallery_entries(page, tag: str) -> None:
     back = page.locator('a[href="/gallery"]:has-text("返回画廊")')
     check(back.count() == 1, f"[{tag}] 侧栏「返回画廊」是原生链接", f"count={back.count()}")
 
-    brand = page.locator('a[href="/gallery"]:has-text("参考图库")')
+    # 说明：这里检查的是 React 侧栏 brand（仍为原生 a，文本含「画室」与「参考图库」）。
+    # 外层 Vue 顶栏的「参考图库」在 iframe 方案下已改为 button，其语义由
+    # check_embed_nav() 单独断言；若在此直接改成 button，会让默认全量的 React 页面
+    # 断言 count==1 失败（React 侧栏没有 button 入口）。
+    brand = page.locator('[data-slot="sidebar"] a[href="/gallery"]').filter(has_text="画室")
     check(brand.count() == 1 and "画室" in (brand.first.inner_text() if brand.count() else ""),
           f"[{tag}] 侧栏 brand 是原生链接", f"count={brand.count()}")
 
@@ -3107,6 +3111,259 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
         ctx.close()
 
 
+def check_embed_nav(browser, shots_dir: Path) -> None:
+    """T25 跨端无感切换：Vue 外层导航常驻、iframe 内无全局导航、target=_top 跳出。"""
+    section("T25 跨端无感切换专项（新 context）")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    # 外层与 iframe 都注入错误收集器：iframe 的 console/pageerror 不会可靠冒泡到
+    # page.on()，用 init script 在两种 document 内各自记录，验收时分别读取。
+    ctx.add_init_script(
+        "window.__t25errs = [];"
+        "window.addEventListener('error', (e) => { try { window.__t25errs.push(String(e.message)); } catch (_) {} });"
+        "window.addEventListener('unhandledrejection', (e) => { try { window.__t25errs.push(String(e.reason)); } catch (_) {} });"
+    )
+    errors: list[str] = []
+    page = new_page(ctx, errors, "t25-embed")
+    try:
+        # a. /gallery 写标记，点击参考图库 -> /reference，标记保留（无整页刷新）
+        status = goto_settle(page, "/gallery")
+        check(status == 200, "[T25] /gallery 返回 200", f"status={status}")
+        page.evaluate("() => { window.__atelierNavMark = 1 }")
+        check(page.evaluate("() => window.__atelierNavMark") == 1,
+              "[T25] 无刷新标记已写入", "mark=1")
+
+        tabs = page.locator("nav.tabs")
+        check(tabs.count() == 1, "[T25] 外层顶栏 tabs 存在", f"count={tabs.count()}")
+        tabs.locator("button:has-text('参考图库')").first.click()
+        page.wait_for_function("() => location.pathname === '/reference'", timeout=30000)
+        page.wait_for_timeout(1200)
+        check(page.evaluate("() => window.__atelierNavMark") == 1,
+              "[T25] 点击参考图库无整页刷新（标记保留）", "mark=1")
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T25] 参考图库路由为 /reference", page.url)
+
+        # a. 提示词 -> /prompt，标记仍在；再回参考图库，标记仍在
+        page.locator("nav.tabs button:has-text('提示词')").first.click()
+        page.wait_for_function("() => location.pathname === '/prompt'", timeout=30000)
+        page.wait_for_timeout(800)
+        check(page.evaluate("() => window.__atelierNavMark") == 1,
+              "[T25] 提示词跳转无整页刷新（标记保留）", "mark=1")
+        check(urlsplit(page.url).path.rstrip("/") == "/prompt",
+              "[T25] 提示词路由为 /prompt", page.url)
+        page.locator("nav.tabs button:has-text('参考图库')").first.click()
+        page.wait_for_function("() => location.pathname === '/reference'", timeout=30000)
+        page.wait_for_timeout(1200)
+        check(page.evaluate("() => window.__atelierNavMark") == 1,
+              "[T25] 回到参考图库无整页刷新（标记保留）", "mark=1")
+
+        # b. 外层 9 项且参考图库 active；iframe 恰 1 个，src 含 /ref-web 与 embedded=1
+        tabs = page.locator("nav.tabs")
+        labels = ["画廊", "参考图库", "提示词", "组合器", "图像编辑", "批量超分",
+                  "分类与标签", "任务", "统计"]
+        btns = tabs.locator("button")
+        count = btns.count()
+        check(count == 9, "[T25] 外层顶栏 9 项", f"count={count}")
+        for i, label in enumerate(labels):
+            if i >= count:
+                check(False, f"[T25] 外层导航项缺失：{label}", "")
+                continue
+            el = btns.nth(i)
+            text = (el.inner_text() or "").strip()
+            cls = el.get_attribute("class") or ""
+            is_active = "active" in cls.split()
+            check(text.startswith(label), f"[T25] 外层导航文案：{label}", f"actual={text!r}")
+            if label == "参考图库":
+                check(is_active, "[T25] 参考图库按钮 active", f"class={cls!r}")
+            else:
+                check(not is_active, f"[T25] {label} 按钮非 active", f"class={cls!r}")
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, "[T25] 参考图库页恰有 1 个 iframe", f"count={iframe.count()}")
+        iframe_src = iframe.first.get_attribute("src") if iframe.count() else ""
+        check("/ref-web" in (iframe_src or "") and "embedded=1" in (iframe_src or ""),
+              "[T25] iframe src 含 /ref-web 与 embedded=1", iframe_src or "无 src")
+        page.screenshot(path=str(shots_dir / "t25_embed_desktop.png"))
+
+        frame = page.frame_locator(".reference-embed iframe")
+        try:
+            frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
+        except Exception:
+            pass
+        page.wait_for_timeout(1200)
+
+        # c. iframe 内不含第一行全局导航；侧栏二级导航仍在
+        inner_global = frame.locator('nav[aria-label="画室全局导航"]')
+        check(inner_global.count() == 0,
+              "[T25] iframe 内不存在第一行全局导航", f"count={inner_global.count()}")
+        inner_text = frame.locator("body").inner_text(timeout=15000)
+        absent = [w for w in ["提示词", "组合器", "批量超分", "统计"] if w in inner_text]
+        check(not absent, "[T25] iframe 正文不含全局导航项", f"命中={absent}")
+        check("图库总览" in inner_text, "[T25] iframe 侧栏『图库总览』仍在", "")
+        check("AI 角色合成台" in inner_text or "AI 合成台" in inner_text,
+              "[T25] iframe 侧栏『AI 合成台』仍在", "")
+
+        # e. iframe 首页裂图 0
+        frame.locator("body").evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(800)
+        home_stats = frame.locator("body").evaluate(
+            """() => {
+                const imgs = Array.from(document.images);
+                const broken = imgs.filter((i) => i.complete && i.naturalWidth === 0);
+                return { total: imgs.length, broken: broken.length };
+            }"""
+        )
+        check(home_stats["broken"] == 0, "[T25] iframe 首页裂图为 0",
+              f"broken={home_stats['broken']}/{home_stats['total']}")
+
+        # e. iframe 内 /ref-web/poses 裂图 0（保持 embedded=1 的 iframe 内导航）
+        inner_frames = [f for f in page.frames if "/ref-web" in (f.url or "")]
+        if inner_frames:
+            try:
+                inner_frames[0].goto(BASE + "/ref-web/poses?embedded=1",
+                                     wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(1500)
+                inner_frames = [f for f in page.frames if "/ref-web" in (f.url or "")]
+                poses_frame = inner_frames[0] if inner_frames else None
+                if poses_frame is None:
+                    check(False, "[T25] iframe poses frame 丢失", "")
+                else:
+                    poses_frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(800)
+                    poses_stats = poses_frame.evaluate(
+                        """() => {
+                            const imgs = Array.from(document.images);
+                            const broken = imgs.filter((i) => i.complete && i.naturalWidth === 0);
+                            return { total: imgs.length, broken: broken.length };
+                        }"""
+                    )
+                    check(poses_stats["broken"] == 0,
+                          "[T25] iframe /ref-web/poses 裂图为 0",
+                          f"broken={poses_stats['broken']}/{poses_stats['total']}")
+            except Exception as exc:
+                check(False, "[T25] iframe poses 导航失败", f"{type(exc).__name__}: {exc}")
+        else:
+            check(False, "[T25] 未找到 /ref-web iframe frame", "frames=[]")
+
+        # e. console error/pageerror 0（外层监听 + 两种 document 的注入收集）
+        outer_errs = page.evaluate("() => window.__t25errs || []")
+        inner_errs: list[str] = []
+        try:
+            inner_errs = frame.locator("body").evaluate("() => window.__t25errs || []")
+        except Exception:
+            pass
+        check(not errors and not outer_errs and not inner_errs,
+              "[T25] console error/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_errs[:2]} inner={inner_errs[:2]}")
+
+        # d. iframe 内点击侧栏「返回画廊」-> 顶层 URL 变为 /gallery
+        inner_frames = [f for f in page.frames if "/ref-web" in (f.url or "")]
+        if inner_frames:
+            try:
+                inner_frames[0].goto(BASE + "/ref-web/?embedded=1",
+                                     wait_until="domcontentloaded", timeout=60000)
+            except Exception:
+                pass
+        page.wait_for_timeout(1200)
+        frame = page.frame_locator(".reference-embed iframe")
+        back_link = frame.locator('a[href="/gallery"]:has-text("返回画廊")')
+        check(back_link.count() >= 1, "[T25] iframe 侧栏返回画廊存在", f"count={back_link.count()}")
+        target = back_link.first.get_attribute("target") if back_link.count() else None
+        check(target == "_top", "[T25] iframe 返回画廊 target=_top", f"target={target!r}")
+        if back_link.count():
+            back_link.first.click()
+            try:
+                page.wait_for_function("() => location.pathname === '/gallery'", timeout=30000)
+            except Exception:
+                pass
+            check(urlsplit(page.url).path.rstrip("/") == "/gallery",
+                  "[T25] 点击返回画廊后顶层跳转到 /gallery", page.url)
+
+        # f. 桌面 1280x800：无横向溢出、9 项、iframe embedded、iframe 内无全局导航
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.goto(BASE + "/reference", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        page.wait_for_timeout(1500)
+        # 整页重载后 status 查询返回前「参考图库」按钮不渲染（v-if），
+        # 必须等 9 项全部出现再计数，否则会把加载过程误判为缺项。
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('nav.tabs button').length >= 9",
+                timeout=20000,
+            )
+        except Exception:
+            pass
+        desk_scroll = page.evaluate(
+            """() => ({
+                innerWidth: window.innerWidth,
+                docScrollWidth: document.documentElement.scrollWidth,
+            })"""
+        )
+        check(desk_scroll["docScrollWidth"] <= desk_scroll["innerWidth"] + 1,
+              "[T25] 桌面 1280 无横向溢出",
+              f"docScrollWidth={desk_scroll['docScrollWidth']} innerWidth={desk_scroll['innerWidth']}")
+        desk_btns = page.locator("nav.tabs button")
+        check(desk_btns.count() == 9, "[T25] 桌面 1280 顶栏 9 项", f"count={desk_btns.count()}")
+        desk_ref_cls = page.locator("nav.tabs button:has-text('参考图库')").first.get_attribute("class") or ""
+        check("active" in desk_ref_cls.split(), "[T25] 桌面 1280 参考图库 active", f"class={desk_ref_cls!r}")
+        desk_src = page.locator(".reference-embed iframe").first.get_attribute("src") or ""
+        check("/ref-web" in desk_src and "embedded=1" in desk_src,
+              "[T25] 桌面 1280 iframe 含 embedded=1", desk_src)
+        desk_frame = page.frame_locator(".reference-embed iframe")
+        try:
+            desk_frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
+        except Exception:
+            pass
+        check(desk_frame.locator('nav[aria-label="画室全局导航"]').count() == 0,
+              "[T25] 桌面 1280 iframe 内无全局导航", "")
+        page.screenshot(path=str(shots_dir / "t25_embed_desktop1280.png"))
+
+        # f. 窄屏 390x844：外层无横向溢出、tabs 可滚动、9 项仍 active；iframe 可见
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(BASE + "/reference", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        page.wait_for_timeout(1500)
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('nav.tabs button').length >= 9",
+                timeout=20000,
+            )
+        except Exception:
+            pass
+        scroll_data = page.evaluate(
+            """() => {
+                const tabs = document.querySelector('nav.tabs');
+                return {
+                    innerWidth: window.innerWidth,
+                    docScrollWidth: document.documentElement.scrollWidth,
+                    tabsClientWidth: tabs ? tabs.clientWidth : -1,
+                    tabsScrollWidth: tabs ? tabs.scrollWidth : -1,
+                };
+            }"""
+        )
+        check(scroll_data["docScrollWidth"] <= scroll_data["innerWidth"] + 1,
+              "[T25] 窄屏外层无横向溢出",
+              f"docScrollWidth={scroll_data['docScrollWidth']} innerWidth={scroll_data['innerWidth']}")
+        check(scroll_data["tabsScrollWidth"] > scroll_data["tabsClientWidth"],
+              "[T25] 窄屏 tabs 可横向滚动",
+              f"scrollWidth={scroll_data['tabsScrollWidth']} clientWidth={scroll_data['tabsClientWidth']}")
+        narrow_btns = page.locator("nav.tabs button")
+        check(narrow_btns.count() == 9, "[T25] 窄屏顶栏 9 项", f"count={narrow_btns.count()}")
+        narrow_ref_cls = page.locator("nav.tabs button:has-text('参考图库')").first.get_attribute("class") or ""
+        check("active" in narrow_ref_cls.split(), "[T25] 窄屏参考图库 active", f"class={narrow_ref_cls!r}")
+        iframe_box = page.locator(".reference-embed iframe").bounding_box()
+        check(bool(iframe_box) and iframe_box["width"] > 0 and iframe_box["height"] > 0,
+              "[T25] 窄屏 iframe 内容可见", f"box={iframe_box}")
+        page.screenshot(path=str(shots_dir / "t25_embed_narrow.png"))
+    except Exception as exc:
+        check(False, "[T25] 无感切换专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t25_embed_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -3132,7 +3389,7 @@ def main() -> int:
         check_phase3_dist()
 
         if NAV_ONLY:
-            observe("T3_E2E_ONLY=nav：只跑 T21 顶栏合并式专项",
+            observe("T3_E2E_ONLY=nav：跑顶栏合并式与跨端无感切换专项",
                     "跳过阶段一/二/三其余检查与阶段四 TestClient")
         else:
             # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
@@ -3172,6 +3429,7 @@ def main() -> int:
             browser = pw.chromium.launch()
             if NAV_ONLY:
                 check_nav_merge(browser, shots_dir)
+                check_embed_nav(browser, shots_dir)
             else:
                 if not P4_ONLY:
                     ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})

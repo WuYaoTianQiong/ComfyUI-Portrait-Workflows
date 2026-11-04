@@ -42,7 +42,9 @@ const online = computed(() => status.value?.comfyui === 'online')
  * 后端未下发地址（旧后端）或显式置空时不渲染；`ATELIER_REFERENCE_ENABLED=0`
  * 时后端虽然仍下发地址，但 /ref-web 不会挂载，因此必须同时看 reference_enabled
  * （字段名以 /api/system/status 为准），否则入口会指向全 404 的页面。
- * v0.8 起同源 `/ref-web`，因此同标签打开，不再新开窗口。
+ *
+ * 本轮改为 iframe 承载（`/reference`），外层顶栏常驻，不再整页跳走；
+ * 顶栏只负责路由与高亮，iframe 地址由 `ReferenceEmbedView` 自己取。
  */
 const referenceWebUrl = computed(
   () =>
@@ -91,13 +93,14 @@ function jumpToPrompt(promptId: number) {
         >
           画廊
         </button>
-        <a
+        <button
           v-if="showReferenceEntry"
           class="btn btn-sm"
-          :href="referenceWebUrl"
+          :class="{ active: activeKey === 'reference' }"
+          @click="go('reference')"
         >
           参考图库
-        </a>
+        </button>
         <button
           class="btn btn-sm"
           :class="{ active: activeKey === 'prompt' }"
@@ -189,6 +192,8 @@ function jumpToPrompt(promptId: number) {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
+  /* 品牌区不参与收缩，窄屏优先压缩中部 tabs。 */
+  flex-shrink: 0;
 }
 
 .logo {
@@ -212,6 +217,16 @@ function jumpToPrompt(promptId: number) {
   gap: var(--gap-xs);
   margin-left: var(--gap-lg);
   align-items: center;
+  /* 窄屏允许压缩并在内部横向滚动，避免 9 个页签撑破页面宽度。 */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .job-badge {
@@ -235,6 +250,8 @@ function jumpToPrompt(promptId: number) {
   font-size: var(--fs-xs);
   color: var(--muted);
   margin-left: auto;
+  /* 状态区不参与收缩，窄屏单独隐藏，避免继续与 tabs 抢宽度。 */
+  flex-shrink: 0;
 }
 
 .status .dot {
@@ -250,6 +267,27 @@ function jumpToPrompt(promptId: number) {
 
 .status.online {
   color: var(--muted);
+}
+
+/* 窄屏：压缩顶栏留白，隐藏状态文字；页签仍可横向滚动，桌面端视觉不变。 */
+@media (max-width: 640px) {
+  .topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  .tabs {
+    margin-left: 8px;
+  }
+
+  .status {
+    display: none;
+  }
+
+  /* 出图位置保持内容宽度；否则会被压到 30px 左右，内部文字溢出顶栏。 */
+  .topbar > .output-location {
+    flex-shrink: 0;
+  }
 }
 
 .content {

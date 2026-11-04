@@ -17,10 +17,13 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { ATELIER_GALLERY_PATH } from '@/lib/atelierLinks'
+import { isEmbeddedMode } from '@/lib/embedded'
 import { useStudio } from '@/store/studioStore'
 
 export function AppHeader() {
   const { recipe, randomizeRecipe, safeMode, toggleSafeMode } = useStudio()
+  // embedded 状态在页面生命周期内不变，渲染时同步求值即可，无需 state/effect。
+  const embedded = isEmbeddedMode()
   const qc = useQueryClient()
   const crumbs = useMatches({
     select: (matches) =>
@@ -44,15 +47,20 @@ export function AppHeader() {
 
   return (
     <header className="@container/header flex shrink-0 flex-col">
-      {/* 第一层：atelier 全局导航（跨应用，整页跳转）。 */}
-      <AtelierTopNav />
+      {/* 第一层：atelier 全局导航（跨应用，整页跳转）；iframe 内嵌时由外层 Vue 提供，此处隐藏。 */}
+      {!embedded && <AtelierTopNav />}
 
       {/* 第二层：沿用原有工具条，断点、尺寸与行为均保持不变。 */}
       <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
         <SidebarTrigger className="-ml-1" />
-        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
+        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明；内嵌时需跳出 iframe。 */}
         <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
-          <a href={ATELIER_GALLERY_PATH} aria-label="返回画室画廊" title="返回画室画廊">
+          <a
+            href={ATELIER_GALLERY_PATH}
+            target={embedded ? '_top' : undefined}
+            aria-label="返回画室画廊"
+            title="返回画室画廊"
+          >
             <ArrowLeftIcon className="size-4" />
             <span className="hidden @lg/header:inline">画室画廊</span>
           </a>
