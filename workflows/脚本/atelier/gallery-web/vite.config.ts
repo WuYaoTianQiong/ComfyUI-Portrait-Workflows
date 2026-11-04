@@ -16,64 +16,13 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 }
 
-// 开发与预览时：
-// 1. 直接挂载仓库根目录下的 data/、thumbs/、img/，避免拷贝 6.8 GB 素材
-// 2. 提供 /api/proxy 同源转发接口，解决 DashScope (Qwen) / 火山方舟 (Doubao) 官方接口的浏览器 CORS 限制
-function localAssetsAndProxyPlugin(): Plugin {
+// 开发与预览时：直接挂载仓库根目录下的 data/、thumbs/、img/，避免拷贝 6.8 GB 素材
+function localAssetsPlugin(): Plugin {
   const rootDir = import.meta.dirname
-  const prefixes = ['/data/', '/thumbs/', '/img/', '/og-cover.jpg', '/robots.txt', '/sitemap.xml']
-
-  const handleProxy = async (req: any, res: any) => {
-    try {
-      const targetUrl = req.headers['x-target-url'] as string | undefined
-      if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
-        res.statusCode = 400
-        res.setHeader('Content-Type', 'application/json; charset=utf-8')
-        res.end(JSON.stringify({ error: { message: 'Missing or invalid x-target-url header' } }))
-        return
-      }
-
-      const chunks: Buffer[] = []
-      for await (const chunk of req) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-      }
-      const rawBody = Buffer.concat(chunks)
-
-      const forwardHeaders: Record<string, string> = {}
-      const contentType = req.headers['content-type']
-      if (contentType) forwardHeaders['Content-Type'] = contentType
-      const auth = req.headers['authorization']
-      if (auth) forwardHeaders['Authorization'] = auth
-      const googKey = req.headers['x-goog-api-key']
-      if (googKey) forwardHeaders['x-goog-api-key'] = googKey as string
-      const dashAsync = req.headers['x-dashscope-async']
-      if (dashAsync) forwardHeaders['X-DashScope-Async'] = dashAsync as string
-
-      const upstream = await fetch(targetUrl, {
-        method: req.method || 'POST',
-        headers: forwardHeaders,
-        body: rawBody.length > 0 ? rawBody : undefined,
-      })
-
-      res.statusCode = upstream.status
-      const upType = upstream.headers.get('content-type') || 'application/json; charset=utf-8'
-      res.setHeader('Content-Type', upType)
-      const ab = await upstream.arrayBuffer()
-      res.end(Buffer.from(ab))
-    } catch (err: any) {
-      res.statusCode = 502
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
-      res.end(JSON.stringify({ error: { message: err?.message || 'Proxy request failed' } }))
-    }
-  }
+  const prefixes = ['/data/', '/thumbs/', '/img/']
 
   const serve = (req: any, res: any, next: any) => {
-    const rawUrl = (req.url || '').split('?')[0]
-    if (rawUrl === '/api/proxy') {
-      void handleProxy(req, res)
-      return
-    }
-    const decoded = decodeURIComponent(rawUrl)
+    const decoded = decodeURIComponent((req.url || '').split('?')[0])
     if (!prefixes.some((p) => decoded === p || decoded.startsWith(p))) {
       return next()
     }
@@ -88,7 +37,7 @@ function localAssetsAndProxyPlugin(): Plugin {
   }
 
   return {
-    name: 'local-assets-and-proxy-plugin',
+    name: 'local-assets-plugin',
     configureServer(server) {
       server.middlewares.use(serve)
     },
@@ -118,7 +67,7 @@ const comfyProxy = {
 export default defineConfig({
   publicDir: false,
   plugins: [
-    localAssetsAndProxyPlugin(),
+    localAssetsPlugin(),
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),
     react(),
     tailwindcss(),
@@ -127,6 +76,9 @@ export default defineConfig({
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
   build: {
+    // 开启清空 outDir，并由 build:prod 的 scripts/clean-dist.mjs 兜底：
+    // 部分受管控环境会把 fs.rmSync 拦截成 no-op，旧 hash 产物会与新产物一起堆积（实测 25 → 36 个文件）。
+    emptyOutDir: true,
     rolldownOptions: {
       output: {
         codeSplitting: {

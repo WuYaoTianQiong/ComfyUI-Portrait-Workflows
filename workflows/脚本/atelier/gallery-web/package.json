@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:prod": "vite build --base=/ref-web/ --emptyOutDir",
+    "build:prod": "node scripts/clean-dist.mjs && vite build --base=/ref-web/",
     "lint": "oxlint",
     "preview": "vite preview"
   },

@@ -22,15 +22,21 @@
 - `src/services/aiGenerator.ts`：只保留本地 ComfyUI 协议，Gemini / GPT / Qwen / Doubao 分支与相关类型已删除。
 - `src/routes/settings.tsx`：只保留 ComfyUI 地址、API Key 与连接测试。
 - `src/routes/guide.tsx`：使用说明与免责声明按"仅本地 ComfyUI"口径改写。
-- `package.json`：新增 `build:prod`，固定生产基路径。
+- `vite.config.ts`：删除仅供云端厂商接口使用的 `/api/proxy` 转发中间件；只保留本地素材挂载与 `/comfy` 反代。
+- `index.html`：移除外站 canonical / sitemap / og / JSON-LD 与第三方统计脚本，标题与描述改成"本地 ComfyUI 出图"口径；页面标记 `noindex`。
+- `package.json`：新增 `build:prod`，先清空 `dist/` 再按 `/ref-web` 基路径构建。
 
 ## 构建
 
 ```powershell
 cd workflows\脚本\atelier\gallery-web
 pnpm install --frozen-lockfile --offline   # 首次或依赖变更；本机 pnpm store 已有上游包
-pnpm run build:prod                        # = vite build --base=/ref-web/ --emptyOutDir
+pnpm run build:prod                        # = node scripts/clean-dist.mjs && vite build --base=/ref-web/
 ```
+
+`build:prod` 会先执行 `scripts/clean-dist.mjs` 清空 `dist/`。不要依赖 Vite 的 `emptyOutDir`：
+在部分受管控环境里 `fs.rmSync` 会被拦截成 no-op，旧 hash 产物会与新产物一起留在 `dist/`，
+连续构建后从 25 个文件堆积到 36 个。`clean-dist.mjs` 用 `unlinkSync` / `rmdirSync` 递归删除，可稳定复现干净产物。
 
 Git Bash 下必须禁用 MSYS 路径转换，否则 `--base=/ref-web/` 会被改写成 Git 安装路径：
 
