@@ -20,6 +20,7 @@ import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useViewerTransform } from '../composables/useViewerTransform'
 import ManualCleanupModal from './ManualCleanupModal.vue'
 import Modal from './Modal.vue'
+import Skeleton from './Skeleton.vue'
 
 /**
  * 图片查看器。
@@ -147,6 +148,7 @@ const {
 })
 
 function initFromImage(img: HTMLImageElement) {
+  imageError.value = false
   setNaturalSize(img)
   // 刷新恢复：第一次拿到尺寸时套用快照；否则正常适应窗口
   if (pendingSnapshot && pendingSnapshot.id === item.value?.id) {
@@ -163,6 +165,21 @@ function initFromImage(img: HTMLImageElement) {
 
 function onImageLoad(event: Event) {
   initFromImage(event.target as HTMLImageElement)
+}
+
+/** 图片加载失败：显示统一的「重试」，而不是裂图。 */
+const imageError = ref(false)
+/** 递增后通过 key 重建 img 元素，强制重新拉取原图。 */
+const reloadNonce = ref(0)
+
+function onImageError() {
+  imageError.value = true
+  imgLoaded.value = false
+}
+
+function retryImage() {
+  imageError.value = false
+  reloadNonce.value++
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +265,7 @@ watch(
 
 function resetViewState() {
   resetViewer()
+  imageError.value = false
   restoreInfo()
   scheduleInfoFade()
   promptInfoOpen.value = false
@@ -930,13 +948,29 @@ function onKey(event: KeyboardEvent) {
       @mousedown="onPanStart"
       @click="onStageClick"
     >
+      <div v-if="!imgLoaded && !imageError" class="stage-state loading">
+        <Skeleton
+          variant="block"
+          width="min(360px, 56vw)"
+          height="min(520px, 58vh)"
+          radius="var(--radius)"
+        />
+        <span>加载中…</span>
+      </div>
+      <div v-else-if="imageError" class="stage-state error" @click.stop>
+        <span>图片加载失败，请检查文件是否存在</span>
+        <button class="btn btn-sm" @click.stop="retryImage">重试</button>
+      </div>
+
       <img
         ref="imgEl"
+        :key="`${item.id}-${reloadNonce}`"
         :src="viewUrl(item)"
         :alt="item.filename"
         :class="{ loaded: imgLoaded }"
         :draggable="false"
         @load="onImageLoad"
+        @error="onImageError"
       />
     </figure>
 
@@ -1241,8 +1275,9 @@ function onKey(event: KeyboardEvent) {
   /* header 在文档流里占一行，stage 拿到剩余高度 —— 图片不会被工具栏盖住，
      也不用再在 padding 里手动预留 40px。 */
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.88);
+  background: rgb(0 0 0 / .72);
   backdrop-filter: blur(2px);
+  transition: opacity var(--dur) var(--ease);
 }
 
 .bar {
@@ -1253,7 +1288,7 @@ function onKey(event: KeyboardEvent) {
   align-items: center;
   gap: 4px;
   padding: var(--gap-sm) var(--gap);
-  background: rgba(20, 24, 30, 0.92);
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1296,7 +1331,7 @@ function onKey(event: KeyboardEvent) {
 
 .tool.primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--text);
 }
 
 .tool.danger:hover:not(:disabled) {
@@ -1348,6 +1383,28 @@ function onKey(event: KeyboardEvent) {
   cursor: grabbing;
 }
 
+.stage-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
+.stage-state.error {
+  pointer-events: auto;
+}
+
+.stage-state.error .btn {
+  pointer-events: auto;
+}
+
 .stage img {
   position: absolute;
   left: 0;
@@ -1375,7 +1432,7 @@ function onKey(event: KeyboardEvent) {
   height: 68px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(22, 27, 34, 0.8);
+  background: var(--panel-2);
   color: var(--text);
   font-size: 26px;
   line-height: 1;
@@ -1412,7 +1469,7 @@ function onKey(event: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgba(16, 20, 26, 0.72);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -1503,7 +1560,7 @@ function onKey(event: KeyboardEvent) {
   padding: 6px 10px;
   font-size: var(--fs-sm);
   color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--panel-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1534,7 +1591,7 @@ function onKey(event: KeyboardEvent) {
   padding: var(--gap-sm);
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
-  color: #fecaca;
+  color: var(--text);
 }
 
 .hint {

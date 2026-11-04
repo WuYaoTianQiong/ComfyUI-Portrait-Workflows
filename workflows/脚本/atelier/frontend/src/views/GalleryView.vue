@@ -6,8 +6,8 @@ import { useRoute, useRouter } from 'vue-router'
 import Lightbox from '../components/Lightbox.vue'
 import CompareModal from '../components/CompareModal.vue'
 import CategoryFilter from '../components/CategoryFilter.vue'
-import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Modal from '../components/Modal.vue'
+import Skeleton from '../components/Skeleton.vue'
 import TagCloud from '../components/TagCloud.vue'
 import { apiGet, apiPost, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
@@ -24,7 +24,7 @@ import { useGallerySelection } from '../composables/useGallerySelection'
 import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 import { flattenCategories } from '../utils/categories'
-import { imageAspect } from '../utils/image'
+
 import { confirmDialog, confirmDialogWithCheckbox } from '../utils/naive'
 import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { readSession, writeSession } from '../composables/useSessionState'
@@ -48,6 +48,8 @@ interface GallerySession {
   model: string
   orientation: string
   scrollTop: number
+  /** 卡片密度：紧凑 / 标准（纯展示偏好，不影响筛选与分页）。 */
+  density: 'standard' | 'compact'
   /** 刷新后要恢复的灯箱图片 id（null = 灯箱当时没开）。 */
   viewerId?: number | null
 }
@@ -67,6 +69,7 @@ const savedSession = readSession<GallerySession>(SESSION_KEY, {
   model: '',
   orientation: '',
   scrollTop: 0,
+  density: 'standard',
   viewerId: null,
 })
 
@@ -84,6 +87,14 @@ const source = ref(savedSession.source)
 const dateFacet = ref(savedSession.dateFacet)
 const model = ref(savedSession.model)
 const orientation = ref(savedSession.orientation)
+
+/** 卡片密度：默认标准，紧凑档缩小列宽与间距。 */
+const density = ref<'standard' | 'compact'>(savedSession.density ?? 'standard')
+const skeletonCount = computed(() => (density.value === 'compact' ? 18 : 10))
+
+function setDensity(value: 'standard' | 'compact') {
+  density.value = value
+}
 
 /** 侧栏折叠：低频分面不该常驻吃掉 240px，折叠状态记在本机。 */
 const SIDEBAR_KEY = 'pb.gallerySidebar'
@@ -230,9 +241,6 @@ const viewerItems = computed<HistoryItem[]>(() =>
   deepLinkItem.value ? [deepLinkItem.value] : items.value,
 )
 
-function imageKey(item: HistoryItem) {
-  return item.id
-}
 
 /** 替换碎片出图的图片不挂原提示词，卡片上给一个轻量标记。 */
 function isBatchReplace(item: HistoryItem): boolean {
@@ -258,6 +266,7 @@ function saveSession() {
     dateFacet: dateFacet.value,
     model: model.value,
     orientation: orientation.value,
+    density: density.value,
     scrollTop: gridEl.value?.scrollTop ?? savedSession.scrollTop,
     viewerId:
       lightboxIndex.value !== null ? (viewerItems.value[lightboxIndex.value]?.id ?? null) : null,
@@ -279,6 +288,7 @@ watch(
       dateFacet.value,
       model.value,
       orientation.value,
+      density.value,
     ].join('|'),
   saveSession,
 )
@@ -888,6 +898,24 @@ function clearFilters() {
           <span v-if="isFetching" class="fetching">加载中…</span>
         </span>
         <span class="spacer" />
+        <div class="density" role="group" aria-label="卡片密度">
+          <button
+            class="btn btn-sm"
+            :class="{ active: density === 'compact' }"
+            title="紧凑排列（更多列）"
+            @click="setDensity('compact')"
+          >
+            紧凑
+          </button>
+          <button
+            class="btn btn-sm"
+            :class="{ active: density === 'standard' }"
+            title="标准排列"
+            @click="setDensity('standard')"
+          >
+            标准
+          </button>
+        </div>
         <select v-model="sortBy" class="mini-select" title="排序">
           <option value="newest">最新优先</option>
           <option value="oldest">最旧优先</option>
@@ -945,88 +973,104 @@ function clearFilters() {
       <div v-if="isError" class="error">加载失败：{{ error?.message }}</div>
 
       <div v-else ref="gridEl" class="grid" @scroll.passive="onGridScroll">
-        <JustifiedGrid
-          v-if="items.length"
-          :items="items"
-          :ratio="imageAspect"
-          :key-of="imageKey"
-          :target-row-height="260"
-          :gap="12"
+        <div
+          v-if="!items.length && isFetching"
+          class="cards skeleton-cards"
+          :class="density"
+          aria-hidden="true"
         >
-          <template #default="{ item, index, height }">
-            <article
-              class="card"
-              :class="{ missing: item.missing, picked: selected.has(item.id) }"
-              :title="item.missing ? '磁盘上找不到这个文件（勾选「只看文件缺失」可批量清理记录）' : item.filename"
-              @click="openLightbox(index)"
-            >
-              <div class="thumb" :style="{ height: `${height}px` }">
-                <img :src="thumbnailUrl(item)" :alt="item.filename" loading="lazy" />
+          <article v-for="n in skeletonCount" :key="`skeleton-${n}`" class="card skeleton-card">
+            <div class="thumb">
+              <Skeleton variant="block" width="100%" height="100%" radius="var(--radius)" />
+            </div>
+            <div class="caption">
+              <Skeleton width="72%" />
+              <Skeleton width="46%" />
+            </div>
+            <div class="actions">
+              <Skeleton width="64px" height="24px" radius="var(--radius-sm)" />
+            </div>
+          </article>
+        </div>
 
-          <button
-            class="pick"
-            :class="{ on: selected.has(item.id) }"
-            :title="selected.has(item.id) ? '取消选择' : '选择'"
-            @click.stop="toggleSelect(item.id)"
+        <div v-else-if="items.length" class="cards" :class="density">
+          <article
+            v-for="(item, index) in items"
+            :key="item.id"
+            class="card"
+            :class="{ missing: item.missing, picked: selected.has(item.id) }"
+            :title="item.missing ? '磁盘上找不到这个文件（勾选「只看文件缺失」可批量清理记录）' : item.filename"
+            @click="openLightbox(index)"
           >
-            ✓
-          </button>
+            <div class="thumb">
+              <img :src="thumbnailUrl(item)" :alt="item.filename" loading="lazy" />
 
-          <button
-            class="fav"
-            :class="{ on: item.is_favorite }"
-            title="收藏"
-            @click.stop="favoriteMutation.mutate(item.id)"
-          >
-            {{ item.is_favorite ? '★' : '☆' }}
-          </button>
+              <span v-if="item.missing" class="badge-missing">文件缺失</span>
+              <span v-else-if="isBatchReplace(item)" class="badge-replace" title="由替换碎片出图生成，提示词以临时记录保存">
+                替换
+              </span>
+              <span v-if="selected.has(item.id)" class="check-mark" aria-hidden="true">✓</span>
+            </div>
 
-          <button
-            class="locate"
-            title="在资源管理器中定位原图"
-            @click.stop="revealImage(item)"
-          >
-            定位
-          </button>
+            <div class="caption">
+              <span
+                class="filename"
+                title="点击复制文件名"
+                @click.stop="copyFilename(item.filename)"
+              >
+                {{ item.filename }}
+              </span>
+              <span class="dim">{{ resolution(item) }} · {{ formatSize(item.file_size) }}</span>
+            </div>
 
-          <span v-if="item.missing" class="badge-missing">🚫 文件缺失</span>
-          <span v-else-if="isBatchReplace(item)" class="badge-replace" title="由替换碎片出图生成，提示词以临时记录保存">
-            替换
-          </span>
+            <div class="actions">
+              <button
+                class="btn btn-sm pick"
+                :class="{ on: selected.has(item.id) }"
+                :title="selected.has(item.id) ? '取消选择' : '选择'"
+                @click.stop="toggleSelect(item.id)"
+              >
+                {{ selected.has(item.id) ? '✓ 已选' : '选择' }}
+              </button>
 
-              </div>
+              <button
+                class="btn btn-sm fav"
+                :class="{ on: item.is_favorite }"
+                title="收藏"
+                @click.stop="favoriteMutation.mutate(item.id)"
+              >
+                {{ item.is_favorite ? '★ 已收藏' : '☆ 收藏' }}
+              </button>
 
-              <div class="caption">
-                <span
-                  class="filename"
-                  title="点击复制文件名"
-                  @click.stop="copyFilename(item.filename)"
-                >
-                  {{ item.filename }}
-                </span>
-                <span class="dim">{{ resolution(item) }} · {{ formatSize(item.file_size) }}</span>
-          </div>
+              <button
+                class="btn btn-sm locate"
+                title="在资源管理器中定位原图"
+                @click.stop="revealImage(item)"
+              >
+                定位
+              </button>
+            </div>
+          </article>
+        </div>
 
-            </article>
-          </template>
-        </JustifiedGrid>
-
-        <EmptyState v-if="!items.length && !isFetching" size="big" text="没有符合条件的图片" />
+        <EmptyState v-else size="big" text="没有符合条件的图片" />
       </div>
     </section>
 
-    <Lightbox
-      v-if="lightboxOpen"
-      :items="viewerItems"
-      :index="lightboxIndex!"
-      :workflows="workflows"
-      :regenerating="regenerating"
-      @update:index="lightboxIndex = $event"
-      @close="closeLightbox"
-      @regenerate="regenerate"
-      @jump-to-prompt="(id) => { closeLightbox(); emit('jump-to-prompt', id) }"
-      @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
-    />
+    <Transition name="lightbox-fade">
+      <Lightbox
+        v-if="lightboxOpen"
+        :items="viewerItems"
+        :index="lightboxIndex!"
+        :workflows="workflows"
+        :regenerating="regenerating"
+        @update:index="lightboxIndex = $event"
+        @close="closeLightbox"
+        @regenerate="regenerate"
+        @jump-to-prompt="(id) => { closeLightbox(); emit('jump-to-prompt', id) }"
+        @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
+      />
+    </Transition>
 
     <CompareModal
       :open="compareOpen"
@@ -1288,7 +1332,7 @@ function clearFilters() {
 
 .btn.danger {
   border-color: var(--danger);
-  color: #fecaca;
+  color: var(--text);
 }
 
 .btn.danger:hover {
@@ -1301,34 +1345,62 @@ function clearFilters() {
   padding: var(--gap-lg);
 }
 
+.density {
+  display: flex;
+  gap: var(--gap-xs);
+  flex: none;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--gap);
+}
+
+.cards.compact {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--gap-sm);
+}
+
 .card {
   width: 100%;
   cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-2);
+}
+
+.card.picked {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .thumb {
   position: relative;
   width: 100%;
+  /* 固定比例容器：图片加载前后网格高度一致，首屏不再重排 */
+  aspect-ratio: 4 / 5;
   overflow: hidden;
-  border-radius: var(--radius);
   background: var(--panel-3);
-  transition: 0.15s;
 }
 
 .thumb img {
   display: block;
   width: 100%;
   height: 100%;
-  /* 容器宽高比已按原图算好，contain 是兜底：绝不裁画面 */
-  object-fit: contain;
+  object-fit: cover;
+  transition: transform var(--dur) var(--ease);
 }
 
-.card:hover .thumb {
-  box-shadow: var(--shadow-sm), 0 0 0 1px var(--border-strong);
-}
-
-.card.picked .thumb {
-  box-shadow: 0 0 0 2px var(--primary);
+.card:hover .thumb img {
+  transform: scale(1.02);
 }
 
 .card.missing .thumb img {
@@ -1336,86 +1408,75 @@ function clearFilters() {
   filter: grayscale(1);
 }
 
-.pick {
+.check-mark {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
+  top: var(--gap-sm);
+  right: var(--gap-sm);
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: rgba(22, 27, 34, 0.8);
-  color: transparent;
-  font-size: var(--fs-xs);
-  opacity: 0.45;
-  transition: 0.12s;
+  background: var(--primary);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  box-shadow: var(--shadow-1);
 }
 
-.card:hover .pick,
-.pick.on {
-  opacity: 1;
+.skeleton-card {
+  cursor: default;
+}
+
+.skeleton-card .caption {
+  padding: var(--gap-sm) var(--gap-sm) 0;
+}
+
+.skeleton-card .actions {
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+
+.skeleton-card:hover {
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.skeleton-card:hover .thumb img {
+  transform: none;
+}
+
+.pick,
+.fav,
+.locate {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .pick.on {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
-}
-
-.fav {
-  position: absolute;
-  top: 4px;
-  left: 6px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-lg);
-  line-height: 1;
-  opacity: 0;
-  transition: 0.12s;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-
-.card:hover .fav,
-.fav.on {
-  opacity: 1;
-}
-
-.fav.on {
-  color: #fbbf24;
-}
-
-.locate {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  padding: 1px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: rgb(22 27 34 / 82%);
   color: var(--text);
-  font-size: 10px;
-  line-height: 1.6;
-  opacity: 0;
-  transition: 0.12s;
 }
 
-.card:hover .locate,
-.locate:focus-visible {
-  opacity: 1;
+.fav.on {
+  border-color: var(--warn);
+  color: var(--warn);
 }
 
 .badge-missing {
   position: absolute;
-  top: 8px;
+  top: var(--gap-sm);
   left: 50%;
   transform: translateX(-50%);
-  padding: 2px 9px;
-  border-radius: 999px;
+  padding: 2px var(--gap-sm);
+  border-radius: var(--radius-pill);
   background: var(--danger-soft);
-  color: #fecaca;
+  color: var(--text);
   font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -1423,14 +1484,14 @@ function clearFilters() {
 
 .badge-replace {
   position: absolute;
-  top: 8px;
+  top: var(--gap-sm);
   left: 50%;
   transform: translateX(-50%);
-  padding: 1px 8px;
-  border-radius: 999px;
+  padding: 1px var(--gap-sm);
+  border-radius: var(--radius-pill);
   background: var(--primary-soft);
   color: var(--primary);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1439,7 +1500,7 @@ function clearFilters() {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 4px 2px 0;
+  padding: var(--gap-sm) var(--gap-sm) 0;
 }
 
 .filename {
@@ -1456,7 +1517,7 @@ function clearFilters() {
 }
 
 .dim {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   opacity: 0.8;
   white-space: nowrap;
@@ -1464,9 +1525,26 @@ function clearFilters() {
   text-overflow: ellipsis;
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+
 .empty {
   font-size: var(--fs-sm);
   color: var(--muted);
+}
+
+.lightbox-fade-enter-active,
+.lightbox-fade-leave-active {
+  transition: opacity var(--dur) var(--ease);
+}
+
+.lightbox-fade-enter-from,
+.lightbox-fade-leave-to {
+  opacity: 0;
 }
 
 .empty.big {
@@ -1480,7 +1558,7 @@ function clearFilters() {
   padding: var(--gap);
   border-radius: var(--radius);
   border: 1px solid var(--danger);
-  color: #fecaca;
+  color: var(--text);
   background: var(--danger-soft);
 }
 </style>

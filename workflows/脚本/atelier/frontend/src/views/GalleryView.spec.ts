@@ -282,4 +282,36 @@ describe('GalleryView 清理失效', () => {
     expect(wrapper.findComponent(Lightbox).props('index')).toBe(1)
     localStorage.setItem('pb.session.gallery', JSON.stringify({ viewerId: null }))
   })
+
+  it('卡片由缩略图、元信息行与操作区三段组成', async () => {
+    const wrapper = await mountView()
+    const card = wrapper.find('.card')
+
+    expect(card.find('.thumb').exists()).toBe(true)
+    expect(card.find('.caption .filename').exists()).toBe(true)
+    expect(card.find('.caption .dim').exists()).toBe(true)
+    expect(card.find('.actions .pick').exists()).toBe(true)
+    expect(card.find('.actions .fav').exists()).toBe(true)
+    expect(card.find('.actions .locate').exists()).toBe(true)
+  })
+
+  it('默认标准密度，可切换到紧凑档', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.find('.cards').classes()).toContain('standard')
+    expect(wrapper.find('.cards').classes()).not.toContain('compact')
+
+    const compact = wrapper.findAll('button').find((b) => b.text() === '紧凑')!
+    await compact.trigger('click')
+
+    expect(wrapper.find('.cards').classes()).toContain('compact')
+  })
+
+  it('选中卡片后进入 picked 态并显示右上角对勾', async () => {
+    const wrapper = await mountView()
+    await wrapper.findAll('.card .pick')[0].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.card').classes()).toContain('picked')
+    expect(wrapper.find('.card .check-mark').exists()).toBe(true)
+  })
 })

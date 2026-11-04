@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiGet, apiPost } from '../api/client'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
+import Skeleton from './Skeleton.vue'
 import { useSettings } from '../composables/useSettings'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
@@ -154,6 +155,10 @@ async function submit() {
       </div>
 
       <div class="list">
+        <div v-if="isFetching && !items.length" class="loading" aria-hidden="true">
+          <Skeleton v-for="n in 6" :key="`skeleton-${n}`" width="72%" />
+        </div>
+
         <label v-for="item in items" :key="item.id" class="item">
           <input type="checkbox" :checked="selected.has(item.id)" @change="toggle(item.id)" />
           <span class="name">{{ item.name }}</span>
@@ -256,7 +261,7 @@ async function submit() {
 }
 
 .params {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   flex: none;
   width: 200px;
@@ -264,6 +269,13 @@ async function submit() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) 0;
 }
 
 .empty {
@@ -282,7 +294,7 @@ async function submit() {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--text);
 }
 
 .btn.primary:disabled {

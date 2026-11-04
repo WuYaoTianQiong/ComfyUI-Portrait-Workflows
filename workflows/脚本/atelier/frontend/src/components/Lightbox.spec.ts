@@ -364,4 +364,24 @@ describe('Lightbox', () => {
     await wrapper.find('.stage img').trigger('click')
     expect(wrapper.emitted('close')).toBeUndefined()
   })
+
+  it('首屏先显示加载占位，加载完成后隐藏', async () => {
+    const wrapper = mount(Lightbox, { props: { items: ITEMS, index: 0 } })
+    expect(wrapper.find('.stage-state.loading').exists()).toBe(true)
+
+    await wrapper.find('.stage img').trigger('load')
+    expect(wrapper.find('.stage-state.loading').exists()).toBe(false)
+  })
+
+  it('图片加载失败显示重试，点击后回到加载态', async () => {
+    const wrapper = mount(Lightbox, { props: { items: ITEMS, index: 0 } })
+    await wrapper.find('.stage img').trigger('error')
+
+    const errorState = wrapper.find('.stage-state.error')
+    expect(errorState.exists()).toBe(true)
+    expect(errorState.text()).toContain('加载失败')
+
+    await errorState.find('button').trigger('click')
+    expect(wrapper.find('.stage-state.loading').exists()).toBe(true)
+  })
 })
