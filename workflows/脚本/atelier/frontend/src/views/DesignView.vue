@@ -283,12 +283,12 @@ const SCALES = [
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .btn.danger {
   border-color: var(--danger);
-  color: #fecaca;
+  color: var(--danger-text);
 }
 
 .btn:disabled {

@@ -40,7 +40,7 @@ const { toasts } = useToast()
 
 .toast.error {
   border-color: var(--danger);
-  color: #fecaca;
+  color: var(--danger-text);
 }
 
 @keyframes toast-in {

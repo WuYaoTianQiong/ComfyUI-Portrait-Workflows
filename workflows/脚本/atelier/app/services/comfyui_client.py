@@ -20,6 +20,12 @@ _object_info: dict | None = None
 _object_info_at = 0.0
 _object_info_fail_until = 0.0
 
+# 探活结果的短缓存（见 is_online 的注释）：挡住前端 10s 轮询造成的重复长探测。
+# 15s 略大于前端轮询间隔（App.vue refetchInterval=10s），使轮询基本都命中缓存；
+# 代价是 ComfyUI 刚恢复时最多 15s 才被发现（原来 10s 轮询 + 6.5s 探测也要 16s）。
+_ONLINE_TTL_SECONDS = 15.0
+_online_cache: tuple[float, bool] | None = None
+
 
 def get_object_info(force: bool = False) -> dict:
     """一次性拉取 ComfyUI 的 `/object_info` 并缓存，返回 {node_type: spec}。
@@ -106,14 +112,40 @@ def is_online(timeout: float = 5.0, retries: int = 2) -> bool:
     `timeout` 5s + 重试 2 次：ComfyUI 刚重启、加载模型或跑图重负载时，`/queue` 可能
     在 2 秒内不应答；旧的 2s 单次探活会把这种"忙"误判成"离线"，前端于是禁用提交按钮
     （实测 2026-11-04 就遇到：状态报 offline，但提交与出图都正常）。
+
+    探活结果按 `_ONLINE_TTL_SECONDS`（15s）短缓存：离线时一次探活实测要 **8.2s**
+    （反代 502 / 连接等到超时），而前端每 10s 轮询 `/api/system/status`，
+    不缓存就是每次轮询都卡满一次超时 —— 顶栏「参考图库」入口实测要等 8s 才出现。
+    15s 略大于轮询间隔，让轮询基本都命中缓存。
+    """
+    global _online_cache
+    now = time.monotonic()
+    if _online_cache is not None and (now - _online_cache[0]) < _ONLINE_TTL_SECONDS:
+        return _online_cache[1]
+    ok = _probe_online(timeout=timeout, retries=retries)
+    _online_cache = (time.monotonic(), ok)
+    return ok
+
+
+def _probe_online(timeout: float, retries: int) -> bool:
+    """真正打一次 `/queue`；`is_online` 的缓存层与它分开，便于测试直接绕过缓存。
+
+    只有**超时**才重试：超时可能只是 ComfyUI 在跑图/加载模型（忙），值得再等一次。
+    连接被拒、DNS 失败、反代 502 都是"确定不可用"，重试只会把接口拖成 8~9 秒
+    （实测离线时 `/api/system/status` 要 8.2s，顶栏入口跟着晚 8s 才出现）。
     """
     for attempt in range(max(1, retries)):
         try:
             with httpx.Client(timeout=timeout) as client:
-                if client.get(f"{COMFYUI_API}/queue").status_code < 500:
+                resp = client.get(f"{COMFYUI_API}/queue")
+                if resp.status_code < 500:
                     return True
-        except Exception:
+                # 5xx：ComfyUI 或它前面的反代明确报上游不可用，再试也不会变好
+                return False
+        except httpx.TimeoutException:
             pass
+        except Exception:
+            return False
         if attempt + 1 < retries:
             time.sleep(0.3)
     return False

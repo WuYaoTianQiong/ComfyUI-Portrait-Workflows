@@ -212,7 +212,7 @@ function jumpToPrompt(promptId: number) {
   margin-left: 4px;
   border-radius: 999px;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   font-size: 10px;
   line-height: 1;
 }

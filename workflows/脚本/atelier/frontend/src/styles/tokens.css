@@ -24,6 +24,11 @@
   --success: #22c55e;
   --warn: #f59e0b;
 
+  /* 前景色：垫在实底主色/危险色上的文字。之前各页面直接写 #fff / #fecaca，
+     同一语义散在多处，改对比度时找不到全部落点。 */
+  --on-primary: #ffffff;
+  --danger-text: #fecaca;
+
   /* 尺度 */
   --radius-sm: 6px;
   --radius: 10px;
@@ -38,7 +43,6 @@
   --gap-2xl: 48px;
 
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-1: 0 1px 2px rgb(0 0 0 / .18);
   --shadow-2: 0 4px 16px rgb(0 0 0 / .22);
   --shadow-3: 0 12px 32px rgb(0 0 0 / .28);

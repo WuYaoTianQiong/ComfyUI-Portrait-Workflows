@@ -174,9 +174,9 @@ def run_browser_checks() -> None:
         # 这批断言属**过期**而非回归：改为验收托管产物 —— 深链接不 404、网格有卡片、
         # 缩略图真实解码、深度切换生效、无 console 错误。
         entry = page.locator("a:has-text('参考图库')")
-        # 入口由 /api/system/status 的 reference_web_url 驱动，而该接口在 ComfyUI
-        # 离线时要 ~6.5s（is_online 5s 超时 + 重试）才返回；e2e 跑到这里可能还没拿到，
-        # 必须显式等待而不是靠时序碰运气（实测入口在 DOM 里于首屏后 ~8s 出现）。
+        # 入口由 /api/system/status 的 reference_web_url 驱动，而该接口要先等一次探活
+        # （离线实测 ~3s，另有 is_online 的 15s 结果缓存）；e2e 跑到这里可能还没拿到，
+        # 必须显式等待而不是靠时序碰运气（修缓存前该接口 8.2s，入口 ~8s 后才出现）。
         try:
             entry.first.wait_for(state="visible", timeout=25000)
         except Exception:

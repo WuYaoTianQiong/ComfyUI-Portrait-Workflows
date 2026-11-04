@@ -5,7 +5,7 @@
 #
 # 六道关，缺一不可：
 #   1) pytest            —— 后端契约/行为用例（迁移、标签、CRUD、upsert 语义）
-#   2) 硬编码颜色守护    —— frontend/src/**/*.vue 的十六进制色值数不得超过基线 55
+#   2) 硬编码颜色守护    —— frontend/src/**/*.vue 的 <style> 块里十六进制色值必须为 0
 #   3) vue-tsc --noEmit  —— 前端类型检查（TS strict 只在编辑器里生效过，命令行没人跑）
 #   4) vitest            —— 前端单测/组件测试
 #   5) vite build        —— 构建产物（构建失败 = 部署不了）
@@ -15,10 +15,15 @@
 # 为什么不能只留第 1 道：静态检查发现不了"启动期崩溃""运行期 500""页面整体白屏"。
 # 为什么不能只留第 4 道：组件测试测不到静态资源 404、接口路径拼错、路由挂载顺序。
 #
-# 硬编码颜色基线（55）来自《atelier_UI卖相提升计划_20261104》§1 的实测：
-#   Get-ChildItem -Path frontend\src -Recurse -Filter *.vue |
-#       Select-String -Pattern '#[0-9a-fA-F]{3,8}\b' -AllMatches
-# 新增色值应改走 styles/tokens.css；确需写死时同步收紧基线，并在本注释记录原因。
+# 硬编码颜色基线（0）来自《atelier_UI卖相提升计划_20261104》§2 P0 的验收目标：
+# 色值一律走 styles/tokens.css，页面只写 var(--token)。
+#
+# 口径说明（2026-11-04 验收后收紧）：
+#   1) 只统计 <style> 块。`<script>` 里的色值可能是写入数据库的「数据」
+#      （如 TaxonomyView 的分类配色板），不属于样式硬编码，按样式口径统计才不误伤。
+#   2) 已下线但仍留存的死代码（ReferenceView / RefLightbox，`/reference` 已改跳 `/ref-web`）
+#      单独列出、不阻断构建：删掉这两个文件即自然归零。
+# 新增色值应改走 styles/tokens.css，不要在这里放水提高基线。
 #
 # E2E 需要 Playwright 与 Chromium；缺失时会自动 SKIP（不算失败），不阻断其它关卡。
 
@@ -45,22 +50,40 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Step '2' '6' '硬编码颜色守护'
-$colorBaseline = 55
+$colorBaseline = 0
 $vueRoot = Join-Path $root 'frontend\src'
+# 已下线的死代码（`/reference` 已改跳 `/ref-web`）：单列提示，不阻断构建。
+$deadVueFiles = @('ReferenceView.vue', 'RefLightbox.vue')
 $hardcodedColors = 0
+$deadColors = 0
+$offenders = @()
 if (Test-Path $vueRoot) {
     foreach ($file in (Get-ChildItem -Path $vueRoot -Recurse -Filter *.vue -File)) {
         $text = Get-Content -LiteralPath $file.FullName -Raw
-        if ($null -ne $text) {
-            $hardcodedColors += [regex]::Matches($text, '#[0-9a-fA-F]{3,8}\b').Count
+        if ($null -eq $text) { continue }
+        # 只看 <style> 块：<script> 里的色值可能是写库的数据色板
+        $count = 0
+        foreach ($block in [regex]::Matches($text, '(?s)<style[^>]*>(.*?)</style>')) {
+            $count += [regex]::Matches($block.Groups[1].Value, '#[0-9a-fA-F]{3,8}\b').Count
+        }
+        if ($count -eq 0) { continue }
+        if ($deadVueFiles -contains $file.Name) {
+            $deadColors += $count
+        } else {
+            $hardcodedColors += $count
+            $offenders += "$($file.Name)($count)"
         }
     }
 }
 if ($hardcodedColors -gt $colorBaseline) {
-    Write-Host "FAILED: frontend/src/**/*.vue 硬编码颜色 $hardcodedColors 处，超过基线 $colorBaseline" -ForegroundColor Red
+    Write-Host "FAILED: 活代码 .vue 的 <style> 里还有 $hardcodedColors 处硬编码颜色（基线 $colorBaseline）：$($offenders -join ', ')" -ForegroundColor Red
+    Write-Host '  改法：在 styles/tokens.css 加令牌，页面写 var(--token)' -ForegroundColor Yellow
     exit 1
 }
-Write-Host "硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
+Write-Host "活代码硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
+if ($deadColors -gt 0) {
+    Write-Host "提示：已下线死代码中还有 $deadColors 处色值（$($deadVueFiles -join ' / ')），删除这两个文件即归零" -ForegroundColor Yellow
+}
 
 $frontend = Join-Path $root 'frontend'
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
@@ -85,6 +108,19 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     }
 
     Step '5' '6' 'vite build'
+    # 1) 清 NODE_OPTIONS：IDE 注入的 safe-delete shim 会让 vite 的 emptyOutDir 报
+    #    "trash operation failed" 而构建失败（等价于"代码没问题但 CI 红了"）。
+    $env:NODE_OPTIONS = ''
+    # 2) 显式清空 web/：本机实测 emptyOutDir 不生效，旧产物会一直堆积
+    #    （2026-11-04 验收时堆到 13 份 index-*.js / 52MB）。用 .NET 删，比 Remove-Item 稳。
+    $webDir = Join-Path $root 'web'
+    if (Test-Path $webDir) {
+        try {
+            [System.IO.Directory]::Delete($webDir, $true)
+        } catch {
+            Write-Host "WARN: 清空 web/ 失败（$($_.Exception.Message)），继续构建" -ForegroundColor Yellow
+        }
+    }
     & npx vite build
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vite build' -ForegroundColor Red

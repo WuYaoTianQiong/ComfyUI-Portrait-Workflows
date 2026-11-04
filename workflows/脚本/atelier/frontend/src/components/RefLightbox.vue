@@ -393,7 +393,7 @@ const positionLabel = computed(() => {
   z-index: var(--z-lightbox);
   display: flex;
   flex-direction: column;
-  background: #0a0c10;
+  background: var(--bg);
   color: var(--text);
 }
 
