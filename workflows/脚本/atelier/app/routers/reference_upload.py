@@ -24,10 +24,6 @@ class UploadedReference(BaseModel):
     dedup: bool = False
 
 
-@router.get("/reference/ping")
-def ping_reference_upload():
-    return {"ok": True, "router": "reference_upload"}
-
 
 @router.post("/reference/uploads", response_model=UploadedReference)
 async def upload_reference(file: UploadFile = File(...)):

@@ -17,10 +17,6 @@ router = APIRouter(tags=["参考图库参考板"])
 SHEET_FILENAME = "reference-sheet.png"
 
 
-@router.get("/reference/ping")
-def ping_reference_sheet():
-    return {"ok": True, "router": "reference_sheet"}
-
 
 @router.get("/reference/sheet")
 def get_reference_sheet(

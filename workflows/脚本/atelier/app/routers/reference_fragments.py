@@ -55,10 +55,6 @@ class ReferenceFragmentResponse(BaseModel):
     fragment_type: str
 
 
-@router.get("/reference/ping")
-def ping_reference_fragments():
-    return {"ok": True, "router": "reference_fragments"}
-
 
 def _append(parts: list[str], value: str | None) -> None:
     text = (value or "").strip()

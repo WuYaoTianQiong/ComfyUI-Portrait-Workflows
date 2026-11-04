@@ -127,6 +127,8 @@ def ref_root(tmp_path: Path, monkeypatch) -> Path:
     _write_bytes(root / "thumbs" / "P001_front.jpg")
     _write_bytes(root / "img" / "P001_front.png")
     _write_bytes(root / "img" / "depth" / "P001_front.webp")
+    # 仅正面有深度缩略图；P001_side 故意缺失，用于验证 DTO 回落 None
+    _write_bytes(root / "thumbs" / "depth" / "P001_front.webp")
     _write_bytes(root / "thumbs" / "costume" / "SPR-0001.webp")
     _write_bytes(root / "img" / "costume" / "SPR-0001.webp")
     _write_bytes(root / "thumbs" / "portrait" / "p1.webp")
@@ -257,6 +259,67 @@ def test_image_endpoints_and_depth_derivation(api, ref_root):
     # 缺失的原图
     missing = api.get("/api/reference/items/pose/P001_side/image", params={"kind": "image"})
     assert missing.status_code == 404
+
+
+def test_depth_thumb_url_and_endpoint(api, ref_root):
+    front = api.get("/api/reference/items/pose/P001_front")
+    assert front.status_code == 200
+    assert front.json()["depth_thumb_url"].endswith("kind=depth_thumb")
+    assert front.json()["depth_url"].endswith("kind=depth")
+
+    side = api.get("/api/reference/items/pose/P001_side")
+    assert side.status_code == 200
+    assert side.json()["depth_thumb_url"] is None
+
+    thumb = api.get("/api/reference/items/pose/P001_front/image", params={"kind": "depth_thumb"})
+    assert thumb.status_code == 200
+    # Windows 的 mimetypes 未必认识 .webp，media_type 兜底为 octet-stream，内容才是准绳
+    assert thumb.content == b"img"
+
+    # 非姿势库没有深度缩略图
+    wrong_library = api.get(
+        "/api/reference/items/costume/SPR-0001/image", params={"kind": "depth_thumb"}
+    )
+    assert wrong_library.status_code == 404
+
+    # 缩略图文件缺失时不退回原深度图
+    missing = api.get("/api/reference/items/pose/P001_side/image", params={"kind": "depth_thumb"})
+    assert missing.status_code == 404
+
+
+def test_libraries_expose_allow_nsfw(api, ref_root, monkeypatch):
+    body = api.get("/api/reference/libraries").json()
+    assert body["allow_nsfw"] is False
+    assert all(row["allow_nsfw"] is False for row in body["libraries"])
+
+    monkeypatch.setattr(settings, "reference_allow_nsfw", True)
+    body = api.get("/api/reference/libraries").json()
+    assert body["allow_nsfw"] is True
+    assert all(row["allow_nsfw"] is True for row in body["libraries"])
+
+
+def test_remote_library_depth_is_404(api, ref_root):
+    for kind in ("depth", "depth_thumb"):
+        resp = api.get(
+            "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": kind}
+        )
+        assert resp.status_code == 404, kind
+
+
+def test_system_status_exposes_reference_enabled(api, monkeypatch):
+    """离线分支也要带开关：前端导航收起不依赖 ComfyUI 是否在线。"""
+    from app.routers import system as system_router
+
+    monkeypatch.setattr(settings, "reference_enabled", False)
+    offline = api.get("/api/system/status").json()
+    assert offline["comfyui"] == "offline"
+    assert offline["reference_enabled"] is False
+
+    monkeypatch.setattr(system_router, "is_online", lambda: True)
+    monkeypatch.setattr(system_router, "fetch_queue", lambda: {})
+    online = api.get("/api/system/status").json()
+    assert online["comfyui"] == "online"
+    assert online["reference_enabled"] is False
 
 
 def test_path_traversal_is_rejected(api, ref_root):

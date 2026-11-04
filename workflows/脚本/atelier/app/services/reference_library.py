@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import os
 import threading
@@ -27,6 +28,17 @@ from app.config import settings
 from app.services.paths import IMAGE_EXTENSIONS, _relative_parts, _resolve_if_reparse
 
 LIBRARIES: tuple[str, ...] = ("pose", "costume", "portrait", "costume-anime")
+
+logger = logging.getLogger("atelier.reference")
+
+#: 上游 2026-11-04 的四库条数基线；偏离 ±5% 说明数据换版或字段改名，值得告警。
+BASELINE_COUNTS: dict[str, int] = {
+    "pose": 1439,
+    "costume": 1407,
+    "portrait": 1499,
+    "costume-anime": 440,
+}
+BASELINE_TOLERANCE = 0.05
 
 LIBRARY_FILES: dict[str, str] = {
     "pose": "data/pose-zh.json",
@@ -83,7 +95,7 @@ FIELD_MAP: dict[str, dict[str, str | None]] = {
     },
 }
 
-IMAGE_KINDS: tuple[str, ...] = ("thumb", "image", "depth")
+IMAGE_KINDS: tuple[str, ...] = ("thumb", "image", "depth", "depth_thumb")
 
 
 class ReferenceImageError(Exception):
@@ -198,6 +210,18 @@ def _image_url(library: str, item_id: str, kind: str) -> str:
     )
 
 
+def _depth_thumb_exists(item_id: str) -> bool:
+    """姿势库的深度缩略图是派生文件，缺失时 DTO 给 None（不退回原深度图）。"""
+    if not item_id or item_id in (".", ".."):
+        return False
+    if "/" in item_id or "\\" in item_id or ":" in item_id:
+        return False
+    try:
+        return (reference_root() / "thumbs" / "depth" / f"{item_id}.webp").is_file()
+    except OSError:
+        return False
+
+
 def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     item_id = _text(obj, "id")
     if not item_id:
@@ -230,16 +254,23 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         thumb_url = _text(obj, mapping["thumb"])
         image_url = _text(obj, mapping["image"]) or thumb_url
         depth_url: str | None = None
+        depth_thumb_url: str | None = None
     else:
         thumb_url = _image_url(library, item_id, "thumb")
         image_url = _image_url(library, item_id, "image")
         depth_url = _image_url(library, item_id, "depth") if library == "pose" else None
+        depth_thumb_url = (
+            _image_url(library, item_id, "depth_thumb")
+            if library == "pose" and _depth_thumb_exists(item_id)
+            else None
+        )
 
     return {
         **fields,
         "thumb_url": thumb_url,
         "image_url": image_url,
         "depth_url": depth_url,
+        "depth_thumb_url": depth_thumb_url,
         "hot": bool(obj.get("热门", False)),
         "featured": bool(obj.get("精选", False)),
         "nsfw": _is_nsfw(library, obj, group),
@@ -250,6 +281,24 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _log_loaded_count(library: str, count: int) -> None:
+    """成功打 info；空库或明显偏离上游基线打 warning，避免"0 条且可用"无从排查。"""
+    baseline = BASELINE_COUNTS.get(library)
+    if count == 0:
+        logger.warning("参考库 %s 加载到 0 条，请检查上游数据文件", library)
+        return
+    if baseline and abs(count - baseline) > baseline * BASELINE_TOLERANCE:
+        logger.warning(
+            "参考库 %s 条数 %d 偏离基线 %d（±%d%%），请检查上游字段是否改名",
+            library,
+            count,
+            baseline,
+            int(BASELINE_TOLERANCE * 100),
+        )
+        return
+    logger.info("参考库 %s 加载完成：%d 条", library, count)
+
+
 def _load(library: str) -> list[dict[str, Any]]:
     """按 mtime 缓存加载单库；文件缺失或 JSON 损坏时降级为空列表。"""
     if library not in LIBRARY_FILES:
@@ -258,6 +307,7 @@ def _load(library: str) -> list[dict[str, Any]]:
     mtime = _mtime_ns(path)
     key = (str(path), library)
     if mtime is None:
+        logger.warning("参考库 %s 数据文件不存在：%s", library, path)
         return []
     with _LOCK:
         cached = _CACHE.get(key)
@@ -266,9 +316,11 @@ def _load(library: str) -> list[dict[str, Any]]:
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        logger.warning("参考库 %s 读取/解析失败：%s", library, exc)
         return []
     if not isinstance(raw, list):
+        logger.warning("参考库 %s 顶层不是数组，已忽略：%s", library, path)
         return []
 
     items: list[dict[str, Any]] = []
@@ -279,9 +331,16 @@ def _load(library: str) -> list[dict[str, Any]]:
         if record is not None:
             items.append(record)
 
+    _log_loaded_count(library, len(items))
     with _LOCK:
         _CACHE[key] = _CacheEntry(mtime_ns=mtime, items=items)
     return items
+
+
+def log_library_summary() -> None:
+    """启动时打印四库条数（同时把 JSON 缺失/损坏以 warning 暴露）。"""
+    parts = [f"{LIBRARY_LABELS[lib]}={len(_load(lib))}" for lib in LIBRARIES]
+    logger.info("参考库加载概况：%s", "，".join(parts))
 
 
 def clear_cache() -> None:
@@ -346,6 +405,7 @@ def library_stats() -> list[dict[str, Any]]:
                 "remote": sum(1 for r in all_items if r["remote"]),
                 "visible": len(visible),
                 "available": available,
+                "allow_nsfw": settings.reference_allow_nsfw,
                 "groups": _facet_values(visible, "group"),
                 "facets": _facet_values(visible, "facet"),
                 "angles": _facet_values(visible, "angle"),
@@ -454,12 +514,19 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
     if record is None or not _visible(record):
         raise ReferenceImageError(404, "参考条目不存在")
     if record["remote"]:
+        # 外链库没有本地深度图：按 §3.3「kind 未命中 → 404」处理，不与"外链不提供本地图"混用。
+        if kind in ("depth", "depth_thumb"):
+            raise ReferenceImageError(404, "该库没有深度图")
         raise ReferenceImageError(400, "外链条目不提供本地图片")
 
     if kind == "depth":
         if library != "pose":
             raise ReferenceImageError(404, "该库没有深度图")
         rel = f"img/depth/{item_id}.webp"
+    elif kind == "depth_thumb":
+        if library != "pose":
+            raise ReferenceImageError(404, "该库没有深度缩略图")
+        rel = f"thumbs/depth/{item_id}.webp"
     elif kind == "thumb":
         rel = record["_thumb_rel"]
     else:
@@ -472,4 +539,4 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
 
 def media_type_for(path: Path) -> str:
     mt, _ = mimetypes.guess_type(str(path))
-    return mt or "image/webp"
+    return mt or "application/octet-stream"

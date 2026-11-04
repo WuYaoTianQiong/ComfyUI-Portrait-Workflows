@@ -1457,8 +1457,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Ping Reference Fragments */
-        get: operations["ping_reference_fragments_api_reference_ping_get"];
+        /**
+         * Ping Reference Library
+         * @description 唯一保留的参考库探活端点（其余 router 的重复注册已删除）。
+         */
+        get: operations["ping_reference_library_api_reference_ping_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3219,7 +3222,10 @@ export interface components {
         };
         /**
          * RecipeRequest
-         * @description 参考库三图出图；带 `extra_id` 时自动切四图工作流。
+         * @description 参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。
+         *
+         *     优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。
+         *     带第 4 张（库条目或上传图）时自动切四图工作流。
          */
         RecipeRequest: {
             /**
@@ -3227,6 +3233,11 @@ export interface components {
              * @default
              */
             costume_id: string;
+            /**
+             * Costume Path
+             * @default
+             */
+            costume_path: string;
             /**
              * Dry Run
              * @default false
@@ -3243,6 +3254,11 @@ export interface components {
              */
             extra_library: string;
             /**
+             * Extra Path
+             * @default
+             */
+            extra_path: string;
+            /**
              * Output Subfolder
              * @default
              */
@@ -3253,10 +3269,20 @@ export interface components {
              */
             portrait_id: string;
             /**
+             * Portrait Path
+             * @default
+             */
+            portrait_path: string;
+            /**
              * Pose Id
              * @default
              */
             pose_id: string;
+            /**
+             * Pose Path
+             * @default
+             */
+            pose_path: string;
             /**
              * Prompt Suffix
              * @default
@@ -3328,6 +3354,8 @@ export interface components {
              * @default
              */
             angle: string;
+            /** Depth Thumb Url */
+            depth_thumb_url?: string | null;
             /** Depth Url */
             depth_url?: string | null;
             /**
@@ -3405,11 +3433,21 @@ export interface components {
         };
         /** ReferenceLibraryListResponse */
         ReferenceLibraryListResponse: {
+            /**
+             * Allow Nsfw
+             * @default false
+             */
+            allow_nsfw: boolean;
             /** Libraries */
             libraries?: components["schemas"]["ReferenceLibraryStats"][];
         };
         /** ReferenceLibraryStats */
         ReferenceLibraryStats: {
+            /**
+             * Allow Nsfw
+             * @default false
+             */
+            allow_nsfw: boolean;
             /** Angles */
             angles?: components["schemas"]["ReferenceFacetValue"][];
             /** Available */
@@ -6503,7 +6541,7 @@ export interface operations {
     get_reference_image_api_reference_items__library___item_id__image_get: {
         parameters: {
             query?: {
-                /** @description thumb / image / depth */
+                /** @description thumb / image / depth / depth_thumb */
                 kind?: string;
             };
             header?: never;
@@ -6555,7 +6593,7 @@ export interface operations {
             };
         };
     };
-    ping_reference_fragments_api_reference_ping_get: {
+    ping_reference_library_api_reference_ping_get: {
         parameters: {
             query?: never;
             header?: never;

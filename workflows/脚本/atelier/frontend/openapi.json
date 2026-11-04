@@ -2590,11 +2590,16 @@
         "type": "object"
       },
       "RecipeRequest": {
-        "description": "参考库三图出图；带 `extra_id` 时自动切四图工作流。",
+        "description": "参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。\n\n优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。\n带第 4 张（库条目或上传图）时自动切四图工作流。",
         "properties": {
           "costume_id": {
             "default": "",
             "title": "Costume Id",
+            "type": "string"
+          },
+          "costume_path": {
+            "default": "",
+            "title": "Costume Path",
             "type": "string"
           },
           "dry_run": {
@@ -2612,6 +2617,11 @@
             "title": "Extra Library",
             "type": "string"
           },
+          "extra_path": {
+            "default": "",
+            "title": "Extra Path",
+            "type": "string"
+          },
           "output_subfolder": {
             "default": "",
             "title": "Output Subfolder",
@@ -2622,9 +2632,19 @@
             "title": "Portrait Id",
             "type": "string"
           },
+          "portrait_path": {
+            "default": "",
+            "title": "Portrait Path",
+            "type": "string"
+          },
           "pose_id": {
             "default": "",
             "title": "Pose Id",
+            "type": "string"
+          },
+          "pose_path": {
+            "default": "",
+            "title": "Pose Path",
             "type": "string"
           },
           "prompt_suffix": {
@@ -2738,6 +2758,17 @@
             "default": "",
             "title": "Angle",
             "type": "string"
+          },
+          "depth_thumb_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth Thumb Url"
           },
           "depth_url": {
             "anyOf": [
@@ -2858,6 +2889,11 @@
       },
       "ReferenceLibraryListResponse": {
         "properties": {
+          "allow_nsfw": {
+            "default": false,
+            "title": "Allow Nsfw",
+            "type": "boolean"
+          },
           "libraries": {
             "items": {
               "$ref": "#/components/schemas/ReferenceLibraryStats"
@@ -2871,6 +2907,11 @@
       },
       "ReferenceLibraryStats": {
         "properties": {
+          "allow_nsfw": {
+            "default": false,
+            "title": "Allow Nsfw",
+            "type": "boolean"
+          },
           "angles": {
             "items": {
               "$ref": "#/components/schemas/ReferenceFacetValue"
@@ -8113,13 +8154,13 @@
             }
           },
           {
-            "description": "thumb / image / depth",
+            "description": "thumb / image / depth / depth_thumb",
             "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
               "default": "thumb",
-              "description": "thumb / image / depth",
+              "description": "thumb / image / depth / depth_thumb",
               "title": "Kind",
               "type": "string"
             }
@@ -8174,7 +8215,8 @@
     },
     "/api/reference/ping": {
       "get": {
-        "operationId": "ping_reference_fragments_api_reference_ping_get",
+        "description": "唯一保留的参考库探活端点（其余 router 的重复注册已删除）。",
+        "operationId": "ping_reference_library_api_reference_ping_get",
         "responses": {
           "200": {
             "content": {
@@ -8185,9 +8227,9 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Ping Reference Fragments",
+        "summary": "Ping Reference Library",
         "tags": [
-          "参考图库转提示词"
+          "参考图库"
         ]
       }
     },
