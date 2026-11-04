@@ -1417,6 +1417,668 @@ def check_phase2_pages(browser, shots_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 阶段三（T10）追加检查：图库数据层切后端（R3.1 ~ R3.3）
+#
+# 与阶段一/二的区别：三个图库查询已改为 GET /api/reference/items 并行分页，
+# 图片全部走后端端点。本段检查：
+#   - dist 无旧 /data/*.json 与外链残留（阶段三起为硬失败）；
+#   - 六路由 200、console 0、无外部域名请求；
+#   - 四库页正常网络裂图 0、图片全部来自后端端点；深度图端点可用；
+#   - 断网（Playwright 阻断非 127.0.0.1）重载裂图 0、无外部请求、
+#     请求的 costume-anime 条目必须在已缓存集合内；
+#   - 返回入口 3 个、18+ 首次确认只弹一次、药丸由 nsfw 聚合；
+#   - 姿势搜索/体系切换/加载更多、服装分类/标签/加载更多、人像分区/发长；
+#   - studio 下拉仍选中后端 default。
+# ---------------------------------------------------------------------------
+PHASE3_CACHE_LIB = "costume-anime"
+
+#: 药丸文本：`名称 (数量)` 或 `名称 (数量) · 18+`；排除「解锁 18+ ...」按钮。
+_P3_PILL_JS = r"""() => Array.from(document.querySelectorAll('button'))
+    .map((b) => (b.textContent || '').trim())
+    .filter((t) => !t.startsWith('解锁') && /^[^(]+ \(\d+\)( · 18\+)?$/.test(t))"""
+
+#: 卡片文本：以「加入配方」按钮定位卡片容器，读取整卡可见文本。
+_P3_CARD_TEXT_JS = r"""() => Array.from(document.querySelectorAll('button'))
+    .filter((b) => (b.textContent || '').trim() === '加入配方')
+    .map((b) => {
+        const card = b.closest('div.group');
+        const box = card || (b.parentElement && b.parentElement.parentElement);
+        return ((box ? box.innerText : '') || '').replace(/\s+/g, ' ').trim();
+    })"""
+
+#: 图片统计：裂图、未完成、以及图片 URL 来源分类。
+_P3_IMAGE_JS = r"""() => {
+    const classify = (s) => {
+        if (!s) return 'empty';
+        if (s.startsWith('data:')) return 'data';
+        let u;
+        try { u = new URL(s, location.href); } catch { return 'bad'; }
+        if (u.hostname !== location.hostname) return 'external';
+        if (/^\/(thumbs|img)\//.test(u.pathname)) return 'legacy';
+        if (u.pathname.startsWith('/api/reference/items/')) return 'backend';
+        return 'other';
+    };
+    const entries = Array.from(document.images).map((i) => {
+        const src = i.currentSrc || i.src;
+        return { src, kind: classify(src), complete: i.complete, width: i.naturalWidth };
+    });
+    const broken = entries.filter((e) => e.complete && e.width === 0);
+    const pending = entries.filter((e) => !e.complete);
+    const bad = entries.filter((e) => ['external', 'legacy', 'other', 'bad', 'empty'].includes(e.kind));
+    return {
+        total: entries.length,
+        broken: broken.length,
+        pending: pending.length,
+        bad: bad.length,
+        backend: entries.filter((e) => e.kind === 'backend').length,
+        brokenSrc: broken.slice(0, 10).map((e) => e.src),
+        badSrc: bad.slice(0, 10).map((e) => e.kind + ':' + e.src),
+        srcs: entries.slice(0, 10).map((e) => e.src),
+    };
+}"""
+
+
+def _p3_is_external(url: str) -> bool:
+    """非 127.0.0.1 / localhost 的 http(s) 请求视为外部请求。"""
+    parsed = urlsplit(url)
+    return parsed.scheme in ("http", "https") and parsed.hostname not in ("127.0.0.1", "localhost")
+
+
+def _p3_new_context(browser, *, unlocked: bool = False):
+    """阶段三专用新 context；unlocked=True 时预先关闭安全模式并写确认标记。"""
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    if unlocked:
+        ctx.add_init_script(
+            "try { localStorage.setItem('pose_atlas_safe_mode_v1', 'false');"
+            " localStorage.setItem('pose_atlas_nsfw_confirmed_v1', 'true'); } catch (e) {}"
+        )
+    return ctx
+
+
+def _p3_cached_kinds() -> dict[str, set[str]]:
+    """读取本机缓存：条目 id -> 已存在的 kind 集合（thumb/image）。"""
+    result: dict[str, set[str]] = {}
+    root = CACHE_ROOT / PHASE3_CACHE_LIB
+    if not root.is_dir():
+        return result
+    for item_dir in root.iterdir():
+        if not item_dir.is_dir():
+            continue
+        kinds: set[str] = set()
+        for path in item_dir.iterdir():
+            try:
+                if path.is_file() and path.stat().st_size > 0:
+                    kinds.add(path.stem)
+            except OSError:
+                pass
+        if kinds:
+            result[item_dir.name] = kinds
+    return result
+
+
+def _p3_cached_coverage() -> dict[str, set[str]]:
+    """thumb 与 image 均已缓存的条目（断网可稳定出图的集合）。"""
+    return {item_id: kinds for item_id, kinds in _p3_cached_kinds().items()
+            if {"thumb", "image"} <= kinds}
+
+
+def _p3_scroll_all(page) -> None:
+    """分步滚到底，确保懒加载图片真正进入视口后再统计。"""
+    try:
+        page.evaluate(
+            """async () => {
+                const step = Math.max(600, Math.floor(window.innerHeight * 0.8));
+                for (let y = 0; y <= document.body.scrollHeight; y += step) {
+                    window.scrollTo(0, y);
+                    await new Promise((r) => setTimeout(r, 120));
+                }
+                window.scrollTo(0, document.body.scrollHeight);
+            }"""
+        )
+    except Exception:
+        pass
+    wait_images_settled(page)
+
+
+def _p3_image_stats(page) -> dict:
+    return page.evaluate(_P3_IMAGE_JS)
+
+
+def _p3_card_count(page) -> int:
+    return page.get_by_role("button", name="加入配方", exact=True).count()
+
+
+def _p3_card_texts(page) -> list[str]:
+    return page.evaluate(_P3_CARD_TEXT_JS)
+
+
+def _p3_remaining_count(page) -> int | None:
+    """读取「加载更多（剩余 N 套/张/组）」中的 N；按钮不存在时返回 None。"""
+    try:
+        text = page.get_by_role("button", name=re.compile("^加载更多")).first.inner_text()
+    except Exception:
+        return None
+    match = re.search(r"剩余\s*(\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def _p3_pill_texts(page) -> list[str]:
+    return page.evaluate(_P3_PILL_JS)
+
+
+def _p3_anime_ids(srcs: list[str]) -> set[str]:
+    import urllib.parse
+
+    ids: set[str] = set()
+    for src in srcs:
+        match = re.search(r"/api/reference/items/costume-anime/([^/]+)/image", src or "")
+        if match:
+            ids.add(urllib.parse.unquote(match.group(1)))
+    return ids
+
+
+def check_phase3_dist() -> None:
+    section("阶段三-0 构建产物：无旧数据路径与外链残留（R3 / C-BUILD-ARTIFACT@1）")
+    index_path = DIST / "index.html"
+    if not check(index_path.exists(), "[阶段三] dist/index.html 存在", str(index_path)):
+        return
+
+    html = index_path.read_text(encoding="utf-8")
+    refs = [r for r in _META_RE.findall(html) if not r.startswith("data:")]
+    check(bool(refs), "[阶段三] dist/index.html 含资源引用", f"{len(refs)} 条")
+    bad_refs = [r for r in refs if not r.startswith("/ref-web/assets/")]
+    check(not bad_refs, "[阶段三] dist/index.html 只引用 /ref-web/assets/", f"异常引用={bad_refs}")
+
+    dist_files = [p for p in DIST.rglob("*") if p.is_file()]
+    src_files = [p for p in (GALLERY / "src").rglob("*") if p.is_file()]
+    check(bool(dist_files), "[阶段三] dist 产物非空", f"{len(dist_files)} 个文件")
+    if dist_files and src_files:
+        oldest_dist = min(p.stat().st_mtime for p in dist_files)
+        newest_src = max(p.stat().st_mtime for p in src_files)
+        check(oldest_dist > newest_src,
+              "[阶段三] dist 全部产物 mtime 晚于最新源码",
+              f"dist_min={time.strftime('%H:%M:%S', time.localtime(oldest_dist))} "
+              f"src_max={time.strftime('%H:%M:%S', time.localtime(newest_src))}")
+
+    literals = LEGACY_DATA_LITERALS + ["charadb-2fi.pages.dev", "qwen2509_2img"]
+    hits: dict[str, list[str]] = {lit: [] for lit in literals}
+    for path in dist_files:
+        if path.suffix in {".woff2", ".png", ".jpg", ".webp"}:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for lit in literals:
+            if lit in content:
+                hits[lit].append(path.relative_to(DIST).as_posix())
+
+    for lit in LEGACY_DATA_LITERALS:
+        check(not hits[lit], f"[阶段三] dist 无旧数据路径 {lit}", f"命中={hits[lit]}")
+    check(not hits["charadb-2fi.pages.dev"],
+          "[阶段三] dist 无 charadb 外链残留", f"命中={hits['charadb-2fi.pages.dev']}")
+    check(not hits["qwen2509_2img"],
+          "[阶段三] dist 无旧模板字面量 qwen2509_2img", f"命中={hits['qwen2509_2img']}")
+
+
+def check_phase3_routes(browser, shots_dir: Path) -> None:
+    section("阶段三-1 六路由 200、console 0、无外部请求（新 context）")
+    ctx = _p3_new_context(browser)
+    errors: list[str] = []
+    external: list[str] = []
+    page = new_page(ctx, errors, "p3-routes")
+    page.on("request", lambda req: external.append(req.url) if _p3_is_external(req.url) else None)
+
+    for route in ROUTES:
+        status = goto_settle(page, route, ROUTE_ANCHORS.get(route))
+        check(status == 200, f"[阶段三] GET {route} 返回 200", f"status={status} url={page.url}")
+        slug = route.strip("/").replace("/", "_") or "index"
+        page.screenshot(path=str(shots_dir / f"phase3_route_{slug}.png"))
+
+    check(not errors, "[阶段三] 六路由 console error / pageerror 为 0", "; ".join(errors[:6]))
+    check(not external, "[阶段三] 六路由未请求任何外部域名", f"外部请求={external[:5]}")
+    page.close()
+    ctx.close()
+
+
+def check_phase3_normal_images(browser, shots_dir: Path) -> None:
+    section("阶段三-2 四库页正常网络裂图 0 与图片端点")
+    ctx = _p3_new_context(browser)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-normal")
+    for route in LIBRARY_ROUTES:
+        goto_settle(page, route, ROUTE_ANCHORS.get(route))
+        _p3_scroll_all(page)
+        stats = _p3_image_stats(page)
+        slug = route.strip("/").replace("/", "_") or "index"
+        page.screenshot(path=str(shots_dir / f"phase3_normal_{slug}.png"))
+        check(stats["total"] > 0, f"[阶段三] {route} 有图片渲染", f"imgs={stats['total']}")
+        check(stats["broken"] == 0, f"[阶段三] {route} 正常网络裂图为 0",
+              f"broken={stats['broken']}/{stats['total']} src={stats['brokenSrc']}")
+        check(stats["pending"] == 0, f"[阶段三] {route} 无未完成加载的图片",
+              f"pending={stats['pending']}")
+        check(stats["bad"] == 0, f"[阶段三] {route} 图片全部走后端端点（无外链/旧静态路径）",
+              f"bad={stats['bad']} src={stats['badSrc']}")
+
+    # 对抗性探针 1：姿势深度图模式必须走 depth_thumb 后端端点且不裂图。
+    goto_settle(page, "/ref-web/poses", "动作姿势库")
+    try:
+        page.get_by_role("button", name="深度图 (Depth)", exact=True).click()
+        _p3_scroll_all(page)
+    except Exception as exc:
+        check(False, "[阶段三] 姿势深度图模式切换", f"{type(exc).__name__}: {exc}")
+    depth_stats = _p3_image_stats(page)
+    depth_srcs = page.evaluate(
+        "() => Array.from(document.images).map((i) => i.currentSrc || i.src)"
+        ".filter((s) => s.includes('kind=depth_thumb') || s.includes('kind=depth'))"
+    )
+    page.screenshot(path=str(shots_dir / "phase3_pose_depth_mode.png"))
+    check(depth_stats["broken"] == 0, "[阶段三] 深度图模式裂图为 0",
+          f"broken={depth_stats['broken']} src={depth_stats['brokenSrc']}")
+    check(len(depth_srcs) > 0, "[阶段三] 深度图模式确实使用后端 depth 端点",
+          f"depth_srcs={len(depth_srcs)} sample={depth_srcs[:2]}")
+    try:
+        page.get_by_role("button", name="素体白模", exact=True).click()
+        page.wait_for_timeout(400)
+    except Exception:
+        pass
+
+    # 对抗性探针 2：二次元服装缩略图必须走后端端点（无 charadb 外链）且不裂图。
+    goto_settle(page, "/ref-web/costumes", "服装穿搭库")
+    try:
+        page.get_by_role("button", name="二次元", exact=True).click()
+        _p3_scroll_all(page)
+    except Exception as exc:
+        check(False, "[阶段三] 服装二次元分类切换", f"{type(exc).__name__}: {exc}")
+    anime_stats = _p3_image_stats(page)
+    page.screenshot(path=str(shots_dir / "phase3_costume_anime.png"))
+    check(anime_stats["broken"] == 0, "[阶段三] 二次元服装裂图为 0",
+          f"broken={anime_stats['broken']}/{anime_stats['total']} src={anime_stats['brokenSrc']}")
+    check(anime_stats["bad"] == 0, "[阶段三] 二次元服装图片全部走后端端点",
+          f"bad={anime_stats['bad']} src={anime_stats['badSrc']}")
+
+    check(not errors, "[阶段三] 正常网络图片检查无 console error", "; ".join(errors[:6]))
+    page.close()
+    ctx.close()
+
+
+def check_phase3_offline(browser, shots_dir: Path) -> None:
+    section("阶段三-3 断网（阻断非 127.0.0.1）四页与已缓存集合")
+    coverage = _p3_cached_coverage()
+    observe("阶段三断网对照的已缓存集合",
+            f"thumb+image 均缓存 {len(coverage)}/440 套")
+
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    blocked: list[str] = []
+    external_502: list[str] = []
+    anime_requests: list[str] = []
+
+    def handler(route):
+        if _p3_is_external(route.request.url):
+            blocked.append(route.request.url)
+            route.abort()
+        else:
+            route.continue_()
+
+    ctx.route("**/*", handler)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-offline")
+
+    def on_request(req):
+        if "/api/reference/items/costume-anime/" in req.url:
+            anime_requests.append(req.url)
+
+    def on_response(resp):
+        if resp.status == 502:
+            external_502.append(resp.url)
+
+    page.on("request", on_request)
+    page.on("response", on_response)
+
+    broken_total = 0
+    for route in LIBRARY_ROUTES:
+        goto_settle(page, route, ROUTE_ANCHORS.get(route))
+        _p3_scroll_all(page)
+        stats = _p3_image_stats(page)
+        broken_total += stats["broken"]
+        slug = route.strip("/").replace("/", "_") or "index"
+        page.screenshot(path=str(shots_dir / f"phase3_offline_{slug}.png"))
+        check(stats["broken"] == 0,
+              f"[阶段三] {route} 断网重载裂图为 0（已缓存集合）",
+              f"broken={stats['broken']}/{stats['total']} pending={stats['pending']} "
+              f"src={stats['brokenSrc']}")
+
+    # 外链服装库：切到二次元后所有缩略图都应来自后端缓存端点。
+    goto_settle(page, "/ref-web/costumes", "服装穿搭库")
+    try:
+        page.get_by_role("button", name="二次元", exact=True).click()
+        _p3_scroll_all(page)
+    except Exception as exc:
+        check(False, "[阶段三] 断网下二次元分类切换", f"{type(exc).__name__}: {exc}")
+    anime_stats = _p3_image_stats(page)
+    broken_total += anime_stats["broken"]
+    page.screenshot(path=str(shots_dir / "phase3_offline_costume_anime.png"))
+    check(anime_stats["broken"] == 0,
+          "[阶段三] 断网下二次元服装裂图为 0（已缓存集合）",
+          f"broken={anime_stats['broken']}/{anime_stats['total']} src={anime_stats['brokenSrc']}")
+
+    check(not blocked, "[阶段三] 断网重载未发起任何外部域名请求",
+          f"被阻断的外部请求={blocked[:5]}")
+    anime_ids = _p3_anime_ids(anime_requests)
+    uncached_requested = sorted(item_id for item_id in anime_ids if item_id not in coverage)
+    check(not uncached_requested,
+          "[阶段三] 断网页面只请求已缓存 anime 条目",
+          f"请求条目={len(anime_ids)} 未缓存={uncached_requested[:8]}")
+
+    if broken_total or external_502:
+        observe("断网裂图/502 明细（如实降级，不修改口径）",
+                f"broken_total={broken_total} 502={external_502[:5]}")
+    else:
+        observe("断网四页与二次元集合裂图均为 0，且未发起外部请求", "无降级")
+
+    check(not errors, "[阶段三] 断网检查期间 console error 记录（用于区分中止请求）",
+          f"console_rows={len(errors)}")
+    page.close()
+    ctx.close()
+
+
+def check_phase3_entries(browser, shots_dir: Path) -> None:
+    section("阶段三-4 返回入口 3 个（新 context）")
+    ctx = _p3_new_context(browser)
+    try:
+        check_gallery_entries_all(ctx, shots_dir)
+    finally:
+        ctx.close()
+
+
+def check_phase3_nsfw(browser, shots_dir: Path) -> None:
+    section("阶段三-5 18+ 判定来自 DTO.nsfw（新 context）")
+    ctx = _p3_new_context(browser)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-nsfw")
+    goto_settle(page, "/ref-web/poses", "动作姿势库")
+
+    nsfw_pose = api_json("/api/reference/items?library=pose&nsfw=true&page_size=200")
+    nsfw_total = int(nsfw_pose.get("total") or 0)
+    check(nsfw_total > 0, "[阶段三] 后端总闸开启且 pose 存在 nsfw 条目",
+          f"total={nsfw_total}")
+    first_pose = (nsfw_pose.get("items") or [{}])[0]
+    nsfw_system = first_pose.get("group") or ""
+    nsfw_pose_id = first_pose.get("id") or ""
+    check(bool(nsfw_system) and bool(nsfw_pose_id),
+          "[阶段三] 取得 nsfw 姿势探针（体系 + id）",
+          f"system={nsfw_system} id={nsfw_pose_id}")
+
+    safe_key = page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1")
+    # 页面挂载时会把当前状态写回 localStorage；默认状态是安全模式，
+    # 因此允许键为 null（尚未写入）或 "true"，只拒绝显式的 "false"。
+    check(safe_key != "false", "[阶段三] 安全模式默认开启（无记忆键或 true）", f"value={safe_key}")
+
+    unlock_button = page.get_by_role("button", name=re.compile(r"^解锁 18\+ 敏感姿势体系"))
+    check(unlock_button.count() == 1, "[阶段三] 安全模式显示 18+ 解锁入口",
+          f"count={unlock_button.count()}")
+    pills_safe = _p3_pill_texts(page)
+    check(bool(nsfw_system) and not any(p.startswith(nsfw_system) for p in pills_safe),
+          "[阶段三] 安全模式下 18+ 体系药丸隐藏",
+          f"pills={pills_safe}")
+
+    search_input = page.locator('input[placeholder*="搜索姿势名称"]')
+    if nsfw_pose_id:
+        search_input.fill(nsfw_pose_id)
+        page.wait_for_timeout(500)
+        hidden_empty = page.get_by_text("没有找到匹配的姿势", exact=False).count()
+        check(hidden_empty > 0, "[阶段三] 安全模式下搜索 18+ 条目为空（条目已隐藏）",
+              f"empty_state={hidden_empty} id={nsfw_pose_id}")
+        search_input.fill("")
+        page.wait_for_timeout(300)
+
+    page.locator('header button[title^="当前已开启安全模式"]').first.click()
+    try:
+        _alertdialog(page).first.wait_for(state="visible", timeout=8000)
+    except Exception:
+        pass
+    check(_alertdialog(page).count() == 1, "[阶段三] 首次解锁弹出年龄确认框",
+          f"alertdialog={_alertdialog(page).count()}")
+    page.screenshot(path=str(shots_dir / "phase3_nsfw_first_dialog.png"))
+    try:
+        page.get_by_role("button", name=re.compile("我已年满")).first.click()
+        page.wait_for_timeout(700)
+    except Exception as exc:
+        check(False, "[阶段三] 点击年龄确认按钮", f"{type(exc).__name__}: {exc}")
+    check(page.evaluate("(k) => localStorage.getItem(k)", NSFW_CONFIRMED_KEY) == "true",
+          "[阶段三] 确认后写入 18+ 记忆键", "")
+
+    pills_unlocked = _p3_pill_texts(page)
+    check(bool(nsfw_system) and any(p.startswith(nsfw_system) and "18+" in p for p in pills_unlocked),
+          "[阶段三] 解锁后至少一个体系药丸显示 18+",
+          f"pills={pills_unlocked}")
+
+    if nsfw_pose_id:
+        search_input.fill(nsfw_pose_id)
+        page.wait_for_timeout(500)
+        visible_cards = _p3_card_count(page)
+        check(visible_cards > 0, "[阶段三] 解锁后搜索同一 18+ 条目可显示",
+              f"cards={visible_cards} id={nsfw_pose_id}")
+        search_input.fill("")
+        page.wait_for_timeout(300)
+
+    # 第二次解锁：切回安全模式再解锁，不得再次弹窗。
+    page.locator('header button[title^="当前已显示 18+"]').first.click()
+    page.wait_for_timeout(500)
+    check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "true",
+          "[阶段三] 可切回安全模式", "")
+    page.locator('header button[title^="当前已开启安全模式"]').first.click()
+    page.wait_for_timeout(1200)
+    check(_alertdialog(page).count() == 0, "[阶段三] 第二次解锁不再弹年龄确认框",
+          f"alertdialog={_alertdialog(page).count()}")
+    check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "false",
+          "[阶段三] 第二次解锁直接进入完整模式", "")
+
+    # 服装页：18+ 分类药丸由 nsfw 聚合，安全模式下隐藏。
+    nsfw_costume = api_json("/api/reference/items?library=costume&nsfw=true&page_size=200")
+    first_costume = (nsfw_costume.get("items") or [{}])[0]
+    nsfw_category = first_costume.get("group") or ""
+    goto_settle(page, "/ref-web/costumes", "服装穿搭库")
+    costume_pills = _p3_pill_texts(page)
+    check(bool(nsfw_category) and any(p.startswith(nsfw_category) and "18+" in p
+                                      for p in costume_pills),
+          "[阶段三] 解锁后至少一个服装分类药丸显示 18+",
+          f"category={nsfw_category} pills={costume_pills}")
+
+    page.locator('header button[title^="当前已显示 18+"]').first.click()
+    page.wait_for_timeout(500)
+    costume_pills_safe = _p3_pill_texts(page)
+    check(bool(nsfw_category) and not any(p.startswith(nsfw_category)
+                                          for p in costume_pills_safe),
+          "[阶段三] 安全模式下 18+ 服装分类药丸隐藏",
+          f"category={nsfw_category} pills={costume_pills_safe}")
+    page.screenshot(path=str(shots_dir / "phase3_nsfw_costume_pills.png"))
+
+    check(not errors, "[阶段三] 18+ 检查期间无 console error", "; ".join(errors[:6]))
+    page.close()
+    ctx.close()
+
+
+def check_phase3_pose_interactions(browser, shots_dir: Path) -> None:
+    section("阶段三-6a 姿势页搜索 / 体系切换 / 加载更多")
+    ctx = _p3_new_context(browser, unlocked=True)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-poses")
+    goto_settle(page, "/ref-web/poses", "动作姿势库")
+
+    baseline = _p3_card_count(page)
+    check(baseline == 60, "[阶段三] 姿势页默认渲染 60 组", f"cards={baseline}")
+
+    search_input = page.locator('input[placeholder*="搜索姿势名称"]')
+    search_input.fill("P001")
+    page.wait_for_timeout(600)
+    filtered = _p3_card_count(page)
+    card_texts = _p3_card_texts(page)
+    check(filtered > 0, "[阶段三] 姿势搜索 P001 有结果", f"cards={filtered}")
+    check(filtered < baseline, "[阶段三] 姿势搜索 P001 确实缩小结果集",
+          f"filtered={filtered} baseline={baseline}")
+    check(any("P001" in text for text in card_texts),
+          "[阶段三] 搜索结果卡片文本包含 P001",
+          f"sample={card_texts[:2]}")
+    page.screenshot(path=str(shots_dir / "phase3_poses_search_p001.png"))
+    search_input.fill("")
+    page.wait_for_timeout(300)
+    page.get_by_role("button", name="重置", exact=True).click()
+    page.wait_for_timeout(400)
+
+    pills = _p3_pill_texts(page)
+    target = next((p for p in pills if not p.startswith("全部")), "")
+    check(bool(target), "[阶段三] 姿势页存在体系药丸", f"pills={pills}")
+    system = target.split(" (")[0] if target else ""
+    if system:
+        page.get_by_role("button", name=re.compile("^" + re.escape(system) + r" \(")).first.click()
+        page.wait_for_timeout(700)
+        system_texts = _p3_card_texts(page)
+        check(bool(system_texts) and all(system in text for text in system_texts),
+              "[阶段三] 体系切换后所有卡片属于该体系",
+              f"system={system} cards={len(system_texts)} sample={system_texts[:2]}")
+
+    # 回到全部体系后验证 60 -> 120。
+    page.get_by_role("button", name=re.compile(r"^全部 \(\d+\)$")).first.click()
+    page.wait_for_timeout(600)
+    before_load = _p3_card_count(page)
+    check(before_load == 60, "[阶段三] 返回全部体系后仍为 60 组", f"cards={before_load}")
+    page.get_by_role("button", name=re.compile("^加载更多")).first.click()
+    page.wait_for_timeout(800)
+    after_load = _p3_card_count(page)
+    check(after_load == 120, "[阶段三] 姿势页加载更多 60 → 120", f"cards={after_load}")
+    page.screenshot(path=str(shots_dir / "phase3_poses_load_more.png"))
+    check(not errors, "[阶段三] 姿势页交互期间无 console error", "; ".join(errors[:6]))
+    page.close()
+    ctx.close()
+
+
+def check_phase3_costume_interactions(browser, shots_dir: Path) -> None:
+    section("阶段三-6b 服装页分类 / 标签筛选与加载更多")
+    ctx = _p3_new_context(browser, unlocked=True)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-costumes")
+    goto_settle(page, "/ref-web/costumes", "服装穿搭库")
+
+    baseline = _p3_card_count(page)
+    check(baseline == 60, "[阶段三] 服装页默认渲染 60 套", f"cards={baseline}")
+
+    pills = _p3_pill_texts(page)
+    target = next((p for p in pills if not p.startswith("全部穿搭")), "")
+    category = target.split(" (")[0] if target else ""
+    check(bool(category), "[阶段三] 服装页存在分类药丸", f"pills={pills}")
+    if category:
+        page.get_by_role("button", name=re.compile("^" + re.escape(category) + r" \(")).first.click()
+        page.wait_for_timeout(700)
+        category_texts = _p3_card_texts(page)
+        check(bool(category_texts) and all(category in text for text in category_texts),
+              "[阶段三] 服装分类筛选后所有卡片属于该分类",
+              f"category={category} cards={len(category_texts)} sample={category_texts[:2]}")
+
+    # 标签筛选：优先选「针织」，不可用时取第一个非「全部」选项。
+    # 记录分类筛选后的「剩余 N 套」，标签生效后应看到剩余量下降。
+    baseline_remaining = _p3_remaining_count(page)
+    page.locator('button[role="combobox"]').first.click()
+    page.wait_for_timeout(300)
+    chose_tag = ""
+    try:
+        option = page.get_by_role("option", name="针织", exact=True)
+        if option.count() > 0:
+            option.first.click()
+            chose_tag = "针织"
+        else:
+            options = page.get_by_role("option")
+            count = options.count()
+            for index in range(1, count):
+                text = options.nth(index).inner_text().strip()
+                if text and "全部" not in text:
+                    options.nth(index).click()
+                    chose_tag = text
+                    break
+    except Exception as exc:
+        observe("服装标签选择失败", f"{type(exc).__name__}: {exc}")
+    page.wait_for_timeout(700)
+    tag_cards = _p3_card_count(page)
+    check(bool(chose_tag), "[阶段三] 服装页可选择标签", f"tag={chose_tag}")
+    check(tag_cards > 0, "[阶段三] 标签筛选后仍有结果",
+          f"tag={chose_tag} cards={tag_cards}")
+    check(tag_cards <= baseline, "[阶段三] 标签筛选结果不超过默认集合",
+          f"tag_cards={tag_cards} baseline={baseline}")
+    tag_remaining = _p3_remaining_count(page)
+    tag_narrowed = (
+        tag_remaining is None
+        or baseline_remaining is None
+        or tag_remaining < baseline_remaining
+    )
+    check(tag_narrowed, "[阶段三] 标签筛选确实缩小结果集",
+          f"remaining_before={baseline_remaining} remaining_after={tag_remaining}")
+    page.screenshot(path=str(shots_dir / "phase3_costumes_tag_filter.png"))
+
+    # 二次元分类：卡片来源显示 CharaDB（后端端点），验证分类切换。
+    page.get_by_role("button", name="重置", exact=True).click()
+    page.wait_for_timeout(400)
+    page.get_by_role("button", name="二次元", exact=True).click()
+    page.wait_for_timeout(800)
+    anime_texts = _p3_card_texts(page)
+    check(bool(anime_texts) and all("CharaDB" in text for text in anime_texts),
+          "[阶段三] 二次元分类下所有卡片来源为 CharaDB",
+          f"cards={len(anime_texts)} sample={anime_texts[:2]}")
+    page.get_by_role("button", name="全部", exact=True).click()
+    page.wait_for_timeout(600)
+
+    before_load = _p3_card_count(page)
+    check(before_load == 60, "[阶段三] 服装页返回全部分类后为 60 套", f"cards={before_load}")
+    page.get_by_role("button", name=re.compile("^加载更多")).first.click()
+    page.wait_for_timeout(800)
+    after_load = _p3_card_count(page)
+    check(after_load == 120, "[阶段三] 服装页加载更多 60 → 120", f"cards={after_load}")
+    page.screenshot(path=str(shots_dir / "phase3_costumes_load_more.png"))
+    check(not errors, "[阶段三] 服装页交互期间无 console error", "; ".join(errors[:6]))
+    page.close()
+    ctx.close()
+
+
+def check_phase3_portrait_interactions(browser, shots_dir: Path) -> None:
+    section("阶段三-6c 人像页分区 / 发长筛选")
+    ctx = _p3_new_context(browser, unlocked=True)
+    errors: list[str] = []
+    page = new_page(ctx, errors, "p3-portraits")
+    goto_settle(page, "/ref-web/portraits", "人像颜值库")
+
+    baseline = _p3_card_count(page)
+    check(baseline == 60, "[阶段三] 人像页默认渲染 60 张", f"cards={baseline}")
+
+    page.get_by_role("button", name=re.compile(r"^正脸参考 \(\d+\)$")).first.click()
+    page.wait_for_timeout(700)
+    section_texts = _p3_card_texts(page)
+    check(bool(section_texts) and all("正脸参考" in text for text in section_texts),
+          "[阶段三] 人像分区筛选后所有卡片属于该分区",
+          f"cards={len(section_texts)} sample={section_texts[:2]}")
+
+    page.get_by_role("button", name=re.compile(r"^短发 \(\d+\)$")).first.click()
+    page.wait_for_timeout(700)
+    hair_texts = _p3_card_texts(page)
+    check(bool(hair_texts) and all("短发" in text for text in hair_texts),
+          "[阶段三] 人像发长筛选后所有卡片属于该发长",
+          f"cards={len(hair_texts)} sample={hair_texts[:2]}")
+    check(len(hair_texts) > 0, "[阶段三] 分区+发长组合筛选仍有结果",
+          f"cards={len(hair_texts)}")
+    page.screenshot(path=str(shots_dir / "phase3_portraits_filters.png"))
+    check(not errors, "[阶段三] 人像页交互期间无 console error", "; ".join(errors[:6]))
+    page.close()
+    ctx.close()
+
+
+def check_phase3_studio_default(browser, shots_dir: Path) -> None:
+    section("阶段三-6d studio 下拉仍选中后端 default（回归）")
+    ctx = _p3_new_context(browser)
+    try:
+        check_studio_workflow_default(ctx, shots_dir)
+    finally:
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 def main() -> int:
@@ -1441,6 +2103,7 @@ def main() -> int:
 
         check_static()
         check_dist_artifact()
+        check_phase3_dist()
 
         # 阶段二：断网等价探针需要重启临时实例（只有脚本自己拉起的实例才可重启）
         if proc is not None:
@@ -1483,6 +2146,17 @@ def main() -> int:
             check_settings_export(browser, shots_dir)
             check_history_empty_mock(browser, shots_dir)
             check_phase2_pages(browser, shots_dir)
+
+            # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
+            check_phase3_routes(browser, shots_dir)
+            check_phase3_normal_images(browser, shots_dir)
+            check_phase3_offline(browser, shots_dir)
+            check_phase3_entries(browser, shots_dir)
+            check_phase3_nsfw(browser, shots_dir)
+            check_phase3_pose_interactions(browser, shots_dir)
+            check_phase3_costume_interactions(browser, shots_dir)
+            check_phase3_portrait_interactions(browser, shots_dir)
+            check_phase3_studio_default(browser, shots_dir)
 
             browser.close()
 

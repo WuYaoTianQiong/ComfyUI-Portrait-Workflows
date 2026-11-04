@@ -107,7 +107,7 @@ function DashboardPage() {
             {posesData.groups.slice(0, 4).map((g) => (
               <img
                 key={g.key}
-                src={`/${g.order[0].缩略图}`}
+                src={referenceImageUrl(g.order[0].缩略图)}
                 alt={g.name}
                 loading="lazy"
                 className="aspect-3/4 w-full rounded-lg bg-background object-cover"
@@ -155,7 +155,7 @@ function DashboardPage() {
             {portraits.slice(0, 4).map((p) => (
               <img
                 key={p.id}
-                src={`/${p.缩略图}`}
+                src={referenceImageUrl(p.缩略图)}
                 alt={p.标题}
                 loading="lazy"
                 className="aspect-3/4 w-full rounded-lg bg-background object-cover"

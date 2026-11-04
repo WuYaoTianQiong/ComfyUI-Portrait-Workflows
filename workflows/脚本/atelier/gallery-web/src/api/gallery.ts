@@ -1,5 +1,13 @@
 import { queryOptions } from '@tanstack/react-query'
-import type { CostumeItem, PortraitItem, PoseGroup, PoseItem } from '@/types/gallery'
+import {
+  fetchAllReferenceItems,
+  isNsfwCostumeItem,
+  isNsfwPoseItem,
+  toCostumeItem,
+  toPortraitItem,
+  toPoseItem,
+} from '@/lib/referenceAdapter'
+import type { CostumeItem, PoseGroup, PoseItem } from '@/types/gallery'
 
 export const ANGLES = ['正面', '俯视', '仰视', '侧面', '斜侧'] as const
 
@@ -10,24 +18,22 @@ export const PREFERRED_POSE_LINE_ORDER = [
   '双人缠绵',
 ] as const
 
-export const NSFW_POSE_SYSTEMS = new Set(['全身单人・性感系', '双人缠绵'])
-export const NSFW_COSTUME_CATEGORIES = new Set(['内衣・睡衣', '性感穿搭'])
-
-export function isNsfwPoseSystem(system: string): boolean {
-  return NSFW_POSE_SYSTEMS.has(system)
-}
-
+/**
+ * 姿势条目的 18+ 判定（名称保留，减少页面改动面）。
+ *
+ * 数据源改为适配层的 `nsfw` 字段（来自后端 DTO），不再硬编码体系名单。
+ */
 export function isNsfwPose(item: PoseItem | PoseGroup): boolean {
-  const sys = '体系' in item ? item.体系 : item.system
-  return NSFW_POSE_SYSTEMS.has(sys)
+  return isNsfwPoseItem(item)
 }
 
-export function isNsfwCostumeCategory(category: string): boolean {
-  return NSFW_COSTUME_CATEGORIES.has(category)
-}
-
+/**
+ * 服装条目的 18+ 判定（名称保留，减少页面改动面）。
+ *
+ * 数据源改为适配层的 `nsfw` 字段（来自后端 DTO），不再硬编码分类名单。
+ */
 export function isNsfwCostume(item: CostumeItem): boolean {
-  return Boolean(item.敏感) || NSFW_COSTUME_CATEGORIES.has(item.分类)
+  return isNsfwCostumeItem(item)
 }
 
 export function buildPoseGroups(items: PoseItem[]): { items: PoseItem[]; groups: PoseGroup[]; lines: string[] } {
@@ -41,6 +47,8 @@ export function buildPoseGroups(items: PoseItem[]): { items: PoseItem[]; groups:
   const groups: PoseGroup[] = []
 
   for (const item of items) {
+    // 分组键使用上游「姿势编号」（DTO.number），跨角度条目才会归入同一组；
+    // 编号缺失时回退 id，避免空编号把所有条目挤成一组。
     const key = `${item.体系}|${item.姿势编号 || item.id}`
     let group = groupMap.get(key)
     if (!group) {
@@ -78,10 +86,8 @@ export const posesQuery = queryOptions({
   queryKey: ['gallery', 'poses'],
   staleTime: Infinity,
   queryFn: async () => {
-    const res = await fetch('/data/pose-zh.json')
-    if (!res.ok) throw new Error(`加载姿势数据失败: HTTP ${res.status}`)
-    const data = (await res.json()) as PoseItem[]
-    return buildPoseGroups(data)
+    const items = await fetchAllReferenceItems('pose')
+    return buildPoseGroups(items.map(toPoseItem))
   },
 })
 
@@ -89,12 +95,12 @@ export const costumesQuery = queryOptions({
   queryKey: ['gallery', 'costumes'],
   staleTime: Infinity,
   queryFn: async () => {
-    const lists = await Promise.all(['/data/costume-zh.json', '/data/costume-anime-zh.json'].map(async (url) => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`加载服装数据失败: HTTP ${res.status}`)
-      return (await res.json()) as CostumeItem[]
-    }))
-    return lists.flat()
+    // 并行拉取两个服装库；合并顺序固定为现实在前、外链二次元在后。
+    const [local, anime] = await Promise.all([
+      fetchAllReferenceItems('costume'),
+      fetchAllReferenceItems('costume-anime'),
+    ])
+    return [...local.map(toCostumeItem), ...anime.map(toCostumeItem)]
   },
 })
 
@@ -102,8 +108,7 @@ export const portraitsQuery = queryOptions({
   queryKey: ['gallery', 'portraits'],
   staleTime: Infinity,
   queryFn: async () => {
-    const res = await fetch('/data/portrait-zh.json')
-    if (!res.ok) throw new Error(`加载人像数据失败: HTTP ${res.status}`)
-    return (await res.json()) as PortraitItem[]
+    const items = await fetchAllReferenceItems('portrait')
+    return items.map(toPortraitItem)
   },
 })

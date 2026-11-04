@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { costumesQuery, isNsfwCostume, isNsfwCostumeCategory } from '@/api/gallery'
+import { costumesQuery, isNsfwCostume } from '@/api/gallery'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { referenceImageUrl } from '@/lib/recipeImages'
+import { costumeCategoryHasNsfw } from '@/lib/referenceAdapter'
 
 import { useStudio } from '@/store/studioStore'
 
@@ -46,13 +47,14 @@ function CostumesPage() {
   const [shown, setShown] = useState(60)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
-  const activeCategory = safeMode && category && isNsfwCostumeCategory(category) ? '' : category
+  // 18+ 判定唯一来源是当前已加载条目的 nsfw 字段，分类字段由适配层给出。
+  const activeCategory = safeMode && category && costumeCategoryHasNsfw(costumes, category) ? '' : category
 
   const baseCostumes = useMemo(
-    () => costumes.filter((x) => (kind === '全部' || (x.一级分类 || '现实') === kind) && (!safeMode || !isNsfwCostume(x))),
+    () => costumes.filter((x) => (kind === '全部' || x.一级分类 === kind) && (!safeMode || !isNsfwCostume(x))),
     [costumes, safeMode, kind]
   )
-  const hiddenNsfwCount = costumes.filter((x) => (kind === '全部' || (x.一级分类 || '现实') === kind) && isNsfwCostume(x)).length
+  const hiddenNsfwCount = costumes.filter((x) => (kind === '全部' || x.一级分类 === kind) && isNsfwCostume(x)).length
   const activeTag = tag === 'all' || baseCostumes.some((x) => (!activeCategory || x.分类 === activeCategory) && x.标签.includes(tag)) ? tag : 'all'
 
   const categories = useMemo(
@@ -124,7 +126,7 @@ function CostumesPage() {
         </button>
         {categories.map((c) => {
           const cnt = baseCostumes.filter((x) => x.分类 === c).length
-          const isNsfw = isNsfwCostumeCategory(c)
+          const isNsfw = costumeCategoryHasNsfw(costumes, c)
           return (
             <button
               key={c}

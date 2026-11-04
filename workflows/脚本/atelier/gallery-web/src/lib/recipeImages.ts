@@ -6,7 +6,11 @@ export function referenceImageUrl(src: string): string {
 
 export function poseThumbPath(pose: PoseItem, useDepth = Boolean(pose.useDepth)): string {
   const raw = pose.缩略图
-  if (pose.source === 'upload' || !useDepth || /^(data:|https?:\/\/)/i.test(raw)) return raw
+  if (pose.source === 'upload' || !useDepth) return raw
+  // 后端 DTO 已给出深度图端点时优先使用，避免再按旧目录规则猜路径。
+  const depthUrl = pose.depthThumbUrl ?? pose.depthUrl
+  if (depthUrl) return depthUrl
+  if (/^(data:|https?:\/\/)/i.test(raw)) return raw
   const clean = raw.replace(/^\/+/, '')
   if (clean.startsWith('thumbs/depth/')) return raw
   if (clean.startsWith('thumbs/')) {
@@ -17,7 +21,10 @@ export function poseThumbPath(pose: PoseItem, useDepth = Boolean(pose.useDepth))
 
 export function poseImagePath(pose: PoseItem, useDepth = Boolean(pose.useDepth)): string {
   const raw = pose.原图 || pose.缩略图
-  if (pose.source === 'upload' || !useDepth || /^(data:|https?:\/\/)/i.test(raw)) return raw
+  if (pose.source === 'upload' || !useDepth) return raw
+  // 深度原图优先后端端点；缩略图端点不参与原图回退。
+  if (pose.depthUrl) return pose.depthUrl
+  if (/^(data:|https?:\/\/)/i.test(raw)) return raw
   const clean = raw.replace(/^\/+/, '')
   if (clean.startsWith('img/depth/')) return raw
   if (clean.startsWith('img/')) {

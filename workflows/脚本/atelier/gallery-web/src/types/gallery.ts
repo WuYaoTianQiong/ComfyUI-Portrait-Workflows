@@ -1,3 +1,6 @@
+/** 参考库标识（契约 C-REF-ADAPTER@1）；`costume-anime` 为外链服装库。 */
+export type ReferenceLibraryId = 'pose' | 'costume' | 'portrait' | 'costume-anime'
+
 export interface PoseItem {
   source?: 'upload'
   /** 是否使用灰阶深度图（Depth Map）代替素体白模 */
@@ -11,6 +14,16 @@ export interface PoseItem {
   缩略图: string
   原图: string
   检索: string
+  /** 条目来源库；旧持久化数据可能没有该字段 */
+  library?: ReferenceLibraryId
+  /** 是否外链条目（仅 costume-anime 为 true） */
+  remote?: boolean
+  /** 敏感标记；唯一来源为后端 DTO 的 nsfw 字段 */
+  nsfw?: boolean
+  /** 后端深度图端点；无深度图时为 null */
+  depthUrl?: string | null
+  /** 后端深度缩略图端点；无派生缩略图时为 null */
+  depthThumbUrl?: string | null
 }
 
 export interface PoseGroup {
@@ -40,6 +53,14 @@ export interface CostumeItem {
   预览图: string
   原图: string
   检索: string
+  /** 条目来源库；旧持久化数据可能没有该字段 */
+  library?: 'costume' | 'costume-anime'
+  /** 是否外链条目（costume-anime 为 true） */
+  remote?: boolean
+  /** 敏感标记；唯一来源为后端 DTO 的 nsfw 字段 */
+  nsfw?: boolean
+  /** 外链条目的上游来源页；其他库为 null/undefined */
+  sourceUrl?: string | null
 }
 
 export interface PortraitItem {
@@ -57,6 +78,10 @@ export interface PortraitItem {
   缩略图: string
   原图: string
   检索: string
+  /** 条目来源库；旧持久化数据可能没有该字段 */
+  library?: 'portrait'
+  /** 敏感标记；唯一来源为后端 DTO 的 nsfw 字段 */
+  nsfw?: boolean
 }
 
 export interface ExtraReferenceImage {
@@ -64,6 +89,8 @@ export interface ExtraReferenceImage {
   id: string
   name: string
   url: string
+  /** 仅在能映射到后端库条目时参与 recipes 提交 */
+  library?: ReferenceLibraryId
 }
 
 export interface RecipeState {
