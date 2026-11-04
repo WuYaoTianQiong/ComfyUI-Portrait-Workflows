@@ -8,12 +8,15 @@ import { flattenCategories } from '../utils/categories'
  * 分类筛选（提示词页 / 组合器共用）。
  *
  * 只负责「全部 + 分层分类列表」，不持有查询状态；选中值走 v-model。
+ * 分类以 pill 分段控件呈现：选中 `--primary` 实底，未选 `--panel-2`。
+ * `inline` 用于提示词页单行横向滚动，避免分类把筛选区撑成多行。
  */
 const props = defineProps<{
   categories: CategoryNode[] | undefined
   modelValue: number | null
   allLabel?: string
   showCount?: boolean
+  inline?: boolean
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: number | null] }>()
@@ -23,8 +26,8 @@ const flat = computed(() => flattenCategories(props.categories))
 
 <template>
   <section class="group">
-    <div class="group-head"><span>分类</span></div>
-    <div class="cat-list">
+    <div v-if="!inline" class="group-head"><span>分类</span></div>
+    <div class="cat-list" :class="{ inline }">
       <button
         class="cat"
         :class="{ active: modelValue === null }"
@@ -37,7 +40,7 @@ const flat = computed(() => flattenCategories(props.categories))
         :key="cat.id"
         class="cat"
         :class="{ active: modelValue === cat.id }"
-        :style="{ paddingLeft: `${8 + cat.depth * 14}px` }"
+        :title="cat.name"
         @click="emit('update:modelValue', cat.id)"
       >
         <span class="dot" :style="{ background: cat.color }" />
@@ -60,29 +63,48 @@ const flat = computed(() => flattenCategories(props.categories))
 
 .cat-list {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.cat-list.inline {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .cat {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--gap-sm);
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  gap: var(--gap-xs);
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--gap-sm);
   font-size: var(--fs-sm);
-  text-align: left;
+  color: var(--text);
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .cat:hover {
-  background: var(--panel-2);
+  border-color: var(--border-strong);
+  background: var(--panel-3);
 }
 
 .cat.active {
-  background: var(--primary-soft);
-  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary);
+  color: rgb(255 255 255);
+}
+
+.cat:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .dot {
@@ -93,15 +115,18 @@ const flat = computed(() => flattenCategories(props.categories))
 }
 
 .cat-name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .cat-count {
   color: var(--muted);
   font-size: var(--fs-xs);
   font-style: normal;
+}
+
+.cat.active .cat-count {
+  color: rgb(255 255 255);
+  opacity: 0.8;
 }
 </style>

@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
+import Skeleton from '../components/Skeleton.vue'
 import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
 import { readSession, writeSession } from '../composables/useSessionState'
@@ -62,7 +63,7 @@ function restoreAllPrompts() {
   toast.success('已恢复全部确认提示')
 }
 
-const { data: catData, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
+const { data: catData, isFetching: catsFetching, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
   queryKey: ['categories', 'taxonomy'],
   queryFn: () => apiGet('/api/categories', { tree: true, count_scope: 'prompt' }),
 })
@@ -74,7 +75,7 @@ const visibleTags = computed(() => {
   return onlyUnused.value ? list.filter((t) => !t.prompt_count) : list
 })
 
-const { data: tagData, refetch: refetchTags } = useQuery<{ tags: TagRow[] }>({
+const { data: tagData, isFetching: tagsFetching, refetch: refetchTags } = useQuery<{ tags: TagRow[] }>({
   queryKey: ['tags', 'taxonomy'],
   queryFn: () => apiGet('/api/tags', { count_scope: 'prompt' }),
 })
@@ -321,6 +322,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 
     <div class="list">
       <template v-if="panel === 'category'">
+        <Skeleton v-if="catsFetching && !flatCats.length" class="list-skeleton" variant="block" :count="5" />
         <div v-for="cat in flatCats" :key="cat.id" class="row" :style="{ paddingLeft: `${8 + cat.depth * 18}px` }">
           <span class="dot" :style="{ background: cat.color }" />
           <input
@@ -335,10 +337,11 @@ async function removeItem(kind: Panel, id: number, name: string) {
           <span class="count">{{ cat.prompt_count }}</span>
           <button class="icon danger" title="删除" @click="removeItem('category', cat.id, cat.name)">✕</button>
         </div>
-        <EmptyState v-if="!flatCats.length" text="还没有分类" />
+        <EmptyState v-if="!flatCats.length && !catsFetching" text="还没有分类" hint="在上方输入名称即可创建第一个分类" />
       </template>
 
       <template v-else-if="panel === 'tag'">
+        <Skeleton v-if="tagsFetching && !visibleTags.length" class="list-skeleton" variant="block" :count="5" />
         <div v-for="tag in visibleTags" :key="tag.id" class="row">
           <span class="dot" :style="{ background: tag.color }" />
           <input
@@ -353,7 +356,13 @@ async function removeItem(kind: Panel, id: number, name: string) {
           <span class="count">{{ tag.prompt_count }}</span>
           <button class="icon danger" title="删除" @click="removeItem('tag', tag.id, tag.name)">✕</button>
         </div>
-        <EmptyState v-if="!visibleTags.length" text="没有符合条件的标签" />
+        <EmptyState
+          v-if="!visibleTags.length && !tagsFetching"
+          text="没有符合条件的标签"
+          hint="当前只显示未被使用的标签"
+          action-text="显示全部标签"
+          @action="onlyUnused = false"
+        />
       </template>
 
       <template v-else>
@@ -408,6 +417,21 @@ async function removeItem(kind: Panel, id: number, name: string) {
   gap: var(--gap-xs);
 }
 
+.tabs .btn {
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.tabs .btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: rgb(255 255 255);
+}
+
 .skipped-bar {
   display: flex;
   flex-wrap: wrap;
@@ -429,8 +453,8 @@ async function removeItem(kind: Panel, id: number, name: string) {
   border: 1px solid var(--primary);
   background: var(--primary-soft);
   color: var(--primary);
-  border-radius: 999px;
-  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  padding: 1px var(--gap-sm);
   font-size: var(--fs-xs);
 }
 
@@ -447,7 +471,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .only-unused {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   color: var(--muted);
   cursor: pointer;
@@ -459,7 +483,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 
 .swatches {
   display: flex;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
 .swatch {
@@ -481,6 +505,10 @@ async function removeItem(kind: Panel, id: number, name: string) {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+.list-skeleton {
+  padding: var(--gap);
 }
 
 .row {
@@ -557,7 +585,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 
 .wf-badge {
   flex: none;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -632,7 +660,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .btn.primary:disabled {

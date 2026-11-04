@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
+import CategoryFilter from '../components/CategoryFilter.vue'
 import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
 import MissingImageRunPanel from '../components/MissingImageRunPanel.vue'
@@ -17,6 +18,7 @@ import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { apiDelete, apiGet, apiPost, apiPut, thumbnailUrl } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import QueryState from '../components/QueryState.vue'
+import Skeleton from '../components/Skeleton.vue'
 import { useSettings } from '../composables/useSettings'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
@@ -950,10 +952,6 @@ function selectCategory(id: number | null) {
   page.value = 1
 }
 
-function onCategorySelect(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  selectCategory(value ? Number(value) : null)
-}
 
 function toggleTag(id: number) {
   const idx = tagIds.value.indexOf(id)
@@ -1055,13 +1053,25 @@ onBeforeUnmount(() => {
         >
           «
         </button>
-        <input
-          v-model="search"
-          class="search"
-          type="search"
-          placeholder="搜索名称 / 内容 / 标签 / 备注…"
-          @input="page = 1"
-        />
+        <div class="search-box">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input
+            v-model="search"
+            class="search"
+            type="text"
+            placeholder="搜索名称 / 内容 / 标签 / 备注…"
+            @input="page = 1"
+          />
+          <button
+            v-if="search"
+            class="search-clear"
+            type="button"
+            title="清除搜索"
+            @click="search = ''; page = 1"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       <div class="side-actions">
@@ -1095,12 +1105,14 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="side-filters">
-        <select class="cat-select" :value="categoryId ?? ''" title="分类" @change="onCategorySelect">
-          <option value="">全部分类</option>
-          <option v-for="cat in flatCats" :key="cat.id" :value="cat.id">
-            {{ '　'.repeat(cat.depth) }}{{ cat.name }}（{{ cat.prompt_count }}）
-          </option>
-        </select>
+        <CategoryFilter
+          inline
+          show-count
+          all-label="全部分类"
+          :categories="catData?.categories"
+          :model-value="categoryId"
+          @update:model-value="selectCategory"
+        />
 
         <select v-model="sort" title="排序" @change="page = 1">
           <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
@@ -1162,9 +1174,11 @@ onBeforeUnmount(() => {
           :tags="tagData?.tags ?? []"
           :selected="tagIds"
           :match="tagMatch"
+          clearable
           empty-text="暂无带提示词的标签"
           @toggle="toggleTag"
           @update:match="(m) => { tagMatch = m; page = 1 }"
+          @clear="tagIds = []; page = 1"
         />
         <button class="btn btn-sm full" @click="tagIds = []; page = 1">清空标签</button>
       </div>
@@ -1205,6 +1219,13 @@ onBeforeUnmount(() => {
 
       <QueryState v-if="listError" :error="listErr" @retry="refetchList" />
 
+      <div class="list-head">
+        <span class="list-title">提示词</span>
+        <span class="list-total">
+          共 {{ total }} 条<span v-if="isFetching"> · 加载中</span>
+        </span>
+      </div>
+
       <div ref="listEl" class="list" :class="{ 'has-bulk': selectedCount }" @scroll.passive="onListScroll">
         <div
           v-for="item in list"
@@ -1238,7 +1259,16 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <EmptyState v-if="!list.length && !isFetching" size="big" text="没有符合条件的提示词" />
+        <Skeleton v-if="isFetching && !list.length" class="list-skeleton" variant="block" :count="5" />
+        <EmptyState
+          v-if="!list.length && !isFetching"
+          size="big"
+          icon="⌕"
+          text="没有符合条件的提示词"
+          hint="换个关键词，或清空当前筛选"
+          action-text="清空筛选"
+          @action="clearFilters"
+        />
       </div>
 
       <div v-if="selectedCount" class="bulk">
@@ -1262,7 +1292,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="pager-row">
-        <span class="count">{{ total }} 条<span v-if="isFetching"> · 加载中</span></span>
+        <span class="count">第 {{ page }} / {{ totalPages }} 页</span>
         <div class="pager-center">
           <Pager compact :page="page" :total-pages="totalPages" @update:page="page = $event" />
           <select v-model.number="pageSize" class="page-size" title="每页条数" @change="page = 1">
@@ -1704,9 +1734,57 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-icon {
+  position: absolute;
+  left: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  pointer-events: none;
+}
+
 .search {
   flex: 1;
   min-width: 0;
+  padding-left: 28px;
+  padding-right: 24px;
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.search-clear {
+  position: absolute;
+  right: var(--gap-xs);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  padding: 0;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.search-clear:hover {
+  background: var(--panel-3);
+  color: var(--text);
 }
 
 /* 4 个入口平分整行宽度；其余低频操作收进「更多」，避免工具栏占两行 */
@@ -1738,18 +1816,18 @@ onBeforeUnmount(() => {
 
 .more-pop {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--gap-xs));
   right: 0;
-  z-index: 1200;
+  z-index: var(--z-modal);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   width: 150px;
-  padding: 6px;
+  padding: var(--gap-xs);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel);
-  box-shadow: var(--shadow-lg, 0 10px 24px rgb(0 0 0 / 35%));
+  box-shadow: var(--shadow-2);
 }
 
 .more-pop .btn {
@@ -1772,6 +1850,11 @@ onBeforeUnmount(() => {
   gap: var(--gap-xs);
   padding: var(--gap-sm) var(--gap);
   border-bottom: 1px solid var(--border);
+}
+
+.side-filters :deep(.group) {
+  flex: 1;
+  min-width: 0;
 }
 
 .side-filters select {
@@ -1858,12 +1941,12 @@ onBeforeUnmount(() => {
   place-items: center;
   min-width: 15px;
   height: 15px;
-  margin-left: 4px;
-  padding: 0 4px;
-  border-radius: 999px;
+  margin-left: var(--gap-xs);
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-pill);
   background: var(--primary);
-  color: #fff;
-  font-size: 10px;
+  color: rgb(255 255 255);
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 
@@ -1871,7 +1954,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: var(--gap-xs) var(--gap);
   border-bottom: 1px solid var(--border);
 }
@@ -1880,8 +1963,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--primary);
   background: var(--primary-soft);
   color: var(--primary);
-  border-radius: 999px;
-  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  padding: 1px var(--gap-sm);
   font-size: var(--fs-xs);
 }
 
@@ -1907,6 +1990,30 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+
+.list-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.list-total {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.list-skeleton {
+  padding: var(--gap);
+}
+
 .list {
   flex: 1;
   min-height: 0;
@@ -1916,16 +2023,16 @@ onBeforeUnmount(() => {
 /* 批量操作条：浮在页面底部居中。 */
 .bulk {
   position: fixed;
-  bottom: 24px;
+  bottom: var(--gap-lg);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 50;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
   gap: var(--gap-sm);
-  padding: 8px 18px;
-  border-radius: 999px;
+  padding: var(--gap-sm) var(--gap-md);
+  border-radius: var(--radius-pill);
   background: var(--panel-3);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow);
@@ -1939,15 +2046,15 @@ onBeforeUnmount(() => {
 
 .list.has-bulk {
   /* 给底部悬浮条留出滚动空间，最后一条能被滚到它上方 */
-  padding-bottom: 64px;
+  padding-bottom: var(--gap-2xl);
 }
 
 @media (max-width: 640px) {
   .bulk {
-    width: calc(100vw - 24px);
+    width: calc(100vw - var(--gap-lg) - var(--gap-xs));
     flex-wrap: wrap;
     justify-content: center;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
     white-space: normal;
   }
 
@@ -1963,7 +2070,7 @@ onBeforeUnmount(() => {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .btn.primary:disabled {
@@ -1972,7 +2079,7 @@ onBeforeUnmount(() => {
 
 .btn.danger {
   border-color: var(--danger);
-  color: #fecaca;
+  color: color-mix(in srgb, var(--danger) 35%, rgb(255 255 255));
 }
 
 .btn.danger:hover {
@@ -1985,7 +2092,9 @@ onBeforeUnmount(() => {
   gap: var(--gap-sm);
   border-bottom: 1px solid var(--border);
   padding: var(--gap-sm) var(--gap);
-  transition: 0.1s;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
   cursor: pointer;
 }
 
@@ -1999,7 +2108,7 @@ onBeforeUnmount(() => {
 }
 
 .row.picked {
-  background: rgba(99, 102, 241, 0.08);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 
 .row-check {
@@ -2014,7 +2123,10 @@ onBeforeUnmount(() => {
   background: transparent;
   color: transparent;
   font-size: var(--fs-xs);
-  transition: 0.12s;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .row:hover .row-check,
@@ -2024,7 +2136,7 @@ onBeforeUnmount(() => {
 
 .row-check.on {
   background: var(--primary);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .row-body {
@@ -2035,7 +2147,7 @@ onBeforeUnmount(() => {
 .row-title {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-sm);
   font-weight: 600;
 }
@@ -2049,20 +2161,20 @@ onBeforeUnmount(() => {
 .pin,
 .star {
   font-size: var(--fs-xs);
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 .rating {
   margin-left: auto;
   font-size: var(--fs-xs);
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 /* 旧版是 2 行截断；单行时一页能看更多，但辨识度差很多 */
 .row-preview {
   font-size: var(--fs-sm);
   color: var(--muted);
-  line-height: 1.45;
+  line-height: var(--lh-lg);
   margin-top: 2px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2074,7 +2186,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   margin-top: 5px;
   font-size: var(--fs-xs);
 }
@@ -2085,7 +2197,7 @@ onBeforeUnmount(() => {
   height: auto;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(34, 197, 94, 0.14);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success);
 }
 
@@ -2096,7 +2208,7 @@ onBeforeUnmount(() => {
 .row-meta .tag {
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(99, 102, 241, 0.12);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   color: var(--primary);
 }
 
@@ -2267,7 +2379,7 @@ onBeforeUnmount(() => {
   font-size: var(--fs-xs);
   color: var(--muted);
   border: 1px dashed var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 7px;
   white-space: nowrap;
   flex: none;
@@ -2318,7 +2430,7 @@ onBeforeUnmount(() => {
   flex: none;
   padding: 1px 7px;
   border: 1px solid var(--warn);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--warn);
   font-size: var(--fs-xs);
   font-weight: 400;
@@ -2371,7 +2483,7 @@ onBeforeUnmount(() => {
 }
 
 .star-btn.on {
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 .meta {
@@ -2466,7 +2578,7 @@ onBeforeUnmount(() => {
   max-height: 28vh;
   field-sizing: content;
   border-left: 3px solid var(--danger);
-  color: #f5a0a0;
+  color: color-mix(in srgb, var(--danger) 45%, rgb(255 255 255));
 }
 
 .editor:focus {
@@ -2538,13 +2650,13 @@ onBeforeUnmount(() => {
 .cat-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
 .cat-chip {
   font-size: var(--fs-xs);
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
@@ -2559,13 +2671,13 @@ onBeforeUnmount(() => {
 .cat-chip.on {
   background: var(--c, var(--primary));
   border-color: var(--c, var(--primary));
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .shot-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
 .shot {

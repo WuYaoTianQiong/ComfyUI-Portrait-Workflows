@@ -15,11 +15,14 @@ const props = defineProps<{
   selected: number[]
   match: 'all' | 'any'
   emptyText?: string
+  /** 多选时在匹配方式旁给出「清除」，由父组件处理清空逻辑 */
+  clearable?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle', id: number): void
   (e: 'update:match', value: 'all' | 'any'): void
+  (e: 'clear'): void
 }>()
 
 const visible = computed(() =>
@@ -46,6 +49,14 @@ const visible = computed(() =>
       >
         任一满足
       </button>
+      <button
+        v-if="clearable && selected.length"
+        class="btn btn-sm clear-btn"
+        title="清除所有已选标签"
+        @click="emit('clear')"
+      >
+        清除
+      </button>
     </div>
 
     <div class="cloud">
@@ -54,7 +65,7 @@ const visible = computed(() =>
         :key="tag.id"
         class="tag"
         :class="{ active: selected.includes(tag.id) }"
-        :style="{ '--c': tag.color }"
+
         @click="emit('toggle', tag.id)"
       >
         {{ tag.name }}<i>{{ tag.prompt_count }}</i>
@@ -79,12 +90,33 @@ const visible = computed(() =>
 .mode-switch .btn {
   flex: 1;
   font-size: var(--fs-xs);
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.mode-switch .btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: rgb(255 255 255);
+}
+
+.mode-switch .clear-btn {
+  flex: none;
+  border-radius: var(--radius-pill);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .cloud {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--gap-xs);
   /* 提示词维度有 95 个标签，不封顶会把整个侧栏撑满、把分类和按钮挤出去 */
   max-height: 46vh;
   overflow-y: auto;
@@ -93,22 +125,31 @@ const visible = computed(() =>
 
 .tag {
   font-size: var(--fs-sm);
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--c, var(--border));
-  background: transparent;
+  padding: 3px var(--gap-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
   color: var(--text);
-  transition: 0.12s;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .tag:hover {
-  background: color-mix(in srgb, var(--c) 18%, transparent);
+  border-color: var(--border-strong);
+  background: var(--panel-3);
 }
 
 .tag.active {
-  background: var(--c);
-  border-color: var(--c);
-  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: rgb(255 255 255);
+}
+
+.tag:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .tag i {

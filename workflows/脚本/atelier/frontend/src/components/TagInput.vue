@@ -110,17 +110,17 @@ function remove(name: string) {
 .picked {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--gap-xs);
   min-height: 20px;
 }
 
 .picked-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   padding: 2px 6px 2px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--primary-soft);
   border: 1px solid var(--primary);
   color: var(--primary);

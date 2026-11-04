@@ -211,7 +211,7 @@ async function submit() {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-sm);
   color: var(--muted);
 }
@@ -264,7 +264,7 @@ async function submit() {
   padding: var(--gap-sm);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--gap-sm);
 }
 
 .card-head {
@@ -325,7 +325,7 @@ async function submit() {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .btn.primary:disabled {

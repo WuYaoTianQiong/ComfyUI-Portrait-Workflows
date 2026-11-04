@@ -1090,7 +1090,7 @@ function submit() {
   flex: 1;
   display: grid;
   place-items: center;
-  padding: 40px;
+  padding: var(--gap-2xl);
   color: var(--muted);
   font-size: var(--fs-sm);
   text-align: center;
@@ -1138,7 +1138,7 @@ function submit() {
 .job-progress {
   flex: none;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel-3);
   overflow: hidden;
 }
@@ -1212,7 +1212,7 @@ function submit() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
 .res-prompt {
@@ -1307,7 +1307,7 @@ function submit() {
   border-radius: 50%;
   background: var(--primary-soft);
   color: var(--primary);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   flex: none;
 }
@@ -1330,16 +1330,16 @@ function submit() {
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: 2px 6px 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel);
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -1363,10 +1363,10 @@ function submit() {
 
 .chip-badge {
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--primary-soft);
   color: var(--primary);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .chip-x {
@@ -1449,7 +1449,7 @@ function submit() {
   white-space: nowrap;
   padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: var(--fs-xs);
 }
@@ -1458,7 +1458,7 @@ function submit() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-sm);
   min-height: 30px;
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -1622,7 +1622,7 @@ function submit() {
 .pick {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-sm);
   min-width: 0;
   cursor: pointer;
 }
@@ -1639,7 +1639,7 @@ function submit() {
 .tag {
   flex: none;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-xs);
   line-height: 1.6;
 }
@@ -1650,14 +1650,14 @@ function submit() {
 }
 
 .replace-tag {
-  background: rgba(34, 197, 94, 0.14);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success);
 }
 
 .diff-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--gap-sm);
 }
 
 .diff-note {
@@ -1677,7 +1677,7 @@ function submit() {
 
 .new-block {
   border-left-color: var(--primary);
-  background: rgba(99, 102, 241, 0.08);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 
 .diff-label {

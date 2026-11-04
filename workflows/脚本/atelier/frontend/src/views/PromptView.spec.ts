@@ -311,6 +311,45 @@ describe('PromptView 切换提示词', () => {
   })
 })
 
+describe('PromptView 筛选区呈现', () => {
+  const store = new Map<string, string>()
+  const baseApiGet = vi.mocked(apiGet).getMockImplementation()!
+
+  beforeEach(() => {
+    store.clear()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    })
+  })
+
+  afterEach(() => {
+    vi.mocked(apiGet).mockImplementation(baseApiGet)
+  })
+
+  it('列表标题旁显示结果总数，搜索框带图标', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.find('.list-total').text()).toContain('共 1 条')
+    expect(wrapper.find('.search-box .search-icon').exists()).toBe(true)
+  })
+
+  it('无结果时给出「清空筛选」动作', async () => {
+    vi.mocked(apiGet).mockImplementation(async (path: string) => {
+      if (path === '/api/prompts') return { prompts: [], total: 0, page: 1, page_size: 50 }
+      if (path.includes('/api/categories')) return { categories: [] }
+      if (path.includes('/api/tags')) return { tags: [] }
+      return {}
+    })
+
+    const wrapper = await mountView()
+    const empty = wrapper.find('.empty-state')
+    expect(empty.text()).toContain('没有符合条件的提示词')
+    expect(empty.text()).toContain('清空筛选')
+  })
+})
+
 describe('PromptView 外部跳转与草稿恢复', () => {
   // happy-dom 的 localStorage 只提供 getItem/setItem，这里补一个完整实现
   const store = new Map<string, string>()

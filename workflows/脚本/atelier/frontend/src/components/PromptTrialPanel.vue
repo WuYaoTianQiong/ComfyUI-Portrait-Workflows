@@ -275,7 +275,7 @@ function clearLog() {
 .controls .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
   font-size: var(--fs-xs);
   color: var(--muted);
 }
@@ -373,7 +373,7 @@ function clearLog() {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .btn.primary:disabled {
