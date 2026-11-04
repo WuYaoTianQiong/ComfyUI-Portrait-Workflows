@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useSlots } from 'vue'
+
+import EmptyState from './EmptyState.vue'
+import Skeleton from './Skeleton.vue'
 
 /**
  * 查询三态：loading / error / empty。
@@ -25,6 +28,9 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'retry'): void }>()
 
+const slots = useSlots()
+const hasEmptySlot = computed(() => Boolean(slots.empty))
+
 const errorText = computed(() => {
   if (props.error instanceof Error) return props.error.message
   return props.error ? String(props.error) : ''
@@ -32,20 +38,21 @@ const errorText = computed(() => {
 </script>
 
 <template>
-  <div v-if="loading" class="query-state loading">
-    <span class="spinner" />
-    <span>{{ loadingText }}</span>
+  <div v-if="loading" class="query-state loading" aria-busy="true">
+    <Skeleton :count="3" height="12px" />
+    <span class="loading-text">{{ loadingText }}</span>
   </div>
   <div v-else-if="error" class="query-state error" role="alert">
     <div class="title">加载失败</div>
     <div class="detail">{{ errorText }}</div>
+    <div class="next">请检查网络连接或后端服务，然后重试。</div>
     <slot name="action">
       <button class="btn btn-sm" @click="emit('retry')">重试</button>
     </slot>
   </div>
-  <div v-else-if="empty" class="query-state empty">
-    <slot name="empty">{{ emptyText }}</slot>
-  </div>
+  <EmptyState v-else-if="empty" :text="hasEmptySlot ? '' : emptyText">
+    <slot name="empty" />
+  </EmptyState>
   <slot v-else />
 </template>
 
@@ -54,15 +61,20 @@ const errorText = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  padding: var(--gap-lg);
+  gap: var(--gap-sm);
+  padding: var(--gap-md) var(--gap-lg);
   color: var(--muted);
   font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .query-state.loading {
-  flex-direction: row;
-  align-items: center;
+  align-items: stretch;
+}
+
+.query-state.loading .loading-text {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .query-state.error {
@@ -71,10 +83,13 @@ const errorText = computed(() => {
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--danger) 8%, var(--panel));
   color: var(--text);
+  box-shadow: var(--shadow-1);
 }
 
 .query-state .title {
   color: var(--danger);
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
   font-weight: 600;
 }
 
@@ -83,18 +98,9 @@ const errorText = computed(() => {
   word-break: break-all;
 }
 
-.spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.query-state .next {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
 }
 </style>
