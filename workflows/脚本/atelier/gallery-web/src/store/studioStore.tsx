@@ -360,6 +360,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const confirmUnlockNsfw = () => {
+    // 仅首次确认写入标记，此后所有解锁都走 readNsfwConfirmed() 短路，不再弹窗。
+    // 需要重新确认时不设 UI 入口：清除本站点 localStorage（或站点数据）即可重置。
     writeNsfwConfirmed(true)
     setAgeGateOpen(false)
     unlockNsfw(pendingUnlockCbRef.current ?? undefined)
@@ -369,10 +371,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (safeMode) {
       requestUnlockNsfw()
     } else {
+      // 切回安全模式只切换显示，不影响 18+ 确认标记：下次解锁仍直接放行。
       setSafeMode(true)
-      // 切回安全模式视为撤销 18+ 确认，下次解锁重新询问（复位入口）。
-      writeNsfwConfirmed(false)
-      toast.success('已开启安全模式（已隐藏 18+ 敏感分类），下次解锁需重新确认')
+      toast.success('已开启安全模式（已隐藏 18+ 敏感分类）')
     }
   }
 

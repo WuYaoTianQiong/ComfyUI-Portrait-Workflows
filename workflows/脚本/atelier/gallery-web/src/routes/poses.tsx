@@ -245,7 +245,7 @@ function PosesPage() {
             }
             className="shrink-0 rounded-full border border-dashed border-rose-500/40 bg-rose-500/5 px-3.5 py-1.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-500/10 dark:text-rose-400"
           >
-            🔒 解锁 18+ 性感/双人系 ({hiddenNsfwCount})
+            解锁 18+ 性感/双人系 ({hiddenNsfwCount})
           </button>
         )}
       </div>
