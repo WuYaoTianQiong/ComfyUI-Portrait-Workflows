@@ -1,6 +1,6 @@
 # AI 参考图库 · atelier 融合计划
 
-> 版本：v0.7（2026-11-04，前端形态改为「上游 Web 为主 + atelier 生产归档」）
+> 版本：v0.8（2026-11-04，单端口合并：上游 Web 由 atelier 在 /ref-web 托管并接管源码）
 > 状态：一期已交付并通过验收（见[验收记录](./AI参考图库_验收记录_20261104.md)）；二期按 §13 执行。
 > 关联文档：[AI 参考图库_接入与模型实测_20261104](./AI参考图库_接入与模型实测_20261104.md)、[AI 参考图库_验收记录_20261104](./AI参考图库_验收记录_20261104.md)
 
@@ -645,6 +645,9 @@ B 与 C 文件不重叠，可同时开；A 必须先完成（前端要等新字�
 
 ## 14. 前端形态决策（v0.7）：保留上游 Web 作为浏览/合成主入口
 
+> **v0.8 变更**：§14.4 的「独立 8760 静态服务」已被 **§15 单端口方案**取代；本节其余决策（上游台为主、旧页下线、安全模式取舍、图像层天然合并）继续有效。
+
+
 ### 14.1 决策（2026-11-04 拍板）
 
 一期做完后，用静态预览把上游 React 台跑起来做了真实对比，结论是**它的浏览/挑图手感明显好于 atelier 自建的参考库页**。因此改变形态：
@@ -730,3 +733,122 @@ B 与 C 文件不重叠，可同时开；A 必须先完成（前端要等新字�
 | 文档（本节验收勾选、验收记录 §八） | P2 会话 / 验收时回写 |
 
 配置项：`ATELIER_REFERENCE_WEB_URL`，默认 `http://127.0.0.1:8760/`；置空则顶栏不显示该入口。
+
+---
+
+## 15. 单端口合并与源码接管（v0.8）
+
+### 15.1 决策（2026-11-04 晚）
+
+| 项 | 决定 |
+|---|---|
+| 形态 | **单端口**：上游 React 台由 atelier 在 `/ref-web` 托管，不再单独跑 8760 进程 |
+| 路线 | **A → B 两步**：A 先接管源码 + 单端口跑通；B 再裁剪与固化构建/升级流程 |
+| 源码 | **vendor 进本仓库**（允许 `package.json` + 构建步骤；`node_modules/`、`dist/` 之外的产物走 gitignore 规则见 §15.4） |
+| 图片数据 | **不复制、不入库**：`/data` `/thumbs` `/img` 三个静态挂载指向上游目录（junction 经 `_resolve_if_reparse`） |
+| atelier 自建页 | `/reference` **下线**（路由重定向到 `/ref-web`，或从路由表移除）；`/api/reference/*` 全部保留，服务"混源出图 / 上传 / 参考板" |
+
+### 15.2 为什么是"接管"而不是"重写"
+
+| 指标 | 实测 |
+|---|---|
+| 上游源码 | 58 个文件 / **11,010 行** |
+| 其中 shadcn 原子组件 | 2,872 行（基本不改） |
+| 业务核心 | routes 3,620 + services 1,880 + store 785 ≈ 6,300 行 |
+| 构建产物 | 27 个文件 / **1.03 MB** |
+| 技术栈 | React 19 + TanStack Router/Query + Tailwind 4 + Radix/shadcn + recharts |
+
+结论：**重写（Vue 化）需要 5–8 天且永远追不上上游**；接管只需要"一行 basepath + 静态托管 + 三个挂载"。
+
+### 15.3 A 阶段：接管源码 + 单端口（1 天）
+
+**为什么 A 阶段必须同时 vendor 源码**：单端口要求 React 应用认识 `/ref-web` 这个前缀，而它的路由 base 是**编译进 bundle** 的。不改源码只能"代理根路径"，会与 atelier 自己的 `/`、`/gallery` 撞车。既然 B 反正要 vendor，A 就一步到位搬源码、改一行 `basepath`。
+
+**改动**
+
+1. vendor 到 `workflows/脚本/atelier/gallery-web/`：复制 `src/`、`index.html`、`package.json`、`pnpm-lock.yaml`、`vite.config.ts`、`tsconfig*.json`、`components.json`。
+   **不复制**：`data/` `img/` `thumbs/`（图片外挂）、`node_modules/`、`dist/`（构建产生）、`functions/` `worker.ts` `wrangler.jsonc`（Cloudflare 部署，本机不用）。
+2. 路由 basepath：`src/main.tsx`（或 router 创建处）加 `basepath: import.meta.env.BASE_URL.replace(/\/$/, '')`，构建用 `vite build --base=/ref-web/`。
+3. atelier 托管（`app/main.py`）：
+   - mount `/ref-web` → `gallery-web/dist`；
+   - **前缀兜底中间件**：`path.startswith('/ref-web')` 且不是真实文件 → 返回 `dist/index.html`（`StaticFiles(html=True)` 不会处理深路径，这条必须有）；
+   - mount `/data`、`/thumbs`、`/img` → `settings.reference_dir` 下对应目录（经 `_resolve_if_reparse`，避免 WinError 448）；
+   - 保持 `/output` `/input` `/temp` `/assets` 原样。
+4. 下线旧页：`frontend/src/router.ts` 的 `/reference` 改 `redirect: '/ref-web'`（或删除）；`App.vue` 导航项移除或改指向 `/ref-web`；`ReferenceView.vue` 与 `RefLightbox.vue` 文件保留但不再被路由引用（可后续删）。
+5. 清理独立服务：删除 `workflows/脚本/参考图库Web/serve.py`（若已建）与 `启动.bat` 里的 8760 启动段；8760 不再使用。
+6. 构建产物：A 阶段先把 `dist/` 生成到 `gallery-web/dist/`；是否入库见 §15.4。
+
+**验收（A）**
+
+- [ ] `http://127.0.0.1:8656/ref-web/` 六个页面可开（总览/姿势/服装/人像/合成台/设置），刷新深链接不 404
+- [ ] `/data/pose-zh.json`、`/thumbs/full_single_P015_front.jpg`、`/img/depth/full_single_P015_front.webp` 全部 200（同源，无 CORS）
+- [ ] 合成台的 ComfyUI 地址填 `http://127.0.0.1:8188` 或 `/comfy` 后能连上（同源则无 403）
+- [ ] 8656 一个端口跑全部；8760 进程不再启动
+- [ ] atelier 原页面（画廊/提示词/编辑/超分/任务/统计）全部正常
+- [ ] `/reference` 重定向到 `/ref-web`；`/api/reference/*` 仍可用
+- [ ] `pytest` / `vue-tsc` / `vitest` / `build` / `smoke` / `e2e` 全绿
+
+### 15.4 B 阶段：裁剪、构建固化与升级流程（0.5–1 天）
+
+**裁剪清单（只删"我们不用"的，不动 routes 主体）**
+
+| 删/改 | 内容 |
+|---|---|
+| 删 | `src/services/aiGenerator.ts` 里 Gemini / GPT / Qwen / Doubao 四个分支与相关类型（保留 `comfyui` 分支与 `buildRecipePrompt`） |
+| 删 | `src/routes/settings.tsx` 的多厂商 Key 配置（改成只保留 ComfyUI 地址） |
+| 删 | `functions/`、`worker.ts`、`wrangler.jsonc`、`og-cover.jpg`/`sitemap.xml`/`robots.txt`（可选） |
+| 改 | `src/routes/guide.tsx` 的云端说明与本项目口径对齐 |
+| 留 | `poses/costumes/portraits/studio` 四个页面、`RecipeDock`、`buildRecipePrompt`、拼图导出 |
+
+**构建与产物**
+
+- `gallery-web/package.json` 加脚本：`build:prod` = `vite build --base=/ref-web/`。
+- **`dist/` 入库**（1.03MB，运行时零 Node 依赖，atelier 不需要 Node）；`node_modules/` 必须 gitignore。
+- 文档注明：**改 `gallery-web/src/` 后必须重新 `build:prod` 并一起提交 `dist/`**，否则线上还是旧产物。
+
+**升级流程**
+
+- `gallery-web/UPSTREAM.md` 记录：来源仓库、pin 的 commit SHA、上次同步日期、合并步骤（`git -C <upstream> fetch` → `diff` → 手抄到 `src/` → 重新 build）。
+- 升级后必跑三件事：三库能加载、studio 能出图、`/ref-web` 深链接不 404。
+
+**可选增强**
+
+- 静态层 NSFW 过滤：`/thumbs` `/img` 挂载前加前缀判定（`full_sexy_*`、`couple` 体系、`UND-*` 等），把"前端开关"升级为服务端拦截。
+
+### 15.5 目标目录结构
+
+```
+workflows/脚本/atelier/
+├─ app/                     FastAPI（唯一后端）
+│   └─ main.py              挂载 /ref-web + /data + /thumbs + /img
+├─ frontend/                atelier 自己的 Vue 前端（画廊/提示词/编辑/任务/统计）
+├─ gallery-web/             ★ 接管来的 React 台（A 阶段搬入）
+│   ├─ src/                 11k 行（B 阶段裁剪）
+│   ├─ package.json
+│   ├─ vite.config.ts
+│   ├─ dist/                构建产物（入库）
+│   └─ UPSTREAM.md          来源与升级说明
+└─ web/                     Vue 构建产物（gitignore）
+```
+
+### 15.6 风险
+
+| 风险 | 处理 |
+|---|---|
+| 仓库多一套前端工具链（React/Tailwind/pnpm） | 隔离在 `gallery-web/`，只在改 UI 时需要 Node；运行时不依赖 |
+| 上游升级要手动 diff | pin SHA + `UPSTREAM.md` 固定流程；升级后跑三条冒烟 |
+| `dist/` 入库导致二进制噪声 | 只有 27 个文件 1MB，可接受；禁止提交 `node_modules` |
+| 两套设计语言（atelier Vue vs gallery 台） | 已接受；入口用子路径隔离 |
+| 深链接 404 | 必须有 `/ref-web` 前缀兜底中间件（§15.3 第 3 条） |
+
+### 15.7 设计语言参考（B 阶段自查用）
+
+上游"更大气"的构成（不是 React 的功劳，是设计系统）：
+1. **统一令牌**：间距/字号/圆角/阴影全部走 Tailwind theme + `tokens`，没有随手写死的 px；
+2. **组件库**：shadcn/ui（Radix 无样式原语 + 统一样式层），175+ 处组件复用同一套 variants；
+3. **字体**：Inter variable + 中文回退，字重层次明确；
+4. **微交互**：`tw-animate-css` + 统一的 hover/选中/焦点态，动效克制（150–200ms）；
+5. **内容优先的版式**：暗底 + 统一比例缩略图 + 充足留白，让图片本身成为视觉主体；
+6. **信息架构为本数据集专门设计**：体系药丸、分组、角度切换条、常驻配方 Dock——**不是通用"筛选+网格"**。
+
+atelier 侧对应要补的：卡片密度与间距刻度、hover/选中过渡、统一圆角与阴影、筛选区从"表单风"改成"药丸/分段控件"、空状态与骨架屏。
