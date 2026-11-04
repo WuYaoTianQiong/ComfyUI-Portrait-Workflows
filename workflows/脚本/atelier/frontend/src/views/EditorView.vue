@@ -4,9 +4,11 @@ import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
 import DiskPathList from '../components/DiskPathList.vue'
+import DropZone from '../components/DropZone.vue'
 import FilePicker from '../components/FilePicker.vue'
 import MaskEditorModal from '../components/MaskEditorModal.vue'
 import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
+import type { UploadedReference } from '../api/upload'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
 import { useImageLocation } from '../composables/useImageLocation'
@@ -265,6 +267,29 @@ function removeTarget(key: string) {
   }
 }
 
+/** 上传成功：按返回顺序追加到对应槽位（同一张图重复拖入时只留一份）。 */
+function onUploaded(index: number, items: UploadedReference[]) {
+  const group = groups.value[index]
+  if (!group || !items.length) return
+
+  const known = new Set(group.paths)
+  const fresh = items
+    .map((item) => item.path)
+    .filter((path) => !known.has(path))
+  if (fresh.length) group.paths = [...group.paths, ...fresh]
+
+  const duplicated = items.length - fresh.length
+  if (!fresh.length) {
+    toast.info(`${roleMeta(index).label}里已有这 ${items.length} 张图片`)
+    return
+  }
+  toast.success(
+    duplicated > 0
+      ? `已加入 ${fresh.length} 张，${duplicated} 张已在槽位中`
+      : `已加入 ${fresh.length} 张图片`,
+  )
+}
+
 // ---------------- 涂抹遮罩 ----------------
 
 const maskEditorOpen = ref(false)
@@ -440,6 +465,11 @@ async function submit() {
           📁 磁盘<template v-if="group.paths.length"> {{ group.paths.length }}</template>
         </button>
       </div>
+      <DropZone
+        :label="`拖拽 / 粘贴 / 点击添加到${roleMeta(i).label}`"
+        @uploaded="onUploaded(i, $event)"
+        @error="toast.error($event)"
+      />
       <ImagePicker v-model="group.ids" title="" />
       <div v-if="group.paths.length" class="disk-picked">
         <div class="disk-picked-head">
@@ -675,6 +705,12 @@ async function submit() {
 .picker-col :deep(.picker) {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* 上传区与标题、画廊选择器之间留出左右/下方间距 */
+.picker-col :deep(.dropzone) {
+  margin: 0 var(--gap) var(--gap-sm);
+  flex: none;
 }
 
 .disk-picked {
