@@ -1,8 +1,9 @@
 # AI 参考图库 · atelier 融合计划
 
-> 版本：v0.5（2026-11-04，审核后修订 + 四图参考实测结论 + 上传/拼图转正）
-> 状态：文档定稿，暂不编码；新会话按第 10 节开工。
-> 关联文档：[AI 参考图库_接入与模型实测_20261104](./AI参考图库_接入与模型实测_20261104.md)
+> 版本：v0.6（2026-11-04，一期验收完成 + 二期补强范围）
+> 状态：一期已交付并通过验收（见[验收记录](./AI参考图库_验收记录_20261104.md)）；二期按 §13 执行。
+> 关联文档：[AI 参考图库_接入与模型实测_20261104](./AI参考图库_接入与模型实测_20261104.md)、[AI 参考图库_验收记录_20261104](./AI参考图库_验收记录_20261104.md)
+
 > 目标：把 `ai-pose-gallery-zh` 的 4,785 条参考资产接入 atelier，形成"选参考 → 出图 → 归档"的闭环。
 > **atelier 是唯一生产入口**，上游 React 台不再作为长期前端。
 
@@ -390,7 +391,7 @@
 - [x] 图片端点无路径穿越，越界 400、缺失 404
 - [x] 三图出图走现有队列并归档；单张 6 步 ≤ 40s
 - [x] 四图（可选第四槽）出图与三图无质量退化，耗时增幅 ≤ 8s
-- [x] 拖拽/粘贴/选择文件入槽可用；HEIC 自动转 PNG；重复文件不重复落盘
+- [x] 拖拽/粘贴/选择文件入槽可用（**仅编辑页**；参考库页的槽位混源见 §13 二期）；HEIC 自动转 PNG；重复文件不重复落盘
 - [x] 参考板导出 1800×1200，`labels=0/1` 双模式可用
 - [x] 未新增表、未改 `custom_nodes/ai-pose-gallery-zh`
 - [x] `pytest` / `vue-tsc` / `vitest` / `vite build` / `smoke` 全绿
@@ -417,6 +418,10 @@
 | 2026-11-04 | **（收尾）参考板按钮只传三核心槽**：`ReferenceSheetButton` 的 `extra` 只接受 `uploads/` 内的上传路径，而 `ReferenceView` 没有上传槽；不把参考库条目 id 混作 `extra`，避免 400 |
 | 2026-11-04 | **（收尾）E2E 标签云断言改为数据自适应**：标签云只展示「确实有图片」的标签，生产库当前无此类标签；原断言把用户数据状态当成代码回归，改为有数据点选、无数据验证空状态 |
 | 2026-11-04 | **（收尾）`reference_fragments` 路由必须在 `main.py` 注册**：手册白名单未列该文件，但新增 router 不注册则端点不可达，属必要的一行注册改动 |
+| 2026-11-04 | **（v0.6 验收）一期通过**：主链路真跑通、安全面无漏洞、真库未污染（详见[验收记录](./AI参考图库_验收记录_20261104.md)） |
+| 2026-11-04 | **（v0.6）参考库槽位改为"多来源混用"而非"再加一个上传按钮"**：`/reference/recipes` 增 `*_path`（仅 `uploads/` 内文件），前端槽位按来源传 id 或 path。理由：真实断点是"自己/磁盘的图 + 图库的服装/姿势"跨页断裂，不是缺少上传入口 |
+| 2026-11-04 | **（v0.6）配置暴露给前端**：`/api/system/status` 增 `reference_enabled`（导航收起用，App.vue 已 10s 轮询）、`/api/reference/libraries` 增 `allow_nsfw`（18+ 开关置灰用），**不再用 `visible<total` 反推** |
+| 2026-11-04 | **（v0.6）深度卡片改用上游 `thumbs/depth`**（5KB vs 18KB），灯箱仍用 `img/depth` |
 
 仍待定（不阻塞 M1）：
 
@@ -562,3 +567,64 @@
 - 每个会话开场只给：**施工手册里该节的「开场白」**，不要粘贴历史对话（文档已包含全部契约与实测数据）。
 - 不要把文档全文粘进提示词——让会话自己读文件，省上下文。
 - 每个会话结束都要它交四样东西：改动摘要 / 文件清单 / 验证命令与结果 / 已知限制；缺验证结果视为未完成。
+
+---
+
+## 13. 二期 · 收尾补强（3 个会话）
+
+一期已验收（见[验收记录](./AI参考图库_验收记录_20261104.md)）。二期只收口验收记录 §4 的必修 1–3 与建议 5–7，**不再扩功能**。
+
+### 13.1 会话与波次
+
+| 波次 | 会话 | 任务 | 依赖 | 预估 |
+|---|---|---|---|---|
+| A（串行） | A | 后端补齐：槽位路径入参、配置暴露、深度缩略图、加载日志 | 一期已交付 | 2–3h |
+| B（并行） | B | 前端接新契约：槽位混源、导航/18+ 配置驱动、`thumbs/depth`、参考板传第 4 张 | A | 3h |
+| B（并行） | C | 测试与门禁：`test_reference_sheet` / `test_reference_recipes` / 前端 spec / smoke 补端点 | A | 2h |
+
+B 与 C 文件不重叠，可同时开；A 必须先完成（前端要等新字段与生成的类型）。
+
+### 13.2 范围
+
+**必修**
+
+1. **槽位多来源**：`RecipeRequest` 增 `portrait_path / costume_path / pose_path / extra_path`（优先级：`*_id` 非空用库条目，否则用路径；路径**必须**位于 `library_root/uploads`，扩展名白名单 + `is_file()`）。前端三个核心槽 + 第 4 槽支持"库条目 / 上传图"二选一，提交时按来源传 `*_id` 或 `*_path`。
+2. **导航收起**：`/api/system/status` 增 `reference_enabled`（`App.vue` 已每 10s 轮询），前端按它 `v-if`。
+3. **18+ 开关**：`/api/reference/libraries` 增 `allow_nsfw`，前端读它置灰，**删除 `visible < total` 推断**。
+4. `workflows/uploads/` 忽略（已完成，`ada52d7`）。
+
+**建议**
+
+5. **深度缩略图**：DTO 增 `depth_thumb_url`（`thumbs/depth/{id}.webp`，仅 pose）+ `kind=depth_thumb`；卡片用它，灯箱仍用 `depth_url`。
+6. **加载可观测**：`reference_library` 加模块级 `logger`；JSON 缺失/解析失败/条数为 0/偏离基线（1439/1407/1499/440 ±5%）打 warning；启动时 info 打印四库条数。
+7. **测试与门禁**：`tests/test_reference_sheet.py`（1800×1200、labels 双模式、remote 400、缺图 400、缓存命中）、`tests/test_reference_recipes.py`（dry_run 节点映射 1/2/3 与 1/2/3/78、path 入参、uploads 外路径 400、remote 400、缺输入 400；`monkeypatch` 掉 `faceswap_batch` 不真提交）、前端 `RefLightbox.spec.ts` + `ReferenceView.spec.ts`、`tools/smoke.py` 补详情/图片/`recipes dry_run`。
+
+**顺手收口（随 A 一起，各一行）**
+
+- `/reference/ping` 只保留一个（当前 4 个 router 各注册一次，只有第一个生效）。
+- `media_type_for` 兜底改为 `application/octet-stream`。
+- `kind=depth` 对 remote 库改为 404（与 §3.3「kind 未命中 → 404」一致）。
+- 参考板按钮传 `extra`，使"四图四列"可达；`EditorView` 补一个参考板入口。
+
+**不做（进 Backlog）**
+
+- `_find_record` 改 id 字典索引、多角度聚合下沉 service（当前 28ms，无实际影响）。
+- 错误类型统一、`BASE_HAIR_NAME` 抽常量（重构收益低于风险）。
+
+### 13.3 文件归属（二期）
+
+| 文件 | 所有者 |
+|---|---|
+| `app/routers/system.py`（仅 status 返回）、`app/services/reference_library.py`、`app/routers/reference_library.py`、`tests/test_reference_library.py`、`frontend/openapi.json`、`frontend/src/api/openapi.d.ts` | A |
+| `frontend/src/views/ReferenceView.vue`、`views/EditorView.vue`、`App.vue`、`api/reference.ts`、`api/sheet.ts` | B |
+| `tests/test_reference_sheet.py`、`tests/test_reference_recipes.py`、`frontend/src/components/RefLightbox.spec.ts`、`frontend/src/views/ReferenceView.spec.ts`、`tools/smoke.py` | C |
+
+### 13.4 验收（二期）
+
+- [ ] 三个核心槽 + 第 4 槽都能"库条目 / 上传图"二选一，混源出图成功一次（如：上传自己的人像 + 图库服装 + 图库姿势）
+- [ ] `REFERENCE_ENABLED=0` 时导航 10s 内消失；`REFERENCE_ALLOW_NSFW=0` 时 18+ 开关置灰且不再依赖条数推断
+- [ ] 深度卡片走 `thumbs/depth`，一页 60 张传输 < 400KB
+- [ ] `/reference/libraries` 与启动日志能看出各库条数；JSON 损坏时有 warning
+- [ ] `test_reference_sheet.py` / `test_reference_recipes.py` / 2 个前端 spec 存在且绿
+- [ ] `smoke.py` 覆盖详情 / 图片 / `recipes dry_run`
+- [ ] `pytest -q` + `ci.ps1` 全绿；`git status` 干净
