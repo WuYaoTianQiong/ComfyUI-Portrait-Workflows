@@ -280,3 +280,147 @@
 - gallery-web dev 模式（5173）的 `vite.config.ts` 未代理 `/api`，studio 下拉在 dev 下会提示读取失败；生产 `/ref-web` 与 `/api` 同源不受影响。
 - `frontend/web/assets/` 仍有 3 个旧 hash 文件（`emptyOutDir` 未生效），`index.html` 只引用新 hash，运行不受影响。
 - `src/workflows/qwen_image_edit_2509_3img.api.json` 已无引用（上游残留资源，未删）。
+---
+
+## 九、阶段三进展
+
+> 追加说明：本阶段按四批实施、每批独立验收，提交链为 `71b171c`（阶段一）→ `0d61018`（阶段二）→ `95f52a4`（阶段三）→ `38b81dd`（阶段四）；另有 `159e329` 单独记录并行会话的双人姿势提示词改动，未混入上述四批。下文每条结论均标注「实测确认」或「未能验证」，未执行的检查不计为通过。
+
+### 8.1 阶段一：IDB 历史导出与历史数据源迁移（T1/T2/T3，commit 71b171c）
+
+**改动文件**
+
+| 文件 | 改动 |
+|---|---|
+| `gallery-web/src/lib/legacyHistoryExport.ts`（新增） | 只读 IDB `pose_atlas_history_v3`，导出 JSON 与逐张 PNG；每张间隔 150ms；不删除原数据；无数据返回 0 且不触发下载 |
+| `gallery-web/src/routes/settings.tsx` | 设置页新增「旧生成记录导出」按钮；无数据时 `disabled` 并显示「未发现旧生成记录」 |
+| `gallery-web/src/api/history.ts`（新增） | 调 `GET /api/images?page=1&page_size=30&sort=newest` 并把后端字段映射为前端记录结构 |
+| `gallery-web/src/store/studioStore.tsx`、`gallery-web/src/routes/studio.tsx` | 历史区改只读展示（标注「来自 atelier 画廊的历史」），删除本地清空与单条删除；`completeGeneration` 不再写 base64 历史；保留既有导入导出工具供用户手动导出旧数据 |
+
+**验收结果（T3 PASS，133 项硬检查 / 0 失败）**
+
+| 检查项 | 结果 | 结论 |
+|---|---|---|
+| `pnpm exec tsc -b --noEmit`、`pnpm exec oxlint src`、Vue `pnpm run typecheck`、`python -c "import app.main"` | 全部退出码 0 | 实测确认 |
+| 六路由访问 | 均返回 200 | 实测确认 |
+| 返回画廊入口 | 3 个 | 实测确认 |
+| 18+ 首次确认 | 只弹一次 | 实测确认 |
+| studio 工作流下拉 | 选中后端 `default` | 实测确认 |
+| 四库页面正常/断网 | 裂图 0 | 实测确认 |
+| 旧记录导出实测 | 产出 JSON 与 PNG，且 IDB 原数据保留 | 实测确认 |
+| 历史区数据源 | 30 条来自 `/api/images` | 实测确认 |
+
+**遗留与未能验证**
+
+- 未能验证：真实非 headless 浏览器对多文件连续下载的拦截策略与 headless 验收环境是否存在差异。
+- 未能验证：运行中实例 8656 是否即时加载重建后的 `dist`。
+
+### 8.2 阶段二：CharaDB 440 套本地缓存（T4/T5/T6/T7，commit 0d61018）
+
+**改动文件**
+
+| 文件 | 改动 |
+|---|---|
+| `app/services/reference_remote_cache.py`（新增） | 白名单 host、仅允许 `http(s)`、缓存键安全段名、命中免请求、`asyncio` 并发去重、原子写、`Content-Type` 校验、20MB 上限、重试、限速、`warm_many` 统计；模块头注明「仅本机参考、禁止再分发」 |
+| `app/config.py` | 新增 `reference_cache_dir`（默认 `atelier/.cache/reference-remote`）、`reference_remote_hosts` 等 6 项配置；启动时校验缓存目录不与 `reference_root`、`data`、`dist` 互相包含 |
+| `app/services/reference_library.py`、`app/routers/reference_library.py` | `costume-anime` DTO 图片 URL 改为后端端点；DTO 新增 `number`/`source_url`/`search_text`；图片端点缓存优先、未命中代理下载后原子写、失败返回 502；`depth` 仍 404 |
+| `tools/warm_reference_cache.py`（新增） | 高并发预热，支持 `limit`/`concurrency`/`rate`/`retry`/`kinds`、断点续跑、统计与失败退出码；脚本头带许可注释 |
+| `app/routers/reference_library.py`（recipes 段） | `RecipeRequest.costume_library`（`costume`/`costume-anime`，默认 `costume`）；外链服装缓存就绪即可出图，失败 502；第 4 张仍走节点 78 |
+| 根 `.gitignore` | 新增 `workflows/脚本/atelier/.cache/` |
+
+**验收结果（T7 PASS）**
+
+| 检查项 | 结果 | 结论 |
+|---|---|---|
+| pytest | 52 项全绿（33 library + 18 recipes + 1 openapi） | 实测确认 |
+| 预热抽样与重复执行 | 首次下载、再次命中缓存并跳过 | 实测确认 |
+| 图片端点缓存命中/未命中 | 已缓存 200；未缓存经死代理返回 502（等价断网） | 实测确认 |
+| recipes `dry_run` | 三图节点 1/2/3；四图节点 1/2/3/78 | 实测确认 |
+| 缓存目录入库状态 | 被根 `.gitignore` 命中 | 实测确认 |
+| E2E | 226 项通过 | 实测确认 |
+| 全量预热（T10 期间执行） | `total=880 / cached=27 / downloaded=853 / failed=0 / 965.86s`；440 条目 × 2 个有效图片字段共 880 个文件全部落盘 | 实测确认 |
+
+**遗留与未能验证**
+
+- 未能验证：真实物理断网与防火墙断网场景，验收以指向不可达代理的方式等价模拟。
+- 未能验证：上游缺图时的回退路径，仅有 fixture 样本，无真实缺图条目可复现。
+- 说明：全量预热 `total=880` 对应 440 套 × 2 个有效图片字段；`depth`/`depth_thumb` 对 `costume-anime` 无意义，由路由层按既定语义返回 404。
+
+### 8.3 阶段三：图库数据层切后端（T8/T9/T10 → T16 修复 → T17 复验，commit 95f52a4）
+
+**改动文件**
+
+| 文件 | 改动 |
+|---|---|
+| `gallery-web/src/lib/referenceAdapter.ts`（新增） | 并行分页拉全量（`page_size=200`、最多 6 并发、按 `id` 去重、任一页失败整体 reject、`total` 增长补拉、200 页上限）；DTO 映射为页面既有中文结构；NSFW 聚合函数 |
+| `gallery-web/src/api/gallery.ts` | 三个 queryFn 改调 `/api/reference/items`；服装并行拉 `costume` 与 `costume-anime`（现实在前）；删除 `NSFW_POSE_SYSTEMS`/`NSFW_COSTUME_CATEGORIES` 与 `isNsfwPoseSystem`/`isNsfwCostumeCategory`；`isNsfwPose`/`isNsfwCostume` 改为读 `nsfw` 字段 |
+| `gallery-web/src/types/gallery.ts` | 补充 `library`/`nsfw`/`depthUrl`/`depthThumbUrl`/`sourceUrl` 等可选字段 |
+| `gallery-web/src/lib/recipeImages.ts` | 深度图优先使用后端 `depthThumbUrl`/`depthUrl` |
+| `gallery-web/src/routes/poses.tsx`、`costumes.tsx`、`portraits.tsx` | 18+ 药丸改由数据聚合；图片统一走 `referenceImageUrl`/`poseThumbPath`/`poseImagePath`；搜索、分组、加载更多行为不变 |
+| `gallery-web/src/routes/index.tsx` | T16 修复首页两处 `/${缩略图}` 拼接，改走 `referenceImageUrl(...)`（原 `//api` 协议相对地址导致 8 张裂图与 `ERR_NAME_NOT_RESOLVED`） |
+
+**验收结果**
+
+| 检查项 | 结果 | 结论 |
+|---|---|---|
+| T10 首轮 | FAIL 327/343，唯一根因为首页两处图片拼接 | 实测确认 |
+| T17 复验 | PASS 343/343、0 失败 | 实测确认 |
+| 六路由 | 200，console 错误 0 | 实测确认 |
+| 首页正常/断网 | 12 张图裂图 0、外部请求 0 | 实测确认 |
+| poses/costumes/portraits | 正常与断网均裂图 0 | 实测确认 |
+| 二次元断网 | 60 张裂图 0；页面请求的 60 条图片全部命中所列 440/440 缓存集合 | 实测确认 |
+| 深度模式 | 360 张图走后端端点 | 实测确认 |
+| 18+ 药丸 | 聚合显示、安全模式隐藏与解锁均正常 | 实测确认 |
+| 交互回归 | P001 搜索、体系切换、加载更多 60→120；服装分类/标签（剩余 155→5）、二次元 CharaDB、加载更多；人像分区/发长 | 实测确认 |
+| studio 工作流下拉 | 仍选中后端 `default` | 实测确认 |
+
+**遗留与未能验证**
+
+- 未能验证：断网由 Playwright 浏览器层阻断请求实现，不是服务端真实断网。
+- 未能验证：未逐张渲染全部 440 套素材，仅覆盖抽样的 60 条请求集合。
+- 未能验证：仅在 Chromium 下执行，未覆盖其他浏览器内核。
+- 未能验证：运行中实例 8656 是否加载重建后的 `dist`。
+
+### 8.4 阶段四：studio 三槽位提交后端（T11/T12/T13，commit 38b81dd）
+
+**改动文件**
+
+| 文件 | 改动 |
+|---|---|
+| `gallery-web/src/services/recipeClient.ts`（新增） | 只 `POST /api/reference/recipes`；`pollJob` 间隔 1.5s、上限 30min、处理终态与 `AbortError`、连续 3 次失败才抛错；`jobResultUrls` 生成 `/api/media/image` 地址；导出 `GenerationProgress`/`ActiveJobInfo` |
+| `gallery-web/src/store/studioStore.tsx` | `startGeneration` 组装槽位（含 `costume_library`）、执行第 4 张规则、拦截上传槽、串联提交→轮询→结果图/失败；`activeTask` 改为 `ActiveJobInfo`，旧 `{task:{promptId}}` 结构安全迁移为 null |
+| `gallery-web/src/services/aiGenerator.ts` | 删除 631 行直连 ComfyUI 提交链路，保留连接检测、工作流解析、提示词与拼图能力 |
+| `gallery-web/src/routes/studio.tsx` | 进度条与 `percent`、结果图、错误重试、原生 `<a href="/jobs">` 任务中心、参数面板 D4 冻结说明、提示词只读加独立「补充要求」、画风收敛为 `none`/`realistic`、移除提交前组合校验、上传槽提示 |
+
+**验收结果（T13 PASS，434 项硬检查 / 0 失败）**
+
+| 检查项 | 结果 | 结论 |
+|---|---|---|
+| 真实提交 | 生成 job 197（`costume-anime` / `charadb-O001`） | 实测确认 |
+| 请求体 | 含三槽位 id、`costume_library`、`style`，不含完整 prompt | 实测确认 |
+| 进度展示 | UI 显示进度 | 实测确认 |
+| 真实出图 | 5 分钟内完成；结果图 `naturalWidth>0`，URL 走 `/api/media/image` | 实测确认 |
+| 直连残留 | 无 `/prompt`、`:8188`、`/comfy` 提交请求 | 实测确认 |
+| 失败分支 | 后端 400 的 `detail` 正确显示并可重试 | 实测确认 |
+| `dry_run` 节点映射 | TestClient 三图 1/2/3、四图 1/2/3/78 | 实测确认 |
+| 任务中心 | `/jobs` 返回 200 | 实测确认 |
+| 8656 操作纪律 | 验收前后 GET 均 200，未重启、未 kill | 实测确认 |
+
+**遗留与未能验证**
+
+- 未能验证：服务端未缓存 anime 条目的首次下载与断网 502 分支，因全量缓存已覆盖、测试中未命中该分支。
+- 未能验证：刷新页面后恢复轮询、停止跟踪任务未列入 T13 必测清单，未执行。
+- 未能验证：仅在 Chromium 下执行。
+
+### 8.5 全局运行状态与遗留
+
+| 项 | 状态 |
+|---|---|
+| 运行中实例 8656 | 实测确认：仍运行旧后端代码，未重启；前后 GET 均 200 |
+| 后端改动的线上生效条件 | 实测确认：`costume_library`、远程缓存/代理、recipes 放行均需重启 8656 才对线上实例生效；按纪律未操作 8656 |
+| 前端产物 | 实测确认：`gallery-web/dist` 已重建并随各提交入库；未能验证 8656 是否已按请求读到新 `dist` |
+| 缓存目录 | 实测确认：`workflows/脚本/atelier/.cache/reference-remote` 已被根 `.gitignore` 命中，不入库、不进 `dist` |
+| 素材许可边界 | 实测确认（代码注释与文档约定）：CharaDB 素材仅本机参考、禁止再分发 |
+| 提交链 | 实测确认：`71b171c` → `0d61018` → `95f52a4` → `38b81dd`；另有 `159e329` 单独记录并行会话的双人姿势提示词改动，范围与本阶段四批隔离 |
+
+遗留事项：真实物理断网、非 headless 多文件下载拦截、非 Chromium 内核、8656 加载新 `dist` 四项未验证，需在后续验收中补齐；后端改动在 8656 重启前不会对线上实例生效。
