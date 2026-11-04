@@ -171,6 +171,9 @@ workflows/脚本/atelier/web/
 workflows/脚本/atelier/_e2e_shot.png
 workflows/脚本/atelier/.pytest_cache/
 
+# 参考图库外链图片缓存（CharaDB 素材仅本机参考、禁止再分发，不入库/不进发布物）
+workflows/脚本/atelier/.cache/
+
 # 仓库清理暂存区（报告、清单与待确认删除物，仅本地保留）
 workflows/_cleanup/
 

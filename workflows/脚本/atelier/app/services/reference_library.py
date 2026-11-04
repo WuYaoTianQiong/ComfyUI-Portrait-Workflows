@@ -233,12 +233,15 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     name = _text(obj, mapping["name"])
     subtitle = _subtitle(library, obj)
     remote = library == "costume-anime"
+    #: 姿势编号单独暴露给前端（`subtitle` 仍是 `编号 · 角度`，兼容旧调用方）
+    number = _text(obj, "姿势编号") if library == "pose" else ""
 
     fields = {
         "id": item_id,
         "library": library,
         "name": name,
         "subtitle": subtitle,
+        "number": number,
         "group": group,
         "facet": facet,
         "angle": angle,
@@ -247,12 +250,16 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     }
     search_text = _search_text(library, obj, fields)
 
-    thumb_rel = "" if remote else _text(obj, mapping["thumb"])
-    image_rel = "" if remote else _text(obj, mapping["image"])
+    thumb_upstream = _text(obj, mapping["thumb"])
+    image_upstream = _text(obj, mapping["image"])
+    thumb_rel = "" if remote else thumb_upstream
+    image_rel = "" if remote else image_upstream
     if remote:
-        # 外链字段可能缺失：给 None 而不是 ""，否则前端 <img src=""> 会请求当前页面
-        thumb_url = _text(obj, mapping["thumb"]) or None
-        image_url = _text(obj, mapping["image"]) or thumb_url
+        # 外链条目对外只暴露后端图片端点，上游 URL 仅作为服务端内部字段保留：
+        # - 缩略图缺失时回退 image 端点；
+        # - 两者都缺时给 None，避免前端 `<img src="">` 请求当前页面。
+        thumb_url = _image_url(library, item_id, "thumb") if (thumb_upstream or image_upstream) else None
+        image_url = _image_url(library, item_id, "image") if image_upstream else None
         depth_url: str | None = None
         depth_thumb_url: str | None = None
     else:
@@ -275,9 +282,16 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "featured": bool(obj.get("精选", False)),
         "nsfw": _is_nsfw(library, obj, group),
         "remote": remote,
+        #: 仅 costume-anime 映射上游「来源地址」；其他库恒 None
+        "source_url": (_text(obj, "来源地址") or None) if remote else None,
+        #: 与后端过滤一致的预拼检索串（小写前的原文），前端「检索」字段直接取此值
+        "search_text": search_text,
         "_search": search_text.lower(),
         "_thumb_rel": thumb_rel,
         "_image_rel": image_rel,
+        #: 外链原始 URL（仅服务端内部使用，`_public` 不会下发）
+        "_remote_thumb": thumb_upstream or image_upstream,
+        "_remote_image": image_upstream or None,
     }
 
 
@@ -460,6 +474,21 @@ def get_item(library: str, item_id: str) -> dict[str, Any] | None:
     if record is None or not _visible(record):
         return None
     return _public(record)
+
+
+def resolve_remote_url(library: str, item_id: str, kind: str) -> str | None:
+    """取外链条目的上游原始图片 URL（仅服务端内部使用，不下发前端）。
+
+    - `thumb`：缩略图缺失时回退原图（对应 DTO 的 thumb 回退规则）；
+    - `image`：仅原图；缺失返回 None；
+    - `depth` / `depth_thumb`：外链库不缓存派生图，返回 None。
+    """
+    if library != "costume-anime" or kind not in ("thumb", "image"):
+        return None
+    record = _find_record(library, item_id)
+    if record is None or not record.get("remote"):
+        return None
+    return record.get("_remote_thumb") if kind == "thumb" else record.get("_remote_image")
 
 
 def _find_record(library: str, item_id: str) -> dict[str, Any] | None:

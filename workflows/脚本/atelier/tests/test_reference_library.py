@@ -5,13 +5,16 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.config import settings
 from app.services import reference_library as rl
+from app.services import reference_remote_cache
 
 
 def _write_json(path: Path, payload: list[dict]) -> None:
@@ -109,6 +112,7 @@ ANIME_ITEMS = [
         "关键词": "serafuku",
         "缩略图": "https://example.invalid/thumb/O001.webp",
         "原图": "https://example.invalid/img/O001.jpg",
+        "来源地址": "https://example.invalid/source/O001",
         "敏感": False,
         "检索": "charadb-O001 藏青水手服 制服与校园风",
     }
@@ -116,7 +120,49 @@ ANIME_ITEMS = [
 
 
 @pytest.fixture()
-def ref_root(tmp_path: Path, monkeypatch) -> Path:
+def remote_cache(tmp_path: Path, monkeypatch) -> Path:
+    """隔离外链缓存目录与白名单；所有下载都由用例 mock，不访问真实外网。"""
+    cache_dir = tmp_path / "remote-cache"
+    monkeypatch.setattr(settings, "reference_cache_dir", cache_dir)
+    monkeypatch.setattr(settings, "reference_remote_hosts", "example.invalid")
+    monkeypatch.setattr(settings, "reference_remote_timeout_sec", 5.0)
+    monkeypatch.setattr(settings, "reference_remote_max_concurrency", 4)
+    monkeypatch.setattr(settings, "reference_remote_retry", 0)
+    monkeypatch.setattr(settings, "reference_remote_max_bytes", 1024 * 1024)
+    reference_remote_cache.reset_state()
+    yield cache_dir
+    reference_remote_cache.reset_state()
+
+
+def _mock_http(monkeypatch, handler) -> list[str]:
+    """把缓存服务的 httpx 客户端替换成 MockTransport，返回记录下来的请求 URL。"""
+    calls: list[str] = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return handler(request)
+
+    def factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(counting_handler),
+            follow_redirects=False,
+        )
+
+    monkeypatch.setattr(reference_remote_cache, "_make_client", factory)
+    return calls
+
+
+def _image_response(request: httpx.Request, content: bytes = b"remote-image") -> httpx.Response:
+    return httpx.Response(
+        200,
+        content=content,
+        headers={"content-type": "image/webp"},
+        request=request,
+    )
+
+
+@pytest.fixture()
+def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     root = tmp_path / "ai-pose-gallery-zh"
     data = root / "data"
     _write_json(data / "pose-zh.json", POSE_ITEMS)
@@ -144,6 +190,17 @@ def ref_root(tmp_path: Path, monkeypatch) -> Path:
 
 def test_default_reference_root_follows_library_root():
     assert settings.reference_root == settings.library_root / "ai-pose-gallery-zh"
+
+
+def test_default_reference_cache_dir_is_under_app_root():
+    """缓存默认位于 `<app_root>/.cache/reference-remote`，不得落在参考库/发布物内。"""
+    cache_dir = Path(settings.reference_cache_dir)
+    assert cache_dir.name == "reference-remote"
+    assert cache_dir.parent.name == ".cache"
+    assert cache_dir.parent.parent == settings.app_root
+    assert not str(cache_dir).startswith(str(settings.reference_root))
+    assert "dist" not in cache_dir.parts
+    assert "data" not in cache_dir.parts
 
 
 def test_library_counts_and_availability(api, ref_root):
@@ -218,16 +275,197 @@ def test_nsfw_filter_is_backend_gated(api, ref_root, monkeypatch):
     assert detail.json()["nsfw"] is True
 
 
-def test_remote_items_use_upstream_urls_and_cannot_be_served(api, ref_root):
+def test_remote_items_use_backend_endpoints(api, ref_root, monkeypatch):
+    """`costume-anime` 对外只暴露后端图片端点，上游外链不再下发前端。"""
     resp = api.get("/api/reference/items", params={"library": "costume-anime"})
     assert resp.status_code == 200
     item = resp.json()["items"][0]
     assert item["remote"] is True
-    assert item["thumb_url"].startswith("https://example.invalid/")
+    assert item["thumb_url"] == (
+        "/api/reference/items/costume-anime/charadb-O001/image?kind=thumb"
+    )
+    assert item["image_url"] == (
+        "/api/reference/items/costume-anime/charadb-O001/image?kind=image"
+    )
+    assert "example.invalid" not in item["thumb_url"]
+    assert "pages.dev" not in item["thumb_url"]
+    assert item["thumb_url"].startswith("/api/reference/items/costume-anime/")
     assert item["depth_url"] is None
+    assert item["depth_thumb_url"] is None
+    assert item["source_url"] == "https://example.invalid/source/O001"
+    # 非 pose 库 number 恒为空；search_text 为上游「检索」原文
+    assert item["number"] == ""
+    assert item["search_text"] == "charadb-O001 藏青水手服 制服与校园风"
 
-    img = api.get("/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "thumb"})
-    assert img.status_code == 400
+    _mock_http(monkeypatch, lambda request: _image_response(request, b"webp"))
+    img = api.get(item["thumb_url"])
+    assert img.status_code == 200
+    assert img.content == b"webp"
+
+
+def test_dto_number_and_search_text_per_library(api, ref_root):
+    pose = api.get("/api/reference/items/pose/P001_front").json()
+    assert pose["number"] == "P001"
+    assert pose["subtitle"] == "P001 · 正面"
+    assert pose["search_text"] == "P001_front 日常 站姿 正面站姿 正面"
+    assert pose["source_url"] is None
+
+    costume = api.get("/api/reference/items/costume/SPR-0001").json()
+    assert costume["number"] == ""
+    assert costume["source_url"] is None
+    assert costume["search_text"] == "SPR-0001 春季穿搭 象牙白针织衫 针织 knit"
+
+    portrait = api.get("/api/reference/items/portrait/p1").json()
+    assert portrait["number"] == ""
+    assert portrait["source_url"] is None
+
+
+def test_remote_image_cache_hit_does_not_touch_network(api, ref_root, monkeypatch):
+    """缓存命中直接返回本机文件，不允许发起任何 HTTP 请求。"""
+    url = rl.resolve_remote_url("costume-anime", "charadb-O001", "thumb")
+    assert url
+    path = reference_remote_cache.cache_path(
+        "costume-anime", "charadb-O001", "thumb", url
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"cached-image")
+
+    calls = _mock_http(monkeypatch, lambda request: _image_response(request))
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "thumb"}
+    )
+    assert resp.status_code == 200
+    assert resp.content == b"cached-image"
+    assert calls == []
+
+
+def test_remote_image_miss_downloads_then_hits(api, ref_root, monkeypatch):
+    calls = _mock_http(monkeypatch, lambda request: _image_response(request, b"downloaded"))
+
+    first = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert first.status_code == 200
+    assert first.content == b"downloaded"
+    assert len(calls) == 1
+
+    url = rl.resolve_remote_url("costume-anime", "charadb-O001", "image")
+    path = reference_remote_cache.cache_path(
+        "costume-anime", "charadb-O001", "image", url
+    )
+    assert path.is_file()
+    assert path.stat().st_size > 0
+
+    second = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert second.status_code == 200
+    assert second.content == b"downloaded"
+    assert len(calls) == 1, "第二次请求必须命中缓存，不得重新下载"
+
+
+def test_remote_image_offline_cached_ok_uncached_502(api, ref_root, monkeypatch):
+    _mock_http(monkeypatch, lambda request: _image_response(request, b"online"))
+    warm = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "thumb"}
+    )
+    assert warm.status_code == 200
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    _mock_http(monkeypatch, offline)
+
+    cached = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "thumb"}
+    )
+    assert cached.status_code == 200
+    assert cached.content == b"online"
+
+    uncached = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert uncached.status_code == 502
+    assert "外链图片下载失败" in uncached.json()["detail"]
+
+
+def test_remote_image_host_not_in_allowlist_400(api, ref_root, monkeypatch):
+    evil = dict(ANIME_ITEMS[0])
+    evil.update(
+        {
+            "id": "charadb-evil-host",
+            "缩略图": "https://evil.invalid/thumb.webp",
+            "原图": "https://evil.invalid/image.jpg",
+        }
+    )
+    _write_json(ref_root / "data" / "costume-anime-zh.json", [evil])
+    rl.clear_cache()
+
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-evil-host/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 400
+    assert "不在允许的外链域名内" in resp.json()["detail"]
+
+
+def test_cache_path_traversal_is_rejected(api, ref_root):
+    with pytest.raises(reference_remote_cache.RemoteCacheError) as excinfo:
+        reference_remote_cache.cache_path(
+            "costume-anime", "../evil", "image", "https://example.invalid/a.jpg"
+        )
+    assert excinfo.value.status_code == 400
+
+    traversal = dict(ANIME_ITEMS[0])
+    traversal["id"] = "..\\..\\evil"
+    _write_json(ref_root / "data" / "costume-anime-zh.json", [traversal])
+    rl.clear_cache()
+
+    resp = api.get(
+        "/api/reference/items/costume-anime/..%5C..%5Cevil/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 400
+    assert "非法" in resp.json()["detail"]
+
+
+def test_remote_image_non_image_content_type_502(api, ref_root, monkeypatch):
+    def html(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"<html>not an image</html>",
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    _mock_http(monkeypatch, html)
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 502
+    assert "不是图片" in resp.json()["detail"]
+
+    url = rl.resolve_remote_url("costume-anime", "charadb-O001", "image")
+    path = reference_remote_cache.cache_path(
+        "costume-anime", "charadb-O001", "image", url
+    )
+    assert not path.exists()
+    assert not list(path.parent.glob(".image.*.tmp"))
+
+
+def test_remote_image_empty_body_502(api, ref_root, monkeypatch):
+    def empty(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"",
+            headers={"content-type": "image/webp"},
+            request=request,
+        )
+
+    _mock_http(monkeypatch, empty)
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 502
+    assert "空图片" in resp.json()["detail"]
 
 
 def test_image_endpoints_and_depth_derivation(api, ref_root):
@@ -298,7 +536,7 @@ def test_libraries_expose_allow_nsfw(api, ref_root, monkeypatch):
     assert all(row["allow_nsfw"] is True for row in body["libraries"])
 
 
-def test_remote_item_without_urls_returns_none(api, tmp_path, monkeypatch):
+def test_remote_item_without_urls_returns_none(api, tmp_path, monkeypatch, remote_cache):
     """外链库字段缺失时给 None：空串会让前端 `<img src="">` 去请求当前页面。"""
     root = tmp_path / "broken-gallery"
     _write_json(root / "data" / "costume-anime-zh.json", [{
@@ -317,6 +555,17 @@ def test_remote_item_without_urls_returns_none(api, tmp_path, monkeypatch):
         assert body["remote"] is True
         assert body["thumb_url"] is None
         assert body["image_url"] is None
+        assert body["depth_url"] is None
+        assert body["depth_thumb_url"] is None
+        assert body["source_url"] is None
+
+        # URL 缺失时后端端点返回 400，而不是把空串交给前端
+        for kind in ("thumb", "image"):
+            resp = api.get(
+                "/api/reference/items/costume-anime/broken-1/image", params={"kind": kind}
+            )
+            assert resp.status_code == 400, kind
+            assert "没有可用的图片地址" in resp.json()["detail"]
     finally:
         rl.clear_cache()
 
@@ -327,6 +576,145 @@ def test_remote_library_depth_is_404(api, ref_root):
             "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": kind}
         )
         assert resp.status_code == 404, kind
+
+
+def test_remote_library_unknown_kind_is_404(api, ref_root):
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "preview"}
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "不支持的图片类型"
+
+
+def test_warm_many_reports_stats_and_reuses_cache(ref_root, monkeypatch):
+    calls = _mock_http(monkeypatch, lambda request: _image_response(request, b"warm"))
+    thumb_url = rl.resolve_remote_url("costume-anime", "charadb-O001", "thumb")
+    image_url = rl.resolve_remote_url("costume-anime", "charadb-O001", "image")
+    jobs = [
+        ("costume-anime", "charadb-O001", "thumb", thumb_url),
+        ("costume-anime", "charadb-O001", "image", image_url),
+    ]
+
+    first = asyncio.run(reference_remote_cache.warm_many(jobs, concurrency=2, retry=0))
+    assert first.total == 2
+    assert first.downloaded == 2
+    assert first.cached == 0
+    assert first.failed == 0
+    assert first.failures == []
+    assert len(calls) == 2
+
+    second = asyncio.run(reference_remote_cache.warm_many(jobs, concurrency=2, retry=0))
+    assert second.total == 2
+    assert second.cached == 2
+    assert second.downloaded == 0
+    assert second.failed == 0
+    assert len(calls) == 2, "已缓存条目重复预热不得重新下载"
+
+
+def test_warm_many_continues_after_failure(ref_root, monkeypatch):
+    _mock_http(monkeypatch, lambda request: _image_response(request, b"warm"))
+    thumb_url = rl.resolve_remote_url("costume-anime", "charadb-O001", "thumb")
+    jobs = [
+        ("costume-anime", "charadb-O001", "thumb", thumb_url),
+        ("costume-anime", "charadb-bad", "image", "https://evil.invalid/image.jpg"),
+    ]
+
+    stats = asyncio.run(reference_remote_cache.warm_many(jobs, concurrency=2, retry=0))
+    assert stats.total == 2
+    assert stats.downloaded == 1
+    assert stats.failed == 1
+    assert len(stats.failures) == 1
+    assert stats.failures[0].item_id == "charadb-bad"
+    assert "不在允许的外链域名内" in stats.failures[0].reason
+
+
+def test_concurrent_ensure_cached_downloads_once(ref_root, monkeypatch):
+    calls = _mock_http(monkeypatch, lambda request: _image_response(request, b"once"))
+    url = rl.resolve_remote_url("costume-anime", "charadb-O001", "image")
+
+    async def run() -> list[Path]:
+        return await asyncio.gather(
+            *[
+                reference_remote_cache.ensure_cached(
+                    "costume-anime", "charadb-O001", "image", url
+                )
+                for _ in range(6)
+            ]
+        )
+
+    paths = asyncio.run(run())
+    assert len(set(paths)) == 1
+    assert len(calls) == 1, "同一缓存键的并发请求只允许下载一次"
+    assert paths[0].read_bytes() == b"once"
+
+
+def test_ensure_cached_sync_works_in_sync_and_async_context(ref_root, monkeypatch):
+    """同步入口供 T6 的同步路由复用；在事件循环内调用时转独立线程执行。"""
+    calls = _mock_http(monkeypatch, lambda request: _image_response(request, b"sync"))
+    image_url = rl.resolve_remote_url("costume-anime", "charadb-O001", "image")
+    path = reference_remote_cache.ensure_cached_sync(
+        "costume-anime", "charadb-O001", "image", image_url
+    )
+    assert path.read_bytes() == b"sync"
+
+    thumb_url = rl.resolve_remote_url("costume-anime", "charadb-O001", "thumb")
+
+    async def run() -> Path:
+        return reference_remote_cache.ensure_cached_sync(
+            "costume-anime", "charadb-O001", "thumb", thumb_url
+        )
+
+    thumb_path = asyncio.run(run())
+    assert thumb_path.read_bytes() == b"sync"
+    assert len(calls) == 2
+
+
+def test_cache_extension_inferred_from_content_type(ref_root, monkeypatch):
+    """URL 无扩展名时由 Content-Type 映射扩展名；`is_cached` 必须能再次命中。"""
+    url = "https://example.invalid/raw-image"
+
+    def png(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"png-bytes",
+            headers={"content-type": "image/png"},
+            request=request,
+        )
+
+    _mock_http(monkeypatch, png)
+    path = asyncio.run(
+        reference_remote_cache.ensure_cached("costume-anime", "raw-1", "image", url)
+    )
+    assert path.name == "image.png"
+    assert path.read_bytes() == b"png-bytes"
+    assert reference_remote_cache.is_cached("costume-anime", "raw-1", "image", url)
+
+
+def test_remote_image_too_large_502(api, ref_root, monkeypatch):
+    monkeypatch.setattr(settings, "reference_remote_max_bytes", 8)
+    _mock_http(monkeypatch, lambda request: _image_response(request, b"x" * 32))
+
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 502
+    assert "超出大小上限" in resp.json()["detail"]
+
+
+def test_remote_image_redirect_is_failure_502(api, ref_root, monkeypatch):
+    def redirect(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"location": "https://example.invalid/elsewhere.jpg"},
+            request=request,
+        )
+
+    _mock_http(monkeypatch, redirect)
+    resp = api.get(
+        "/api/reference/items/costume-anime/charadb-O001/image", params={"kind": "image"}
+    )
+    assert resp.status_code == 502
+    assert "外链图片下载失败" in resp.json()["detail"]
 
 
 def test_system_status_exposes_reference_enabled(api, monkeypatch):

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 
 from app.config import settings
-from app.services import reference_library, uploads
+from app.services import reference_library, reference_remote_cache, uploads
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 from app.services.recipe_prompt import RecipeEntry, STYLE_PRESETS, build_recipe_prompt
 
@@ -43,12 +43,17 @@ FOUR_REF_WORKFLOW = "PornMaster_Flux2Klein9B_四图参考_6步_自动尺寸.api.
 #: 四图工作流里第 4 张的 LoadImage 节点（已接链尾，勿改接法）。
 EXTRA_REF_NODE = "78"
 
+#: 服装槽允许的库：本地服装库 + 外链二次元服装库（后者需缓存就绪）。
+COSTUME_LIBRARIES = ("costume", "costume-anime")
+
 
 class ReferenceItem(BaseModel):
     id: str
     library: str
     name: str
     subtitle: str = ""
+    #: 仅 pose 非空：上游「姿势编号」；其他库为 ""
+    number: str = ""
     group: str = ""
     facet: str = ""
     angle: str = ""
@@ -64,6 +69,10 @@ class ReferenceItem(BaseModel):
     featured: bool = False
     nsfw: bool = False
     remote: bool = False
+    #: 仅 costume-anime 且上游有「来源地址」时非空
+    source_url: str | None = None
+    #: 与后端过滤一致的预拼检索串原文（前端「检索」字段直接取此值）
+    search_text: str = ""
 
 
 class ReferenceItemListResponse(BaseModel):
@@ -148,11 +157,40 @@ def get_reference_item(library: str, item_id: str):
 
 
 @router.get("/reference/items/{library}/{item_id}/image")
-def get_reference_image(
+async def get_reference_image(
     library: str,
     item_id: str,
     kind: str = Query("thumb", description="thumb / image / depth / depth_thumb"),
 ):
+    """参考图库图片端点。
+
+    本地三库走 `_safe_image_path`；`costume-anime` 走本机缓存优先 + 只读代理下载
+    （C-REMOTE-CACHE@1）：缓存命中不发网络请求，未命中下载并原子写入后返回。
+    """
+    if library == "costume-anime":
+        if kind == "depth":
+            raise HTTPException(404, "该库没有深度图")
+        if kind == "depth_thumb":
+            raise HTTPException(404, "该库没有深度缩略图")
+        if kind not in ("thumb", "image"):
+            raise HTTPException(404, "不支持的图片类型")
+
+        if reference_library.get_item(library, item_id) is None:
+            raise HTTPException(404, "参考条目不存在")
+        url = reference_library.resolve_remote_url(library, item_id, kind)
+        if not url:
+            raise HTTPException(400, "该条目没有可用的图片地址")
+
+        try:
+            path = await reference_remote_cache.ensure_cached(library, item_id, kind, url)
+        except reference_remote_cache.RemoteCacheError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
+        return FileResponse(
+            str(path),
+            media_type=reference_library.media_type_for(path),
+            headers={"Cache-Control": "no-cache"},
+        )
+
     try:
         path = reference_library.resolve_image(library, item_id, kind)
     except reference_library.ReferenceImageError as exc:
@@ -168,11 +206,16 @@ class RecipeRequest(BaseModel):
 
     优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。
     带第 4 张（库条目或上传图）时自动切四图工作流。
+
+    `costume_library` 只影响服装槽：默认本地 `costume`，也可选外链
+    `costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。
     """
 
     portrait_id: str = ""
     costume_id: str = ""
     pose_id: str = ""
+    #: 服装槽使用的库：仅 `costume` / `costume-anime`
+    costume_library: str = "costume"
     #: 上传图路径（必须在 `library_root/uploads` 内）；与对应 `*_id` 二选一
     portrait_path: str = ""
     costume_path: str = ""
@@ -209,7 +252,15 @@ def _upload_path(raw: str, label: str) -> Path:
 
 
 def _recipe_entry(library: str, item_id: str, label: str) -> tuple[dict, Path]:
-    """校验条目可见且非外链，并解析出真实文件路径；错误信息带上槽位名。"""
+    """校验条目可见并解析出图用的真实文件路径；错误信息带上槽位名。
+
+    本地三库直接取参考库内的原图；`costume-anime` 是外链库，先取上游 URL，
+    缓存命中用本机文件，未命中按 `C-REMOTE-CACHE@1` 下载后再参与出图。
+    `costume-anime` 不再因 `remote=true` 一律拒绝，但其余外链库仍不允许。
+
+    许可边界：CharaDB 素材仅本机参考、禁止再分发；缓存只落在
+    `reference_cache_dir`，不得复制进 `reference_root` / `data/` / `dist/`。
+    """
     if not item_id:
         raise HTTPException(400, f"缺少{label}")
     if library not in reference_library.LIBRARY_FILES:
@@ -217,8 +268,25 @@ def _recipe_entry(library: str, item_id: str, label: str) -> tuple[dict, Path]:
     item = reference_library.get_item(library, item_id)
     if item is None:
         raise HTTPException(404, f"{label}不存在或不可见：{item_id}")
+
     if item["remote"]:
-        raise HTTPException(400, f"{label}是外链素材，不能参与本地出图")
+        # CharaDB 素材仅本机参考、禁止再分发；只有 costume-anime 提供缓存通道。
+        if library != "costume-anime":
+            raise HTTPException(400, f"{label}是外链素材，不能参与本地出图")
+        url = reference_library.resolve_remote_url(library, item_id, "image")
+        if not url:
+            raise HTTPException(400, f"{label}没有可用的图片地址：{item_id}")
+        try:
+            path = reference_remote_cache.ensure_cached_sync(
+                library, item_id, "image", url
+            )
+        except reference_remote_cache.RemoteCacheError as exc:
+            # 下载/落盘失败统一 502；URL、域名等非法仍按 400 返回，且都带槽位名。
+            if exc.status_code == 502:
+                raise HTTPException(502, f"{label}：外链图片下载失败") from None
+            raise HTTPException(exc.status_code, f"{label}：{exc.detail}") from None
+        return item, path
+
     try:
         path = reference_library.resolve_image(library, item_id, "image")
     except reference_library.ReferenceImageError as exc:
@@ -291,9 +359,17 @@ def create_reference_recipe(req: RecipeRequest):
     """
     if req.style not in STYLE_PRESETS:
         raise HTTPException(400, f"不支持的画风：{req.style}")
+    if req.costume_library not in COSTUME_LIBRARIES:
+        raise HTTPException(
+            400,
+            f"不支持的服装库：{req.costume_library}"
+            f"（仅支持 {' / '.join(COSTUME_LIBRARIES)}）",
+        )
 
     portrait, portrait_path = _resolve_slot("portrait", req.portrait_id, req.portrait_path, "人像")
-    costume, costume_path = _resolve_slot("costume", req.costume_id, req.costume_path, "服装")
+    costume, costume_path = _resolve_slot(
+        req.costume_library, req.costume_id, req.costume_path, "服装"
+    )
     pose, pose_path = _resolve_slot("pose", req.pose_id, req.pose_path, "姿势")
 
     extra = None
@@ -343,7 +419,7 @@ def create_reference_recipe(req: RecipeRequest):
 
     slots = [
         _slot_info("portrait", portrait, portrait_path, "portrait"),
-        _slot_info("costume", costume, costume_path, "costume"),
+        _slot_info("costume", costume, costume_path, req.costume_library),
         _slot_info("pose", pose, pose_path, "pose"),
     ]
     if extra_path is not None:

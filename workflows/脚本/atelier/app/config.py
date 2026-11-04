@@ -1,7 +1,56 @@
 """配置管理 —— pydantic-settings 统一加载"""
+import os
 from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+
+def _is_inside(base: Path, candidate: Path) -> bool:
+    """词法包含校验（不访问磁盘），避免 Windows junction 上的 exists/resolve 异常。"""
+    try:
+        root = os.path.abspath(os.path.normcase(str(base)))
+        target = os.path.abspath(os.path.normcase(str(candidate)))
+        return os.path.commonpath([root, target]) == root
+    except (OSError, ValueError):
+        return False
+
+
+def _validate_reference_cache_dir(
+    cache_dir: Path,
+    app_root: Path,
+    library_root: Path,
+    reference_root: Path | None,
+) -> Path:
+    """校验外链图片缓存根目录的落点（C-REMOTE-CACHE@1）。
+
+    硬约束：必须在 app_root 下；不得与 reference_root 互相包含；不得落在
+    data/ 或 dist/ 内（含 gallery-web/dist）。缓存只存储本机参考素材，禁止随发布物扩散。
+    """
+    cache_dir = Path(cache_dir)
+    if not cache_dir.is_absolute():
+        cache_dir = app_root / cache_dir
+
+    if not _is_inside(app_root, cache_dir):
+        raise ValueError(f"ATELIER_REFERENCE_CACHE_DIR 必须位于 app_root 下：{cache_dir}")
+    if reference_root is not None and (
+        _is_inside(reference_root, cache_dir) or _is_inside(cache_dir, reference_root)
+    ):
+        raise ValueError(
+            f"ATELIER_REFERENCE_CACHE_DIR 不得与 reference_root 互相包含：{cache_dir}"
+        )
+    forbidden = (
+        app_root / "data",
+        library_root / "data",
+        app_root / "dist",
+        library_root / "dist",
+        app_root / "gallery-web" / "dist",
+    )
+    for directory in forbidden:
+        if _is_inside(directory, cache_dir):
+            raise ValueError(
+                f"ATELIER_REFERENCE_CACHE_DIR 不得位于 data/ 或 dist/ 内：{cache_dir}"
+            )
+    return cache_dir
 
 
 def _resolve_library_root(app_root: Path) -> Path:
@@ -21,7 +70,7 @@ def _safe_is_dir(p: Path) -> bool:
     services.paths._resolve_if_reparse 一致；避免 os.path.realpath/exists 在
     不受信任的装入点上抛 WinError 448 而被误判为不存在。
     """
-    import os
+
     try:
         try:
             target = os.readlink(p)
@@ -101,11 +150,31 @@ class Settings(BaseSettings):
     reference_nsfw_pose_systems: str = "全身单人・性感系,双人缠绵"
     reference_nsfw_costume_categories: str = "内衣・睡衣,性感穿搭"
 
+    # 外链图片缓存（CharaDB 素材仅本机参考、禁止再分发；目录不得入库/进发布物）
+    #: 缓存根；默认 `<app_root>/.cache/reference-remote`，由 model_validator 归一与校验
+    reference_cache_dir: Path = app_root / ".cache" / "reference-remote"
+    #: 允许下载的外链域名白名单（逗号分隔）；只读集合见 `reference_remote_host_set`
+    reference_remote_hosts: str = "charadb-2fi.pages.dev"
+    #: 单次下载总超时（秒）
+    reference_remote_timeout_sec: float = 20.0
+    #: 进程内同时下载上限（asyncio 信号量）
+    reference_remote_max_concurrency: int = 8
+    #: 失败重试次数（不含首次）
+    reference_remote_retry: int = 2
+    #: 单文件上限；超出按下载失败处理
+    reference_remote_max_bytes: int = 20 * 1024 * 1024
+
     @model_validator(mode="after")
     def _resolve_comfyui_root_field(self):
         self.comfyui_root = _resolve_comfyui_root(self.library_root, self.comfyui_root_env)
         if self.reference_root is None:
             self.reference_root = self.library_root / "ai-pose-gallery-zh"
+        self.reference_cache_dir = _validate_reference_cache_dir(
+            self.reference_cache_dir,
+            self.app_root,
+            self.library_root,
+            self.reference_root,
+        )
         return self
 
     @property
@@ -120,6 +189,11 @@ class Settings(BaseSettings):
     @property
     def nsfw_costume_categories(self) -> frozenset[str]:
         return _split_csv(self.reference_nsfw_costume_categories)
+
+    @property
+    def reference_remote_host_set(self) -> frozenset[str]:
+        """外链域名白名单（只读集合）；比较前统一小写，避免大小写绕过。"""
+        return frozenset(host.lower() for host in _split_csv(self.reference_remote_hosts))
 
     @property
     def output_dir(self) -> Path:
@@ -152,3 +226,4 @@ print(f"[config]   output dir = {settings.output_dir}")
 print(f"[config]   output dir exists = {_safe_is_dir(settings.output_dir)}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")
 print(f"[config]   reference_root = {settings.reference_dir} (enabled={settings.reference_enabled})")
+print(f"[config]   reference_cache_dir = {settings.reference_cache_dir}")

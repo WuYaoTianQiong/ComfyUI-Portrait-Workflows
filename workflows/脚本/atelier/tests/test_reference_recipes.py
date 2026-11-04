@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.config import settings
 from app.routers import editor as editor_router
 from app.routers import reference_library as ref_router
 from app.services import reference_library as rl
+from app.services import reference_remote_cache
 
 POSE_ITEMS = [
     {
@@ -151,6 +153,49 @@ def captured(monkeypatch):
         return {"success": True, "dry_run": req.dry_run, "total": 1}
 
     monkeypatch.setattr(editor_router, "faceswap_batch", fake_faceswap)
+    return calls
+
+
+@pytest.fixture()
+def remote_cache_env(tmp_path: Path, monkeypatch):
+    """隔离外链缓存目录与白名单；所有下载都由用例 mock，不访问真实外网。"""
+    cache_dir = tmp_path / "remote-cache"
+    monkeypatch.setattr(settings, "reference_cache_dir", cache_dir)
+    monkeypatch.setattr(settings, "reference_remote_hosts", "example.invalid")
+    monkeypatch.setattr(settings, "reference_remote_timeout_sec", 5.0)
+    monkeypatch.setattr(settings, "reference_remote_max_concurrency", 4)
+    monkeypatch.setattr(settings, "reference_remote_retry", 0)
+    monkeypatch.setattr(settings, "reference_remote_max_bytes", 1024 * 1024)
+    reference_remote_cache.reset_state()
+    yield cache_dir
+    reference_remote_cache.reset_state()
+
+
+def _seed_remote_image(item_id: str = "charadb-O001") -> Path:
+    """预置 costume-anime 原图缓存，模拟预热脚本已跑过（不发网络请求）。"""
+    url = rl.resolve_remote_url("costume-anime", item_id, "image")
+    assert url, "测试数据必须提供外链原图 URL"
+    path = reference_remote_cache.cache_path("costume-anime", item_id, "image", url)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"cached-anime")
+    return path
+
+
+def _mock_http(monkeypatch, handler) -> list[str]:
+    """替换缓存服务的 httpx 客户端，记录请求 URL；返回空列表即未访问网络。"""
+    calls: list[str] = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return handler(request)
+
+    def factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(counting_handler),
+            follow_redirects=False,
+        )
+
+    monkeypatch.setattr(reference_remote_cache, "_make_client", factory)
     return calls
 
 
@@ -372,7 +417,13 @@ def test_upload_path_validation_errors(api, recipe_env, captured):
     assert not captured
 
 
-def test_remote_extra_item_is_400(api, recipe_env, captured):
+def test_remote_extra_item_cache_miss_is_502(api, recipe_env, remote_cache_env, captured, monkeypatch):
+    """第 4 张外链条目缓存缺失且下载失败 → 502，错误文本带槽位名。"""
+
+    def server_error(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, request=request)
+
+    _mock_http(monkeypatch, server_error)
     resp = api.post(
         "/api/reference/recipes",
         json={
@@ -381,9 +432,110 @@ def test_remote_extra_item_is_400(api, recipe_env, captured):
             "extra_id": "charadb-O001",
         },
     )
-    assert resp.status_code == 400
-    assert "外链" in resp.json()["detail"]
+    assert resp.status_code == 502
+    assert "第 4 张参考" in resp.json()["detail"]
+    assert "下载失败" in resp.json()["detail"]
     assert not captured, "校验失败不应进入提交"
+
+
+def test_cached_costume_anime_as_fourth_keeps_node_78(api, recipe_env, remote_cache_env, captured, monkeypatch):
+    """缓存就绪的外链服装同样可作为第 4 张，节点仍是 78、工作流仍是四图。"""
+    _seed_remote_image()
+    calls = _mock_http(monkeypatch, lambda request: httpx.Response(500, request=request))
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "extra_library": "costume-anime",
+            "extra_id": "charadb-O001",
+        },
+    )
+    assert resp.status_code == 200
+    req = captured[0]
+    assert req.ref3_node == "78"
+    assert Path(req.workflow_path).name == ref_router.FOUR_REF_WORKFLOW
+    assert calls == [], "缓存命中不应访问网络"
+
+
+def test_costume_library_defaults_to_costume(api, recipe_env):
+    """不传 `costume_library` 时按本地 costume 库解析（与现状一致）。"""
+    resp = api.post("/api/reference/recipes", json=THREE_BODY)
+    assert resp.status_code == 200
+    slots = {slot["role"]: slot for slot in resp.json()["slots"]}
+    assert slots["costume"]["library"] == "costume"
+    assert Path(slots["costume"]["path"]).name == "SPR-0001.png"
+
+
+def test_cached_costume_anime_dry_run_reports_three_node_mapping(api, recipe_env, remote_cache_env, monkeypatch):
+    """缓存就绪的 costume-anime 可参与三图 dry_run，不再报“外链素材不能参与”。"""
+    _seed_remote_image()
+    calls = _mock_http(monkeypatch, lambda request: httpx.Response(500, request=request))
+    resp = api.post(
+        "/api/reference/recipes",
+        json={**THREE_BODY, "costume_library": "costume-anime", "costume_id": "charadb-O001"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["dry_run"] is True
+    inputs = body["nodes"]["inputs"]
+    assert [(item["role"], item["id"]) for item in inputs] == [
+        ("target", "1"),
+        ("ref1", "2"),
+        ("ref2", "3"),
+    ]
+    assert Path(body["workflow_path"]).name == ref_router.THREE_REF_WORKFLOW
+    assert body["references"]["costume"] == "charadb-O001"
+    costume_slot = {slot["role"]: slot for slot in body["slots"]}["costume"]
+    assert costume_slot["library"] == "costume-anime"
+    assert calls == [], "缓存命中不应访问网络"
+
+
+def test_unknown_costume_library_is_400(api, recipe_env):
+    resp = api.post(
+        "/api/reference/recipes",
+        json={**THREE_BODY, "costume_library": "portrait"},
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "服装" in detail
+    assert "costume-anime" in detail
+
+
+def test_costume_anime_cache_miss_download_failure_is_502(api, recipe_env, remote_cache_env, monkeypatch):
+    """缓存缺失且下载失败 → 502，detail 明确指向服装槽位。"""
+
+    def server_error(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, request=request)
+
+    _mock_http(monkeypatch, server_error)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={**THREE_BODY, "costume_library": "costume-anime", "costume_id": "charadb-O001"},
+    )
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "服装" in detail
+    assert "下载失败" in detail
+
+
+def test_costume_anime_without_remote_url_is_400(api, recipe_env):
+    no_url = dict(ANIME_ITEMS[0])
+    no_url.update({"id": "charadb-no-url", "缩略图": "", "原图": ""})
+    _write_json(recipe_env["root"] / "data" / "costume-anime-zh.json", [no_url])
+    rl.clear_cache()
+
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "costume_library": "costume-anime",
+            "costume_id": "charadb-no-url",
+        },
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "服装" in detail
+    assert "没有可用的图片地址" in detail
 
 
 def test_missing_inputs_are_400(api, recipe_env, captured):

@@ -2590,11 +2590,16 @@
         "type": "object"
       },
       "RecipeRequest": {
-        "description": "参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。\n\n优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。\n带第 4 张（库条目或上传图）时自动切四图工作流。",
+        "description": "参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。\n\n优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。\n带第 4 张（库条目或上传图）时自动切四图工作流。\n\n`costume_library` 只影响服装槽：默认本地 `costume`，也可选外链\n`costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。",
         "properties": {
           "costume_id": {
             "default": "",
             "title": "Costume Id",
+            "type": "string"
+          },
+          "costume_library": {
+            "default": "costume",
+            "title": "Costume Library",
             "type": "string"
           },
           "costume_path": {
@@ -2834,10 +2839,31 @@
             "title": "Nsfw",
             "type": "boolean"
           },
+          "number": {
+            "default": "",
+            "title": "Number",
+            "type": "string"
+          },
           "remote": {
             "default": false,
             "title": "Remote",
             "type": "boolean"
+          },
+          "search_text": {
+            "default": "",
+            "title": "Search Text",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           },
           "subtitle": {
             "default": "",
@@ -8175,6 +8201,7 @@
     },
     "/api/reference/items/{library}/{item_id}/image": {
       "get": {
+        "description": "参考图库图片端点。\n\n本地三库走 `_safe_image_path`；`costume-anime` 走本机缓存优先 + 只读代理下载\n（C-REMOTE-CACHE@1）：缓存命中不发网络请求，未命中下载并原子写入后返回。",
         "operationId": "get_reference_image_api_reference_items__library___item_id__image_get",
         "parameters": [
           {

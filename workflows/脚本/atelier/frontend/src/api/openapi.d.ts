@@ -1423,7 +1423,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Reference Image */
+        /**
+         * Get Reference Image
+         * @description 参考图库图片端点。
+         *
+         *     本地三库走 `_safe_image_path`；`costume-anime` 走本机缓存优先 + 只读代理下载
+         *     （C-REMOTE-CACHE@1）：缓存命中不发网络请求，未命中下载并原子写入后返回。
+         */
         get: operations["get_reference_image_api_reference_items__library___item_id__image_get"];
         put?: never;
         post?: never;
@@ -3249,6 +3255,9 @@ export interface components {
          *
          *     优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。
          *     带第 4 张（库条目或上传图）时自动切四图工作流。
+         *
+         *     `costume_library` 只影响服装槽：默认本地 `costume`，也可选外链
+         *     `costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。
          */
         RecipeRequest: {
             /**
@@ -3256,6 +3265,11 @@ export interface components {
              * @default
              */
             costume_id: string;
+            /**
+             * Costume Library
+             * @default costume
+             */
+            costume_library: string;
             /**
              * Costume Path
              * @default
@@ -3420,10 +3434,22 @@ export interface components {
              */
             nsfw: boolean;
             /**
+             * Number
+             * @default
+             */
+            number: string;
+            /**
              * Remote
              * @default false
              */
             remote: boolean;
+            /**
+             * Search Text
+             * @default
+             */
+            search_text: string;
+            /** Source Url */
+            source_url?: string | null;
             /**
              * Subtitle
              * @default
