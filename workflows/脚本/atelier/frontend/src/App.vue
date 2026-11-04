@@ -36,10 +36,15 @@ const { data: status } = useQuery({
 const online = computed(() => status.value?.comfyui === 'online')
 
 
-const referenceEnabled = computed(
+/**
+ * 参考图库 Web（上游 React 台）入口。
+ *
+ * 后端未下发地址（旧后端）或显式置空时不渲染；`/reference` 旧页保留可直达。
+ */
+const referenceWebUrl = computed(
   () =>
-    (status.value as (SystemStatus & { reference_enabled?: boolean }) | undefined)
-      ?.reference_enabled !== false,
+    (status.value as (SystemStatus & { reference_web_url?: string | null }) | undefined)
+      ?.reference_web_url ?? '',
 )
 
 const route = useRoute()
@@ -74,14 +79,15 @@ function jumpToPrompt(promptId: number) {
         >
           画廊
         </button>
-        <button
-          v-if="referenceEnabled"
+        <a
+          v-if="referenceWebUrl"
           class="btn btn-sm"
-          :class="{ active: activeKey === 'reference' }"
-          @click="go('reference')"
+          :href="referenceWebUrl"
+          target="_blank"
+          rel="noopener noreferrer"
         >
-          参考图库
-        </button>
+          参考图库（新版）
+        </a>
         <button
           class="btn btn-sm"
           :class="{ active: activeKey === 'prompt' }"

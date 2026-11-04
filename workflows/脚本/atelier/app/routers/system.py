@@ -124,8 +124,9 @@ def open_output_dir():
 
 @router.get("/system/status")
 def get_system_status():
-    # 参考库回滚开关必须每个分支都返回：离线时前端也要能收起导航项。
+    # 参考库回滚开关与 Web 入口必须每个分支都返回：离线时前端也要能收起导航项。
     reference_enabled = settings.reference_enabled
+    reference_web_url = settings.reference_web_url
     # 不能靠 get_queue() 判断在线：它在任何异常下都返回 {}，于是状态永远是 online，
     # 前端就会允许在 ComfyUI 离线时提交任务（历史 109 个任务里 27 个因此失败）。
     if not is_online():
@@ -134,6 +135,7 @@ def get_system_status():
             "queue_running": 0,
             "queue_pending": 0,
             "reference_enabled": reference_enabled,
+            "reference_web_url": reference_web_url,
         }
     queue = fetch_queue()
     return {
@@ -141,6 +143,7 @@ def get_system_status():
         "queue_running": len(queue.get("queue_running", [])),
         "queue_pending": len(queue.get("queue_pending", [])),
         "reference_enabled": reference_enabled,
+        "reference_web_url": reference_web_url,
     }
 
 

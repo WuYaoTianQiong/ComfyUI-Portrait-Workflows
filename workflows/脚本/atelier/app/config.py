@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     # 否则会固化成模块加载时的类默认值，ATELIER_LIBRARY_ROOT 覆盖后不会跟着变。
     reference_root: Path | None = None
     reference_allow_nsfw: bool = False
+    # 上游 React 台（参考图库 Web）地址；置空则 atelier 顶栏不显示该入口。
+    reference_web_url: str = "http://127.0.0.1:8760/"
     reference_page_size: int = 60
     reference_nsfw_pose_systems: str = "全身单人・性感系,双人缠绵"
     reference_nsfw_costume_categories: str = "内衣・睡衣,性感穿搭"
