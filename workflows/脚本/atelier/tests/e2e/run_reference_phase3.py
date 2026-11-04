@@ -2933,6 +2933,180 @@ def check_phase4_ui_contract(browser, shots_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# T21 顶栏合并式改造专项（T22）
+# ---------------------------------------------------------------------------
+NAV_ONLY = os.environ.get("T3_E2E_ONLY", "").strip().lower() == "nav"
+
+NAV_ITEMS: list[tuple[str, str]] = [
+    ("画廊", "/gallery"),
+    ("参考图库", "/ref-web"),
+    ("提示词", "/prompt"),
+    ("组合器", "/composer"),
+    ("图像编辑", "/editor"),
+    ("批量超分", "/upscale"),
+    ("分类与标签", "/taxonomy"),
+    ("任务", "/jobs"),
+    ("统计", "/stats"),
+]
+
+
+def _nav_scope(page):
+    return page.locator('nav[aria-label="画室全局导航"]')
+
+
+def check_nav_merge(browser, shots_dir: Path) -> None:
+    """T21 顶栏合并式改造：9 项链接 / 两层高度 / 3 个返回入口 / 跳转 / 窄屏。"""
+    section("T21 顶栏合并式改造专项（新 context）")
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    errors: list[str] = []
+    page = new_page(ctx, errors, "t21-nav")
+    try:
+        status = goto_settle(page, "/ref-web/")
+        check(status == 200, "[T21] /ref-web/ 返回 200", f"status={status}")
+
+        nav = _nav_scope(page)
+        check(nav.count() == 1, "[T21] 存在画室全局导航", f"count={nav.count()}")
+
+        # a. 9 项导航：文案与 href 精确匹配，仅参考图库 aria-current=page
+        nav_items = nav.locator("div > a")
+        count = nav_items.count()
+        check(count == 9, "[T21] 顶部导航 9 项", f"count={count}")
+        for i, (label, href) in enumerate(NAV_ITEMS):
+            if i >= count:
+                check(False, f"[T21] 导航项缺失：{label}", "")
+                continue
+            el = nav_items.nth(i)
+            text = (el.inner_text() or "").strip()
+            actual_href = el.get_attribute("href")
+            aria = el.get_attribute("aria-current")
+            check(text == label, f"[T21] 导航文案：{label}", f"actual={text!r}")
+            check(actual_href == href, f"[T21] 导航 href：{label}", f"actual={actual_href!r}")
+            if label == "参考图库":
+                check(aria == "page", "[T21] 参考图库 aria-current=page", f"actual={aria!r}")
+            else:
+                check(aria is None, f"[T21] {label} 无 aria-current", f"actual={aria!r}")
+
+        # b. 两层高度与第二行原元素
+        nav_box = nav.bounding_box()
+        nav_h = round(nav_box["height"], 1) if nav_box else -1
+        check(abs(nav_h - 52) <= 2, "[T21] 第一层高度 52px±2", f"height={nav_h}")
+        second = page.locator("header > div").last
+        second_box = second.bounding_box()
+        second_h = round(second_box["height"], 1) if second_box else -1
+        check(second_h >= 56, "[T21] 第二层高度 >=56px", f"height={second_h}")
+        check(second.locator('nav[aria-label="breadcrumb"]').count() >= 1,
+              "[T21] 第二行面包屑仍在", "")
+        check(second.locator("button[title*='安全模式']").count() >= 1,
+              "[T21] 第二行安全模式按钮仍在", "")
+        check(second.locator("button:has-text('随机捏人')").count() >= 1,
+              "[T21] 第二行随机捏人仍在", "")
+        check(second.locator("a[aria-label*='AI 合成台']").count() >= 1,
+              "[T21] 第二行 AI 合成台仍在", "")
+        check(second.locator("button[aria-label='切换主题']").count() >= 1,
+              "[T21] 第二行主题切换仍在", "")
+
+        # c. 3 个返回入口：侧栏 brand（画室）、侧栏返回画廊、顶栏画室画廊
+        sidebar = page.locator('[data-slot="sidebar"]')
+        brand = sidebar.locator('a[href="/gallery"]').filter(has_text="画室")
+        back = sidebar.locator('a[href="/gallery"]').filter(has_text="返回画廊")
+        top_back = second.locator('a[href="/gallery"]').filter(has_text="画室画廊")
+        check(brand.count() >= 1, "[T21] 侧栏 brand 返回入口", f"count={brand.count()}")
+        check(back.count() >= 1, "[T21] 侧栏返回画廊入口", f"count={back.count()}")
+        check(top_back.count() >= 1, "[T21] 顶栏画室画廊入口", f"count={top_back.count()}")
+        hrefs = [
+            brand.first.get_attribute("href") if brand.count() else None,
+            back.first.get_attribute("href") if back.count() else None,
+            top_back.first.get_attribute("href") if top_back.count() else None,
+        ]
+        check(hrefs == ["/gallery", "/gallery", "/gallery"],
+              "[T21] 3 个返回入口 href 均为 /gallery", f"hrefs={hrefs}")
+
+        # h. 首页裂图 0
+        wait_images_settled(page)
+        home_stats = image_stats(page)
+        check(home_stats["broken"] == 0, "[T21] /ref-web/ 裂图为 0",
+              f"broken={home_stats['broken']}/{home_stats['total']} src={home_stats['brokenSrc']}")
+        page.screenshot(path=str(shots_dir / "t21_nav_desktop.png"))
+
+        # d. 点击提示词 -> /prompt 整页跳转（不得拼成 /ref-web/prompt）
+        nav_items.nth(2).click()
+        page.wait_for_function("() => window.location.pathname === '/prompt'", timeout=30000)
+        page.wait_for_timeout(1200)
+        prompt_url = page.url
+        check("/ref-web/prompt" not in prompt_url, "[T21] 提示词跳转未拼 basepath", prompt_url)
+        check(prompt_url.rstrip("/").endswith("/prompt"), "[T21] 提示词跳转到 /prompt", prompt_url)
+        prompt_status = ctx.request.get(prompt_url).status
+        check(prompt_status == 200, "[T21] /prompt 返回 200", f"status={prompt_status}")
+        body_text = page.inner_text("body")
+        check("提示词" in body_text, "[T21] /prompt 渲染出提示词标题",
+              body_text[:60].replace("\n", " "))
+
+        # e. 点击画廊 -> /gallery 200
+        goto_settle(page, "/ref-web/")
+        _nav_scope(page).locator("div > a").filter(has_text="画廊").first.click()
+        page.wait_for_function("() => window.location.pathname === '/gallery'", timeout=30000)
+        page.wait_for_timeout(1200)
+        gallery_url = page.url
+        check(gallery_url.rstrip("/").endswith("/gallery"),
+              "[T21] 画廊跳转到 /gallery", gallery_url)
+        gallery_status = ctx.request.get(gallery_url).status
+        check(gallery_status == 200, "[T21] /gallery 返回 200", f"status={gallery_status}")
+        page.screenshot(path=str(shots_dir / "t21_nav_gallery.png"))
+
+        # e. 点击参考图库 -> 回到 /ref-web/
+        goto_settle(page, "/ref-web/")
+        _nav_scope(page).locator("div > a").filter(has_text="参考图库").first.click()
+        page.wait_for_function(
+            "() => /^\\/ref-web\\/?$/.test(window.location.pathname)", timeout=30000)
+        page.wait_for_timeout(800)
+        ref_url = page.url
+        check(re.fullmatch(r"https?://[^/]+/ref-web/?", ref_url) is not None,
+              "[T21] 参考图库回到 /ref-web/", ref_url)
+
+        # h. poses 裂图 0（不重复跑四页全量）
+        poses_status = goto_settle(page, "/ref-web/poses", "动作姿势库")
+        check(poses_status == 200, "[T21] /ref-web/poses 返回 200", f"status={poses_status}")
+        wait_images_settled(page)
+        poses_stats = image_stats(page)
+        check(poses_stats["broken"] == 0, "[T21] /ref-web/poses 裂图为 0",
+              f"broken={poses_stats['broken']}/{poses_stats['total']} src={poses_stats['brokenSrc']}")
+
+        # g. console error/pageerror 0（本页与跳转后的 Vue 页面）
+        check(not errors, "[T21] console error/pageerror 为 0", "; ".join(errors[:3]))
+
+        # f. 窄屏 390x844：导航可横向滚动、页面不横向溢出
+        page.set_viewport_size({"width": 390, "height": 844})
+        goto_settle(page, "/ref-web/")
+        scroll_data = page.evaluate(
+            """() => {
+                const nav = document.querySelector('nav[aria-label="画室全局导航"]');
+                const scroller = nav ? nav.querySelector(':scope > div') : null;
+                return {
+                    innerWidth: window.innerWidth,
+                    docScrollWidth: document.documentElement.scrollWidth,
+                    navClientWidth: scroller ? scroller.clientWidth : -1,
+                    navScrollWidth: scroller ? scroller.scrollWidth : -1,
+                };
+            }"""
+        )
+        check(scroll_data["navScrollWidth"] > scroll_data["navClientWidth"],
+              "[T21] 窄屏导航可横向滚动",
+              f"scrollWidth={scroll_data['navScrollWidth']} clientWidth={scroll_data['navClientWidth']}")
+        check(scroll_data["docScrollWidth"] <= scroll_data["innerWidth"] + 1,
+              "[T21] 窄屏页面无横向溢出",
+              f"docScrollWidth={scroll_data['docScrollWidth']} innerWidth={scroll_data['innerWidth']}")
+        page.screenshot(path=str(shots_dir / "t21_nav_narrow.png"))
+    except Exception as exc:
+        check(False, "[T21] 顶栏专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t21_nav_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -2957,73 +3131,80 @@ def main() -> int:
         check_dist_artifact()
         check_phase3_dist()
 
-        # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
-        check_phase4_recipe_testclient()
-
-        # 阶段二：断网等价探针需要重启临时实例（只有脚本自己拉起的实例才可重启）
-        if P4_ONLY:
-            observe("T3_E2E_ONLY=phase4：跳过阶段一/二/三检查",
-                    "仅执行静态检查、dist 产物检查、阶段四 TestClient 与 Playwright")
-        elif proc is not None:
-            stop_instance(proc)
-            proc = None
-            offline_proc = None
-            try:
-                offline_proc = start_instance_if_needed(
-                    OFFLINE_ENV, "t3_phase2_offline_server.log")
-                check_phase2_offline()
-            except Exception as exc:
-                check(False, "断网等价探针执行失败",
-                      f"{type(exc).__name__}: {exc}")
-            finally:
-                stop_instance(offline_proc)
-            proc = start_instance_if_needed()
-            check(port_serving(PORT), "断网探针后恢复正常临时实例", "")
+        if NAV_ONLY:
+            observe("T3_E2E_ONLY=nav：只跑 T21 顶栏合并式专项",
+                    "跳过阶段一/二/三其余检查与阶段四 TestClient")
         else:
-            observe("8766 由外部启动，脚本不能重启为断网实例；跳过服务端 502 探针",
-                    "已缓存 200 仍由后续检查覆盖")
+            # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
+            check_phase4_recipe_testclient()
 
-        if not P4_ONLY:
-            section("阶段二 HTTP 契约检查（C-REMOTE-CACHE@1 / C-REF-ITEM-DTO@2 / C-REF-RECIPES@2）")
-            check_phase2_dto()
-            check_phase2_image_cache()
-            check_phase2_recipes()
-            check_phase2_cache_location()
+            # 阶段二：断网等价探针需要重启临时实例（只有脚本自己拉起的实例才可重启）
+            if P4_ONLY:
+                observe("T3_E2E_ONLY=phase4：跳过阶段一/二/三检查",
+                        "仅执行静态检查、dist 产物检查、阶段四 TestClient 与 Playwright")
+            elif proc is not None:
+                stop_instance(proc)
+                proc = None
+                offline_proc = None
+                try:
+                    offline_proc = start_instance_if_needed(
+                        OFFLINE_ENV, "t3_phase2_offline_server.log")
+                    check_phase2_offline()
+                except Exception as exc:
+                    check(False, "断网等价探针执行失败",
+                          f"{type(exc).__name__}: {exc}")
+                finally:
+                    stop_instance(offline_proc)
+                proc = start_instance_if_needed()
+                check(port_serving(PORT), "断网探针后恢复正常临时实例", "")
+            else:
+                observe("8766 由外部启动，脚本不能重启为断网实例；跳过服务端 502 探针",
+                        "已缓存 200 仍由后续检查覆盖")
+
+            if not P4_ONLY:
+                section("阶段二 HTTP 契约检查（C-REMOTE-CACHE@1 / C-REF-ITEM-DTO@2 / C-REF-RECIPES@2）")
+                check_phase2_dto()
+                check_phase2_image_cache()
+                check_phase2_recipes()
+                check_phase2_cache_location()
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            if not P4_ONLY:
-                ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
-                check_routes(ctx_main, shots_dir)
-                check_gallery_entries_all(ctx_main, shots_dir)
-                check_library_images(ctx_main, shots_dir)
-                check_studio_workflow_default(ctx_main, shots_dir)
-                check_history_section(ctx_main, shots_dir)
-                ctx_main.close()
+            if NAV_ONLY:
+                check_nav_merge(browser, shots_dir)
+            else:
+                if not P4_ONLY:
+                    ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
+                    check_routes(ctx_main, shots_dir)
+                    check_gallery_entries_all(ctx_main, shots_dir)
+                    check_library_images(ctx_main, shots_dir)
+                    check_studio_workflow_default(ctx_main, shots_dir)
+                    check_history_section(ctx_main, shots_dir)
+                    ctx_main.close()
 
-                check_nsfw_age_gate(browser, shots_dir)
-                check_library_images_offline(browser, shots_dir)
-                check_settings_export(browser, shots_dir)
-                check_history_empty_mock(browser, shots_dir)
-                check_phase2_pages(browser, shots_dir)
+                    check_nsfw_age_gate(browser, shots_dir)
+                    check_library_images_offline(browser, shots_dir)
+                    check_settings_export(browser, shots_dir)
+                    check_history_empty_mock(browser, shots_dir)
+                    check_phase2_pages(browser, shots_dir)
 
-                # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
-                check_phase3_routes(browser, shots_dir)
-                check_phase3_normal_images(browser, shots_dir)
-                check_phase3_offline(browser, shots_dir)
-                check_phase3_entries(browser, shots_dir)
-                check_phase3_nsfw(browser, shots_dir)
-                check_phase3_pose_interactions(browser, shots_dir)
-                check_phase3_costume_interactions(browser, shots_dir)
-                check_phase3_portrait_interactions(browser, shots_dir)
-                check_phase3_studio_default(browser, shots_dir)
+                    # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
+                    check_phase3_routes(browser, shots_dir)
+                    check_phase3_normal_images(browser, shots_dir)
+                    check_phase3_offline(browser, shots_dir)
+                    check_phase3_entries(browser, shots_dir)
+                    check_phase3_nsfw(browser, shots_dir)
+                    check_phase3_pose_interactions(browser, shots_dir)
+                    check_phase3_costume_interactions(browser, shots_dir)
+                    check_phase3_portrait_interactions(browser, shots_dir)
+                    check_phase3_studio_default(browser, shots_dir)
 
-            # 阶段四（T13）关卡：真实提交 -> 轮询 -> 结果图 -> 任务中心。
-            phase4_state = check_phase4_real_submit(browser, shots_dir)
-            check_phase4_mock_result(browser, shots_dir, phase4_state)
-            check_phase4_failure_branch(browser, shots_dir, phase4_state)
-            check_phase4_upload_slot(browser, shots_dir)
-            check_phase4_ui_contract(browser, shots_dir)
+                # 阶段四（T13）关卡：真实提交 -> 轮询 -> 结果图 -> 任务中心。
+                phase4_state = check_phase4_real_submit(browser, shots_dir)
+                check_phase4_mock_result(browser, shots_dir, phase4_state)
+                check_phase4_failure_branch(browser, shots_dir, phase4_state)
+                check_phase4_upload_slot(browser, shots_dir)
+                check_phase4_ui_contract(browser, shots_dir)
 
             browser.close()
 

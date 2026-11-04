@@ -3,6 +3,7 @@ import { ArrowLeftIcon, DicesIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-
 import { Fragment } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
+import { AtelierTopNav } from '@/components/layout/AtelierTopNav'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import {
   Breadcrumb,
@@ -42,67 +43,73 @@ export function AppHeader() {
   }
 
   return (
-    <header className="@container/header flex min-h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
-      <SidebarTrigger className="-ml-1" />
-      {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
-      <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
-        <a href={ATELIER_GALLERY_PATH} aria-label="返回画室画廊" title="返回画室画廊">
-          <ArrowLeftIcon className="size-4" />
-          <span className="hidden @lg/header:inline">画室画廊</span>
-        </a>
-      </Button>
-      <Separator orientation="vertical" className="mr-2 h-4 data-vertical:self-center" />
-      <Breadcrumb className="min-w-0 flex-1">
-        <BreadcrumbList className="flex-nowrap">
-          {crumbs.map((c, i) => (
-            <Fragment key={c.path}>
-              {i > 0 && <BreadcrumbSeparator />}
-              <BreadcrumbItem className="min-w-0">
-                {i === crumbs.length - 1 ? (
-                  <BreadcrumbPage className="truncate">{c.title}</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink asChild>
-                    <Link to={c.path}>{c.title}</Link>
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-            </Fragment>
-          ))}
-        </BreadcrumbList>
-      </Breadcrumb>
+    <header className="@container/header flex shrink-0 flex-col">
+      {/* 第一层：atelier 全局导航（跨应用，整页跳转）。 */}
+      <AtelierTopNav />
 
-      <div className="ml-auto flex shrink-0 items-center gap-1 @lg/header:gap-2">
-        <Button
-          variant={safeMode ? 'outline' : 'secondary'}
-          size="sm"
-          onClick={toggleSafeMode}
-          title={safeMode ? '当前已开启安全模式（已隐藏 18+ 敏感内容），点击可解锁完整图库' : '当前已显示 18+ 完整图库，点击可切回安全模式'}
-          className={
-            safeMode
-              ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400'
-              : 'border-rose-500/30 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-400'
-          }
-        >
-          <ShieldCheckIcon className="size-3.5" />
-          <span className="hidden @2xl/header:inline">{safeMode ? '安全模式 (SFW)' : '18+ 完整模式'}</span>
-          <span className="@2xl/header:hidden">{safeMode ? 'SFW' : '18+'}</span>
+      {/* 第二层：沿用原有工具条，断点、尺寸与行为均保持不变。 */}
+      <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
+        <SidebarTrigger className="-ml-1" />
+        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
+        <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
+          <a href={ATELIER_GALLERY_PATH} aria-label="返回画室画廊" title="返回画室画廊">
+            <ArrowLeftIcon className="size-4" />
+            <span className="hidden @lg/header:inline">画室画廊</span>
+          </a>
         </Button>
-        <Button variant="outline" size="sm" onClick={handleRandom} className="hidden @3xl/header:inline-flex">
-          <DicesIcon className="size-3.5" />
-          随机捏人
-        </Button>
-        <Button size="sm" asChild>
-          <Link to="/studio" aria-label={`AI 合成台，已选 ${selectedCount} 项参考图`}>
-            <SparklesIcon className="size-3.5" />
-            <span className="hidden @lg/header:inline">AI 合成台</span>
-            {selectedCount > 0 && (
-              <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.2 text-[11px] font-bold">
-                {selectedCount}/3
-              </span>
-            )}
-          </Link>
-        </Button>
-        <ThemeToggle />
+        <Separator orientation="vertical" className="mr-2 h-4 data-vertical:self-center" />
+        <Breadcrumb className="min-w-0 flex-1">
+          <BreadcrumbList className="flex-nowrap">
+            {crumbs.map((c, i) => (
+              <Fragment key={c.path}>
+                {i > 0 && <BreadcrumbSeparator />}
+                <BreadcrumbItem className="min-w-0">
+                  {i === crumbs.length - 1 ? (
+                    <BreadcrumbPage className="truncate">{c.title}</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink asChild>
+                      <Link to={c.path}>{c.title}</Link>
+                    </BreadcrumbLink>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            ))}
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <div className="ml-auto flex shrink-0 items-center gap-1 @lg/header:gap-2">
+          <Button
+            variant={safeMode ? 'outline' : 'secondary'}
+            size="sm"
+            onClick={toggleSafeMode}
+            title={safeMode ? '当前已开启安全模式（已隐藏 18+ 敏感内容），点击可解锁完整图库' : '当前已显示 18+ 完整图库，点击可切回安全模式'}
+            className={
+              safeMode
+                ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400'
+                : 'border-rose-500/30 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-400'
+            }
+          >
+            <ShieldCheckIcon className="size-3.5" />
+            <span className="hidden @2xl/header:inline">{safeMode ? '安全模式 (SFW)' : '18+ 完整模式'}</span>
+            <span className="@2xl/header:hidden">{safeMode ? 'SFW' : '18+'}</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRandom} className="hidden @3xl/header:inline-flex">
+            <DicesIcon className="size-3.5" />
+            随机捏人
+          </Button>
+          <Button size="sm" asChild>
+            <Link to="/studio" aria-label={`AI 合成台，已选 ${selectedCount} 项参考图`}>
+              <SparklesIcon className="size-3.5" />
+              <span className="hidden @lg/header:inline">AI 合成台</span>
+              {selectedCount > 0 && (
+                <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.2 text-[11px] font-bold">
+                  {selectedCount}/3
+                </span>
+              )}
+            </Link>
+          </Button>
+          <ThemeToggle />
+        </div>
       </div>
     </header>
   )
