@@ -424,3 +424,19 @@
 | 提交链 | 实测确认：`71b171c` → `0d61018` → `95f52a4` → `38b81dd`；另有 `159e329` 单独记录并行会话的双人姿势提示词改动，范围与本阶段四批隔离 |
 
 遗留事项：真实物理断网、非 headless 多文件下载拦截、非 Chromium 内核、8656 加载新 `dist` 四项未验证，需在后续验收中补齐；后端改动在 8656 重启前不会对线上实例生效。
+
+### 8.6 最终验证闭环与门禁修复（T15 → T18 → T19）
+
+T15 最终独立验证首轮结论为 `VERDICT: PARTIAL`。通过项均实测确认：后端 `pytest tests/test_reference_library.py tests/test_reference_recipes.py tests/test_openapi_snapshot.py -q` 为 52 passed；`import app.main` 正常；gallery-web 的 `tsc -b --noEmit`、`oxlint src` 与 Vue `typecheck` 退出码全 0；`build:prod` 后 `git status -- dist` 零差异；`tests/e2e/run_reference_phase3.py` 434/434 PASS；8656 验收前后均返回 200，PID 5568 未变。唯一硬失败来自既有回归脚本 `tests/e2e/run_e2e.py`：它仍在等待 `img[src*="/thumbs/"]`，与阶段三「图片统一走后端端点」的既定实现冲突，脚本中断导致其后的 Vue 端检查未执行。该失败判定为脚本断言过期而非产品缺陷，处理方向是同步脚本，不回退生产实现（实测确认）。
+
+T18 据此修复（commit `78f5f12`），只改 `tests/e2e/run_e2e.py` 的 4 处选择器：等待、locator 与 `querySelectorAll` 中的 `/thumbs/` 改为 `/api/reference/items/pose/`，深度态改为 `kind=depth_thumb`，断言阈值与语义不变。使用 `启动.bat` 指定的 python 实测结果为 `RESULT: PASS（35 通过 / 0 失败）`；8656 PID 5568 未动，临时实例 8766 已清理（实测确认）。
+
+T19 最终复验结论为 `VERDICT: PASS`：`run_e2e.py` 35/0、`run_reference_phase3.py` 434/0，后者含真实提交 job 199、`POST /api/reference/recipes`、`GET /api/jobs` 轮询、结果图 `naturalWidth>0` 与零直连 ComfyUI；后端 52 passed、`import app.main` 正常、gallery-web `tsc`/`oxlint` 与 Vue `typecheck` 全 0；`build:prod` 后 `git status -- dist` 无差异，`dist` 资源前缀为 `/ref-web/assets/`、mtime 晚于源码、无旧模板字面；8656 前后 200 且 PID 5568 未变，8766 已停止，工作树仅剩并行会话的未追踪文件（实测确认）。
+
+| 轮次 | 结论 | 关键证据 |
+|---|---|---|
+| T15 首轮独立验证 | `VERDICT: PARTIAL`（实测确认） | 52 passed、静态检查全 0、dist 零差异、434/434、8656 PID 5568 未变；唯一硬失败为 `run_e2e.py` 的 `/thumbs/` 选择器过期 |
+| T18 门禁修复（`78f5f12`） | 脚本同步，产品实现未改（实测确认） | `run_e2e.py` 4 处选择器改后端端点与 `kind=depth_thumb`；`RESULT: PASS（35 通过 / 0 失败）` |
+| T19 最终复验 | `VERDICT: PASS`（实测确认） | `run_e2e.py` 35/0、`run_reference_phase3.py` 434/0（job 199）、后端 52 passed、静态检查全 0、dist 零差异、8656 PID 5568 未变 |
+
+最终提交链按时间顺序为：`eb5816e`（阶段二残留收尾）→ `71b171c`（阶段一：IDB 导出与历史切后端）→ `0d61018`（阶段二：CharaDB 缓存、预热与 recipes 服装库）→ `95f52a4`（阶段三：图库数据层切后端）→ `159e329`（并行会话双人姿势提示词，单独入库以隔离写集）→ `38b81dd`（阶段四：studio 提交后端）→ `07241d3`（第九节文档）→ `78f5f12`（回归脚本同步）。上述提交顺序与内容对应关系为实测确认。以下项目仍未能验证，不得视为已通过：8656 是否已加载最新 `dist`（按纪律未操作）、真实物理断网、非 Chromium 内核、未缓存 anime 首次下载 502（当前 440/440 全缓存覆盖）、真实非 headless 多文件下载拦截。
