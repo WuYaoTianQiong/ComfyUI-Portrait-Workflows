@@ -14,6 +14,10 @@
     - /api/workflows               工作流列表（界面格式工作流也应列出）
     - /api/editor/faceswap/nodes          双图工作流的 LoadImage 节点探测
     - /api/editor/faceswap/batch          批量换脸（dry_run，不占显存）
+    - /api/reference/items/{lib}/{id}     参考条目详情
+    - /api/reference/items/.../image      参考图图片（kind=thumb）
+    - /api/reference/recipes              参考库出图（dry_run，不提交任务）
+    - /api/reference/libraries            四库统计与 allow_nsfw
     - /*.js / *.css / index.html   前端静态资源（带内容断言）
 
 - 启动前先清理占用该端口的残留实例，避免结果混淆
@@ -277,17 +281,96 @@ def main() -> int:
             # 避免冒烟真的往库副本里写提示词或落盘上传文件。
             code, body = _get(BASE + "/api/reference/libraries")
             try:
-                lib_count = len(json.loads(body).get("libraries") or [])
+                libs_payload = json.loads(body)
+                lib_count = len(libs_payload.get("libraries") or [])
+                allow_nsfw = libs_payload.get("allow_nsfw")
             except Exception:
                 lib_count = "PARSE_ERR"
+                allow_nsfw = "PARSE_ERR"
             checks.append(("reference/libraries", code, f"{lib_count} 库"))
+            checks.append((
+                "reference/libraries.allow_nsfw",
+                200 if isinstance(allow_nsfw, bool) else -2,
+                f"allow_nsfw={allow_nsfw!r}",
+            ))
 
+            def _first_ref_id(library: str) -> str:
+                """取该库第一条可见条目 id；参考库缺失时返回空串，由调用方记为 SKIP。"""
+                c, b = _get(BASE + f"/api/reference/items?library={library}&page_size=1")
+                try:
+                    items = json.loads(b).get("items") or []
+                    return str(items[0].get("id") or "") if items else ""
+                except Exception:
+                    return ""
+
+            pose_first = _first_ref_id("pose")
             code, body = _get(BASE + "/api/reference/items?library=pose&page_size=1")
             try:
                 ref_total = json.loads(body).get("total")
             except Exception:
                 ref_total = "PARSE_ERR"
             checks.append(("reference/items(pose)", code, ref_total))
+
+            # 详情与图片端点：用列表里真实存在的 id，避免写死素材编号
+            if pose_first:
+                ref_id = urllib.parse.quote(pose_first, safe="")
+                code, body = _get(BASE + f"/api/reference/items/pose/{ref_id}")
+                try:
+                    detail_id = json.loads(body).get("id")
+                except Exception:
+                    detail_id = "PARSE_ERR"
+                checks.append((
+                    "reference/items/{lib}/{id}",
+                    code if code == 200 and detail_id == pose_first else -2,
+                    f"HTTP {code} id={detail_id!r}",
+                ))
+
+                code, body = _get(
+                    BASE + f"/api/reference/items/pose/{ref_id}/image?kind=thumb"
+                )
+                checks.append((
+                    "reference/items image kind=thumb",
+                    code if code == 200 and len(body) > 0 else -2,
+                    f"HTTP {code} bytes={len(body)}",
+                ))
+            else:
+                checks.append(("reference/items/{lib}/{id}", -3, "姿势库暂无条目，跳过详情断言"))
+                checks.append(("reference/items image kind=thumb", -3, "姿势库暂无条目，跳过图片断言"))
+
+            # 出图配方：只跑 dry_run，核对三图节点映射，不向 ComfyUI 提交任务
+            portrait_first = _first_ref_id("portrait")
+            costume_first = _first_ref_id("costume")
+            if pose_first and portrait_first and costume_first:
+                code, body = _post(
+                    BASE + "/api/reference/recipes",
+                    {
+                        "portrait_id": portrait_first,
+                        "costume_id": costume_first,
+                        "pose_id": pose_first,
+                        "dry_run": True,
+                    },
+                )
+                try:
+                    recipe = json.loads(body)
+                    nodes = (recipe.get("nodes") or {}).get("inputs") or []
+                    mapping = [(item.get("role"), item.get("id")) for item in nodes]
+                    ok = (
+                        code == 200
+                        and recipe.get("dry_run") is True
+                        and mapping
+                        == [("target", "1"), ("ref1", "2"), ("ref2", "3")]
+                    )
+                    recipe_detail = f"HTTP {code} nodes={mapping}"
+                except Exception as e:
+                    ok = False
+                    recipe_detail = f"HTTP {code} PARSE_ERR:{e!r}"
+                checks.append(("reference/recipes dry_run", 200 if ok else -2, recipe_detail))
+            else:
+                checks.append((
+                    "reference/recipes dry_run",
+                    -3,
+                    f"条目不足（pose={bool(pose_first)} portrait={bool(portrait_first)} costume={bool(costume_first)}）",
+                ))
 
             code, body = _get(BASE + "/api/reference/sheet")
             checks.append(("reference/sheet 缺参数→400", 200 if code == 400 else -2,
