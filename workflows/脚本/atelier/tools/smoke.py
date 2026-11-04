@@ -19,6 +19,8 @@
     - /api/reference/recipes              参考库出图（dry_run，不提交任务）
     - /api/reference/libraries            四库统计与 allow_nsfw
     - /*.js / *.css / index.html   前端静态资源（带内容断言）
+    - /ref-web/ 与 /ref-web/poses  单端口托管的 gallery-web（校验产物特征，防被 Vue 兜底假通过）
+    - /data/*.json /thumbs/* /img/depth/*  参考素材静态挂载（文件名取自 pose-zh.json）
 
 - 启动前先清理占用该端口的残留实例，避免结果混淆
 - 等待 "Application startup complete" 而非仅看 /docs，确保路由已注册
@@ -259,6 +261,47 @@ def main() -> int:
                 ok = code == 200 and b"<svg" in body
                 checks.append((label, code if ok else -2,
                                f"bytes={len(body)}" if ok else "未返回占位图"))
+
+            # 参考图库 Web（v0.8 单端口托管）：/ref-web 与其深链接、三个素材挂载。
+            # 只断言 200 会被 Vue 的 SPA 兜底（781B 的 index.html）假通过，必须校验内容特征。
+            code, body = _get(BASE + "/ref-web/")
+            ok_ref = code == 200 and b"/ref-web/assets/" in body
+            checks.append(("ref-web 首页（gallery-web 产物）", code if ok_ref else -2,
+                           f"len={len(body)}" if ok_ref else "不是 gallery-web 产物（可能被 Vue 兜底）"))
+            code, body = _get(BASE + "/ref-web/poses")
+            ok_deep = code == 200 and b"/ref-web/assets/" in body
+            checks.append(("ref-web 深链接 /poses", code if ok_deep else -2,
+                           f"len={len(body)}" if ok_deep else "前缀兜底未生效"))
+
+            # 素材挂载：从 pose-zh.json 里取真实文件名，不写死上游数据
+            code, body = _get(BASE + "/data/pose-zh.json")
+            thumb_rel = depth_rel = None
+            entries = []
+            try:
+                if code == 200:
+                    entries = json.loads(body)
+                    for ent in entries:
+                        t = str(ent.get("缩略图") or "")
+                        if not thumb_rel and t.startswith("thumbs/"):
+                            thumb_rel = t
+                        eid = str(ent.get("id") or "")
+                        if not depth_rel and eid.startswith("full_single_"):
+                            depth_rel = f"img/depth/{eid}.webp"
+                        if thumb_rel and depth_rel:
+                            break
+            except Exception:  # noqa: BLE001
+                entries = []
+            checks.append(("/data/pose-zh.json", code if code == 200 else -2, f"entries={len(entries)}"))
+            if thumb_rel:
+                c2, b2 = _get(BASE + "/" + thumb_rel)
+                checks.append((f"/{thumb_rel}", c2 if c2 == 200 and len(b2) > 1000 else -2, f"bytes={len(b2)}"))
+            else:
+                checks.append(("/thumbs 挂载", -3, "pose-zh.json 里没有缩略图字段，跳过"))
+            if depth_rel:
+                c3, b3 = _get(BASE + "/" + depth_rel)
+                checks.append((f"/{depth_rel}", c3 if c3 == 200 and len(b3) > 1000 else -2, f"bytes={len(b3)}"))
+            else:
+                checks.append(("/img/depth 挂载", -3, "pose-zh.json 里没有 full_single_* 条目，跳过"))
 
             # 同步不再为「文件已被删除」的历史条目建记录
             code, body = _get(BASE + "/api/images/sync?page_size=1")
