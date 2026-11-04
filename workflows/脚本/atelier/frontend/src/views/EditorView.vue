@@ -80,6 +80,8 @@ interface EditSession {
   refPaths: string[]
   ref2Ids: number[]
   ref2Paths: string[]
+  ref3Ids: number[]
+  ref3Paths: string[]
   /** 目标图 → 遮罩文件绝对路径；key 形如 id:12 / file:<路径>。 */
   masks: Record<string, string>
   pairMode: 'cross' | 'zip'
@@ -108,6 +110,7 @@ const groups = ref<EditGroup[]>([
   },
   { ids: savedSession.refIds ?? [], paths: savedSession.refPaths ?? [], pickerOpen: false },
   { ids: savedSession.ref2Ids ?? [], paths: savedSession.ref2Paths ?? [], pickerOpen: false },
+  { ids: savedSession.ref3Ids ?? [], paths: savedSession.ref3Paths ?? [], pickerOpen: false },
 ])
 
 const pairMode = ref<'cross' | 'zip'>(savedSession.pairMode ?? 'cross')
@@ -119,7 +122,7 @@ const maskEntries = ref<Record<string, string>>({ ...(savedSession.masks ?? {}) 
 watch(
   [groups, maskEntries, pairMode, seedMode, seed, promptText],
   () => {
-    const [target, ref1, ref2] = groups.value
+    const [target, ref1, ref2, ref3] = groups.value
     writeSession(SESSION_KEY, {
       targetIds: target.ids,
       targetPaths: target.paths,
@@ -127,6 +130,8 @@ watch(
       refPaths: ref1.paths,
       ref2Ids: ref2.ids,
       ref2Paths: ref2.paths,
+      ref3Ids: ref3.ids,
+      ref3Paths: ref3.paths,
       masks: maskEntries.value,
       pairMode: pairMode.value,
       seedMode: seedMode.value,
@@ -139,7 +144,7 @@ watch(
 
 interface NodeInfo {
   loadimages: Array<{ id: string; title: string }>
-  inputs: Array<{ role: 'target' | 'ref1' | 'ref2'; id: string }>
+  inputs: Array<{ role: 'target' | 'ref1' | 'ref2' | 'ref3'; id: string }>
   roles: string[]
   target: string | null
   refs: string[]
@@ -148,7 +153,7 @@ interface NodeInfo {
   max_combos: number
 }
 
-/** 探测工作流的 LoadImage 节点，按数量决定页面显示 1/2/3 列。 */
+/** 探测工作流的 LoadImage 节点，按数量决定页面显示 1/2/3/4 列。 */
 const {
   data: nodeInfo,
   error: nodeError,
@@ -329,26 +334,27 @@ async function onMaskSaved(payload: { dataUrl: string | null }) {
   }
 }
 
-/** 文案与角色：工作流有几个 LoadImage，就显示几列，顺序固定为目标图 → 参考1 → 参考2。 */
+/** 文案与角色：工作流有几个 LoadImage，就显示几列，顺序固定为目标图 → 参考1 → 参考2 → 参考3。 */
 const ROLE_META = {
   target: { label: '目标图', hint: '保留姿势/服装/背景，决定输出尺寸' },
   ref1: { label: '参考图1', hint: '提供要参考/替换的内容' },
   ref2: { label: '参考图2', hint: '第二张参考' },
+  ref3: { label: '参考图3', hint: '只补鞋包/配饰/场景' },
 } as const
-const ROLE_KEYS = ['target', 'ref1', 'ref2'] as const
+const ROLE_KEYS = ['target', 'ref1', 'ref2', 'ref3'] as const
 
 function roleMeta(index: number) {
-  return ROLE_META[ROLE_KEYS[index] ?? 'ref2']
+  return ROLE_META[ROLE_KEYS[index] ?? 'ref3']
 }
 
 /** 未选工作流时按旧版双图布局兜底；选中后按实际 LoadImage 数量显示。 */
 const columnCount = computed(() => {
   const n = nodeInfo.value?.loadimages.length
   if (!n) return 2
-  return Math.min(3, n)
+  return Math.min(4, n)
 })
 
-const tooManyInputs = computed(() => (nodeInfo.value?.loadimages.length ?? 0) > 3)
+const tooManyInputs = computed(() => (nodeInfo.value?.loadimages.length ?? 0) > 4)
 const visibleGroups = computed(() => groups.value.slice(0, columnCount.value))
 const groupCounts = computed(() => groups.value.map((g) => g.ids.length + g.paths.length))
 const activeCounts = computed(() => groupCounts.value.slice(0, columnCount.value))
@@ -422,7 +428,7 @@ async function submit() {
     rememberKey: CONFIRM_PROMPTS.editorSubmit.key,
   })
   if (!ok) return
-  const [target, ref1, ref2] = groups.value
+  const [target, ref1, ref2, ref3] = groups.value
   try {
     const result = await submitAndTrack<{
       success: boolean
@@ -438,6 +444,8 @@ async function submit() {
       ref_paths: columnCount.value >= 2 ? ref1.paths : [],
       ref2_ids: columnCount.value >= 3 ? ref2.ids : [],
       ref2_paths: columnCount.value >= 3 ? ref2.paths : [],
+      ref3_ids: columnCount.value >= 4 ? ref3.ids : [],
+      ref3_paths: columnCount.value >= 4 ? ref3.paths : [],
       // 工作流没有遮罩链路时不提交，避免后端报错
       mask_paths: nodeInfo.value?.mask ? maskPaths.value : [],
       workflow_path: workflowPath.value,
@@ -465,6 +473,9 @@ async function submit() {
           📁 磁盘<template v-if="group.paths.length"> {{ group.paths.length }}</template>
         </button>
       </div>
+      <p v-if="i === 3" class="pick-hint">
+        第 4 张只补鞋包/配饰/场景，不要放第二套完整服装或第二张人像
+      </p>
       <DropZone
         :label="`拖拽 / 粘贴 / 点击添加到${roleMeta(i).label}`"
         @uploaded="onUploaded(i, $event)"
@@ -502,7 +513,7 @@ async function submit() {
           </div>
           <div v-else class="err-text">
             <template v-if="tooManyInputs">
-              这个工作流有 {{ nodeInfo.loadimages.length }} 个 LoadImage，当前最多支持 3 个输入
+              这个工作流有 {{ nodeInfo.loadimages.length }} 个 LoadImage，当前最多支持 4 个输入
             </template>
             <template v-else>
               这个工作流没有可注入的 LoadImage，请换一个图像编辑工作流
@@ -523,7 +534,7 @@ async function submit() {
         <div v-else-if="probing" class="hint">探测工作流中…</div>
         <div v-else-if="nodeError" class="err-text">{{ nodeError.message }}</div>
         <div v-else-if="nodeInfo && !nodeInfo.mask" class="hint">
-          该工作流没有遮罩链路（三图参考工作流不支持遮罩）
+          该工作流没有遮罩链路（参考类工作流不支持遮罩）
         </div>
         <template v-else-if="nodeInfo">
           <div class="hint">白/不透明 = 要改；黑/透明 = 保留；不配 = 整图重绘</div>
@@ -747,6 +758,16 @@ async function submit() {
 .picker-head .btn {
   margin-left: auto;
 }
+
+.pick-hint {
+  margin: 0;
+  padding: 4px var(--gap);
+  border-bottom: 1px solid var(--border);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
 .panel {
   width: 340px;
   flex: none;

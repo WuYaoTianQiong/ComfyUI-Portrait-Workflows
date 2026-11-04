@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
+import { useRouter } from 'vue-router'
 
 import JustifiedGrid from '../components/JustifiedGrid.vue'
 import Pager from '../components/Pager.vue'
@@ -10,11 +11,13 @@ import {
   listReferenceItems,
   listReferenceLibraries,
   poseCodeOf,
+  referenceImageUrl,
   type ReferenceFacetValue,
   type ReferenceItem,
   type ReferenceItemPage,
   type ReferenceLibraryStats,
 } from '../api/reference'
+import { useGenerate } from '../composables/useGenerate'
 import { confirmDialog } from '../utils/naive'
 
 /**
@@ -489,6 +492,118 @@ function captionMeta(item: ReferenceItem): string {
 }
 
 // ---------------------------------------------------------------------------
+// 出图面板（M2 三图 / M2.5 第 4 张）
+// ---------------------------------------------------------------------------
+
+type CoreSlot = 'portrait' | 'costume' | 'pose'
+
+const CORE_SLOTS: Array<{ key: CoreSlot; label: string; empty: string }> = [
+  { key: 'portrait', label: '人像', empty: '在左侧人像库点「选」' },
+  { key: 'costume', label: '服装', empty: '在左侧服装库点「选」' },
+  { key: 'pose', label: '姿势', empty: '在左侧姿势库点「选」' },
+]
+
+const router = useRouter()
+const { busy, error: submitError, submitAndTrack } = useGenerate()
+
+const picks = ref<Record<CoreSlot, ReferenceItem | null>>({
+  portrait: null,
+  costume: null,
+  pose: null,
+})
+const extraPick = ref<ReferenceItem | null>(null)
+
+const stylePreset = ref<'realistic' | 'none'>('realistic')
+const promptSuffix = ref('')
+const seed = ref(100000)
+const promptPreview = ref('')
+
+interface RecipeResponse {
+  success: boolean
+  job_id?: number | null
+  total?: number
+  prompt: string
+}
+
+function coreSlotOf(item: ReferenceItem): CoreSlot | '' {
+  if (item.library === 'portrait') return 'portrait'
+  if (item.library === 'costume') return 'costume'
+  if (item.library === 'pose') return 'pose'
+  return ''
+}
+
+function sameItem(a: ReferenceItem | null, b: ReferenceItem): boolean {
+  return !!a && a.id === b.id && a.library === b.library
+}
+
+function isCorePicked(item: ReferenceItem): boolean {
+  const slot = coreSlotOf(item)
+  return slot ? sameItem(picks.value[slot], item) : false
+}
+
+function toggleCore(item: ReferenceItem) {
+  const slot = coreSlotOf(item)
+  if (!slot || item.remote) return
+  picks.value = {
+    ...picks.value,
+    [slot]: sameItem(picks.value[slot], item) ? null : item,
+  }
+}
+
+function isExtraPicked(item: ReferenceItem): boolean {
+  return sameItem(extraPick.value, item)
+}
+
+function toggleExtra(item: ReferenceItem) {
+  if (item.remote) return
+  extraPick.value = sameItem(extraPick.value, item) ? null : item
+}
+
+function clearSlot(slot: CoreSlot) {
+  picks.value = { ...picks.value, [slot]: null }
+}
+
+function slotOf(slot: CoreSlot): ReferenceItem | null {
+  return picks.value[slot]
+}
+
+const canGenerate = computed(
+  () => !busy.value && CORE_SLOTS.every((slot) => !!picks.value[slot.key]),
+)
+
+const extraNode = computed(() => (extraPick.value ? extraPick.value.id : ''))
+
+async function submitRecipe(dryRun: boolean) {
+  if (!canGenerate.value) return
+  promptPreview.value = ''
+  const portrait = picks.value.portrait
+  const costume = picks.value.costume
+  const pose = picks.value.pose
+  if (!portrait || !costume || !pose) return
+  try {
+    const result = await submitAndTrack<RecipeResponse>('/api/reference/recipes', {
+      portrait_id: portrait.id,
+      costume_id: costume.id,
+      pose_id: pose.id,
+      extra_library: extraPick.value?.library ?? '',
+      extra_id: extraNode.value,
+      style: stylePreset.value,
+      prompt_suffix: promptSuffix.value.trim(),
+      seed: seed.value,
+      dry_run: dryRun,
+    })
+    if (dryRun) {
+      promptPreview.value = result.prompt
+      return
+    }
+    // 出图后直接去任务中心看进度；归档完成后画廊可见
+    router.push({ name: 'jobs' })
+  } catch {
+    // submitAndTrack 已把可读错误写进 submitError，面板直接展示
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 滚动容器
 // ---------------------------------------------------------------------------
 
@@ -597,7 +712,8 @@ const gridEl = ref<HTMLElement | null>(null)
       </div>
     </div>
 
-    <div ref="gridEl" class="grid-scroll">
+    <div class="work-area">
+      <div ref="gridEl" class="grid-scroll">
       <QueryState
         :loading="isFetching && !items.length"
         :error="isError ? error : null"
@@ -674,6 +790,29 @@ const gridEl = ref<HTMLElement | null>(null)
                     ›
                   </button>
                 </div>
+
+                <div class="pick-actions" @click.stop>
+                  <button
+                    v-if="coreSlotOf(displayItem(item))"
+                    class="mini"
+                    :class="{ active: isCorePicked(displayItem(item)) }"
+                    :title="`选为${
+                      CORE_SLOTS.find((s) => s.key === coreSlotOf(displayItem(item)))?.label ?? ''
+                    }参考`"
+                    @click="toggleCore(displayItem(item))"
+                  >
+                    {{ isCorePicked(displayItem(item)) ? '已选' : '选' }}
+                  </button>
+                  <button
+                    class="mini"
+                    :class="{ active: isExtraPicked(displayItem(item)) }"
+                    :disabled="displayItem(item).remote"
+                    title="选为第 4 张（只补鞋包/配饰/场景）"
+                    @click="toggleExtra(displayItem(item))"
+                  >
+                    {{ isExtraPicked(displayItem(item)) ? '4✓' : '4' }}
+                  </button>
+                </div>
               </div>
 
               <div class="caption">
@@ -686,6 +825,86 @@ const gridEl = ref<HTMLElement | null>(null)
           </template>
         </JustifiedGrid>
       </QueryState>
+      </div>
+
+      <aside class="gen-panel">
+        <div class="panel-head">
+          <span>出图</span>
+          <span class="panel-sub">三图；第 4 张可选</span>
+        </div>
+
+        <div v-for="slot in CORE_SLOTS" :key="slot.key" class="slot">
+          <div class="slot-head">
+            <span class="slot-label">{{ slot.label }}</span>
+            <button v-if="slotOf(slot.key)" class="btn btn-sm" @click="clearSlot(slot.key)">
+              清除
+            </button>
+          </div>
+          <div v-if="slotOf(slot.key)" class="slot-picked">
+            <img :src="referenceImageUrl(slotOf(slot.key)!, 'thumb')" :alt="slot.label" loading="lazy" />
+            <div class="slot-info">
+              <span class="slot-name" :title="slotOf(slot.key)!.name">
+                {{ slotOf(slot.key)!.name || slotOf(slot.key)!.id }}
+              </span>
+              <span class="slot-meta">{{ captionMeta(slotOf(slot.key)!) }}</span>
+            </div>
+          </div>
+          <div v-else class="slot-empty">{{ slot.empty }}</div>
+        </div>
+
+        <div class="slot">
+          <div class="slot-head">
+            <span class="slot-label">第 4 张</span>
+            <button v-if="extraPick" class="btn btn-sm" @click="extraPick = null">清除</button>
+          </div>
+          <div v-if="extraPick" class="slot-picked">
+            <img :src="referenceImageUrl(extraPick, 'thumb')" alt="第 4 张" loading="lazy" />
+            <div class="slot-info">
+              <span class="slot-name" :title="extraPick.name">{{ extraPick.name || extraPick.id }}</span>
+              <span class="slot-meta">{{ captionMeta(extraPick) }}</span>
+            </div>
+          </div>
+          <div v-else class="slot-empty">可选：在左侧任一库点「4」</div>
+          <p class="slot-hint">
+            第 4 张只补鞋包/配饰/场景，不要放第二套完整服装或第二张人像
+          </p>
+        </div>
+
+        <label class="field">
+          <span>画风</span>
+          <select v-model="stylePreset">
+            <option value="realistic">写实人像写真</option>
+            <option value="none">无预设（跟随参考图）</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>补充提示词</span>
+          <textarea
+            v-model="promptSuffix"
+            rows="3"
+            spellcheck="false"
+            placeholder="可选：补充服装细节、场景、光线…"
+          />
+        </label>
+
+        <label class="field">
+          <span>种子</span>
+          <input v-model.number="seed" type="number" class="seed-input" />
+        </label>
+
+        <div class="panel-actions">
+          <button class="btn btn-sm" :disabled="!canGenerate" @click="submitRecipe(true)">
+            预览提示词
+          </button>
+          <button class="btn btn-sm primary" :disabled="!canGenerate" @click="submitRecipe(false)">
+            {{ busy ? '提交中…' : '开始出图' }}
+          </button>
+        </div>
+
+        <div v-if="submitError" class="panel-error">{{ submitError }}</div>
+        <pre v-if="promptPreview" class="prompt-preview">{{ promptPreview }}</pre>
+      </aside>
     </div>
 
     <footer class="foot">
@@ -936,11 +1155,160 @@ const gridEl = ref<HTMLElement | null>(null)
   opacity: 0.6;
 }
 
+.work-area {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .grid-scroll {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: var(--gap) var(--gap-lg) var(--gap-lg);
+}
+
+.gen-panel {
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap);
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs);
+  font-weight: 700;
+}
+
+.panel-sub {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  opacity: 0.66;
+}
+
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: var(--gap-xs);
+  border-bottom: 1px solid var(--border);
+}
+
+.slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slot-label {
+  font-size: var(--fs-xs);
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.slot-picked {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.slot-picked img {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.slot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.slot-name {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot-meta {
+  font-size: var(--fs-xs);
+  opacity: 0.62;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot-empty {
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  opacity: 0.66;
+}
+
+.slot-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--warn);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  opacity: 0.9;
+}
+
+.field select,
+.field textarea,
+.field input {
+  font-size: var(--fs-sm);
+}
+
+.panel-actions {
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.panel-actions .btn {
+  flex: 1;
+}
+
+.panel-error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
+.prompt-preview {
+  margin: 0;
+  padding: var(--gap-sm);
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .card {
@@ -1069,6 +1437,17 @@ const gridEl = ref<HTMLElement | null>(null)
   padding: 0 5px;
 }
 
+.pick-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(13, 17, 23, 0.78);
+}
+
 .caption {
   display: flex;
   flex-direction: column;
@@ -1134,6 +1513,17 @@ const gridEl = ref<HTMLElement | null>(null)
   .row-label,
   .facet-label {
     width: 56px;
+  }
+
+  .work-area {
+    flex-direction: column;
+  }
+
+  .gen-panel {
+    width: auto;
+    max-height: 45%;
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 }
 </style>
