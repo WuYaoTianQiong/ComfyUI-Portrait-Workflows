@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { isNsfwCostume, isNsfwPose } from '@/api/gallery'
+import { fetchHistory } from '@/api/history'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,7 +14,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { idbRead, idbWrite } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
-import { durableImage, snapshotGeneration } from '@/lib/generationSnapshot'
+import { snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
 import {
   buildRecipePrompt,
@@ -43,7 +44,8 @@ import type {
 
 const CFG_KEY = 'pose_atlas_api_config_v3'
 const RECIPE_KEY = 'pose_atlas_recipe_v3'
-const HISTORY_KEY = 'pose_atlas_history_v3'
+// 仅保留常量供旧记录导出复用同一 key；本模块不再读写该 IndexedDB 历史。
+export const HISTORY_KEY = 'pose_atlas_history_v3'
 const TASK_KEY = 'pose_atlas_active_task_v1'
 type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
 const SAFE_MODE_KEY = 'pose_atlas_safe_mode_v1'
@@ -200,9 +202,7 @@ interface StudioContextValue {
   updateProviderConfig: (provider: ImageProviderId, patch: Partial<ProviderEndpointConfig>) => void
 
   updateComfyUiParams: (patch: Partial<ComfyUiParams>) => void
-  addHistory: (item: Omit<GenerationHistoryItem, 'id' | 'createdAt'>) => void
-  removeHistoryItem: (id: string) => void
-  clearHistory: () => void
+
 }
 
 const StudioContext = createContext<StudioContextValue | null>(null)
@@ -233,14 +233,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
   })
 
-  const [history, setHistory] = useState<GenerationHistoryItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_KEY)
-      return raw ? JSON.parse(raw) : []
-    } catch {
-      return []
-    }
-  })
+  // 生成记录改读后端画廊（GET /api/images）；这里是内存态，不再写 IndexedDB/localStorage。
+  const [history, setHistory] = useState<GenerationHistoryItem[]>([])
 
   const [safeMode, setSafeMode] = useState<boolean>(() => {
     try {
@@ -256,15 +250,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   // 提升到根部 Provider 的生成状态，路由切换不会卸载或中断
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string>(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_KEY)
-      const list = raw ? JSON.parse(raw) : []
-      return list[0]?.imageUrl || ''
-    } catch {
-      return ''
-    }
-  })
+  // 初始为空；IDB 恢复完成后异步取后端最新一条历史作为初始预览。
+  const [previewUrl, setPreviewUrl] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingModel, setGeneratingModel] = useState('')
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null)
@@ -273,18 +260,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [activeTask, setActiveTask] = useState<ActiveTask | null>(null)
   const activeTaskRef = useRef<ActiveTask | null>(null)
   const trackingRef = useRef<AbortController | null>(null)
-  const historyRef = useRef(history)
-  const historyWrites = useRef<Promise<void>>(Promise.resolve())
   const [idbHydrated, setIdbHydrated] = useState(false)
 
-  // 从 IndexedDB 异步恢复大容量历史记录与含附图的配方
+  // 从 IndexedDB 异步恢复含附图的配方与未决任务（历史记录不再走 IDB）
   useEffect(() => {
     let active = true
     Promise.all([
       idbRead<RecipeState>(RECIPE_KEY),
-      idbRead<GenerationHistoryItem[]>(HISTORY_KEY),
       idbRead<ActiveTask | null>(TASK_KEY),
-    ]).then(([savedRecipe, savedHistory, savedTask]) => {
+    ]).then(([savedRecipe, savedTask]) => {
       if (!active) return
       if (savedRecipe) {
         if (savedRecipe.pose?.useDepth !== undefined) {
@@ -299,11 +283,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           extraImages: Array.isArray(savedRecipe.extraImages) ? savedRecipe.extraImages : [],
         })
       }
-      if (Array.isArray(savedHistory)) {
-        historyRef.current = savedHistory
-        setHistory(savedHistory)
-        setPreviewUrl((prev) => prev || savedHistory[0]?.imageUrl || '')
-      }
       activeTaskRef.current = savedTask || null
       setActiveTask(savedTask || null)
       setIdbHydrated(true)
@@ -312,6 +291,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       active = false
     }
   }, [])
+
+  // IDB 恢复后异步加载后端生成记录。失败只提示，不阻塞图库与合成台。
+  useEffect(() => {
+    if (!idbHydrated) return
+    let active = true
+    fetchHistory({ page: 1, pageSize: 30 })
+      .then((items) => {
+        if (!active) return
+        setHistory(items)
+        // 已有生成结果时保留当前预览，否则展示后端最新一条。
+        setPreviewUrl((prev) => prev || items[0]?.imageUrl || '')
+      })
+      .catch((error: unknown) => {
+        if (!active) return
+        toast.error(error instanceof Error ? error.message : '加载生成记录失败：未知错误')
+      })
+    return () => {
+      active = false
+    }
+  }, [idbHydrated])
 
   useEffect(() => {
     if (!idbHydrated) return
@@ -514,25 +513,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setApiConfig((prev) => ({ ...prev, comfyuiParams: { ...prev.comfyuiParams, ...patch } }))
   }
 
-  const persistHistory = (update: (current: GenerationHistoryItem[]) => GenerationHistoryItem[]) => {
-    const write = historyWrites.current.catch(() => {}).then(async () => {
-      const next = update(historyRef.current)
-      await idbWrite(HISTORY_KEY, next)
-      historyRef.current = next
-      setHistory(next)
-    })
-    historyWrites.current = write
-    return write
-  }
-  const addHistory = (item: Omit<GenerationHistoryItem, 'id' | 'createdAt'>) => {
-    void persistHistory((current) => [{ ...item, id: crypto.randomUUID(), createdAt: Date.now() }, ...current].slice(0, 30)).catch(() => toast.error('历史记录保存失败'))
-  }
-  const removeHistoryItem = (id: string) => {
-    void persistHistory((current) => current.filter((x) => x.id !== id)).then(() => toast.success('已删除该条记录')).catch(() => toast.error('删除失败'))
-  }
-  const clearHistory = () => {
-    void persistHistory(() => []).then(() => { localStorage.removeItem(HISTORY_KEY); toast.success('已清空记录') }).catch(() => toast.error('清空记录失败'))
-  }
 
   const refreshStitchPreview = async () => {
     try {
@@ -549,16 +529,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     activeTaskRef.current = value
     setActiveTask(value)
   }
-  const completeGeneration = async (result: {imageUrl: string; modelUsed: string; providerUsed: ImageProviderId}, record: ActiveTask, signal: AbortSignal) => {
+  const completeGeneration = async (result: {imageUrl: string; modelUsed: string; providerUsed: ImageProviderId}, signal: AbortSignal) => {
     signal.throwIfAborted()
-    const imageUrl = await durableImage(result.imageUrl)
-    signal.throwIfAborted()
-    setPreviewUrl(imageUrl)
-    const id = record.task ? `comfy:${record.task.baseUrl}:${record.task.promptId}` : crypto.randomUUID()
-    await persistHistory((current) => {
-      signal.throwIfAborted()
-      return [{ id, createdAt: Date.now(), imageUrl, provider: result.providerUsed, model: result.modelUsed, prompt: record.prompt, recipeSummary: record.summary, snapshot: record.snapshot }, ...current.filter((x) => x.id !== id)].slice(0, 30)
-    })
+    // 结果图直接用后端返回的同源 URL（/api/media/image?...），不再转 base64；
+    // 生成记录由后端画廊提供，这里不再写本地历史。
+    setPreviewUrl(result.imageUrl)
     signal.throwIfAborted()
     await saveActive(null)
     toast.success('角色图已完成并保存')
@@ -574,7 +549,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     try {
       const result = await resumeComfyTask({ task: record.task, apiKey: apiConfig.providers.comfyui.apiKey, timeoutSec: apiConfig.comfyuiParams.timeoutSec, onProgress: setGenerationProgress, signal: controller.signal })
       controller.signal.throwIfAborted()
-      await completeGeneration(result, record, controller.signal)
+      await completeGeneration(result, controller.signal)
     } catch (e) {
       if (e instanceof ComfySubmissionRejectedError || (e instanceof ComfyTaskError && e.reason === 'failed')) { try { await saveActive(null) } catch { toast.error('任务记录清除失败') } }
       if (!controller.signal.aborted) setGenerationError(e instanceof Error ? e.message : '无法确认任务状态，记录已保留')
@@ -633,7 +608,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         },
       })
       controller.signal.throwIfAborted()
-      await completeGeneration(result, record, controller.signal)
+      await completeGeneration(result, controller.signal)
     } catch (e) {
       if (e instanceof ComfySubmissionRejectedError || (e instanceof ComfyTaskError && e.reason === 'failed')) {
         try { await saveActive(null) } catch { toast.error('任务失败记录未能清除，请停止跟踪后重试') }
@@ -684,9 +659,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         updateProviderConfig,
 
         updateComfyUiParams,
-        addHistory,
-        removeHistoryItem,
-        clearHistory,
+
       }}
     >
       {children}

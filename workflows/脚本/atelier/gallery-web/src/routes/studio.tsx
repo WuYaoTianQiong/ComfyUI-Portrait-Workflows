@@ -22,7 +22,7 @@ import {
   ShirtIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
-  Trash2Icon,
+
   UserRoundIcon,
   XIcon,
 } from 'lucide-react'
@@ -93,8 +93,7 @@ function StudioPage() {
 
     updateComfyUiParams,
     randomizeRecipe,
-    removeHistoryItem,
-    clearHistory,
+
   } = useStudio()
   const qc = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1245,17 +1244,11 @@ function StudioPage() {
         </div>
       </div>
 
-      {/* 生成历史记录 */}
+      {/* 生成历史记录：来自 atelier 画廊（后端 GET /api/images），只读展示 */}
       {history.length > 0 && (
         <Section
-          title={`生成记录 (${history.length})`}
+          title={`来自 atelier 画廊的历史 (${history.length})`}
           className="grid-cols-2 @lg/section:grid-cols-3 @3xl/section:grid-cols-4"
-          actions={
-            <Button variant="ghost" size="sm" onClick={clearHistory}>
-              <Trash2Icon className="size-3.5" />
-              清空
-            </Button>
-          }
         >
           {history.map((h) => (
             <div
@@ -1263,27 +1256,24 @@ function StudioPage() {
               className="group flex flex-col justify-between overflow-hidden rounded-2xl bg-background p-2"
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-xl bg-muted">
-                <button type="button" aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
-                <img
-                  src={h.imageUrl}
-                  alt={h.recipeSummary}
-                  className="h-full w-full object-cover transition group-hover:scale-105"
-                />
-                <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
-                  {h.model}
-                </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeHistoryItem(h.id)
-                  }}
-                  title="删除此记录"
-                  className="absolute top-1.5 right-1.5 rounded-full bg-black/65 p-1 text-white opacity-85 transition hover:bg-destructive hover:opacity-100"
-                >
-                  <XIcon className="size-3" />
-                </button>
+                {h.imageUrl ? (
+                  <button type="button" aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
+                    <img
+                      src={h.imageUrl}
+                      alt={h.recipeSummary}
+                      className="h-full w-full object-cover transition group-hover:scale-105"
+                    />
+                  </button>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center px-2 text-center">
+                    <span className="text-[11px] text-muted-foreground">图片不可用</span>
+                  </div>
+                )}
+                {h.model && (
+                  <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
+                    {h.model}
+                  </span>
+                )}
               </div>
 
               <div className="mt-2 space-y-1.5 px-0.5">
@@ -1299,13 +1289,19 @@ function StudioPage() {
                   >
                     复用词
                   </button>
-                  <a
-                    href={h.imageUrl}
-                    download={`character-${h.id}.png`}
-                    className="flex h-7 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-medium whitespace-nowrap text-primary transition hover:bg-primary/20"
-                  >
-                    下载
-                  </a>
+                  {h.imageUrl ? (
+                    <a
+                      href={h.imageUrl}
+                      download={`character-${h.id}.png`}
+                      className="flex h-7 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-medium whitespace-nowrap text-primary transition hover:bg-primary/20"
+                    >
+                      下载
+                    </a>
+                  ) : (
+                    <span className="flex h-7 items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-muted-foreground">
+                      下载
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

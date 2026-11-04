@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { ActivityIcon, RotateCcwIcon, ScanSearchIcon, SparklesIcon } from 'lucide-react'
-import { useState } from 'react'
+import { ActivityIcon, DownloadIcon, RotateCcwIcon, ScanSearchIcon, SparklesIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Field, Section } from '@/components/common/FormSection'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { exportLegacyHistory, readLegacyHistory } from '@/lib/legacyHistoryExport'
 import { detectComfyUi, PROVIDER_META, testComfyConnection } from '@/services/aiGenerator'
 import { useStudio } from '@/store/studioStore'
 
@@ -19,8 +20,50 @@ const COMFY_META = PROVIDER_META.comfyui
 function SettingsPage() {
   const { apiConfig, updateProviderConfig } = useStudio()
   const [testingComfy, setTestingComfy] = useState(false)
+  const [legacyCount, setLegacyCount] = useState<number | null>(null)
+  const [exportingLegacy, setExportingLegacy] = useState(false)
 
   const pCfg = apiConfig.providers.comfyui
+
+  // 进页时只读检查一次旧记录数量，用于决定导出按钮是否可用。
+  useEffect(() => {
+    let active = true
+    readLegacyHistory()
+      .then((items) => {
+        if (active) setLegacyCount(items.length)
+      })
+      .catch(() => {
+        if (active) setLegacyCount(0)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const handleExportLegacy = async () => {
+    if (exportingLegacy || legacyCount === null || legacyCount === 0) return
+    setExportingLegacy(true)
+    try {
+      const summary = await exportLegacyHistory()
+      setLegacyCount(summary.count)
+      if (summary.count === 0) {
+        toast.info('未发现旧生成记录')
+        return
+      }
+      if (summary.failures.length === 0) {
+        toast.success(`已导出 ${summary.count} 条旧生成记录：JSON 1 个、PNG 成功 ${summary.pngNames.length} 张、失败 0 张`)
+      } else {
+        toast.warning(
+          `已导出 ${summary.count} 条旧生成记录：PNG 成功 ${summary.pngNames.length} 张、失败 ${summary.failures.length} 张；请允许浏览器下载后重试失败项。`,
+          { duration: 10000 },
+        )
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? `导出失败：${e.message}` : '导出失败', { duration: 10000 })
+    } finally {
+      setExportingLegacy(false)
+    }
+  }
 
   const handleTestComfy = async () => {
     setTestingComfy(true)
@@ -107,6 +150,31 @@ function SettingsPage() {
             placeholder={COMFY_META.defaultBaseUrl}
           />
         </Field>
+      </Section>
+
+      {/* 旧版 IndexedDB 生成记录导出：只读，不删除原始数据 */}
+      <Section
+        title="旧生成记录导出"
+        desc="从本浏览器 IndexedDB 只读导出旧生成记录，生成 1 个 JSON 并逐张下载 PNG；导出不会删除或清空原始数据。"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportLegacy}
+            disabled={exportingLegacy || legacyCount === null || legacyCount === 0}
+          >
+            <DownloadIcon className="size-3.5" />
+            {exportingLegacy ? '导出中…' : '导出旧生成记录'}
+          </Button>
+        }
+      >
+        <p className={legacyCount === 0 ? 'text-sm font-medium' : 'text-sm text-muted-foreground'}>
+          {legacyCount === null
+            ? '正在检查旧生成记录…'
+            : legacyCount === 0
+              ? '未发现旧生成记录'
+              : `共发现 ${legacyCount} 条旧生成记录。导出包含 1 个 JSON 文件，并逐张下载 PNG。`}
+        </p>
       </Section>
 
       <p className="text-sm text-muted-foreground">
