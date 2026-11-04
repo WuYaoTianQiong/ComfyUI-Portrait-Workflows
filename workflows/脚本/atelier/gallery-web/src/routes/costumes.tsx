@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { referenceImageUrl } from '@/lib/recipeImages'
-import { CHARADB_NOTICE_URL } from '@/lib/charadb'
+
 import { useStudio } from '@/store/studioStore'
 
 export const Route = createFileRoute('/costumes')({
@@ -103,11 +103,7 @@ function CostumesPage() {
             }}>{value}</Button>
           ))}
         </div>
-        {kind !== '现实' && (
-          <p className="text-xs text-muted-foreground">
-            二次元服装来源：<a className="underline hover:text-foreground" href="https://charadb-2fi.pages.dev/" target="_blank" rel="noopener noreferrer">たき AI · CharaDB</a>（<a className="underline hover:text-foreground" href={CHARADB_NOTICE_URL} target="_blank" rel="noopener noreferrer">使用说明</a>）
-          </p>
-        )}
+
       </div>
 
       {/* 分类筛选药丸 */}
@@ -159,7 +155,7 @@ function CostumesPage() {
             }
             className="shrink-0 rounded-full border border-dashed border-rose-500/40 bg-rose-500/5 px-3.5 py-1.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-500/10 dark:text-rose-400"
           >
-            🔒 解锁 18+ 敏感服装 ({hiddenNsfwCount})
+            解锁 18+ 敏感服装 ({hiddenNsfwCount})
           </button>
         )}
       </div>
@@ -325,7 +321,9 @@ function CostumesPage() {
                       </div>
                       <DialogTitle className="mt-2 text-base leading-snug">{currentItem.服装名称}</DialogTitle>
                       <p className="text-xs text-muted-foreground">来源：{currentItem.来源 || 'ギア（@giaaibusi）'}</p>
-                      {currentItem.source === 'charadb' && <a className="text-xs underline" href={CHARADB_NOTICE_URL} target="_blank" rel="noopener noreferrer">图片仅作参考，禁止真人、未成年人及再分发；查看原作者条件</a>}
+                      {currentItem.source === 'charadb' && (
+                        <p className="text-xs text-muted-foreground">二次元素材 · 仅作参考，请勿再分发</p>
+                      )}
                     </DialogHeader>
 
                     <div>

@@ -26,6 +26,16 @@
 - `index.html`：移除外站 canonical / sitemap / og / JSON-LD 与第三方统计脚本，标题与描述改成"本地 ComfyUI 出图"口径；页面标记 `noindex`。
 - `package.json`：新增 `build:prod`，先清空 `dist/` 再按 `/ref-web` 基路径构建。
 
+## 许可证与署名
+
+- **代码许可**：上游代码为 MIT 许可，版权行为 `Copyright (c) 2026 Anhao`，许可全文
+  （含上游的「适用范围说明 / Scope」段）见本目录 `LICENSE`。该文件与上游 LICENSE
+  逐字节一致，不得改写版权行或替换许可文本。
+- **素材署名**：姿势 / 现实服装 / 人像素材著作权归原作者 ギア（@giaaibusi）；
+  CharaDB 图片仅作参考、禁止再分发。完整授权边界与来源见本目录 `NOTICE`。
+- **约束**：UI 中的上游链接（侧边栏、页脚、关于页等）可以移除或替换为本地说明，
+  但 `LICENSE` 与 `NOTICE` 必须保留，且随源码一起提交；MIT 要求副本保留版权与许可声明。
+
 ## 构建
 
 ```powershell

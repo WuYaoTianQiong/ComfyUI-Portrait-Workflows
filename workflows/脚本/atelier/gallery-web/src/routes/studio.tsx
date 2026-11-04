@@ -29,6 +29,11 @@ import {
 import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
+import {
+  fetchWorkflowCatalog,
+  fetchWorkflowContent,
+  type WorkflowCatalogItem,
+} from '@/api/workflows'
 import { Field, Section } from '@/components/common/FormSection'
 import { WorkflowParameters } from '@/components/studio/WorkflowParameters'
 import { applyWorkflowOverrides, validateReferenceCombinations, workflowIdentity } from '@/lib/comfyWorkflowParameters'
@@ -44,9 +49,7 @@ import {
   autoDetectComfyMappings,
   buildRecipePrompt,
   type ComfyCheckResult,
-  type ComfyPresetId,
   checkComfyWorkflow,
-  COMFYUI_WORKFLOW_TEMPLATES,
   detectComfyUi,
   fileToDataUrl,
   fetchComfyObjectInfo,
@@ -57,9 +60,7 @@ import {
 } from '@/services/aiGenerator'
 import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { useStudio } from '@/store/studioStore'
-import type {
-  ComfyUiParams,
-} from '@/types/gallery'
+
 
 export const Route = createFileRoute('/studio')({
   staticData: { title: 'AI 合成台' },
@@ -120,24 +121,96 @@ function StudioPage() {
   const [comfyCheck, setComfyCheck] = useState<(ComfyCheckResult & { info?: string }) | null>(null)
   const [checkingComfy, setCheckingComfy] = useState(false)
 
+  // 本机工作流列表（/api/workflows）：选中后再按需加载 JSON 内容。
+  const [workflowList, setWorkflowList] = useState<WorkflowCatalogItem[]>([])
+  const [workflowListLoading, setWorkflowListLoading] = useState(true)
+  const [workflowListError, setWorkflowListError] = useState('')
+  const [loadingWorkflowPath, setLoadingWorkflowPath] = useState<string | null>(null)
+  const autoSelectingRef = useRef(false)
+  // 列表可能晚于用户操作完成，用 ref 读取最新的配置，避免异步闭包拿到旧值。
+  const apiConfigRef = useRef(apiConfig)
+  useEffect(() => {
+    apiConfigRef.current = apiConfig
+  }, [apiConfig])
+
+  // 当前选中工作流在目录里的元信息（来源 / 相对路径 / 图片槽位数），用于下拉下方的说明行
+  const selectedWorkflow = workflowList.find(
+    (w) => w.path === apiConfig.comfyuiParams.workflowPreset
+  )
+
   const parsedComfyNodes = useMemo(
     () => parseComfyWorkflowNodes(apiConfig.comfyuiParams.workflowJson),
     [apiConfig.comfyuiParams.workflowJson]
   )
 
-  const handleSelectComfyPreset = (preset: ComfyUiParams['workflowPreset']) => {
+  /** 读取一个本机工作流并写入 comfyuiParams；失败时保留当前配置，不把下拉置空。 */
+  const loadWorkflowIntoConfig = async (path: string, fallbackName?: string): Promise<boolean> => {
+    setLoadingWorkflowPath(path)
     setComfyCheck(null)
-    if (preset === 'custom') {
+    try {
+      const data = await fetchWorkflowContent(path)
+      const workflowJson = JSON.stringify(data.content, null, 2)
+      updateComfyUiParams({
+        workflowPreset: path,
+        workflowJson,
+        ...autoDetectComfyMappings(workflowJson),
+      })
+      toast.success(`已加载工作流：${data.name || fallbackName || path}`)
+      return true
+    } catch (e) {
+      toast.error(`加载工作流失败：${e instanceof Error ? e.message : '未知错误'}`)
+      return false
+    } finally {
+      setLoadingWorkflowPath(null)
+    }
+  }
+
+  /** 拉取本机工作流列表；若当前选中项已失效（旧内置模板/文件被删），自动回落到默认工作流。 */
+  const loadWorkflowList = async () => {
+    setWorkflowListLoading(true)
+    setWorkflowListError('')
+    try {
+      // 合成台只看"能塞参考图"的工作流（参考库专用 + 画廊旧版 + 库根里的编辑类），
+      // 文生图 / 超分这类会被后端过滤掉，避免选中后才报「工作流与本机不匹配」。
+      const data = await fetchWorkflowCatalog('studio')
+      setWorkflowList(data.workflows)
+
+      const current = apiConfigRef.current.comfyuiParams.workflowPreset
+      const usable = current === 'custom' || data.workflows.some((w) => w.path === current)
+      if (!usable && !autoSelectingRef.current) {
+        // 优先用后端下发的 default（通常文件名含「文生图」）；它缺失或不在列表中时
+        // 回落到 mtime 最新的第一条，保证下拉始终有可用的选中项。
+        const preferred =
+          data.workflows.find((w) => w.path === data.default) ?? data.workflows[0]
+        if (preferred) {
+          autoSelectingRef.current = true
+          try {
+            await loadWorkflowIntoConfig(preferred.path, preferred.name)
+          } finally {
+            autoSelectingRef.current = false
+          }
+        }
+      }
+    } catch (e) {
+      setWorkflowListError(e instanceof Error ? e.message : '未知错误')
+    } finally {
+      setWorkflowListLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadWorkflowList()
+    // 只在挂载时拉取一次；重试由错误提示里的按钮触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSelectWorkflow = (value: string) => {
+    setComfyCheck(null)
+    if (value === 'custom') {
       updateComfyUiParams({ workflowPreset: 'custom' })
       return
     }
-    const tpl = COMFYUI_WORKFLOW_TEMPLATES[preset]
-    updateComfyUiParams({
-      workflowPreset: preset,
-      workflowJson: JSON.stringify(tpl.workflow, null, 2),
-      ...tpl.defaults,
-    })
-    toast.success(`已切换为：${tpl.label}`)
+    void loadWorkflowIntoConfig(value)
   }
 
   // 自动识别 ComfyUI 地址 + 检测工作流所需节点/模型是否在本机存在
@@ -722,21 +795,24 @@ function StudioPage() {
               </Button>
             }
           >
-            <Field label="工作流模板 (API 格式)">
+            <Field label="工作流 (本机工作流目录)">
                 <div className="space-y-2">
                   <Select
-                    value={apiConfig.comfyuiParams.workflowPreset}
-                    onValueChange={(v) =>
-                      handleSelectComfyPreset(v as ComfyUiParams['workflowPreset'])
-                    }
+                    value={apiConfig.comfyuiParams.workflowPreset || undefined}
+                    onValueChange={handleSelectWorkflow}
+                    disabled={workflowListLoading}
                   >
                     <SelectTrigger className="w-full text-xs">
-                      <SelectValue />
+                      <SelectValue
+                        placeholder={workflowListLoading ? '正在读取本机工作流…' : '选择本机工作流'}
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      {(Object.keys(COMFYUI_WORKFLOW_TEMPLATES) as ComfyPresetId[]).map((key) => (
-                        <SelectItem key={key} value={key} className="text-xs">
-                          {COMFYUI_WORKFLOW_TEMPLATES[key].label}
+                      {workflowList.map((workflow) => (
+                        <SelectItem key={workflow.path} value={workflow.path} className="text-xs">
+                          {workflow.source !== '库根' ? `${workflow.source} · ` : ''}
+                          {workflow.name.replace(/\.api\.json$/i, '').replace(/\.json$/i, '')}
+                          {workflow.image_slots ? `（${workflow.image_slots} 图）` : ''}
                         </SelectItem>
                       ))}
                       <SelectItem value="custom" className="text-xs">
@@ -744,6 +820,50 @@ function StudioPage() {
                       </SelectItem>
                     </SelectContent>
                   </Select>
+                  {workflowListLoading && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <LoaderCircleIcon className="size-3.5 animate-spin" />
+                      正在读取本机工作流列表…
+                    </p>
+                  )}
+                  {!workflowListLoading && workflowListError && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+                      <CircleAlertIcon className="size-3.5 shrink-0" />
+                      <span className="break-all">读取工作流列表失败：{workflowListError}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[11px]"
+                        onClick={() => void loadWorkflowList()}
+                      >
+                        重试
+                      </Button>
+                    </div>
+                  )}
+                  {!workflowListLoading && !workflowListError && workflowList.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      本机库目录中没有可用工作流，可手动导入 .json。
+                    </p>
+                  )}
+                  {loadingWorkflowPath && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <LoaderCircleIcon className="size-3.5 animate-spin" />
+                      正在加载工作流 JSON…
+                    </p>
+                  )}
+                  {selectedWorkflow && (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      {selectedWorkflow.source} · {selectedWorkflow.rel_path} · 图片槽位{' '}
+                      {selectedWorkflow.image_slots}
+                      {selectedWorkflow.image_slots !== 3 && (
+                        <span className="text-amber-500">
+                          {' '}
+                          （不是「人像+服装+姿势」三槽，参考图会多出或缺一张）
+                        </span>
+                      )}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-1.5">
                     <input
                       ref={comfyFileInputRef}

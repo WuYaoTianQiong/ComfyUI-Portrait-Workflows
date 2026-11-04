@@ -8,7 +8,7 @@ import {
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
-  FlameIcon,
+
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
@@ -43,7 +43,7 @@ function PortraitsPage() {
   const [section, setSection] = useState<'' | '正脸参考' | '造型氛围'>('')
   const [hair, setHair] = useState('')
   const [styleName, setStyleName] = useState('all')
-  const [onlyHot, setOnlyHot] = useState(false)
+
   const [query, setQuery] = useState('')
   const [shown, setShown] = useState(60)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
@@ -60,11 +60,10 @@ function PortraitsPage() {
       if (section && item.分区 !== section) return false
       if (hair && item.发长 !== hair) return false
       if (styleName !== 'all' && item.发型名称 !== styleName) return false
-      if (onlyHot && !item.热门) return false
       if (q && !item.检索.toLowerCase().includes(q)) return false
       return true
     })
-  }, [portraits, section, hair, styleName, onlyHot, q])
+  }, [portraits, section, hair, styleName, q])
 
   const currentItem = viewerIndex !== null ? filtered[viewerIndex] : null
 
@@ -83,22 +82,7 @@ function PortraitsPage() {
 
   return (
     <>
-      <PageHeader
-        title="人像颜值库"
-        actions={
-          <Button
-            variant={onlyHot ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => {
-              setOnlyHot((v) => !v)
-              setShown(60)
-            }}
-          >
-            <FlameIcon className="size-3.5 text-orange-500" />
-            Top10 热门
-          </Button>
-        }
-      />
+      <PageHeader title="人像颜值库" />
 
       {/* 分区与发长切换药丸 */}
       <div className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:pb-0">
@@ -186,10 +170,10 @@ function PortraitsPage() {
           }}
         >
           <SelectTrigger className="w-full bg-background">
-            <SelectValue placeholder="全部 51 款日系发型" />
+            <SelectValue placeholder={`全部 ${styleOptions.length} 款日系发型`} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部 51 款日系发型</SelectItem>
+            <SelectItem value="all">全部 {styleOptions.length} 款日系发型</SelectItem>
             {styleOptions.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
@@ -206,7 +190,7 @@ function PortraitsPage() {
             setSection('')
             setHair('')
             setStyleName('all')
-            setOnlyHot(false)
+
             setQuery('')
             setShown(60)
           }}
@@ -245,11 +229,7 @@ function PortraitsPage() {
                       {item.发长}
                     </span>
                   </div>
-                  {item.热门 && (
-                    <span className="absolute right-2 bottom-2 rounded-md bg-orange-500/90 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                      🔥 Top10
-                    </span>
-                  )}
+
                   <button
                     type="button"
                     onClick={(e) => {
@@ -320,7 +300,7 @@ function PortraitsPage() {
                       <div className="flex items-center gap-2">
                         <Badge>{currentItem.分区}</Badge>
                         <Badge variant="outline">{currentItem.发长}</Badge>
-                        {currentItem.热门 && <Badge variant="secondary">🔥 Top10</Badge>}
+
                       </div>
                       <DialogTitle className="mt-2 text-base leading-snug">{currentItem.标题}</DialogTitle>
                     </DialogHeader>

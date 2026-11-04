@@ -3734,6 +3734,21 @@
           "caps": {
             "$ref": "#/components/schemas/WorkflowCaps"
           },
+          "image_slots": {
+            "default": 0,
+            "title": "Image Slots",
+            "type": "integer"
+          },
+          "media_kind": {
+            "default": "image",
+            "title": "Media Kind",
+            "type": "string"
+          },
+          "mtime": {
+            "default": 0.0,
+            "title": "Mtime",
+            "type": "number"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -3751,6 +3766,21 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "rel_path": {
+            "default": "",
+            "title": "Rel Path",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "studio_ready": {
+            "default": false,
+            "title": "Studio Ready",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9534,6 +9564,19 @@
               "title": "Include Video",
               "type": "boolean"
             }
+          },
+          {
+            "description": "all=库根通用工作流；studio=参考图库合成台专用（含参考库专用/画廊旧版，只留能做参考合成的）",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "all=库根通用工作流；studio=参考图库合成台专用（含参考库专用/画廊旧版，只留能做参考合成的）",
+              "pattern": "^(all|studio)$",
+              "title": "Scope",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9559,6 +9602,49 @@
           }
         },
         "summary": "List Workflows",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/workflows/content": {
+      "get": {
+        "description": "只读返回工作流 JSON 内容（统一转换为 ComfyUI API 格式）。\n\n前端「AI 合成台」的下拉框通过它加载本机磁盘上已有的工作流：\n列表只给 path/name，选中后再按需读取内容，避免一次性传输所有 JSON。",
+        "operationId": "get_workflow_content_api_workflows_content_get",
+        "parameters": [
+          {
+            "description": "工作流文件路径，必须位于库的自动扫描目录内",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "工作流文件路径，必须位于库的自动扫描目录内",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workflow Content",
         "tags": [
           "ComfyUI"
         ]

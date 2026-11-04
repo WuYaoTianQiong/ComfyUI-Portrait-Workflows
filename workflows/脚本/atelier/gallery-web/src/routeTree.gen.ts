@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CostumesRouteImport } from './routes/costumes'
-import { Route as GuideRouteImport } from './routes/guide'
 import { Route as PortraitsRouteImport } from './routes/portraits'
 import { Route as PosesRouteImport } from './routes/poses'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -25,11 +24,6 @@ const IndexRoute = IndexRouteImport.update({
 const CostumesRoute = CostumesRouteImport.update({
   id: '/costumes',
   path: '/costumes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GuideRoute = GuideRouteImport.update({
-  id: '/guide',
-  path: '/guide',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PortraitsRoute = PortraitsRouteImport.update({
@@ -56,7 +50,6 @@ const StudioRoute = StudioRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/costumes': typeof CostumesRoute
-  '/guide': typeof GuideRoute
   '/portraits': typeof PortraitsRoute
   '/poses': typeof PosesRoute
   '/settings': typeof SettingsRoute
@@ -65,7 +58,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/costumes': typeof CostumesRoute
-  '/guide': typeof GuideRoute
   '/portraits': typeof PortraitsRoute
   '/poses': typeof PosesRoute
   '/settings': typeof SettingsRoute
@@ -75,7 +67,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/costumes': typeof CostumesRoute
-  '/guide': typeof GuideRoute
   '/portraits': typeof PortraitsRoute
   '/poses': typeof PosesRoute
   '/settings': typeof SettingsRoute
@@ -84,27 +75,13 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/costumes'
-    | '/guide'
-    | '/portraits'
-    | '/poses'
-    | '/settings'
-    | '/studio'
+    '/' | '/costumes' | '/portraits' | '/poses' | '/settings' | '/studio'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/costumes'
-    | '/guide'
-    | '/portraits'
-    | '/poses'
-    | '/settings'
-    | '/studio'
+  to: '/' | '/costumes' | '/portraits' | '/poses' | '/settings' | '/studio'
   id:
     | '__root__'
     | '/'
     | '/costumes'
-    | '/guide'
     | '/portraits'
     | '/poses'
     | '/settings'
@@ -114,7 +91,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CostumesRoute: typeof CostumesRoute
-  GuideRoute: typeof GuideRoute
   PortraitsRoute: typeof PortraitsRoute
   PosesRoute: typeof PosesRoute
   SettingsRoute: typeof SettingsRoute
@@ -135,13 +111,6 @@ declare module '@tanstack/react-router' {
       path: '/costumes'
       fullPath: '/costumes'
       preLoaderRoute: typeof CostumesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/guide': {
-      id: '/guide'
-      path: '/guide'
-      fullPath: '/guide'
-      preLoaderRoute: typeof GuideRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/portraits': {
@@ -178,7 +147,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CostumesRoute: CostumesRoute,
-  GuideRoute: GuideRoute,
   PortraitsRoute: PortraitsRoute,
   PosesRoute: PosesRoute,
   SettingsRoute: SettingsRoute,

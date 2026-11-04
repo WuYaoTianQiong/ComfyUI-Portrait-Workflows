@@ -1,7 +1,7 @@
 import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } from '@/types/gallery'
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
 import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
-import qwen2509ThreeImageWorkflow from '@/workflows/qwen_image_edit_2509_3img.api.json'
+
 
 export interface ProviderModelOption {
   value: string
@@ -301,13 +301,11 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
 
 // ============================================================================
-// 本地 ComfyUI API 工作流模板与节点解析工具
+// 本地 ComfyUI API 工作流节点解析 / 提交工具
 // ============================================================================
 
 type ComfyNode = { class_type: string; inputs: Record<string, any>; _meta?: { title?: string; studio?: { imageRole?: string } } }
 type ComfyWorkflow = Record<string, ComfyNode>
-
-export type ComfyPresetId = 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img'
 
 export interface ComfyNodeMappings {
   promptNodeId: string
@@ -343,139 +341,6 @@ export function comfyCandidateUrls(current = ''): string[] {
     .map((x) => x.replace(/\/+$/, ''))
     .filter(Boolean)
   return Array.from(new Set(list))
-}
-
-function cloneWorkflow<T>(wf: T): T {
-  return JSON.parse(JSON.stringify(wf))
-}
-
-// 双图版：图1 = 人物（含服装），图2 = 姿势（姿势图只送入视觉语言编码器，不作为像素参考）
-function buildQwen2509TwoImage(): ComfyWorkflow {
-  const wf = cloneWorkflow(qwen2509ThreeImageWorkflow) as ComfyWorkflow
-  for (const id of ['2', '22', '23', '25', '27']) delete wf[id]
-  wf['1']._meta = { title: '图1：人物/服装参考 (Person)' }
-  wf['3']._meta = { title: '图2：姿势参考 (Pose)' }
-  for (const id of ['12', '13']) {
-    wf[id].inputs.image2 = ['3', 0]
-    delete wf[id].inputs.image3
-  }
-  wf['14'].inputs.positive = ['24', 0]
-  wf['14'].inputs.negative = ['26', 0]
-  return wf
-}
-
-// 旧版 Qwen-Image 2.1 预设（需要另行安装 2.1 模型；默认已改用本机可用的 Edit 2509）
-function buildQwen21Workflow(threeImages: boolean): ComfyWorkflow {
-  const wf: ComfyWorkflow = {
-    '1': {
-      inputs: { image: 'portrait_ref.png' },
-      class_type: 'LoadImage',
-      _meta: { title: threeImages ? '图1：人像参考 (Portrait)' : '图2：人物/服装参考图 (Person)' },
-    },
-    '4': {
-      inputs: { unet_name: 'image2image/qwen_image_2.1_bf16.safetensors', weight_dtype: 'default' },
-      class_type: 'UNETLoader',
-      _meta: { title: '加载 Qwen Image 2.1 基础模型' },
-    },
-    '5': {
-      inputs: {
-        model: ['4', 0],
-        lora_name: 'qwen2.1/动作编辑VNCCS_QI2_PoseStudioV2_3294845.safetensors',
-        strength_model: 1.0,
-      },
-      class_type: 'LoraLoaderModelOnly',
-      _meta: { title: '加载姿态编辑 LoRA 适配器 (Qwen 2.1 专用)' },
-    },
-    '6': {
-      inputs: { device: 'auto', dtype: 'default', model: ['5', 0] },
-      class_type: 'QwenImage21Cache',
-      _meta: { title: 'Qwen Image 2.1 条件缓存' },
-    },
-    '7': {
-      inputs: { clip_name: 'text_encoders/qwen3vl_8b_bf16.safetensors', type: 'qwen_image', device: 'default' },
-      class_type: 'CLIPLoader',
-      _meta: { title: '加载 Qwen3-VL 8B 编码器' },
-    },
-    '8': {
-      inputs: { vae_name: 'vae/qwen_image_2.1_vae_bf16.safetensors' },
-      class_type: 'VAELoader',
-      _meta: { title: '加载 Qwen Image 2.1 VAE' },
-    },
-    '9': {
-      inputs: {
-        prompt: '',
-        negative_prompt: '',
-        resolution: 1024,
-        clip: ['7', 0],
-        vae: ['8', 0],
-      },
-      class_type: 'TextEncodeQwenImage21',
-      _meta: { title: '正向提示词与多图编码 (Qwen 2.1)' },
-    },
-    '10': {
-      inputs: {
-        seed: 20261031,
-        steps: 25,
-        cfg: 1.0,
-        sampler_name: 'euler',
-        scheduler: 'simple',
-        denoise: 1.0,
-        model: ['6', 0],
-        positive: ['9', 0],
-        negative: ['9', 1],
-        latent_image: ['9', 2],
-      },
-      class_type: 'KSampler',
-      _meta: { title: 'KSampler 采样器' },
-    },
-    '11': {
-      inputs: { samples: ['10', 0], vae: ['8', 0] },
-      class_type: 'VAEDecode',
-      _meta: { title: 'VAE 解码' },
-    },
-    '12': {
-      inputs: { filename_prefix: 'pose_studio/result', images: ['11', 0] },
-      class_type: 'SaveImage',
-      _meta: { title: '保存生成结果' },
-    },
-  }
-  if (threeImages) {
-    wf['2'] = { inputs: { image: 'costume_ref.png' }, class_type: 'LoadImage', _meta: { title: '图2：服装参考 (Costume)' } }
-    wf['3'] = { inputs: { image: 'pose_ref.png' }, class_type: 'LoadImage', _meta: { title: '图3：姿势参考 (Pose)' } }
-    Object.assign(wf['9'].inputs, { 'images.image_1': ['1', 0], 'images.image_2': ['2', 0], 'images.image_3': ['3', 0] })
-  } else {
-    wf['2'] = { inputs: { image: 'pose_reference.png' }, class_type: 'LoadImage', _meta: { title: '图1：姿势参考图 (Pose)' } }
-    Object.assign(wf['9'].inputs, { 'images.image_1': ['2', 0], 'images.image_2': ['1', 0] })
-  }
-  return wf
-}
-
-export const DEFAULT_COMFY_PRESET: ComfyPresetId = 'qwen2509_3img'
-
-export const COMFYUI_WORKFLOW_TEMPLATES: Record<
-  ComfyPresetId,
-  { label: string; workflow: ComfyWorkflow; defaults: ComfyNodeMappings }
-> = {
-  qwen2509_3img: {
-    label: 'Qwen Image Edit 2509 三图合成（人像+服装+姿势）· 推荐',
-    workflow: qwen2509ThreeImageWorkflow as ComfyWorkflow,
-    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', stitchedNodeId: 'none' },
-  },
-  qwen2509_2img: {
-    label: 'Qwen Image Edit 2509 双图姿态迁移（人物+姿势）',
-    workflow: buildQwen2509TwoImage(),
-    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '3', stitchedNodeId: 'none' },
-  },
-  qwen21_3img: {
-    label: 'Qwen-Image 2.1 三图合成（需另装 2.1 模型）',
-    workflow: buildQwen21Workflow(true),
-    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', stitchedNodeId: 'none' },
-  },
-  qwen21_2img: {
-    label: 'Qwen-Image 2.1 双图姿态迁移（需另装 2.1 模型）',
-    workflow: buildQwen21Workflow(false),
-    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '2', stitchedNodeId: 'none' },
-  },
 }
 
 export interface ComfyParsedNodes {

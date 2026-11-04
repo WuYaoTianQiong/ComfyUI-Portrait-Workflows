@@ -303,6 +303,16 @@ class WorkflowParams(BaseModel):
 class WorkflowRow(BaseModel):
     path: str
     name: str
+    #: 相对库根的路径（子目录里的工作流用它在界面上区分同名文件）
+    rel_path: str = ""
+    #: 来源标签：参考库专用 / 画廊本机改版 / 库根
+    source: str = ""
+    mtime: float = 0.0
+    media_kind: str = "image"
+    #: 工作流里的 LoadImage* 槽位数（参考图能塞几张）
+    image_slots: int = 0
+    #: 是否能用于参考图库合成台（有图片槽位 + 有文本编码节点）
+    studio_ready: bool = False
     caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
     params: WorkflowParams | None = None
 

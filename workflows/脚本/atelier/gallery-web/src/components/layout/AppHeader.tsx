@@ -1,5 +1,5 @@
 import { Link, useMatches } from '@tanstack/react-router'
-import { DicesIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react'
+import { ArrowLeftIcon, DicesIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react'
 import { Fragment } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+import { ATELIER_GALLERY_PATH } from '@/lib/atelierLinks'
 import { useStudio } from '@/store/studioStore'
 
 export function AppHeader() {
@@ -43,6 +44,13 @@ export function AppHeader() {
   return (
     <header className="@container/header flex min-h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
       <SidebarTrigger className="-ml-1" />
+      {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
+      <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
+        <a href={ATELIER_GALLERY_PATH} aria-label="返回画室画廊" title="返回画室画廊">
+          <ArrowLeftIcon className="size-4" />
+          <span className="hidden @lg/header:inline">画室画廊</span>
+        </a>
+      </Button>
       <Separator orientation="vertical" className="mr-2 h-4 data-vertical:self-center" />
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList className="flex-nowrap">

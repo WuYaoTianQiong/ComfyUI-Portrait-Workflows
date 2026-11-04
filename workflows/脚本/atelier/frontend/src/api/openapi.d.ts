@@ -1954,6 +1954,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Content
+         * @description 只读返回工作流 JSON 内容（统一转换为 ComfyUI API 格式）。
+         *
+         *     前端「AI 合成台」的下拉框通过它加载本机磁盘上已有的工作流：
+         *     列表只给 path/name，选中后再按需读取内容，避免一次性传输所有 JSON。
+         */
+        get: operations["get_workflow_content_api_workflows_content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3868,11 +3891,41 @@ export interface components {
         /** WorkflowRow */
         WorkflowRow: {
             caps?: components["schemas"]["WorkflowCaps"];
+            /**
+             * Image Slots
+             * @default 0
+             */
+            image_slots: number;
+            /**
+             * Media Kind
+             * @default image
+             */
+            media_kind: string;
+            /**
+             * Mtime
+             * @default 0
+             */
+            mtime: number;
             /** Name */
             name: string;
             params?: components["schemas"]["WorkflowParams"] | null;
             /** Path */
             path: string;
+            /**
+             * Rel Path
+             * @default
+             */
+            rel_path: string;
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Studio Ready
+             * @default false
+             */
+            studio_ready: boolean;
         };
         /** BatchImportRequest */
         app__routers__prompts__BatchImportRequest: {
@@ -7548,6 +7601,8 @@ export interface operations {
                 sort?: string;
                 /** @description true=也返回视频工作流（默认隐藏） */
                 include_video?: boolean;
+                /** @description all=库根通用工作流；studio=参考图库合成台专用（含参考库专用/画廊旧版，只留能做参考合成的） */
+                scope?: string;
             };
             header?: never;
             path?: never;
@@ -7562,6 +7617,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_content_api_workflows_content_get: {
+        parameters: {
+            query: {
+                /** @description 工作流文件路径，必须位于库的自动扫描目录内 */
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

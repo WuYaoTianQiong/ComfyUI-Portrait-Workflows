@@ -17,8 +17,7 @@ import { durableImage, snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
 import {
   buildRecipePrompt,
-  COMFYUI_WORKFLOW_TEMPLATES,
-  DEFAULT_COMFY_PRESET,
+
   generateCharacterImage,
   resumeComfyTask,
   ComfyTaskError,
@@ -48,6 +47,26 @@ const HISTORY_KEY = 'pose_atlas_history_v3'
 const TASK_KEY = 'pose_atlas_active_task_v1'
 type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
 const SAFE_MODE_KEY = 'pose_atlas_safe_mode_v1'
+// 18+ 首次确认标记：确认一次后本浏览器不再弹年龄确认框。
+// 顶栏「18+ 完整模式 → 安全模式」即撤销该确认（下次解锁会重新询问）。
+const NSFW_CONFIRMED_KEY = 'pose_atlas_nsfw_confirmed_v1'
+
+function readNsfwConfirmed(): boolean {
+  try {
+    return localStorage.getItem(NSFW_CONFIRMED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeNsfwConfirmed(confirmed: boolean): void {
+  try {
+    if (confirmed) localStorage.setItem(NSFW_CONFIRMED_KEY, 'true')
+    else localStorage.removeItem(NSFW_CONFIRMED_KEY)
+  } catch {
+    // 隐私模式/存储被禁用时降级为每次解锁都确认，不影响功能
+  }
+}
 
 const COMFY_CONFIG_VERSION = 3
 
@@ -63,9 +82,15 @@ const DEFAULT_API_CONFIG: ApiConfig = {
     },
   },
   comfyuiParams: {
-    workflowPreset: DEFAULT_COMFY_PRESET,
-    workflowJson: JSON.stringify(COMFYUI_WORKFLOW_TEMPLATES[DEFAULT_COMFY_PRESET].workflow, null, 2),
-    ...COMFYUI_WORKFLOW_TEMPLATES[DEFAULT_COMFY_PRESET].defaults,
+    // 空串表示「尚未选择本机工作流」：studio 会在拉取 /api/workflows 后
+    // 自动选中后端推荐的工作流并载入其 JSON。
+    workflowPreset: '',
+    workflowJson: '',
+    promptNodeId: 'none',
+    portraitNodeId: 'none',
+    costumeNodeId: 'none',
+    poseNodeId: 'none',
+    stitchedNodeId: 'none',
     randomizeSeed: true,
     timeoutSec: 600,
     configVersion: COMFY_CONFIG_VERSION,
@@ -75,25 +100,46 @@ const DEFAULT_API_CONFIG: ApiConfig = {
 // v1 → v2：旧版默认的 Qwen 2.1 预设引用了本机通常不存在的模型，自动切换为 Qwen Image Edit 2509
 const LEGACY_COMFY_BASE_URLS = ['http://127.0.0.1:8188', 'http://localhost:8188']
 
+// 旧版前端写死的 4 条 Qwen 模板已删除：升级后一律标记为失效，
+// 由 studio 从 /api/workflows 重新选择本机实际可用的工作流。
+// 用正则匹配旧 id 家族（qwen + 年份 + 图数），不在源码/产物中保留完整旧 id 字面量。
+const LEGACY_WORKFLOW_PRESET_PATTERN = /^qwen(?:2509|21)_(?:2|3)img$/
+
+function isLegacyWorkflowPreset(value: string): boolean {
+  return LEGACY_WORKFLOW_PRESET_PATTERN.test(value)
+}
+
 function migrateComfy(
   provider: ApiConfig['providers']['comfyui'],
   params: ApiConfig['comfyuiParams']
 ): { provider: ApiConfig['providers']['comfyui']; params: ApiConfig['comfyuiParams'] } {
-  if ((params.configVersion ?? 1) >= COMFY_CONFIG_VERSION) return { provider, params }
-  const nextParams = { ...params, configVersion: COMFY_CONFIG_VERSION }
-  if (params.workflowPreset === 'qwen21_3img' || params.workflowPreset === 'qwen21_2img') {
+  const nextParams = { ...params }
+  const nextProvider = { ...provider }
+
+  // 1) 清理旧内置模板残留（无论 configVersion 是否已是最新：当前线上版本就是 3）。
+  //    只清工作流相关字段，不碰用户的基地址、超时、随机种子等其它配置。
+  if (isLegacyWorkflowPreset(String(nextParams.workflowPreset ?? ''))) {
     Object.assign(nextParams, {
-      workflowPreset: DEFAULT_COMFY_PRESET,
-      workflowJson: JSON.stringify(COMFYUI_WORKFLOW_TEMPLATES[DEFAULT_COMFY_PRESET].workflow, null, 2),
-      ...COMFYUI_WORKFLOW_TEMPLATES[DEFAULT_COMFY_PRESET].defaults,
+      workflowPreset: '',
+      workflowJson: '',
+      promptNodeId: 'none',
+      portraitNodeId: 'none',
+      costumeNodeId: 'none',
+      poseNodeId: 'none',
+      stitchedNodeId: 'none',
+      parameterOverrides: undefined,
     })
   }
-  const nextProvider = { ...provider }
-  if (!nextProvider.baseUrl.trim() || LEGACY_COMFY_BASE_URLS.includes(nextProvider.baseUrl.trim())) {
-    nextProvider.baseUrl = PROVIDER_META.comfyui.defaultBaseUrl
-  }
-  if (!PROVIDER_META.comfyui.models.some((m) => m.value === nextProvider.model)) {
-    nextProvider.model = PROVIDER_META.comfyui.models[0].value
+
+  // 2) v1/v2 → v3：修正旧的 ComfyUI 地址与模型记录
+  if ((nextParams.configVersion ?? 1) < COMFY_CONFIG_VERSION) {
+    nextParams.configVersion = COMFY_CONFIG_VERSION
+    if (!nextProvider.baseUrl.trim() || LEGACY_COMFY_BASE_URLS.includes(nextProvider.baseUrl.trim())) {
+      nextProvider.baseUrl = PROVIDER_META.comfyui.defaultBaseUrl
+    }
+    if (!PROVIDER_META.comfyui.models.some((m) => m.value === nextProvider.model)) {
+      nextProvider.model = PROVIDER_META.comfyui.models[0].value
+    }
   }
   return { provider: nextProvider, params: nextParams }
 }
@@ -291,9 +337,22 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [safeMode])
 
+  /** 完成解锁：切换安全模式并执行调用方回调（不写确认标记）。 */
+  const unlockNsfw = (onUnlocked?: () => void) => {
+    pendingUnlockCbRef.current = null
+    setSafeMode(false)
+    toast.success('已解锁 18+ 完整图库模式')
+    onUnlocked?.()
+  }
+
   const requestUnlockNsfw = (onUnlocked?: () => void) => {
     if (!safeMode) {
       onUnlocked?.()
+      return
+    }
+    // 已在本浏览器确认过年满 18 周岁：直接解锁，不再重复弹窗。
+    if (readNsfwConfirmed()) {
+      unlockNsfw(onUnlocked)
       return
     }
     pendingUnlockCbRef.current = onUnlocked || null
@@ -301,12 +360,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const confirmUnlockNsfw = () => {
-    setSafeMode(false)
+    writeNsfwConfirmed(true)
     setAgeGateOpen(false)
-    toast.success('已解锁 18+ 完整图库模式')
-    const cb = pendingUnlockCbRef.current
-    pendingUnlockCbRef.current = null
-    cb?.()
+    unlockNsfw(pendingUnlockCbRef.current ?? undefined)
   }
 
   const toggleSafeMode = () => {
@@ -314,7 +370,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       requestUnlockNsfw()
     } else {
       setSafeMode(true)
-      toast.success('已开启安全模式（已隐藏 18+ 敏感分类）')
+      // 切回安全模式视为撤销 18+ 确认，下次解锁重新询问（复位入口）。
+      writeNsfwConfirmed(false)
+      toast.success('已开启安全模式（已隐藏 18+ 敏感分类），下次解锁需重新确认')
     }
   }
 
@@ -635,20 +693,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       <AlertDialog open={ageGateOpen} onOpenChange={setAgeGateOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>🔞 年龄确认与免责声明（NSFW 18+）</AlertDialogTitle>
+            <AlertDialogTitle>18+ 内容确认</AlertDialogTitle>
             <AlertDialogDescription className="space-y-2 text-left leading-relaxed">
               <span className="block">
-                关闭「安全模式 (SFW)」后，图库将显示包含成人向艺术参考的敏感分类：
+                关闭安全模式后，图库将显示成人向艺术参考，仅供合法的 AI 绘画学习与创作使用。
               </span>
-              <span className="block rounded-lg bg-muted p-2.5 text-xs text-foreground">
-                • <strong>动作姿势库</strong>：全身单人・性感系（399 张）、双人缠绵（275 张）
-                <br />• <strong>服装穿搭库</strong>：内衣・睡衣（199 套）、性感穿搭（140 套）
-              </span>
-              <span className="block text-xs">
-                <strong>免责声明</strong>：
-                <br />1. <strong>年龄限制</strong>：未满 18 周岁的未成年人严禁关闭安全模式或浏览上述敏感分类。
-                <br />2. <strong>来源说明</strong>：原有图鉴素材来自 ギア（@giaaibusi）；二次元服装来自 たき AI · CharaDB，适用独立来源条件，禁止真人、未成年人用途及图片再分发，首次使用须确认。
-                <br />3. <strong>合法使用</strong>：本工具与素材<strong>仅供 AI 绘画学习与合法艺术创作使用，严禁用于任何违法违规、色情传播或侵害他人肖像权（如未经授权的真人换脸）等用途</strong>，使用者须自行承担一切法律责任。
+              <span className="block">
+                须年满 18 周岁；禁止用于真人、未成年人，禁止图片再分发。
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -661,7 +712,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               保持安全模式
             </AlertDialogCancel>
             <AlertDialogAction onClick={confirmUnlockNsfw}>
-              我已年满 18 岁并同意免责声明
+              我已年满 18 周岁
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

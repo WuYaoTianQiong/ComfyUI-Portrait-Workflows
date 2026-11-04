@@ -50,7 +50,11 @@ function localAssetsPlugin(): Plugin {
 // 本地 ComfyUI 同源代理：浏览器请求 /comfy/* → ComfyUI（默认 Desktop 端口 8000）
 // 这样无需修改 ComfyUI 的 --enable-cors-header 白名单。可用环境变量 COMFYUI_URL 指定其他地址。
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://127.0.0.1:8000'
-const comfyProxy = {
+
+// atelier 后端同源代理：dev/preview 单跑时把 /api/* 转发到本机 atelier（默认端口 8656），
+// 使 studio 能读取工作流列表；生产环境由 atelier 直接提供同源 /api，不走此代理。
+const ATELIER_URL = process.env.ATELIER_URL || 'http://127.0.0.1:8656'
+const devProxy = {
   '/comfy': {
     target: COMFYUI_URL,
     changeOrigin: true,
@@ -61,6 +65,10 @@ const comfyProxy = {
       proxy.on('proxyReq', (proxyReq: any) => proxyReq.removeHeader('origin'))
       proxy.on('proxyReqWs', (proxyReq: any) => proxyReq.removeHeader('origin'))
     },
+  },
+  '/api': {
+    target: ATELIER_URL,
+    changeOrigin: true,
   },
 }
 
@@ -93,9 +101,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: comfyProxy,
+    proxy: devProxy,
   },
   preview: {
-    proxy: comfyProxy,
+    proxy: devProxy,
   },
 })

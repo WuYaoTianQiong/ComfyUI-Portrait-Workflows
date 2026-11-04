@@ -9,6 +9,7 @@
 - GET /api/reference/items/{library}/{item_id}
 - GET /api/reference/items/{library}/{item_id}/image?kind=thumb|image|depth|depth_thumb
 """
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,12 +23,17 @@ from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 from app.services.recipe_prompt import RecipeEntry, STYLE_PRESETS, build_recipe_prompt
 
 router = APIRouter(tags=["参考图库"])
+logger = logging.getLogger(__name__)
 
 
 @router.on_event("startup")
 def log_reference_libraries_on_startup():
-    """启动时打印四库条数；失败/偏离基线会以 warning 出现在同一份日志里。"""
+    """启动时打印四库条数与 18+ 总闸；失败/偏离基线会以 warning 出现在同一份日志里。"""
     reference_library.log_library_summary()
+    logger.info(
+        "参考库 18+ 总闸：%s",
+        "开启（前端可切换）" if settings.reference_allow_nsfw else "关闭（敏感内容过滤）",
+    )
 
 
 #: 出图工作流文件名（都在 `settings.library_root` 根目录）。

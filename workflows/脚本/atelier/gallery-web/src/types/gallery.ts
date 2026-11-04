@@ -93,7 +93,11 @@ export interface WorkflowParameterOverrides {
 
 export interface ComfyUiParams {
   parameterOverrides?: WorkflowParameterOverrides
-  workflowPreset: 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img' | 'custom'
+  /**
+   * 当前工作流选择：`/api/workflows` 返回的工作流绝对路径，或 `'custom'`（用户导入的 JSON）。
+   * 旧版内置模板 ID 已废弃；读到旧值时由 studioStore 迁移为空串，再由合成台自动选中本机工作流。
+   */
+  workflowPreset: string
   workflowJson: string
   promptNodeId: string
   portraitNodeId: string

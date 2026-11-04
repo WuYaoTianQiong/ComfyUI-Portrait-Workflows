@@ -1,5 +1,5 @@
 import { Link, useLocation } from '@tanstack/react-router'
-import { ExternalLinkIcon, LayersIcon, SparklesIcon } from 'lucide-react'
+import { ArrowLeftIcon, PaletteIcon, SparklesIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
   Sidebar,
@@ -14,6 +14,7 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { useStudio } from '@/store/studioStore'
+import { ATELIER_GALLERY_PATH } from '@/lib/atelierLinks'
 import { activeNavTo, navGroups } from './nav'
 
 export function AppSidebar() {
@@ -27,22 +28,36 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
+            <SidebarMenuButton size="lg" asChild tooltip="返回画室画廊">
+              {/* 整页导航回 atelier：TanStack Link 会把 basepath 拼成 /ref-web/gallery。 */}
+              <a href={ATELIER_GALLERY_PATH}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <LayersIcon className="size-4" />
+                  <PaletteIcon className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold">POSE &amp; CHARACTER</span>
-                  <span className="truncate text-xs text-muted-foreground">AI 角色三合一参考台</span>
+                  <span className="truncate text-sm font-semibold">画室</span>
+                  <span className="truncate text-xs text-muted-foreground">参考图库</span>
                 </div>
-              </Link>
+              </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
+        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明。 */}
+        <SidebarGroup>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="返回画室画廊">
+                <a href={ATELIER_GALLERY_PATH}>
+                  <ArrowLeftIcon />
+                  <span className="flex-1 truncate">返回画廊</span>
+                </a>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
         {navGroups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
@@ -82,19 +97,6 @@ export function AppSidebar() {
                   </span>
                 </div>
               </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="sm" asChild tooltip="访问 GitHub 仓库">
-              <a
-                href="https://github.com/anhao/ai-pose-gallery-zh"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground"
-              >
-                <ExternalLinkIcon className="size-3.5" />
-                <span>GitHub · @anhao_ai</span>
-              </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

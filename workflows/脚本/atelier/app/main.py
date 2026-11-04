@@ -196,6 +196,12 @@ from app.routers.legacy import router as legacy_router
 
 app.include_router(legacy_router, prefix="/api")
 
+# 参考图库 Web 的路径前缀。用精确前缀判断，避免 /ref-web-foo 被误判。
+_REF_WEB_PREFIX = "/ref-web"
+
+def _is_ref_web_path(path: str) -> bool:
+    return path == _REF_WEB_PREFIX or path.startswith(_REF_WEB_PREFIX + "/")
+
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):
     """在静态文件挂载返回 404 后，返回 index.html 以支持前端路由"""
@@ -213,7 +219,13 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
         # （缩略图/原图等自带 Cache-Control 长缓存的端点不受影响）
         if request.url.path.startswith("/api/") and "cache-control" not in {k.lower() for k in response.headers.keys()}:
             response.headers["Cache-Control"] = "no-store"
-        if response.status_code == 404 and not request.url.path.startswith("/api/"):
+        # /ref-web/* 的 404 交给 RefWebFallbackMiddleware 判定：本中间件在外层，
+        # 若这里再按 Vue SPA 兜底，缺失的 /ref-web/assets/*.js 又会被 HTML 顶替。
+        if (
+            response.status_code == 404
+            and not request.url.path.startswith("/api/")
+            and not _is_ref_web_path(request.url.path)
+        ):
             index_file = self._index_file or (settings.web_dir / "index.html")
             if index_file.exists():
                 resp = FileResponse(index_file)
@@ -223,6 +235,25 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
 
 # 参考图库 Web 深链接兜底：StaticFiles(html=True) 只处理目录请求，
 # /ref-web/poses 这类前端路由需要回 gallery-web 的 index.html。
+#
+# 只兜底「页面导航」，不能兜底静态资源：以前任何 /ref-web/* 的 404 都回 index.html，
+# 于是缺失的 /ref-web/assets/xxx.js 会以 200 text/html 返回，浏览器按脚本加载时
+# 报 MIME 类型错误，还会把 HTML 当 JS 解析失败，掩盖真正的缺文件问题。
+def _is_ref_web_page_request(request: Request) -> bool:
+    if request.method != "GET":
+        return False
+    path = request.url.path
+    if not _is_ref_web_path(path):
+        return False
+    last_segment = path.rstrip("/").rsplit("/", 1)[-1]
+    # 无扩展名 → 前端路由深链（/ref-web/poses、/ref-web/studio 等）
+    if "." not in last_segment:
+        return True
+    # 有扩展名的路径默认是静态资源，缺失时必须保持 404；
+    # 只有客户端明确声明 Accept: text/html 时才视为页面导航兜底。
+    return "text/html" in request.headers.get("accept", "").lower()
+
+
 class RefWebFallbackMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, index_file=None):
         super().__init__(app)
@@ -233,7 +264,7 @@ class RefWebFallbackMiddleware(BaseHTTPMiddleware):
         index_file = self._index_file
         if (
             response.status_code == 404
-            and request.url.path.startswith("/ref-web")
+            and _is_ref_web_page_request(request)
             and index_file is not None
             and index_file.exists()
         ):

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import traceback
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from app.schemas import WorkflowListResponse
@@ -15,7 +16,14 @@ from pydantic import BaseModel
 from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
 from app.services.prompt_compiler import compile_prompt
-from app.services.workflow_catalog import find_default_workflow, list_valid_workflows
+from app.services.workflow_catalog import (
+    find_default_workflow,
+    is_valid_workflow,
+    list_valid_workflows,
+    search_dirs,
+    studio_dirs,
+    studio_sort_key,
+)
 from app.services.workflow_parser import (
     RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt,
 )
@@ -130,19 +138,83 @@ def validate_workflow(path: str = Query("")):
 def list_workflows(
     sort: str = Query("mtime"),
     include_video: bool = Query(False, description="true=也返回视频工作流（默认隐藏）"),
+    scope: str = Query(
+        "all",
+        pattern="^(all|studio)$",
+        description="all=库根通用工作流；studio=参考图库合成台专用（含参考库专用/画廊旧版，只留能做参考合成的）",
+    ),
 ):
     """列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。"""
-    results = list_valid_workflows(include_video=include_video)
+    results = list_valid_workflows(include_video=include_video, scope=scope)
 
-    if sort == "mtime":
+    if scope == "studio":
+        # 合成台：三槽（人像+服装+姿势）优先 → 画廊本机改版 > 参考库专用 > 库根 → 新到旧。
+        results.sort(key=studio_sort_key, reverse=True)
+    elif sort == "mtime":
         results.sort(key=lambda x: x["mtime"], reverse=True)
     else:
         results.sort(key=lambda x: x["name"])
 
     return {
         "workflows": results,
-        "default": find_default_workflow(include_video=include_video),
+        "default": find_default_workflow(include_video=include_video, scope=scope),
     }
+
+
+def _resolve_workflow_file(path: str) -> Path:
+    """把请求里的路径解析为「库内工作流文件」，并拒绝任何越界读取。
+
+    安全约定：
+    - 必须是 .json；
+    - resolve()（含符号链接解析）后必须位于 workflow_catalog.search_dirs() 任一目录之下；
+    - 必须是已存在的普通文件。
+    """
+    raw = (path or "").strip()
+    if not raw:
+        raise HTTPException(400, "缺少工作流路径")
+
+    try:
+        resolved = Path(raw).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(400, "工作流路径无效")
+
+    if resolved.suffix.lower() != ".json":
+        raise HTTPException(400, "只支持 .json 工作流文件")
+
+    allowed_dirs = [d.resolve(strict=False) for d in (*search_dirs(), *studio_dirs())]
+    if not any(resolved.is_relative_to(d) for d in allowed_dirs):
+        # 不区分「不存在」与「越界」，避免泄露目录外文件是否存在
+        raise HTTPException(404, "工作流不存在")
+
+    if not resolved.is_file():
+        raise HTTPException(404, "工作流不存在")
+
+    return resolved
+
+
+@router.get("/workflows/content")
+def get_workflow_content(
+    path: str = Query(..., description="工作流文件路径，必须位于库的自动扫描目录内"),
+):
+    """只读返回工作流 JSON 内容（统一转换为 ComfyUI API 格式）。
+
+    前端「AI 合成台」的下拉框通过它加载本机磁盘上已有的工作流：
+    列表只给 path/name，选中后再按需读取内容，避免一次性传输所有 JSON。
+    """
+    file = _resolve_workflow_file(path)
+
+    if not is_valid_workflow(file):
+        raise HTTPException(404, "不是可用的 ComfyUI 工作流")
+
+    try:
+        content = load_workflow(str(file))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.exception("读取工作流内容失败：%s", file)
+        raise HTTPException(400, f"工作流解析失败: {e}")
+
+    return {"path": str(file), "name": file.name, "content": content}
 
 
 # ---------- 提示词编译预览 ----------

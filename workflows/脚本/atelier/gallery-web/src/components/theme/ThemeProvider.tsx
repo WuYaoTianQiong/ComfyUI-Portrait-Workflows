@@ -2,7 +2,12 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 export type Theme = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'todaynew-admin:theme'
+/** 当前存储键（atelier 口径）。 */
+const STORAGE_KEY = 'atelier:theme'
+/** 上游旧键：仅用于兼容读取，避免用户已有选择丢失。 */
+const LEGACY_STORAGE_KEY = 'todaynew-admin:theme'
+/** atelier 是固定暗色，未存过偏好时默认深色。 */
+const DEFAULT_THEME: Theme = 'dark'
 
 interface ThemeState {
   theme: Theme
@@ -11,9 +16,19 @@ interface ThemeState {
 
 const ThemeContext = createContext<ThemeState | null>(null)
 
+function isTheme(value: string | null): value is Theme {
+  return value === 'light' || value === 'dark' || value === 'system'
+}
+
 function readTheme(): Theme {
-  const v = localStorage.getItem(STORAGE_KEY)
-  return v === 'light' || v === 'dark' ? v : 'system'
+  try {
+    // 先读新键；新键缺失时回退旧键，再回退默认深色。
+    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    return isTheme(stored) ? stored : DEFAULT_THEME
+  } catch {
+    // 隐私模式或禁用存储时 localStorage 会抛 SecurityError，回退默认值。
+    return DEFAULT_THEME
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -32,8 +47,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme])
 
   const setTheme = (t: Theme) => {
-    localStorage.setItem(STORAGE_KEY, t)
+    // 先更新 UI，写入失败（存储被禁用/超配额）时至少当前会话生效。
     setThemeState(t)
+    try {
+      localStorage.setItem(STORAGE_KEY, t)
+    } catch {
+      // 忽略：主题切换不因持久化失败而中断。
+    }
   }
 
   return <ThemeContext value={{ theme, setTheme }}>{children}</ThemeContext>

@@ -12,18 +12,63 @@ import StatsView from './views/StatsView.vue'
 import DesignView from './views/DesignView.vue'
 
 /**
- * 参考图库已切到 `/ref-web`（atelier 托管的上游 React 台）。
+ * 参考图库已切到 atelier 托管的 React 台（默认 `/ref-web/`）。
+ *
+ * 入口地址由后端 `/api/system/status` 的 `reference_web_url` 下发，
+ * 换端口或反代前缀时无需改前端；请求失败（旧后端、后端重启、超时）
+ * 才回落默认 `/ref-web/`。
  *
  * `/ref-web` 是服务端子路径，不属于 Vue Router；必须整页跳转，
  * 不能用 router 的内部 redirect（会被 catch-all 兜回 /gallery）。
  * 旧的 `ReferenceView.vue` / `RefLightbox.vue` / `api/reference.ts` 已删除
  * （2026-11-04 验收收尾）；`/api/reference/*` 后端接口保留，继续服务混源出图与参考板。
  */
+
+/** 后端未下发入口或请求失败时的兜底地址。 */
+const REFERENCE_WEB_FALLBACK = '/ref-web/'
+
+/**
+ * 静态挂载入口需要尾斜杠：后端下发的默认值是 /ref-web（无斜杠），
+ * 缺斜杠会多一次 307 跳转，历史里也多一条记录。
+ */
+function normalizeReferenceWebUrl(url: string | null | undefined): string {
+  if (!url) return REFERENCE_WEB_FALLBACK
+  return url.endsWith('/') ? url : `${url}/`
+}
+
+/**
+ * 读取后端下发的参考图库地址。
+ *
+ * `/api/system/status` 在 ComfyUI 离线时要等一次探活超时（实测约 8s），
+ * 这里 4s 后放弃并回落默认地址，避免用户盯着「正在打开参考图库…」干等。
+ */
+async function resolveReferenceWebUrl(): Promise<string> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 4_000)
+  try {
+    const response = await fetch('/api/system/status', {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    })
+    if (!response.ok) return REFERENCE_WEB_FALLBACK
+    const body = (await response.json()) as { reference_web_url?: string | null }
+    return normalizeReferenceWebUrl(body?.reference_web_url)
+  } catch {
+    return REFERENCE_WEB_FALLBACK
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const ReferenceWebRedirect = defineComponent({
   name: 'ReferenceWebRedirect',
   setup() {
     if (typeof window !== 'undefined') {
-      window.location.replace('/ref-web/')
+      void resolveReferenceWebUrl().then((url) => {
+        // 中间跳转页不得留在 history，否则后退会再次触发重定向形成回弹；
+        // 返回画廊由 gallery-web 内的原生链接负责，不依赖 history。
+        window.location.replace(url)
+      })
     }
     return () =>
       h(

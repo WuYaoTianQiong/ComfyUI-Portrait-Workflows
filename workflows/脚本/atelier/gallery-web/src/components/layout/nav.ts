@@ -1,9 +1,8 @@
 import type { LinkProps } from '@tanstack/react-router'
 import {
-  BookOpenIcon,
-  KeyRoundIcon,
   LayoutDashboardIcon,
   PersonStandingIcon,
+  PlugZapIcon,
   ShirtIcon,
   SparklesIcon,
   UserRoundIcon,
@@ -33,17 +32,14 @@ export const navGroups: NavGroup[] = [
   {
     label: '三大参考图库',
     items: [
-      { title: '动作姿势库', to: '/poses', icon: PersonStandingIcon, badge: '1,439' },
-      { title: '服装穿搭库', to: '/costumes', icon: ShirtIcon, badge: '1,847' },
-      { title: '人像颜值库', to: '/portraits', icon: UserRoundIcon, badge: '1,499' },
+      { title: '动作姿势库', to: '/poses', icon: PersonStandingIcon },
+      { title: '服装穿搭库', to: '/costumes', icon: ShirtIcon },
+      { title: '人像颜值库', to: '/portraits', icon: UserRoundIcon },
     ],
   },
   {
-    label: '配置与说明',
-    items: [
-      { title: 'API 接口配置', to: '/settings', icon: KeyRoundIcon },
-      { title: '使用说明与免责声明', to: '/guide', icon: BookOpenIcon },
-    ],
+    label: '配置',
+    items: [{ title: 'ComfyUI 连接', to: '/settings', icon: PlugZapIcon }],
   },
 ]
 
