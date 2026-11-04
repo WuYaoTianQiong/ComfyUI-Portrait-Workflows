@@ -167,7 +167,7 @@ workflows/脚本/atelier/frontend/_dev*.log
 workflows/脚本/atelier/gallery-web/node_modules/
 workflows/脚本/atelier/gallery-web/.vite/
 workflows/脚本/atelier/static/v2/
-workflows/脚本/atelier/web/
+# Vue 前端产物 web/ 入库（与 gallery-web/dist 一致），不在此忽略
 workflows/脚本/atelier/_e2e_shot.png
 workflows/脚本/atelier/.pytest_cache/
 
