@@ -19,10 +19,9 @@
 # 色值一律走 styles/tokens.css，页面只写 var(--token)。
 #
 # 口径说明（2026-11-04 验收后收紧）：
-#   1) 只统计 <style> 块。`<script>` 里的色值可能是写入数据库的「数据」
-#      （如 TaxonomyView 的分类配色板），不属于样式硬编码，按样式口径统计才不误伤。
-#   2) 已下线但仍留存的死代码（ReferenceView / RefLightbox，`/reference` 已改跳 `/ref-web`）
-#      单独列出、不阻断构建：删掉这两个文件即自然归零。
+#   只统计 <style> 块。`<script>` 里的色值可能是写入数据库的「数据」
+#   （如 TaxonomyView 的分类配色板），不属于样式硬编码，按样式口径统计才不误伤。
+#   已下线死代码（ReferenceView / RefLightbox / api/reference.ts）同日已删除，不计入。
 # 新增色值应改走 styles/tokens.css，不要在这里放水提高基线。
 #
 # E2E 需要 Playwright 与 Chromium；缺失时会自动 SKIP（不算失败），不阻断其它关卡。
@@ -52,10 +51,7 @@ if ($LASTEXITCODE -ne 0) {
 Step '2' '6' '硬编码颜色守护'
 $colorBaseline = 0
 $vueRoot = Join-Path $root 'frontend\src'
-# 已下线的死代码（`/reference` 已改跳 `/ref-web`）：单列提示，不阻断构建。
-$deadVueFiles = @('ReferenceView.vue', 'RefLightbox.vue')
 $hardcodedColors = 0
-$deadColors = 0
 $offenders = @()
 if (Test-Path $vueRoot) {
     foreach ($file in (Get-ChildItem -Path $vueRoot -Recurse -Filter *.vue -File)) {
@@ -67,23 +63,16 @@ if (Test-Path $vueRoot) {
             $count += [regex]::Matches($block.Groups[1].Value, '#[0-9a-fA-F]{3,8}\b').Count
         }
         if ($count -eq 0) { continue }
-        if ($deadVueFiles -contains $file.Name) {
-            $deadColors += $count
-        } else {
-            $hardcodedColors += $count
-            $offenders += "$($file.Name)($count)"
-        }
+        $hardcodedColors += $count
+        $offenders += "$($file.Name)($count)"
     }
 }
 if ($hardcodedColors -gt $colorBaseline) {
-    Write-Host "FAILED: 活代码 .vue 的 <style> 里还有 $hardcodedColors 处硬编码颜色（基线 $colorBaseline）：$($offenders -join ', ')" -ForegroundColor Red
+    Write-Host "FAILED: .vue 的 <style> 里还有 $hardcodedColors 处硬编码颜色（基线 $colorBaseline）：$($offenders -join ', ')" -ForegroundColor Red
     Write-Host '  改法：在 styles/tokens.css 加令牌，页面写 var(--token)' -ForegroundColor Yellow
     exit 1
 }
-Write-Host "活代码硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
-if ($deadColors -gt 0) {
-    Write-Host "提示：已下线死代码中还有 $deadColors 处色值（$($deadVueFiles -join ' / ')），删除这两个文件即归零" -ForegroundColor Yellow
-}
+Write-Host "硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
 
 $frontend = Join-Path $root 'frontend'
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {

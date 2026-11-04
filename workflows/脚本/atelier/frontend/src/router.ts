@@ -16,7 +16,8 @@ import DesignView from './views/DesignView.vue'
  *
  * `/ref-web` 是服务端子路径，不属于 Vue Router；必须整页跳转，
  * 不能用 router 的内部 redirect（会被 catch-all 兜回 /gallery）。
- * 旧的 `ReferenceView.vue` 文件保留，但不再被路由引用。
+ * 旧的 `ReferenceView.vue` / `RefLightbox.vue` / `api/reference.ts` 已删除
+ * （2026-11-04 验收收尾）；`/api/reference/*` 后端接口保留，继续服务混源出图与参考板。
  */
 const ReferenceWebRedirect = defineComponent({
   name: 'ReferenceWebRedirect',
