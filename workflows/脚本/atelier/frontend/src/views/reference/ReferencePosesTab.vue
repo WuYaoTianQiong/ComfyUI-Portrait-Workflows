@@ -1,0 +1,1116 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+
+import { isNsfwPoseItem } from '../../api/reference'
+import type { PoseGroup, PoseItem } from '../../api/reference'
+import { useReferencePoses } from '../../composables/useReferenceLibrary'
+import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
+import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
+import { useToast } from '../../composables/useToast'
+
+import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
+import ReferenceCard from './components/ReferenceCard.vue'
+import ReferenceGrid from './components/ReferenceGrid.vue'
+import ReferenceLightbox from './components/ReferenceLightbox.vue'
+import {
+  ANGLES,
+  INITIAL_GROUP_COUNT,
+  INITIAL_SINGLE_COUNT,
+  activeGroupItem,
+  filterPoseGroups,
+  filterPoseSingles,
+  firstNsfwLine,
+  groupAngleItem,
+  groupIndexOfItem,
+  hiddenNsfwCount,
+  loadMoreState,
+  nextShown,
+  poseCategoryOptions,
+  poseDepthMode,
+  posePreviewUrl,
+  poseSystemSummaries,
+  poseThumbnailUrl,
+  resolveActiveLine,
+  setPoseDepthMode,
+  stepGroupItem,
+} from './components/poseView'
+
+/**
+ * 姿势库（阶段 2.1）。
+ *
+ * 功能逐条对齐 §7 的 8 行姿势特性 + 全局安全模式：
+ * 体系药丸（含 ` · 18+` 文本后缀）、按「体系|姿势编号」分组、组内 5 角度切换、
+ * 白模 / 深度图（顶栏与灯箱共享）、搜索 + 动作分类下拉 + 视角胶囊 + 重置、
+ * 分组 / 单张视图（5 列 60 组 / 6 列 96 张）、加载更多（+60）、卡片加入配方、
+ * 灯箱（缩放拖动、←/→ 组内、↑/↓ 跨组、复制 ID、下载 / 新窗口、加入配方）。
+ *
+ * 数据来自阶段 1.2 的 `useReferencePoses`（分页并发 ≤6、按 id 去重保序），
+ * 本文件只做展示状态与筛选，不重复实现数据层算法。
+ */
+
+const {
+  items,
+  groups,
+  lines,
+  loading,
+  error,
+  load,
+  retry,
+} = useReferencePoses()
+
+const {
+  safeMode,
+  ageGateOpen,
+  nsfwAvailable,
+  canUnlock,
+  loadBackendGate,
+  requestUnlock,
+  confirmUnlock,
+  cancelUnlock,
+  toggleSafeMode,
+} = useReferenceSafeMode()
+
+const {
+  pose: poseSlot,
+  togglePose,
+  isPoseSelected,
+} = useReferenceRecipeDraft()
+
+const toast = useToast()
+
+// ---------------------------------------------------------------------------
+// 筛选 / 视图状态
+// ---------------------------------------------------------------------------
+
+/** 体系筛选；空串 = 全部。 */
+const line = ref('')
+/** 动作分类；'all' = 全部（与 React 一致，用字符串而非空串） */
+const category = ref('all')
+/** 视角胶囊；空串 = 全部视角 */
+const angle = ref('')
+/** 搜索词 */
+const query = ref('')
+const viewMode = ref<'group' | 'single'>('group')
+/** 已展示条数：分组 60 组 / 单张 96 张起步 */
+const shown = ref(INITIAL_GROUP_COUNT)
+/** 每个分组卡片当前悬停 / 点击的角度（key = group.key） */
+const hoverAngles = ref<Record<string, string>>({})
+
+/** 灯箱状态：当前分组下标 + 当前条目 */
+const viewer = ref<{ groupIndex: number; item: PoseItem } | null>(null)
+
+const angleOptions = computed(() => [
+  { value: '', label: '全部视角' },
+  ...ANGLES.map((value) => ({ value, label: value })),
+])
+
+// ---------------------------------------------------------------------------
+// 安全模式过滤（客户端；与 React 一致）
+// ---------------------------------------------------------------------------
+
+const baseItems = computed(() =>
+  safeMode.value ? items.value.filter((item) => !isNsfwPoseItem(item)) : items.value,
+)
+const baseGroups = computed(() =>
+  safeMode.value ? groups.value.filter((group) => !isNsfwPoseItem(group)) : groups.value,
+)
+const systemSummaries = computed(() =>
+  poseSystemSummaries(lines.value, items.value, safeMode.value),
+)
+const visibleSystems = computed(() => systemSummaries.value.filter((summary) => summary.visible))
+const hiddenTotal = computed(() => hiddenNsfwCount(items.value))
+const firstRiskyLine = computed(() => firstNsfwLine(lines.value, items.value))
+const activeLine = computed(() => resolveActiveLine(line.value, safeMode.value, items.value))
+
+// ---------------------------------------------------------------------------
+// 派生列表
+// ---------------------------------------------------------------------------
+
+const filters = computed(() => ({
+  line: activeLine.value,
+  category: category.value,
+  angle: angle.value,
+  query: query.value,
+}))
+
+const categories = computed(() => poseCategoryOptions(baseItems.value, activeLine.value))
+const filteredGroups = computed(() => filterPoseGroups(baseGroups.value, filters.value))
+const filteredSingles = computed(() => filterPoseSingles(baseItems.value, filters.value))
+
+const totalCount = computed(() =>
+  viewMode.value === 'group' ? filteredGroups.value.length : filteredSingles.value.length,
+)
+const visibleGroups = computed(() => filteredGroups.value.slice(0, shown.value))
+const visibleSingles = computed(() => filteredSingles.value.slice(0, shown.value))
+const unit = computed<'组' | '张'>(() => (viewMode.value === 'group' ? '组' : '张'))
+const more = computed(() => loadMoreState(shown.value, totalCount.value, unit.value))
+
+interface AngleCell {
+  angle: string
+  item?: PoseItem
+  url: string | null
+}
+
+interface GroupCard {
+  group: PoseGroup
+  index: number
+  item?: PoseItem
+  angles: AngleCell[]
+}
+
+/** 分组卡片：把当前角度与 5 格缩略条提前算好，避免模板里重复调函数。 */
+const groupCards = computed<GroupCard[]>(() =>
+  visibleGroups.value.map((group, index) => ({
+    group,
+    index,
+    item: activeGroupItem(group, hoverAngles.value, angle.value),
+    angles: ANGLES.map((value) => {
+      const angleItem = groupAngleItem(group, value)
+      return {
+        angle: value,
+        item: angleItem,
+        url: angleItem ? poseThumbnailUrl(angleItem, poseDepthMode.value) : null,
+      }
+    }),
+  })),
+)
+
+interface SingleCard {
+  item: PoseItem
+  src: string | null
+  selected: boolean
+}
+
+const singleCards = computed<SingleCard[]>(() =>
+  visibleSingles.value.map((item) => ({
+    item,
+    src: poseThumbnailUrl(item, poseDepthMode.value),
+    selected: isPoseSelected(item.id),
+  })),
+)
+
+// ---------------------------------------------------------------------------
+// 交互
+// ---------------------------------------------------------------------------
+
+function selectLine(next: string): void {
+  line.value = next
+  category.value = 'all'
+  shown.value = INITIAL_GROUP_COUNT
+}
+
+function selectCategory(event: Event): void {
+  category.value = (event.target as HTMLSelectElement).value
+  shown.value = INITIAL_GROUP_COUNT
+}
+
+function selectAngle(next: string): void {
+  angle.value = next
+  shown.value = INITIAL_GROUP_COUNT
+}
+
+function onQueryInput(): void {
+  shown.value = INITIAL_GROUP_COUNT
+}
+
+function resetFilters(): void {
+  line.value = ''
+  category.value = 'all'
+  angle.value = ''
+  query.value = ''
+  shown.value = INITIAL_GROUP_COUNT
+}
+
+function setViewMode(mode: 'group' | 'single'): void {
+  if (viewMode.value === mode) return
+  viewMode.value = mode
+  shown.value = mode === 'single' ? INITIAL_SINGLE_COUNT : INITIAL_GROUP_COUNT
+}
+
+function loadMore(): void {
+  shown.value = nextShown(shown.value, totalCount.value)
+}
+
+function setHoverAngle(group: PoseGroup, next: string): void {
+  hoverAngles.value = { ...hoverAngles.value, [group.key]: next }
+}
+
+/** 卡片「加入配方 / 已选」：模式参与移除判定（同 id 不同模式视为替换）。 */
+function onTogglePose(item: PoseItem): void {
+  const added = togglePose(item, poseDepthMode.value)
+  if (added) {
+    toast.success(
+      `已选姿势：${item.姿势名称}（${item.角度}${poseDepthMode.value ? ' · 深度图' : ''}）`,
+    )
+  } else {
+    toast.success('已移除姿势')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 安全模式
+// ---------------------------------------------------------------------------
+
+function backendBlockedToast(): void {
+  toast.error('后端未开启 18+ 总闸（ATELIER_REFERENCE_ALLOW_NSFW），无法解锁')
+}
+
+function onToggleSafeMode(): void {
+  if (!safeMode.value) {
+    // 完整模式 → 安全模式：只切显示，确认标记保留
+    toggleSafeMode()
+    toast.success('已开启安全模式（已隐藏 18+ 敏感分类）')
+    return
+  }
+  const accepted = requestUnlock(() => toast.success('已解锁 18+ 完整图库模式'))
+  if (!accepted) backendBlockedToast()
+}
+
+function onUnlockPill(): void {
+  const accepted = requestUnlock(() => {
+    line.value = firstRiskyLine.value
+    category.value = 'all'
+    shown.value = INITIAL_GROUP_COUNT
+    toast.success('已解锁 18+ 敏感姿势体系')
+  })
+  if (!accepted) backendBlockedToast()
+}
+
+function onConfirmAgeGate(): void {
+  confirmUnlock()
+  toast.success('已解锁 18+ 完整图库模式')
+}
+
+function onCancelAgeGate(): void {
+  cancelUnlock()
+}
+
+// ---------------------------------------------------------------------------
+// 灯箱
+// ---------------------------------------------------------------------------
+
+const viewerGroup = computed<PoseGroup | undefined>(() => {
+  const current = viewer.value
+  if (!current) return undefined
+  return filteredGroups.value[current.groupIndex]
+})
+
+const viewerItem = computed(() => viewer.value?.item ?? null)
+const viewerGroupIndex = computed(() => viewer.value?.groupIndex ?? 0)
+
+const viewerImageUrl = computed(() =>
+  viewerItem.value ? posePreviewUrl(viewerItem.value, poseDepthMode.value) : null,
+)
+
+const viewerThumbs = computed(() => {
+  const group = filteredGroups.value[viewerGroupIndex.value]
+  if (!group) return []
+  const thumbs: Array<{ key: string; label: string; url: string | null }> = []
+  for (const value of ANGLES) {
+    const angleItem = groupAngleItem(group, value)
+    if (!angleItem) continue
+    thumbs.push({
+      key: value,
+      label: value,
+      url: poseThumbnailUrl(angleItem, poseDepthMode.value),
+    })
+  }
+  return thumbs
+})
+
+const viewerMeta = computed(() => {
+  const item = viewerItem.value
+  if (!item) return []
+  return [
+    { label: '所属体系', value: item.体系 || '—' },
+    { label: '动作分类', value: item.分类 || '—' },
+    {
+      label: '当前模式',
+      value: poseDepthMode.value ? '深度图 (Depth Map)' : '3D 素体白模',
+    },
+    { label: '原图尺寸', value: `900 × 1200 ${poseDepthMode.value ? 'WebP' : 'PNG'}` },
+  ]
+})
+
+const viewerCounter = computed(() => {
+  if (!viewer.value) return ''
+  return `${viewer.value.groupIndex + 1} / ${filteredGroups.value.length}`
+})
+
+const viewerSelected = computed(() =>
+  viewerItem.value ? isPoseSelected(viewerItem.value.id, poseDepthMode.value) : false,
+)
+
+const lightboxSelectLabel = computed(
+  () => `加入角色配方（${poseDepthMode.value ? '深度图' : '白模'}）`,
+)
+
+const viewerDownloadName = computed(() => {
+  const item = viewerItem.value
+  if (!item) return ''
+  return `${item.id}${poseDepthMode.value ? '_depth.webp' : '.png'}`
+})
+
+function openGroup(group: PoseGroup, index: number): void {
+  const item = activeGroupItem(group, hoverAngles.value, angle.value)
+  if (item) viewer.value = { groupIndex: index, item }
+}
+
+function openSingle(item: PoseItem): void {
+  viewer.value = {
+    groupIndex: groupIndexOfItem(filteredGroups.value, item.id),
+    item,
+  }
+}
+
+/** 组内角度翻页（← / →），循环。 */
+function stepViewerAngle(direction: number): void {
+  const group = filteredGroups.value[viewerGroupIndex.value]
+  const item = viewerItem.value
+  if (!group || !item) return
+  const next = stepGroupItem(group, item.id, direction)
+  if (next) viewer.value = { groupIndex: viewerGroupIndex.value, item: next }
+}
+
+/** 跨组翻页（↑ / ↓）：优先保持同一角度。 */
+function stepViewerGroup(direction: number): void {
+  const current = viewer.value
+  if (!current) return
+  const nextIndex = current.groupIndex + direction
+  if (nextIndex < 0 || nextIndex >= filteredGroups.value.length) return
+  const nextGroup = filteredGroups.value[nextIndex]
+  const nextItem = nextGroup.angles[current.item.角度] || nextGroup.order[0]
+  if (nextItem) viewer.value = { groupIndex: nextIndex, item: nextItem }
+}
+
+/** 灯箱内点 5 角度缩略图。 */
+function selectViewerAngle(key: string): void {
+  const group = filteredGroups.value[viewerGroupIndex.value]
+  const next = group ? groupAngleItem(group, key) : undefined
+  if (next) viewer.value = { groupIndex: viewerGroupIndex.value, item: next }
+}
+
+function toggleViewerSelection(): void {
+  const item = viewerItem.value
+  if (item) onTogglePose(item)
+}
+
+/** 首屏加载且尚无数据：不渲染药丸 / 筛选，避免「全部 (0)」闪烁。 */
+const initialLoading = computed(() => loading.value && items.value.length === 0)
+
+onMounted(() => {
+  // 总闸探测与数据加载并行，互不阻塞
+  void loadBackendGate()
+  void load()
+})
+</script>
+
+<template>
+  <div class="pose-tab">
+    <header class="pose-head">
+      <!--
+        `tab-placeholder__title` 是 ReferenceView 骨架期就冻结的「页签面板标题」
+        契约（ReferenceView.spec.ts 用它断言 `?tab=` 直达渲染的页面），
+        真实页签沿用同一 class，避免骨架测试随实现替换而失效。
+      -->
+      <h1 class="pose-head__title tab-placeholder__title">姿势库</h1>
+      <div class="pose-head__actions">
+        <!-- 素体白模 / 深度图：与灯箱共享 poseDepthMode -->
+        <div class="pose-segment" data-testid="pose-depth-toggle" role="group" aria-label="白模与深度图切换">
+          <button
+            type="button"
+            data-depth="white"
+            :class="{ 'is-active': !poseDepthMode }"
+            :aria-pressed="!poseDepthMode"
+            @click="setPoseDepthMode(false)"
+          >
+            素体白模
+          </button>
+          <button
+            type="button"
+            data-depth="depth"
+            :class="{ 'is-active': poseDepthMode }"
+            :aria-pressed="poseDepthMode"
+            @click="setPoseDepthMode(true)"
+          >
+            深度图 (Depth)
+          </button>
+        </div>
+
+        <div class="pose-view-mode" role="group" aria-label="视图模式">
+          <button
+            type="button"
+            data-testid="pose-view-group"
+            :class="{ 'is-active': viewMode === 'group' }"
+            :aria-pressed="viewMode === 'group'"
+            @click="setViewMode('group')"
+          >
+            分组
+          </button>
+          <button
+            type="button"
+            data-testid="pose-view-single"
+            :class="{ 'is-active': viewMode === 'single' }"
+            :aria-pressed="viewMode === 'single'"
+            @click="setViewMode('single')"
+          >
+            单张
+          </button>
+        </div>
+
+        <!-- 安全模式：SFW 态 / 18+ 态配色按 §5；后端总闸关闭时置灰 -->
+        <button
+          type="button"
+          class="pose-safe"
+          :class="safeMode ? 'is-safe' : 'is-full'"
+          data-testid="pose-safe-toggle"
+          :data-safe="safeMode ? '1' : '0'"
+          :data-gate="nsfwAvailable ? 'open' : 'closed'"
+          :disabled="safeMode && !nsfwAvailable"
+          :aria-pressed="!safeMode"
+          :title="
+            safeMode
+              ? nsfwAvailable
+                ? '当前已开启安全模式（已隐藏 18+ 敏感内容），点击可解锁完整图库'
+                : '后端总闸已关闭（ATELIER_REFERENCE_ALLOW_NSFW=0），无法解锁 18+'
+              : '当前已显示 18+ 完整图库，点击可切回安全模式'
+          "
+          @click="onToggleSafeMode"
+        >
+          <svg class="pose-safe__icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M8 1.8 13 4v4.1c0 3-2.1 5.1-5 6.1-2.9-1-5-3.1-5-6.1V4l5-2.2Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M5.8 7.8 7.4 9.4l3-3.2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          {{ safeMode ? '安全模式 (SFW)' : '18+ 完整模式' }}
+        </button>
+      </div>
+    </header>
+
+    <template v-if="!initialLoading">
+      <!-- 体系（一级分类）横向药丸；18+ 用文本后缀而不是独立角标 -->
+      <div class="pose-pills" data-testid="pose-system-pills" role="group" aria-label="姿势体系筛选">
+        <button
+          type="button"
+          class="pose-pill"
+          :class="{ 'is-active': activeLine === '' }"
+          :aria-pressed="activeLine === ''"
+          data-system=""
+          @click="selectLine('')"
+        >
+          全部 ({{ baseItems.length }})
+        </button>
+        <button
+          v-for="summary in visibleSystems"
+          :key="summary.line"
+          type="button"
+          class="pose-pill"
+          :class="{ 'is-active': activeLine === summary.line }"
+          :aria-pressed="activeLine === summary.line"
+          :data-system="summary.line"
+          :data-nsfw="summary.nsfw ? '1' : '0'"
+          @click="selectLine(summary.line)"
+        >
+          {{ summary.line }} ({{ summary.count }})<template v-if="summary.nsfw"> · 18+</template>
+        </button>
+
+        <button
+          v-if="safeMode && hiddenTotal > 0"
+          type="button"
+          class="pose-pill is-unlock"
+          data-testid="pose-unlock-nsfw"
+          :disabled="!nsfwAvailable"
+          :title="nsfwAvailable ? '解锁后显示 18+ 敏感姿势体系' : '后端总闸已关闭，无法解锁'"
+          @click="onUnlockPill"
+        >
+          解锁 18+ 敏感姿势体系 ({{ hiddenTotal }})
+        </button>
+      </div>
+
+      <!-- 搜索 + 动作分类下拉 + 视角胶囊 + 重置 -->
+      <div class="pose-filters">
+        <label class="pose-search">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.3" />
+            <path d="m10.2 10.2 3 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+          </svg>
+          <input
+            v-model="query"
+            type="search"
+            data-testid="pose-search"
+            placeholder="搜索姿势名称、编号 (如 P001)、分类或 ID…"
+            aria-label="搜索姿势"
+            @input="onQueryInput"
+          />
+        </label>
+
+        <select
+          v-model="category"
+          class="pose-select"
+          data-testid="pose-category"
+          aria-label="动作分类"
+          @change="selectCategory"
+        >
+          <option value="all">全部动作分类</option>
+          <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
+        </select>
+
+        <div class="pose-angles" data-testid="pose-angles" role="group" aria-label="视角筛选">
+          <button
+            v-for="option in angleOptions"
+            :key="option.value || 'all'"
+            type="button"
+            :class="{ 'is-active': angle === option.value }"
+            :aria-pressed="angle === option.value"
+            :data-angle="option.value"
+            @click="selectAngle(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+
+        <button type="button" class="pose-reset" data-testid="pose-reset" @click="resetFilters">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M3.2 6.2A5 5 0 1 1 3 9.4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            />
+            <path d="M2.6 2.6v3.8h3.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          重置
+        </button>
+      </div>
+    </template>
+
+    <ReferenceGrid
+      :mode="viewMode"
+      :loading="loading"
+      :error="error"
+      :total="initialLoading ? 0 : totalCount"
+      :has-more="more.hasMore"
+      :remaining="more.remaining"
+      :unit="unit"
+      empty-title="没有找到匹配的姿势"
+      empty-hint="试试更换搜索词或重置筛选条件"
+      :skeleton-count="viewMode === 'single' ? 12 : 10"
+      @retry="retry"
+      @load-more="loadMore"
+    >
+      <!-- 分组视图：5 列 60 组，组内 5 角度缩略条 -->
+      <template v-if="viewMode === 'group'">
+        <ReferenceCard
+          v-for="card in groupCards"
+          v-show="card.item"
+          :key="card.group.key"
+          data-testid="pose-card"
+          :src="card.item ? poseThumbnailUrl(card.item, poseDepthMode) : null"
+          :title="card.group.name"
+          :alt="card.item ? `${card.group.name} · ${card.item.角度}` : card.group.name"
+          :badge="card.group.number"
+          :angle="card.item?.角度"
+          :meta-left="card.group.system"
+          :meta-right="card.group.category"
+          :selectable="Boolean(card.item)"
+          :selected="card.item ? isPoseSelected(card.item.id) : false"
+          @open="openGroup(card.group, card.index)"
+          @toggle-select="card.item && onTogglePose(card.item)"
+        >
+          <div class="angle-strip">
+            <template v-for="cell in card.angles" :key="cell.angle">
+              <button
+                v-if="cell.item"
+                type="button"
+                class="angle-cell"
+                :class="{ 'is-active': card.item && cell.item.id === card.item.id }"
+                :title="`预览${cell.angle}`"
+                :aria-label="`切换到${cell.angle}`"
+                :data-angle="cell.angle"
+                @mouseenter="setHoverAngle(card.group, cell.angle)"
+                @focus="setHoverAngle(card.group, cell.angle)"
+                @click="setHoverAngle(card.group, cell.angle)"
+              >
+                <img v-if="cell.url" :src="cell.url" :alt="cell.angle" loading="lazy" />
+                <span v-else class="angle-cell__empty" />
+                <span class="angle-cell__label">{{ cell.angle }}</span>
+              </button>
+              <span v-else class="angle-cell is-empty" aria-hidden="true" />
+            </template>
+          </div>
+        </ReferenceCard>
+      </template>
+
+      <!-- 单张视图：6 列 96 张 -->
+      <template v-else>
+        <ReferenceCard
+          v-for="card in singleCards"
+          :key="card.item.id"
+          data-testid="pose-card-single"
+          :src="card.src"
+          :title="card.item.姿势名称"
+          :alt="card.item.姿势名称"
+          :badge="card.item.姿势编号"
+          :angle="card.item.角度"
+          meta-mono
+          :meta-left="card.item.id"
+          selectable
+          :selected="card.selected"
+          @open="openSingle(card.item)"
+          @toggle-select="onTogglePose(card.item)"
+        />
+      </template>
+    </ReferenceGrid>
+
+    <ReferenceLightbox
+      :open="Boolean(viewer)"
+      :title="viewerItem?.姿势名称 ?? ''"
+      :image-url="viewerImageUrl"
+      :alt="viewerItem ? `${viewerItem.姿势名称} · ${viewerItem.角度}` : ''"
+      :badge="viewerItem?.姿势编号"
+      :angle="viewerItem?.角度"
+      :counter="viewerCounter"
+      :meta-rows="viewerMeta"
+      :thumbnails="viewerThumbs"
+      :active-thumb-key="viewerItem?.角度 ?? null"
+      :depth-mode="poseDepthMode"
+      :selected="viewerSelected"
+      :select-label="lightboxSelectLabel"
+      selected-label="已在角色配方中（点击移除）"
+      :download-name="viewerDownloadName"
+      :copy-value="viewerItem?.id ?? ''"
+      copy-toast="已复制姿势 ID"
+      :can-prev="Boolean(viewerGroup && viewerGroup.order.length > 1)"
+      :can-next="Boolean(viewerGroup && viewerGroup.order.length > 1)"
+      :can-prev-group="viewerGroupIndex > 0"
+      :can-next-group="viewerGroupIndex < filteredGroups.length - 1"
+      @close="viewer = null"
+      @prev="stepViewerAngle(-1)"
+      @next="stepViewerAngle(1)"
+      @prev-group="stepViewerGroup(-1)"
+      @next-group="stepViewerGroup(1)"
+      @select-thumb="selectViewerAngle"
+      @update:depth-mode="setPoseDepthMode"
+      @toggle-select="toggleViewerSelection"
+    />
+
+    <ReferenceAgeGate
+      :open="ageGateOpen"
+      @confirm="onConfirmAgeGate"
+      @cancel="onCancelAgeGate"
+    />
+
+    <!-- 供自动化断言：当前配方已选姿势（不渲染可见文案） -->
+    <span class="pose-sr-only" data-testid="pose-selected-id">
+      {{ poseSlot?.item.id ?? '' }}{{ poseSlot?.useDepth ? '|depth' : '' }}
+    </span>
+    <span class="pose-sr-only" data-testid="pose-recipe-count">{{ poseSlot ? 1 : 0 }}/3</span>
+    <span class="pose-sr-only" data-testid="pose-can-unlock">{{ canUnlock ? '1' : '0' }}</span>
+  </div>
+</template>
+
+<style scoped>
+.pose-tab {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pose-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pose-head__title {
+  margin: 0;
+  color: #fafafa;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.pose-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 顶栏分段按钮（白模 / 深度图） */
+.pose-segment {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #262626;
+}
+
+.pose-segment button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a1a1a1;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.pose-segment button:hover {
+  color: #fafafa;
+}
+
+.pose-segment button.is-active {
+  background: #0a0a0a;
+  color: #fafafa;
+  box-shadow: var(--shadow-1);
+}
+
+/* 分组 / 单张 */
+.pose-view-mode {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.pose-view-mode button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: #fafafa;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pose-view-mode button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pose-view-mode button.is-active {
+  border-color: transparent;
+  background: #e5e5e5;
+  color: #171717;
+}
+
+/* 安全模式按钮：§5 SFW 态 / 18+ 态 */
+.pose-safe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pose-safe.is-safe {
+  border: 1px solid rgba(0, 189, 123, 0.3);
+  background: rgba(255, 255, 255, 0.045);
+  color: #00d492;
+}
+
+.pose-safe.is-full {
+  border: 1px solid rgba(255, 34, 87, 0.3);
+  background: rgba(255, 29, 88, 0.1);
+  color: #ff637e;
+}
+
+.pose-safe:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pose-safe__icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* 体系药丸：32px / 全圆 / 内边距 6px 14px / 14px 500 / gap 8px */
+.pose-pills {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.pose-pills::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .pose-pills {
+    flex-wrap: wrap;
+    padding-bottom: 0;
+  }
+}
+
+.pose-pill {
+  flex: none;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: #262626;
+  color: #a1a1a1;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.pose-pill:hover {
+  background: #303030;
+  color: #fafafa;
+}
+
+.pose-pill.is-active {
+  background: #e5e5e5;
+  color: #171717;
+}
+
+.pose-pill.is-unlock {
+  border: 1px dashed rgba(255, 29, 88, 0.4);
+  background: rgba(255, 29, 88, 0.05);
+  color: #ff637e;
+}
+
+.pose-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 筛选面板：1280 × 68 / 圆角 22 / 内边距 16 / gap 12 / 底 #262626 */
+.pose-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px minmax(0, auto) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 16px;
+  padding: 16px;
+  border-radius: 22px;
+  background: #262626;
+}
+
+@media (max-width: 1023px) {
+  .pose-filters {
+    grid-template-columns: minmax(0, 1fr) 200px;
+  }
+}
+
+@media (max-width: 639px) {
+  .pose-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pose-search {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.pose-search input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0a0a0a;
+  color: #fafafa;
+  font-size: 14px;
+}
+
+.pose-search input::placeholder {
+  color: #737373;
+}
+
+.pose-search input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.pose-search svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #a1a1a1;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.pose-select {
+  box-sizing: border-box;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0a0a0a;
+  color: #fafafa;
+  font-size: 14px;
+}
+
+.pose-angles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #0a0a0a;
+  scrollbar-width: none;
+}
+
+.pose-angles::-webkit-scrollbar {
+  display: none;
+}
+
+.pose-angles button {
+  flex: none;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a1a1a1;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.pose-angles button:hover {
+  color: #fafafa;
+}
+
+.pose-angles button.is-active {
+  background: #e5e5e5;
+  color: #171717;
+}
+
+.pose-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #a1a1a1;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pose-reset svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pose-reset:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fafafa;
+}
+
+/* 5 格角度缩略条：列宽 42.23 / 单格 42.23 × 57.73 / gap 4 / 圆角 10 / 内边距 2 / 边框 1 */
+.angle-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.angle-cell {
+  box-sizing: border-box;
+  height: 57.73px;
+  padding: 2px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #a1a1a1;
+}
+
+.angle-cell.is-active {
+  border-color: #e5e5e5;
+  background: #0a0a0a;
+}
+
+.angle-cell:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.angle-cell img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.angle-cell__empty {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  background: #171717;
+}
+
+.angle-cell__label {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  line-height: 13.5px;
+  text-align: center;
+}
+
+.angle-cell.is-empty {
+  pointer-events: none;
+}
+
+/* 仅供自动化读取的状态行 */
+.pose-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+</style>
