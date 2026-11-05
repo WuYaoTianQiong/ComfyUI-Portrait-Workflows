@@ -26,6 +26,8 @@ export interface WorkflowCatalogItem {
   image_slots: number
   /** 能否用于参考图库合成台（有图片槽位 + 有文本编码节点） */
   studio_ready: boolean
+  /** 后端标记的推荐项（实测最佳：三槽齐全 + 姿势 LoRA） */
+  recommended?: boolean
 }
 
 export interface WorkflowCatalogResponse {

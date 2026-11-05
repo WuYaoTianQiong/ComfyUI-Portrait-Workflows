@@ -828,7 +828,17 @@ function StudioPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {workflowList.map((workflow) => (
-                        <SelectItem key={workflow.path} value={workflow.path} className="text-xs">
+                        <SelectItem
+                          key={workflow.path}
+                          value={workflow.path}
+                          className="text-xs"
+                          textValue={`${workflow.source !== '库根' && !workflow.name.startsWith(workflow.source) ? `${workflow.source} · ` : ''}${workflow.name.replace(/\.api\.json$/i, '').replace(/\.json$/i, '')}${workflow.image_slots ? `（${workflow.image_slots} 图）` : ''}`}
+                        >
+                          {workflow.recommended && (
+                            <span className="mr-1 inline-flex items-center rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 align-middle">
+                              推荐
+                            </span>
+                          )}
                           {workflow.source !== '库根' && !workflow.name.startsWith(workflow.source)
                             ? `${workflow.source} · `
                             : ''}
