@@ -65,6 +65,16 @@
     三入口外层仅一套 9 项导航、iframe 内无品牌/返回入口/全局导航；非法 ?path=
     回落 /ref-web/?embedded=1 且 console 0；390x844 无横向溢出。
 
+    T34（页签内导航回归）专项：`T3_E2E_ONLY=nav` 追加校验 /reference iframe 内
+    依次点击侧栏六个页签（图库总览、AI 角色合成台、动作姿势库、服装穿搭库、
+    人像颜值库、ComfyUI 连接）后，即使 TanStack Router 丢掉 `embedded=1`，
+    `nav[aria-label="画室全局导航"]`、`[data-slot="sidebar-header"]`、「返回画廊」、
+    「画室画廊」仍全部为 0，面包屑只显示当前页、SidebarTrigger 仍在；
+    对抗场景覆盖顶层 `/ref-web/?embedded=1`（self === top，保留 React 独立导航）
+    与深链 `/ref-web/poses` 归壳；390x844 外层/iframe 均无横向溢出、
+    iframe 首页与 poses 裂图 0、console/pageerror 0；并对运行中的 8656 做只读
+    复核（不重启，点击至少 3 个页签，PID 前后不变）。
+
 跑法（二选一，脚本会自动判断是否需要自起实例）：
 
     ATELIER_PORT=8766 ATELIER_REFERENCE_ALLOW_NSFW=1 python main.py   # 手动先起
@@ -3541,7 +3551,11 @@ def _t32_assert_shell_chrome(page, frame, label: str) -> None:
     btns = page.locator("nav.tabs button")
     labels = [(btns.nth(i).inner_text() or "").strip() for i in range(btns.count())]
     check(btns.count() == 9, f"[T32] {label} 外层顶栏 9 项", f"count={btns.count()}")
-    check(labels == T32_OUTER_LABELS, f"[T32] {label} 外层顶栏文案完整", f"labels={labels}")
+    # 「任务」按钮会追加进行中任务数徽标（如「任务 1」），文案断言不能精确等于标签，
+    # 只剥离尾部数字徽标再比对，避免后端瞬时任务数让既有门禁随机失败。
+    normalized_labels = [re.sub(r"\s+\d+$", "", text).strip() for text in labels]
+    check(normalized_labels == T32_OUTER_LABELS,
+          f"[T32] {label} 外层顶栏文案完整", f"labels={labels}")
     active = [
         text for i, text in enumerate(labels)
         if "active" in (btns.nth(i).get_attribute("class") or "").split()
@@ -3898,6 +3912,485 @@ def check_unified_entry(browser, shots_dir: Path) -> None:
     _t32_narrow(browser, shots_dir)
 
 
+# ---------------------------------------------------------------------------
+# T34 页签内导航回归专项（commit 24f0100）
+#
+# 回归背景：`isEmbeddedMode()` 曾经依赖地址里的 `embedded=1`。TanStack Router 在
+# iframe 内做客户端导航时会丢掉 query（点击侧栏后 URL 变成 `/ref-web/portraits`），
+# 组件重渲染时判定退回「非嵌入」，侧栏品牌、返回入口与全局导航重新出现。
+# 修复后判定只看 `window.self !== window.top`；本专项逐个点击侧栏页签，验证丢
+# query 之后四项仍为 0，并覆盖两个对抗场景（顶层 embedded=1 / 深链归壳）。
+# ---------------------------------------------------------------------------
+#: 侧栏 6 个页签：(点击文案, 截图 slug, 期望 iframe 路径, 期望 h1, 期望面包屑)
+#: 面包屑取路由 staticData.title，因此 studio 页为「AI 合成台」而非 h1 的「AI 角色合成台」。
+T34_TABS: list[tuple[str, str, str, str, str]] = [
+    ("图库总览", "home", "/ref-web/", "AI 角色参考库", "图库总览"),
+    ("AI 角色合成台", "studio", "/ref-web/studio", "AI 角色合成台", "AI 合成台"),
+    ("动作姿势库", "poses", "/ref-web/poses", "动作姿势库", "动作姿势库"),
+    ("服装穿搭库", "costumes", "/ref-web/costumes", "服装穿搭库", "服装穿搭库"),
+    ("人像颜值库", "portraits", "/ref-web/portraits", "人像颜值库", "人像颜值库"),
+    ("ComfyUI 连接", "settings", "/ref-web/settings", "ComfyUI 连接", "ComfyUI 连接"),
+]
+
+
+def _t34_inner_url(page) -> str:
+    """当前 /ref-web iframe 的绝对 URL（未加载时返回空串）。"""
+    for f in page.frames:
+        if "/ref-web" in (f.url or ""):
+            return f.url or ""
+    return ""
+
+
+def _t34_h1(frame) -> str:
+    try:
+        loc = frame.locator("h1")
+        if loc.count() == 0:
+            return ""
+        return loc.first.inner_text(timeout=1000).strip()
+    except Exception:
+        return ""
+
+
+def _t34_wait_h1(frame, expected: str, timeout_ms: int = 25000) -> str:
+    deadline = time.time() + timeout_ms / 1000
+    actual = ""
+    while time.time() < deadline:
+        actual = _t34_h1(frame)
+        if actual == expected:
+            return actual
+        time.sleep(0.25)
+    return actual
+
+
+def _t34_wait_inner_url(page, before: str, expected_path: str,
+                        timeout_ms: int = 25000) -> str:
+    """等 iframe 发生客户端导航，且路径落到期望值（URL 丢 query 也要能命中）。"""
+    deadline = time.time() + timeout_ms / 1000
+    actual = before
+    while time.time() < deadline:
+        actual = _t34_inner_url(page)
+        if actual and actual != before and \
+                urlsplit(actual).path.rstrip("/") == expected_path.rstrip("/"):
+            return actual
+        page.wait_for_timeout(150)
+    return actual
+
+
+def _t34_collect_inner_errors(frame, sink: list[str]) -> None:
+    """把当前 iframe document 的错误并入总表（客户端导航不会重置 init script）。"""
+    for item in _t32_inner_errors(frame):
+        text = str(item)
+        if text not in sink:
+            sink.append(text)
+
+
+def _t34_assert_no_duplicate_nav(frame, label: str) -> dict:
+    """iframe 内四项重复导航必须为 0，SidebarTrigger 必须仍在。"""
+    targets = [
+        ('nav[aria-label="画室全局导航"]', "画室全局导航"),
+        ('[data-slot="sidebar-header"]', "侧栏品牌块"),
+        ('text="返回画廊"', "返回画廊"),
+        ('text="画室画廊"', "画室画廊"),
+    ]
+    counts: dict[str, int] = {}
+    for selector, human in targets:
+        value = frame.locator(selector).count()
+        counts[human] = value
+        check(value == 0, f"[T34] {label} iframe {human} 为 0", f"count={value}")
+    trigger = frame.locator('[data-slot="sidebar-trigger"]').count()
+    check(trigger == 1, f"[T34] {label} iframe SidebarTrigger 仍在", f"count={trigger}")
+    return counts
+
+
+def _t34_assert_breadcrumb(frame, label: str, expected: str) -> str:
+    """面包屑只显示当前页，且不含「画室画廊」根。"""
+    bc_loc = frame.locator('nav[aria-label="breadcrumb"]')
+    count = bc_loc.count()
+    check(count >= 1, f"[T34] {label} iframe 面包屑存在", f"count={count}")
+    text = bc_loc.first.inner_text().strip() if count else ""
+    check("画室画廊" not in text, f"[T34] {label} iframe 面包屑不含『画室画廊』",
+          f"text={text!r}")
+    check(text == expected, f"[T34] {label} iframe 面包屑仅为当前页『{expected}』",
+          f"actual={text!r}")
+    return text
+
+
+def _t34_click_tab(page, frame, label: str, slug: str, expected_path: str,
+                   expected_h1: str, expected_crumb: str, tag: str,
+                   shots_dir: Path, inner_errors: list[str]) -> None:
+    """点击 iframe 侧栏页签，等待 h1/URL 到位后断言重复导航未复现。"""
+    link = frame.locator('[data-slot="sidebar"] a').filter(has_text=label).first
+    link_count = link.count()
+    check(link_count == 1, f"[T34] {tag} 侧栏页签『{label}』存在且唯一",
+          f"count={link_count}")
+    if link_count != 1:
+        return
+
+    before_url = _t34_inner_url(page)
+    before_h1 = _t34_h1(frame)
+    link.click()
+    url = _t34_wait_inner_url(page, before_url, expected_path)
+    actual_h1 = _t34_wait_h1(frame, expected_h1)
+    page.wait_for_timeout(600)
+
+    path = urlsplit(url).path.rstrip("/")
+    check(path == expected_path.rstrip("/"),
+          f"[T34] {tag} 页签『{label}』iframe 路径为 {expected_path}",
+          f"url={url}")
+    check(actual_h1 == expected_h1,
+          f"[T34] {tag} 页签『{label}』h1 为『{expected_h1}』",
+          f"actual={actual_h1!r}")
+    if before_h1 == actual_h1:
+        observe(f"[T34] {tag} 页签『{label}』h1 未变化",
+                f"before={before_h1!r} url={url}")
+    else:
+        observe(f"[T34] {tag} 页签『{label}』h1 变化", f"{before_h1!r} -> {actual_h1!r}")
+    # 丢 query 是本回归的触发条件：如实记录，但不判失败（修复后不依赖 query）。
+    if "embedded=1" not in url:
+        observe(f"[T34] {tag} 页签『{label}』iframe URL 已丢 embedded=1（预期）", url)
+    else:
+        observe(f"[T34] {tag} 页签『{label}』iframe URL 仍带 embedded=1", url)
+
+    _t34_assert_no_duplicate_nav(frame, f"{tag}·{label}")
+    _t34_assert_breadcrumb(frame, f"{tag}·{label}", expected_crumb)
+    _t34_collect_inner_errors(frame, inner_errors)
+
+    try:
+        page.screenshot(path=str(shots_dir / f"t34_tab_{tag}_{slug}.png"))
+    except Exception as exc:
+        observe(f"[T34] {tag} 页签『{label}』截图失败", f"{type(exc).__name__}: {exc}")
+
+
+def _t34_scroll_metrics(page, frame) -> dict:
+    outer = page.evaluate(
+        "() => ({ innerWidth: window.innerWidth, "
+        "docScrollWidth: document.documentElement.scrollWidth })"
+    )
+    inner = frame.locator("body").evaluate(
+        """() => ({
+            innerWidth: window.innerWidth,
+            docScrollWidth: document.documentElement.scrollWidth,
+        })"""
+    )
+    return {"outer": outer, "inner": inner}
+
+
+def _t34_wait_inner_images(frame, timeout_ms: int = 30000) -> dict:
+    """滚动 iframe 文档触发懒加载，等全部图片完成后返回裂图统计。"""
+    frame.locator("body").evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        try:
+            done = frame.locator("body").evaluate(
+                "() => Array.from(document.images).every((i) => i.complete)"
+            )
+        except Exception:
+            done = False
+        if done:
+            break
+        time.sleep(0.3)
+    frame.locator("body").evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    return _t32_inner_image_stats(frame)
+
+
+def _t34_top_embedded(browser, shots_dir: Path) -> None:
+    """T34-c：顶层直接打开 /ref-web/?embedded=1，self === top，保留 React 独立导航。"""
+    section("T34-c 顶层 /ref-web/?embedded=1 保留 React 独立导航")
+    ctx, page, errors, _navs = _t32_new_page(browser, "t34-top-embedded",
+                                             viewport={"width": 1500, "height": 950})
+    try:
+        resp = page.goto(BASE + "/ref-web/?embedded=1", wait_until="domcontentloaded",
+                         timeout=60000)
+        check(resp is not None and resp.status == 200,
+              "[T34] c 顶层 embedded=1 返回 200",
+              f"status={resp.status if resp else None}")
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('nav[aria-label=\"画室全局导航\"]').length >= 1",
+                timeout=25000,
+            )
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
+
+        check(page.evaluate("() => window.self === window.top"),
+              "[T34] c 顶层页面 self === top", "")
+        check(urlsplit(page.url).path.rstrip("/") == "/ref-web",
+              "[T34] c 顶层 embedded=1 未被归壳", page.url)
+        nav = page.locator('nav[aria-label="画室全局导航"]')
+        check(nav.count() == 1, "[T34] c 顶层保留 React 全局导航",
+              f"count={nav.count()}")
+        check(nav.locator("div > a").count() == 9,
+              "[T34] c 顶层 React 全局导航 9 项",
+              f"count={nav.locator('div > a').count()}")
+        header_count = page.locator('[data-slot="sidebar-header"]').count()
+        check(header_count == 1, "[T34] c 顶层保留侧栏品牌块", f"count={header_count}")
+        back_count = page.locator('text="返回画廊"').count()
+        check(back_count == 1, "[T34] c 顶层保留『返回画廊』", f"count={back_count}")
+        studio_count = page.locator('text="画室画廊"').count()
+        check(studio_count == 1, "[T34] c 顶层保留『画室画廊』", f"count={studio_count}")
+        check(not errors, "[T34] c 顶层 embedded=1 console/pageerror 为 0",
+              "; ".join(errors[:3]))
+        page.screenshot(path=str(shots_dir / "t34_top_embedded.png"))
+    except Exception as exc:
+        check(False, "[T34] c 顶层 embedded=1 专项执行异常",
+              f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t34_top_embedded_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t34_deep_link_poses(browser, shots_dir: Path) -> None:
+    """T34-d：直接访问 /ref-web/poses 归壳到 /reference?path=...，iframe 无重复导航。"""
+    section("T34-d 直接访问 /ref-web/poses 归壳并渲染『动作姿势库』")
+    ctx, page, errors, _navs = _t32_new_page(browser, "t34-deeplink")
+    inner_errors: list[str] = []
+    try:
+        resp = page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded",
+                         timeout=60000)
+        check(resp is not None and resp.status == 200,
+              "[T34] d /ref-web/poses 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T34] d 最终 URL 为 /reference", page.url)
+        query = page.evaluate("() => new URLSearchParams(location.search).get('path')")
+        check(query == "/ref-web/poses", "[T34] d path 参数保留 poses 深链",
+              f"path={query!r}")
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, "[T34] d 恰有 1 个 iframe", f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check("/ref-web/poses" in src and "embedded=1" in src,
+              "[T34] d iframe 指向 /ref-web/poses?embedded=1", src or "无 src")
+
+        frame = _t32_inner_frame(page)
+        _t34_assert_no_duplicate_nav(frame, "d·深链")
+        _t34_assert_breadcrumb(frame, "d·深链", "动作姿势库")
+        actual_h1 = _t34_h1(frame)
+        check(actual_h1 == "动作姿势库", "[T34] d iframe h1 为『动作姿势库』",
+              f"actual={actual_h1!r}")
+        inner_text = frame.locator("body").inner_text(timeout=15000)
+        check("动作姿势库" in inner_text, "[T34] d iframe 正文含『动作姿势库』", "")
+        _t34_collect_inner_errors(frame, inner_errors)
+
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errors and not outer_injected,
+              "[T34] d 深链 console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errors[:2]}")
+        page.screenshot(path=str(shots_dir / "t34_deeplink_poses.png"))
+    except Exception as exc:
+        check(False, "[T34] d 深链 poses 专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t34_deeplink_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t34_narrow(browser, shots_dir: Path) -> None:
+    """T34-e：390x844 外层/iframe 无横向溢出、裂图 0、console 0。"""
+    section("T34-e 390x844 无横向溢出、iframe 首页与 poses 裂图 0")
+    ctx, page, errors, _navs = _t32_new_page(browser, "t34-narrow",
+                                             viewport={"width": 390, "height": 844})
+    inner_errors: list[str] = []
+    try:
+        resp = page.goto(BASE + "/reference", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200,
+              "[T34] e 窄屏 /reference 返回 200",
+              f"status={resp.status if resp else None}")
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        frame = _t32_inner_frame(page)
+
+        _t34_assert_no_duplicate_nav(frame, "e·窄屏首页")
+        _t34_assert_breadcrumb(frame, "e·窄屏首页", "图库总览")
+        metrics = _t34_scroll_metrics(page, frame)
+        check(metrics["outer"]["docScrollWidth"] <= metrics["outer"]["innerWidth"] + 1,
+              "[T34] e 窄屏外层无横向溢出",
+              f"docScrollWidth={metrics['outer']['docScrollWidth']} "
+              f"innerWidth={metrics['outer']['innerWidth']}")
+        check(metrics["inner"]["docScrollWidth"] <= metrics["inner"]["innerWidth"] + 1,
+              "[T34] e 窄屏 iframe 内无横向溢出",
+              f"docScrollWidth={metrics['inner']['docScrollWidth']} "
+              f"innerWidth={metrics['inner']['innerWidth']}")
+        home_stats = _t34_wait_inner_images(frame)
+        check(home_stats["broken"] == 0, "[T34] e 窄屏 iframe 首页裂图为 0",
+              f"broken={home_stats['broken']}/{home_stats['total']} "
+              f"src={home_stats['src']}")
+        _t34_collect_inner_errors(frame, inner_errors)
+        page.screenshot(path=str(shots_dir / "t34_narrow_home.png"))
+
+        resp = page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded",
+                         timeout=60000)
+        check(resp is not None and resp.status == 200,
+              "[T34] e 窄屏 /ref-web/poses 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        frame = _t32_inner_frame(page)
+        _t34_assert_no_duplicate_nav(frame, "e·窄屏poses")
+        _t34_assert_breadcrumb(frame, "e·窄屏poses", "动作姿势库")
+        metrics = _t34_scroll_metrics(page, frame)
+        check(metrics["outer"]["docScrollWidth"] <= metrics["outer"]["innerWidth"] + 1,
+              "[T34] e 窄屏 poses 外层无横向溢出",
+              f"docScrollWidth={metrics['outer']['docScrollWidth']} "
+              f"innerWidth={metrics['outer']['innerWidth']}")
+        check(metrics["inner"]["docScrollWidth"] <= metrics["inner"]["innerWidth"] + 1,
+              "[T34] e 窄屏 poses iframe 内无横向溢出",
+              f"docScrollWidth={metrics['inner']['docScrollWidth']} "
+              f"innerWidth={metrics['inner']['innerWidth']}")
+        poses_stats = _t34_wait_inner_images(frame)
+        check(poses_stats["broken"] == 0, "[T34] e 窄屏 iframe poses 裂图为 0",
+              f"broken={poses_stats['broken']}/{poses_stats['total']} "
+              f"src={poses_stats['src']}")
+        _t34_collect_inner_errors(frame, inner_errors)
+
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errors and not outer_injected,
+              "[T34] e 窄屏外层与 iframe console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errors[:2]}")
+        page.screenshot(path=str(shots_dir / "t34_narrow_poses.png"))
+    except Exception as exc:
+        check(False, "[T34] e 窄屏专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t34_narrow_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _pid_on_port(port: int) -> str | None:
+    """读取监听指定端口的进程 PID（Windows netstat / POSIX lsof），只读不杀进程。"""
+    try:
+        if os.name == "nt":
+            proc = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=20)
+        else:
+            proc = subprocess.run(["lsof", "-ti", f"tcp:{port}"], capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace", timeout=20)
+    except Exception:
+        return None
+    pids: set[str] = set()
+    if os.name == "nt":
+        for line in (proc.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP" and "LISTENING" in parts:
+                if parts[1].rsplit(":", 1)[-1] == str(port):
+                    pids.add(parts[-1])
+    else:
+        pids = {ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip().isdigit()}
+    return ",".join(sorted(pids)) or None
+
+
+def check_live_8656_tab_nav(browser, shots_dir: Path) -> None:
+    """T34-f：8656 只读复核，不重启，验证页签内导航同样不回落独立导航。"""
+    section("T34-f 运行中 8656 只读复核（不重启，PID 前后不变）")
+    live = f"http://127.0.0.1:{LIVE_PORT}"
+    pid_before = _pid_on_port(LIVE_PORT)
+    check(pid_before is not None, "[T34] f 记录 8656 监听 PID（前）",
+          f"pid={pid_before}")
+    status = http_get_status(live + "/")
+    check(status == 200, "[T34] f 8656 GET 探活 200（只读）", f"status={status}")
+    if status != 200:
+        check(False, "[T34] f 8656 不可用，无法复核", f"status={status}")
+        return
+
+    ctx, page, errors, _navs = _t32_new_page(browser, "t34-live-8656")
+    inner_errors: list[str] = []
+    clicked = 0
+    try:
+        resp = page.goto(live + "/reference", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200,
+              "[T34] f 8656 /reference 返回 200",
+              f"status={resp.status if resp else None}")
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        frame = _t32_inner_frame(page)
+        _t34_assert_no_duplicate_nav(frame, "f·8656 初始")
+        _t34_assert_breadcrumb(frame, "f·8656 初始", "图库总览")
+        _t34_collect_inner_errors(frame, inner_errors)
+
+        for label, slug, path, h1, crumb in T34_TABS[2:5]:
+            _t34_click_tab(page, frame, label, slug, path, h1, crumb, "f·8656",
+                           shots_dir, inner_errors)
+            clicked += 1
+        check(clicked >= 3, "[T34] f 8656 至少点击 3 个页签", f"clicked={clicked}")
+
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errors and not outer_injected,
+              "[T34] f 8656 外层与 iframe console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errors[:2]}")
+        page.screenshot(path=str(shots_dir / "t34_live_8656.png"))
+    except Exception as exc:
+        check(False, "[T34] f 8656 只读复核执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t34_live_8656_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+    pid_after = _pid_on_port(LIVE_PORT)
+    check(pid_after is not None, "[T34] f 记录 8656 监听 PID（后）",
+          f"pid={pid_after}")
+    check(pid_before == pid_after, "[T34] f 8656 PID 前后不变（未重启）",
+          f"before={pid_before} after={pid_after}")
+    status_after = http_get_status(live + "/")
+    check(status_after == 200, "[T34] f 复核后 8656 仍可用", f"status={status_after}")
+
+
+def check_tab_nav_regression(browser, shots_dir: Path) -> None:
+    """T34：/reference 页签内导航后不得回落独立导航，并覆盖两个对抗场景。"""
+    section("T34-a 初始 /reference：iframe 内无重复导航")
+    ctx, page, errors, _navs = _t32_new_page(browser, "t34-tabs")
+    inner_errors: list[str] = []
+    try:
+        resp = page.goto(BASE + "/reference", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, "[T34] a /reference 返回 200",
+              f"status={resp.status if resp else None}")
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        src = page.locator(".reference-embed iframe").first.get_attribute("src") or ""
+        check("embedded=1" in src, "[T34] a 初始 iframe src 含 embedded=1", src)
+
+        frame = _t32_inner_frame(page)
+        _t34_assert_no_duplicate_nav(frame, "a·初始")
+        _t34_assert_breadcrumb(frame, "a·初始", "图库总览")
+        initial_h1 = _t34_h1(frame)
+        check(initial_h1 == "AI 角色参考库", "[T34] a 初始 h1 为『AI 角色参考库』",
+              f"actual={initial_h1!r}")
+        _t34_collect_inner_errors(frame, inner_errors)
+        page.screenshot(path=str(shots_dir / "t34_initial.png"))
+
+        section("T34-b 依次点击 iframe 内侧栏六个页签（每次断言四项仍为 0）")
+        for label, slug, path, h1, crumb in T34_TABS:
+            _t34_click_tab(page, frame, label, slug, path, h1, crumb, "b·8766",
+                           shots_dir, inner_errors)
+
+        section("T34-b+ 从 ComfyUI 连接回到图库总览（h1 必须变化）")
+        _t34_click_tab(page, frame, "图库总览", "home_back", "/ref-web/",
+                       "AI 角色参考库", "图库总览", "b+·8766", shots_dir, inner_errors)
+
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errors and not outer_injected,
+              "[T34] b 页签点击全流程 console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errors[:2]}")
+    except Exception as exc:
+        check(False, "[T34] 页签回归专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t34_tabs_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+    _t34_top_embedded(browser, shots_dir)
+    _t34_deep_link_poses(browser, shots_dir)
+    _t34_narrow(browser, shots_dir)
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -3965,6 +4458,8 @@ def main() -> int:
                 check_nav_merge(browser, shots_dir)
                 check_embed_nav(browser, shots_dir)
                 check_unified_entry(browser, shots_dir)
+                check_tab_nav_regression(browser, shots_dir)
+                check_live_8656_tab_nav(browser, shots_dir)
             else:
                 if not P4_ONLY:
                     ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
