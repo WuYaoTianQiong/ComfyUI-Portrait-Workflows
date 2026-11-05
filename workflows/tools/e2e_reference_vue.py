@@ -2,6 +2,8 @@
 """参考图库 Vue 版关键路径 E2E 验收脚本（施工手册阶段 4.2）。
 
 覆盖《参考图库_React转Vue统一迁移_施工手册_20261105.md》§8 的 G1–G10。
+阶段 3 多选升级后追加 G11「合成台交互」8 项，并扩写 G7「批量组合 / 上限 100 /
+空槽提交 / 非 studio 400 / caps 过滤」8 项（见文件内 2026-11-05 增补注释）。
 G9 深链组与 G10「产物不含 ref-web」在阶段 4.3 + 4.4（删除 React 子应用、
 建立 `/ref-web` → `/reference?tab=` 的 301/302 重定向）之后转正，不再 SKIP；
 G9 另补了 query 传递、前缀边界与路径穿越 3 条边界断言（见 §6 实现注意）。
@@ -16,6 +18,10 @@ G9 另补了 query 传递、前缀边界与路径穿越 3 条边界断言（见 
     python tools/e2e_reference_vue.py
     python tools/e2e_reference_vue.py --base http://127.0.0.1:8656
     python tools/e2e_reference_vue.py --only G1,G2
+    python tools/e2e_reference_vue.py --only G7,G11 --live-submit
+
+`--live-submit` 默认关闭：打开后 G7 会额外真实提交 1 组（1 张图），
+用于验证「前端 → 后端 → 轮询 → 结果图」链路；其余断言仍走 mock。
 
 退出码：
     0  没有 FAIL（允许 SKIP）
@@ -162,6 +168,8 @@ class Recorder:
     only: set[str] | None = None
     results: list[CheckResult] = field(default_factory=list)
     screenshots: list[str] = field(default_factory=list)
+    #: 是否允许真实提交（默认关闭；全量验收时由 --live-submit 显式打开）。
+    live_submit: bool = False
 
     def enabled(self, group: str) -> bool:
         return self.only is None or group in self.only
@@ -450,6 +458,121 @@ def read_json_body(route: Route) -> dict:
         return json.loads(raw) if raw else {}
     except Exception:
         return {}
+
+
+def read_batch_total(page: Page) -> tuple[int | None, int | None, str]:
+    """读取常驻的「当前 N / 上限 M」文本，返回 (N, M, 原文)。"""
+    text = text_of(page, '[data-testid="studio-batch-total"]')
+    match = re.search(r"当前\s*(\d+)\s*/\s*上限\s*(\d+)", text)
+    if not match:
+        return None, None, text
+    return int(match.group(1)), int(match.group(2)), text
+
+
+def read_slot_counts(page: Page) -> dict[str, int]:
+    """读取三槽已选数量徽标；空槽无徽标时按 0 计。"""
+    counts: dict[str, int] = {}
+    for key in ("portrait", "costume", "pose"):
+        badge = page.locator(f'[data-testid="studio-slot-count-{key}"]')
+        raw = badge.first.inner_text().strip() if badge.count() else ""
+        counts[key] = int(raw) if raw.isdigit() else 0
+    return counts
+
+
+def slot_product(counts: dict[str, int]) -> int:
+    """槽位组合数：空槽按 1 计，三槽全空为 0（与前端纯函数同口径）。"""
+    dims = [counts["portrait"], counts["costume"], counts["pose"]]
+    if all(value <= 0 for value in dims):
+        return 0
+    total = 1
+    for value in dims:
+        total *= max(1, value)
+    return total
+
+
+def choose_workflow(page: Page, fragment: str) -> str:
+    """展开工作流下拉，按 title 片段选中一项；成功返回触发器 title，失败返回空串。
+
+    只用 role=listbox / role=option 语义定位，不依赖构建产物类名。
+    """
+    trigger = page.locator('[data-testid="studio-workflow-trigger"]')
+    trigger.click()
+    listbox = page.get_by_role("listbox", name="本机工作流列表")
+    try:
+        listbox.wait_for(state="visible", timeout=15_000)
+    except PlaywrightTimeoutError:
+        return ""
+    options = listbox.get_by_role("option")
+    target = None
+    for index in range(options.count()):
+        option = options.nth(index)
+        if fragment in (option.get_attribute("title") or ""):
+            target = option
+            break
+    if target is None:
+        page.keyboard.press("Escape")
+        return ""
+    target.click()
+    page.wait_for_timeout(500)
+    return trigger.get_attribute("title") or ""
+
+
+def click_chips(page: Page, field_testid: str, *, select: bool) -> list[str]:
+    """批量点击画质 / 比例档位。
+
+    `select=True` 只点未选中项（aria-pressed=false），否则只点已选中项。
+    返回点击过的按钮文案，便于断言实际点击数量。
+    """
+    container = page.locator(f'[data-testid="{field_testid}"]')
+    if container.count() == 0:
+        return []
+    buttons = container.locator("button")
+    clicked: list[str] = []
+    # 点击会切换 aria-pressed；按下标遍历并逐项判断，每项最多点一次。
+    total = buttons.count()
+    for index in range(total):
+        button = buttons.nth(index)
+        pressed = button.get_attribute("aria-pressed") == "true"
+        if (select and pressed) or (not select and not pressed):
+            continue
+        button.click()
+        clicked.append(button.inner_text().strip())
+        page.wait_for_timeout(60)
+    return clicked
+
+
+def click_first_unselected_chip(page: Page, field_testid: str) -> str:
+    """点选该字段下第一个未选中的档位，返回其文案；没有可选项时返回空串。"""
+    container = page.locator(f'[data-testid="{field_testid}"]')
+    if container.count() == 0:
+        return ""
+    buttons = container.locator("button")
+    for index in range(buttons.count()):
+        button = buttons.nth(index)
+        if button.get_attribute("aria-pressed") == "true":
+            continue
+        label = button.inner_text().strip()
+        button.click()
+        page.wait_for_timeout(120)
+        return label
+    return ""
+
+
+def post_json_status(base: str, path: str, payload: dict, timeout: float = 30.0) -> tuple[int, str]:
+    """POST JSON，返回 (状态码, 响应体文本)；HTTP 错误也读取响应体。"""
+    request = urllib.request.Request(
+        f"{base.rstrip('/')}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            return response.status, response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as error:
+        return 0, str(error)
 
 
 # ---------------------------------------------------------------------------
@@ -1539,6 +1662,9 @@ def run_g7(browser: Browser, base: str, recorder: Recorder) -> None:
             if select_button.count() == 0:
                 return False
             select_button.first.click()
+            # 多选升级后点「加入配方」只 toggle、不再自动回合成台，
+            # 必须显式点页签返回，否则后续断言会停在服装页。
+            page.get_by_role("tab", name="合成台", exact=True).click()
             page.wait_for_selector('[data-testid="reference-studio"]', state="visible", timeout=20_000)
             page.wait_for_timeout(600)
             return True
@@ -1631,10 +1757,258 @@ def run_g7(browser: Browser, base: str, recorder: Recorder) -> None:
             f"提示={toast_text}",
         )
         session.shoot("G7-extra-rejected")
+
+        # ------------------------------------------------------------------
+        # G7 增补（2026-11-05）：批量组合数、上限 100、空槽提交、
+        # 非 studio 400、Qwen 系 caps 过滤。全部只用语义选择器与文案。
+        # ------------------------------------------------------------------
+
+        captured_bodies.clear()
+
+        # 1) 尺寸多选相乘：切到 PornMaster（caps quality/orientation=true），
+        #    在默认 1 档基础上各再选 1 档 → N = 槽位组合 × 2 × 2。
+        porn_path = choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        porn_has_size = (
+            page.locator('[data-testid="studio-quality-field"]').count() > 0
+            and page.locator('[data-testid="studio-ratio-field"]').count() > 0
+        )
+        click_first_unselected_chip(page, "studio-quality-options")
+        click_first_unselected_chip(page, "studio-ratio-options")
+        selected_quality = page.locator(
+            '[data-testid="studio-quality-options"] button[aria-pressed="true"]'
+        ).count()
+        selected_ratio = page.locator(
+            '[data-testid="studio-ratio-options"] button[aria-pressed="true"]'
+        ).count()
+
+        counts = read_slot_counts(page)
+        combos = slot_product(counts)
+        expected_total = combos * selected_quality * selected_ratio
+        actual_total, limit_value, total_text = read_batch_total(page)
+        recorder.check(
+            group,
+            "组合数 = 槽位组合 × 画质档数 × 比例数（尺寸多选相乘）",
+            bool(porn_path) and porn_has_size
+            and selected_quality >= 2
+            and selected_ratio >= 2
+            and actual_total == expected_total
+            and limit_value == 100,
+            f"N = {combos} × {selected_quality} × {selected_ratio} = {expected_total}，上限 100",
+            f"工作流={porn_path}，槽位={counts}，画质档={selected_quality}，"
+            f"比例={selected_ratio}，实测文本={total_text}",
+        )
+
+        # 2) 空槽不展开：清空人像 / 服装两槽，只剩姿势 → 空槽按 1 计而非 0。
+        page.locator(
+            '[data-testid="studio-slot-portrait"] button[aria-label^="清除"]'
+        ).click()
+        page.locator(
+            '[data-testid="studio-slot-costume"] button[aria-label^="清除"]'
+        ).click()
+        page.wait_for_timeout(400)
+        counts_after_clear = read_slot_counts(page)
+        combos_after_clear = slot_product(counts_after_clear)
+        actual_after_clear, _, text_after_clear = read_batch_total(page)
+        expected_after_clear = combos_after_clear * selected_quality * selected_ratio
+        recorder.check(
+            group,
+            "空槽按 1 计、不展开为 0",
+            counts_after_clear["pose"] >= 1
+            and combos_after_clear == 1
+            and actual_after_clear == expected_after_clear
+            and actual_after_clear > 0,
+            f"清空人像/服装后 N = 1 × {selected_quality} × {selected_ratio} = {expected_after_clear}（>0）",
+            f"槽位={counts_after_clear}，实测文本={text_after_clear}",
+        )
+
+        # 3) 上限 100：姿势槽加到 3 张 + 全尺寸档（5×9）→ 135 > 100，
+        #    提交按钮禁用并给出与常量逐字一致的文案。
+        page.locator('[data-testid="studio-slot-pose"]').click()
+        page.wait_for_selector('[data-testid="pose-card"]', state="visible", timeout=60_000)
+        add_pose = page.get_by_role("button", name="加入配方", exact=True)
+        for _ in range(2):
+            if add_pose.count() == 0:
+                break
+            add_pose.first.click()
+            page.wait_for_timeout(250)
+        page.get_by_role("tab", name="合成台", exact=True).click()
+        page.wait_for_selector('[data-testid="reference-studio"]', state="visible", timeout=30_000)
+        page.wait_for_timeout(800)
+
+        # 切页签会重置工作流与尺寸选择，回合成台后重新选 PornMaster 并点满档位。
+        choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        click_chips(page, "studio-quality-options", select=True)
+        click_chips(page, "studio-ratio-options", select=True)
+        counts_over = read_slot_counts(page)
+        combos_over = slot_product(counts_over)
+        quality_over = page.locator(
+            '[data-testid="studio-quality-options"] button[aria-pressed="true"]'
+        ).count()
+        ratio_over = page.locator(
+            '[data-testid="studio-ratio-options"] button[aria-pressed="true"]'
+        ).count()
+        total_over, limit_over, text_over = read_batch_total(page)
+        expected_over = combos_over * quality_over * ratio_over
+        limit_message = f"全组合共 {expected_over} 张，超过上限 100 张；请减少素材或尺寸档位"
+        blocked_text = text_of(page, '[data-testid="studio-generate-blocked"]')
+        batch_limit_text = text_of(page, '[data-testid="studio-batch-limit"]')
+        generate = page.locator('[data-testid="studio-generate"]')
+        recorder.check(
+            group,
+            "超过上限 100 时禁用提交并给出原文案",
+            expected_over > 100
+            and total_over == expected_over
+            and limit_over == 100
+            and generate.is_disabled()
+            and blocked_text == limit_message
+            and batch_limit_text == limit_message,
+            f"N={expected_over} > 100，按钮 disabled，文案=「{limit_message}」",
+            f"N={total_over}，disabled={generate.is_disabled()}，"
+            f"按钮下方文案=「{blocked_text}」，摘要文案=「{batch_limit_text}」",
+        )
+        session.shoot("G7-batch-limit")
+
+        # 4) 空槽提交：M=1（仅姿势）< N=3，先弹降级确认框；点「仍用当前工作流提交」
+        #    后提交体只带 pose_id，不带空槽字段（后端自行裁掉空槽）。
+        #    切换工作流会清掉尺寸多选并回落为 1 档，N 随之回到 3。
+        choose_workflow(page, "图库专用_Qwen21+VNCCS")
+        choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        counts_before_submit = read_slot_counts(page)
+        total_before_submit, _, _ = read_batch_total(page)
+        captured_bodies.clear()
+        page.locator('[data-testid="studio-generate"]').click()
+        page.wait_for_selector(
+            '[data-testid="studio-workflow-downgrade"]', state="visible", timeout=15_000
+        )
+        downgrade_message = text_of(page, '[data-testid="studio-downgrade-message"]')
+        recorder.check(
+            group,
+            "槽位数 < input_count 时弹降级确认框",
+            "切换后任务语义可能变为换衣/编辑" in downgrade_message
+            and "当前工作流需要 3 个输入" in downgrade_message,
+            "确认框文案含「切换后任务语义可能变为换衣/编辑」与「需要 3 个输入」",
+            f"文案=「{downgrade_message}」，提交前槽位={counts_before_submit}，N={total_before_submit}",
+        )
+        page.locator('[data-testid="studio-downgrade-current"]').click()
+        page.wait_for_timeout(1500)
+        empty_slot_body = captured_bodies[-1] if captured_bodies else {}
+        recorder.check(
+            group,
+            "空槽提交只发送已填槽（不含 portrait_id / costume_id）",
+            bool(captured_bodies)
+            and "pose_id" in empty_slot_body
+            and "portrait_id" not in empty_slot_body
+            and "costume_id" not in empty_slot_body,
+            "提交体含 pose_id，且不含 portrait_id / costume_id",
+            f"提交体键={sorted(empty_slot_body.keys())}，"
+            f"pose_id={empty_slot_body.get('pose_id')}",
+        )
+
+        # 5) 非 studio 400 与 M==0 400：直接打后端，避免页面前置校验。
+        all_workflows = api_json(base, "/api/workflows?scope=all")
+        studio_paths = {
+            item.get("path") for item in workflow_catalog.get("workflows", [])
+        }
+        non_studio_paths = [
+            item.get("path")
+            for item in all_workflows.get("workflows", [])
+            if item.get("path") and item.get("path") not in studio_paths
+        ]
+        portrait_payload = api_json(
+            base, "/api/reference/items?library=portrait&page=1&page_size=1"
+        )
+        portrait_items = portrait_payload.get("items") or []
+        portrait_id = portrait_items[0].get("id") if portrait_items else None
+
+        empty_status, empty_body = post_json_status(
+            base,
+            "/api/reference/recipes",
+            {
+                "style": "realistic",
+                "prompt_suffix": "",
+                "seed": 100000,
+                "seed_mode": "fixed",
+            },
+        )
+        recorder.check(
+            group,
+            "空槽提交（M=0）返回 400 且提示至少选择一张",
+            empty_status == 400 and "请至少选择一个参考图" in empty_body,
+            "HTTP 400，detail 含「请至少选择一个参考图」",
+            f"HTTP {empty_status}，响应={empty_body[:160]}",
+        )
+
+        if not non_studio_paths or portrait_id is None:
+            recorder.skip(
+                group,
+                "非 studio 工作流返回 400",
+                "HTTP 400，detail 含「不属于合成台可用范围」",
+                f"无法构造用例：非 studio 工作流 {len(non_studio_paths)} 个，"
+                f"人像条目 {len(portrait_items)} 条",
+            )
+        else:
+            outside_status, outside_body = post_json_status(
+                base,
+                "/api/reference/recipes",
+                {
+                    "portrait_id": portrait_id,
+                    "workflow": non_studio_paths[0],
+                    "style": "realistic",
+                    "prompt_suffix": "",
+                    "seed": 100000,
+                    "seed_mode": "fixed",
+                },
+            )
+            recorder.check(
+                group,
+                "非 studio 工作流返回 400",
+                outside_status == 400 and "不属于合成台可用范围" in outside_body,
+                "HTTP 400，detail 含「不属于合成台可用范围」",
+                f"HTTP {outside_status}，工作流={non_studio_paths[0]}，"
+                f"响应={outside_body[:160]}",
+            )
+
+        # 6) Qwen 系 caps 过滤：尺寸档与比例控件隐藏，提交体绝不带
+        #    quality / aspect_ratio / orientation 三个字段。
+        page.locator('[data-testid="studio-random"]').click()
+        page.wait_for_function(
+            """() => {
+                const node = document.querySelector('[data-testid="studio-recipe-count"]');
+                return node && node.textContent.trim() === '3/3';
+            }""",
+            timeout=60_000,
+        )
+        qwen_path = choose_workflow(page, "图库专用_Qwen21+VNCCS")
+        qwen_hidden = (
+            page.locator('[data-testid="studio-quality-field"]').count() == 0
+            and page.locator('[data-testid="studio-ratio-field"]').count() == 0
+            and page.locator('[data-testid="studio-size-follow-note"]').count() > 0
+        )
+        captured_bodies.clear()
+        page.locator('[data-testid="studio-generate"]').click()
+        page.wait_for_timeout(1500)
+        qwen_body = captured_bodies[-1] if captured_bodies else {}
+        recorder.check(
+            group,
+            "Qwen 系不发送 quality / aspect_ratio / orientation",
+            "Qwen21+VNCCS" in qwen_path
+            and qwen_hidden
+            and bool(captured_bodies)
+            and "quality" not in qwen_body
+            and "aspect_ratio" not in qwen_body
+            and "orientation" not in qwen_body,
+            "尺寸控件隐藏；提交体不含 quality / aspect_ratio / orientation",
+            f"工作流={qwen_path}，控件隐藏={qwen_hidden}，"
+            f"提交体键={sorted(qwen_body.keys())}",
+        )
+
     except PlaywrightTimeoutError as error:
         recorder.fail(group, "合成台加载/交互", "合成台在 60s 内可用", f"超时：{error}")
     finally:
         session.close()
+
+    # 可选的 1 组真实提交（--live-submit）：验证链路，不批量出图。
+    run_live_submit(browser, base, recorder, group)
 
 
 # ---------------------------------------------------------------------------
@@ -2054,6 +2428,326 @@ def run_g10(browser: Browser, base: str, recorder: Recorder) -> None:
 
 
 # ---------------------------------------------------------------------------
+# G11 合成台交互（2026-11-05，8 项）
+# ---------------------------------------------------------------------------
+
+
+def run_g11(browser: Browser, base: str, recorder: Recorder) -> None:
+    group = "G11"
+    if not recorder.enabled(group):
+        return
+
+    captured: list[dict] = []
+
+    def recipes_route(route: Route) -> None:
+        captured.append(read_json_body(route))
+        route.fulfill(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"success": True, "job_id": 999011, "errors": []}),
+        )
+
+    session = BrowserSession(browser, base, recorder)
+    try:
+        session.open(routes=[("**/api/reference/recipes**", recipes_route)])
+        page = session.page
+        ensure_vue_studio(page, base)
+        page.wait_for_function(
+            """() => {
+                const node = document.querySelector('[data-testid="studio-workflow-trigger"]');
+                return node && (node.getAttribute('title') || '') !== '选择工作流';
+            }""",
+            timeout=30_000,
+        )
+
+        # 初始空态：常驻「当前 0 / 上限 100」。
+        initial_total, initial_limit, initial_text = read_batch_total(page)
+
+        # 1. 基础种子输入存在且 hint 说明第 i 组 = base_seed + i
+        seed_input = page.locator('[data-testid="studio-base-seed"]')
+        seed_hint = text_of(page, '[data-testid="studio-seed-hint"]')
+        seed_value = seed_input.input_value() if seed_input.count() else ""
+        recorder.check(
+            group,
+            "基础种子输入存在且说明 base_seed + i 派生",
+            seed_input.count() == 1
+            and seed_value.isdigit()
+            and "基础种子" in seed_hint
+            and "+i" in seed_hint,
+            "存在数字输入框，说明含「基础种子」与「+i」",
+            f"输入值={seed_value or '缺失'}，说明=「{seed_hint}」",
+        )
+
+        # 2. 随机捏人填三槽后，到姿势库再选 3 张（共 4 张）
+        page.locator('[data-testid="studio-random"]').click()
+        page.wait_for_function(
+            """() => {
+                const node = document.querySelector('[data-testid="studio-recipe-count"]');
+                return node && node.textContent.trim() === '3/3';
+            }""",
+            timeout=60_000,
+        )
+        page.locator('[data-testid="studio-slot-pose"]').click()
+        page.wait_for_selector('[data-testid="pose-card"]', state="visible", timeout=60_000)
+        add_buttons = page.get_by_role("button", name="加入配方", exact=True)
+        added = 0
+        for _ in range(3):
+            if add_buttons.count() == 0:
+                break
+            add_buttons.first.click()
+            added += 1
+            page.wait_for_timeout(250)
+        page.get_by_role("tab", name="合成台", exact=True).click()
+        page.wait_for_selector('[data-testid="reference-studio"]', state="visible", timeout=30_000)
+        page.wait_for_timeout(800)
+
+        # 3. 三槽卡片显示已选数量与前 3 张缩略图（第 4 张用 +N 表达）
+        counts = read_slot_counts(page)
+        pose_thumbs = page.locator('[data-testid="studio-slot-pose"] img').count()
+        pose_text = page.locator('[data-testid="studio-slot-pose"]').inner_text()
+        other_thumbs = {
+            key: page.locator(f'[data-testid="studio-slot-{key}"] img').count()
+            for key in ("portrait", "costume")
+        }
+        recorder.check(
+            group,
+            "三槽卡片显示已选数量与前 3 张缩略图（溢出 +N）",
+            added == 3
+            and counts["pose"] == 4
+            and pose_thumbs == 3
+            and "+1" in pose_text
+            and other_thumbs["portrait"] == 1
+            and other_thumbs["costume"] == 1,
+            "姿势槽计数 4、缩略图 3 张、文本含「+1」；人像/服装各 1 张",
+            f"新增 {added} 张，槽位计数={counts}，姿势缩略图={pose_thumbs}，"
+            f"文本=「{pose_text}」，其它槽缩略图={other_thumbs}",
+        )
+        session.shoot("G11-slot-thumbs")
+
+        # 4. 切回合成台后默认工作流是 Qwen21：尺寸档与比例控件隐藏
+        qwen_hidden = (
+            page.locator('[data-testid="studio-quality-field"]').count() == 0
+            and page.locator('[data-testid="studio-ratio-field"]').count() == 0
+            and page.locator('[data-testid="studio-size-follow-note"]').count() > 0
+        )
+        qwen_title = (
+            page.locator('[data-testid="studio-workflow-trigger"]').get_attribute("title") or ""
+        )
+        after_material, after_limit, after_text = read_batch_total(page)
+        recorder.check(
+            group,
+            "Qwen21 工作流隐藏尺寸档与比例控件",
+            "Qwen21+VNCCS" in qwen_title and qwen_hidden and after_limit == 100,
+            "画质档/比例字段 0 个，出现「输出尺寸跟随参考图」说明",
+            f"工作流={qwen_title}，隐藏={qwen_hidden}，N 文本=「{after_text}」",
+        )
+
+        # 5. 页面常驻「N / 上限 100」且随素材变化实时更新
+        recorder.check(
+            group,
+            "页面常驻「当前 N / 上限 100」并随素材实时更新",
+            initial_total == 0
+            and initial_limit == 100
+            and after_material == 4
+            and after_limit == 100,
+            "初始「当前 0 / 上限 100」；姿势 4 张后「当前 4 / 上限 100」",
+            f"初始「{initial_text}」，当前「{after_text}」",
+        )
+
+        # 6. 切到 PornMaster（caps 支持尺寸）→ 尺寸档与比例控件出现
+        porn_title = choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        porn_visible = (
+            page.locator('[data-testid="studio-quality-field"]').count() > 0
+            and page.locator('[data-testid="studio-ratio-field"]').count() > 0
+        )
+        recorder.check(
+            group,
+            "PornMaster 工作流出现尺寸档与比例控件",
+            "PornMaster_Flux2Klein9B_三图角色合成" in porn_title and porn_visible,
+            "画质档与比例字段各 1 个",
+            f"工作流={porn_title}，控件出现={porn_visible}",
+        )
+
+        # 7. 超限：点满 5 画质 + 9 比例 → N = 4 × 5 × 9 = 180 > 100
+        click_chips(page, "studio-quality-options", select=True)
+        click_chips(page, "studio-ratio-options", select=True)
+        quality_count = page.locator(
+            '[data-testid="studio-quality-options"] button[aria-pressed="true"]'
+        ).count()
+        ratio_count = page.locator(
+            '[data-testid="studio-ratio-options"] button[aria-pressed="true"]'
+        ).count()
+        total_over, limit_over, text_over = read_batch_total(page)
+        expected_over = slot_product(read_slot_counts(page)) * quality_count * ratio_count
+        limit_message = f"全组合共 {expected_over} 张，超过上限 100 张；请减少素材或尺寸档位"
+        generate = page.locator('[data-testid="studio-generate"]')
+        blocked_text = text_of(page, '[data-testid="studio-generate-blocked"]')
+        recorder.check(
+            group,
+            "超限时提交按钮禁用且展示原文案",
+            expected_over > 100
+            and total_over == expected_over
+            and limit_over == 100
+            and generate.is_disabled()
+            and blocked_text == limit_message,
+            f"N={expected_over} > 100，按钮 disabled，文案=「{limit_message}」",
+            f"N 文本=「{text_over}」，disabled={generate.is_disabled()}，"
+            f"文案=「{blocked_text}」",
+        )
+        session.shoot("G11-batch-limit")
+
+        # 8. 降级确认框：切 Qwen 再切回 PornMaster（尺寸选择回落 1 档）→ N=4；
+        #    清空人像/服装，只剩姿势 4 张 → M=1 < input_count=3，点提交先弹框。
+        choose_workflow(page, "图库专用_Qwen21+VNCCS")
+        choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        page.locator('[data-testid="studio-slot-portrait"] button[aria-label^="清除"]').click()
+        page.locator('[data-testid="studio-slot-costume"] button[aria-label^="清除"]').click()
+        page.wait_for_timeout(500)
+        _, _, text_before = read_batch_total(page)
+        captured.clear()
+        page.locator('[data-testid="studio-generate"]').click()
+        page.wait_for_selector(
+            '[data-testid="studio-workflow-downgrade"]', state="visible", timeout=15_000
+        )
+        downgrade_message = text_of(page, '[data-testid="studio-downgrade-message"]')
+        recorder.check(
+            group,
+            "槽位数 < input_count 时弹出降级确认框并说明语义变化",
+            "切换后任务语义可能变为换衣/编辑" in downgrade_message,
+            "确认框文案含「切换后任务语义可能变为换衣/编辑」",
+            f"文案=「{downgrade_message}」，提交前 N 文本=「{text_before}」",
+        )
+        session.shoot("G11-downgrade")
+
+        # 9. 取消确认框：不提交（POST 计数为 0）
+        page.locator('[data-testid="studio-downgrade-cancel"]').click()
+        page.wait_for_timeout(800)
+        dialog_gone = page.locator('[data-testid="studio-workflow-downgrade"]').count() == 0
+        recorder.check(
+            group,
+            "取消降级确认框后不发生提交",
+            dialog_gone and not captured,
+            "确认框消失且 POST /api/reference/recipes 调用 0 次",
+            f"确认框消失={dialog_gone}，POST 次数={len(captured)}",
+        )
+    except PlaywrightTimeoutError as error:
+        recorder.fail(group, "合成台交互", "G11 交互在 60s 内完成", f"超时：{error}")
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# 真实提交（--live-submit，仅 1 组 / 1 张图）
+# ---------------------------------------------------------------------------
+
+
+def run_live_submit(browser: Browser, base: str, recorder: Recorder, group: str = "G7") -> None:
+    """真实提交 1 组，验证「前端 → 后端 → 轮询 → 结果图」链路。
+
+    仅在 `--live-submit` 且对应分组启用时执行；不挂任何路由 mock。
+    全量验收最多产生 1 张图，避免 27 张批量出图。
+    """
+    if not recorder.live_submit or not recorder.enabled(group):
+        return
+
+    responses: list[dict] = []
+    session = BrowserSession(browser, base, recorder)
+    try:
+        page = session.open()
+
+        def on_response(response) -> None:  # noqa: ANN001
+            if "/api/reference/recipes" not in response.url:
+                return
+            if response.request.method != "POST":
+                return
+            try:
+                responses.append(response.json())
+            except Exception:
+                responses.append({})
+
+        page.on("response", on_response)
+        ensure_vue_studio(page, base)
+        page.wait_for_function(
+            """() => {
+                const node = document.querySelector('[data-testid="studio-workflow-trigger"]');
+                return node && (node.getAttribute('title') || '') !== '选择工作流';
+            }""",
+            timeout=30_000,
+        )
+        workflow_title = (
+            page.locator('[data-testid="studio-workflow-trigger"]').get_attribute("title") or ""
+        )
+
+        # 随机捏人 → 三槽各 1 张；Qwen21 无尺寸维度，全组合恰好 1 组。
+        page.locator('[data-testid="studio-random"]').click()
+        page.wait_for_function(
+            """() => {
+                const node = document.querySelector('[data-testid="studio-recipe-count"]');
+                return node && node.textContent.trim() === '3/3';
+            }""",
+            timeout=60_000,
+        )
+        total, limit, total_text = read_batch_total(page)
+        recorder.check(
+            group,
+            "真实提交前组合数 = 1 组（只出 1 张）",
+            total == 1 and limit == 100,
+            "三槽各 1 张、Qwen21 无尺寸维度 → 当前 1 / 上限 100",
+            f"工作流={workflow_title}，实测「{total_text}」",
+        )
+
+        started = time.time()
+        page.locator('[data-testid="studio-generate"]').click()
+        page.wait_for_selector('[data-testid="studio-result-image"]', timeout=300_000)
+        elapsed = time.time() - started
+        result_src = (
+            page.locator('[data-testid="studio-result-image"]').get_attribute("src") or ""
+        )
+
+        job_id = None
+        for payload in responses:
+            if isinstance(payload, dict) and payload.get("job_id"):
+                job_id = payload.get("job_id")
+                break
+        result_files: list[str] = []
+        if job_id:
+            snapshot = api_json(base, f"/api/jobs/{job_id}", timeout=30)
+            for item in snapshot.get("items") or []:
+                for image in item.get("images") or []:
+                    name = image.get("filename")
+                    if name:
+                        result_files.append(name)
+
+        media_status = 0
+        if result_src.startswith("/api/"):
+            try:
+                with urllib.request.urlopen(f"{base}{result_src}", timeout=30) as response:  # noqa: S310
+                    media_status = response.status
+            except urllib.error.HTTPError as error:
+                media_status = error.code
+        recorder.check(
+            group,
+            "真实提交 1 组打通提交链路并产出 1 张结果图",
+            bool(job_id)
+            and bool(result_files)
+            and result_src.startswith("/api/media/image")
+            and media_status == 200,
+            "POST 返回 job_id，任务完成后结果图走 /api/media/image 且可访问（HTTP 200）",
+            f"job_id={job_id}，耗时 {elapsed:.1f}s，结果图={result_src}，"
+            f"media HTTP={media_status}，产物={result_files}",
+        )
+        print(
+            f"[LIVE] job_id={job_id} | 耗时={elapsed:.1f}s | "
+            f"结果图={result_src} | 产物={result_files}"
+        )
+        session.shoot("G7-live-submit")
+    except PlaywrightTimeoutError as error:
+        recorder.fail(group, "真实提交 1 组", "300s 内返回结果图", f"超时：{error}")
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
@@ -2069,6 +2763,7 @@ GROUPS: dict[str, Callable[[Browser, str, Recorder], None]] = {
     "G8": run_g8,
     "G9": run_g9,
     "G10": run_g10,
+    "G11": run_g11,
 }
 
 
@@ -2085,6 +2780,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--only",
         default="",
         help="只跑指定分组，逗号分隔，例如 G1,G2；缺省跑全部",
+    )
+    parser.add_argument(
+        "--live-submit",
+        action="store_true",
+        help="G7 额外真实提交 1 组（1 张图）验证提交链路；默认关闭，避免批量出图",
     )
     return parser.parse_args(argv)
 
@@ -2107,9 +2807,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"参考图库 Vue E2E 验收开始：base={base}")
     print(f"截图目录：{SCREENSHOT_DIR}")
     print(f"分组过滤：{'全部' if only is None else ','.join(sorted(only))}")
+    print(f"真实提交：{'开启（最多 1 组 / 1 张图）' if args.live_submit else '关闭'}")
     print("-" * 78)
 
-    recorder = Recorder(only=only)
+    recorder = Recorder(only=only, live_submit=args.live_submit)
     started = time.time()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
