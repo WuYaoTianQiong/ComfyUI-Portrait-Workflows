@@ -487,7 +487,7 @@ onMounted(() => {
 
 .portrait-head__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
@@ -520,8 +520,8 @@ onMounted(() => {
   padding: 6px 14px;
   border: 1px solid transparent;
   border-radius: 9999px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-panel);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -532,13 +532,13 @@ onMounted(() => {
 }
 
 .portrait-pill:hover {
-  background: #303030;
-  color: #fafafa;
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
 }
 
 .portrait-pill.is-active {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 /* 筛选面板：圆角 22 / 内边距 16 / gap 12 / 底 #262626（§5 补充实测项） */
@@ -550,7 +550,7 @@ onMounted(() => {
   margin: 12px 0 16px;
   padding: 16px;
   border-radius: 22px;
-  background: #262626;
+  background: var(--surface-panel);
 }
 
 @media (max-width: 1023px) {
@@ -578,13 +578,13 @@ onMounted(() => {
   padding: 0 12px 0 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
 .portrait-search input::placeholder {
-  color: #737373;
+  color: var(--text-faint);
 }
 
 .portrait-search input:focus {
@@ -598,7 +598,7 @@ onMounted(() => {
   left: 12px;
   width: 16px;
   height: 16px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -610,8 +610,8 @@ onMounted(() => {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
@@ -625,7 +625,7 @@ onMounted(() => {
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -637,8 +637,8 @@ onMounted(() => {
 }
 
 .portrait-reset:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fafafa;
+  background: var(--fill-subtle);
+  color: var(--text-strong);
 }
 
 /*
@@ -651,7 +651,7 @@ onMounted(() => {
 
 /* §5：辅助文字统一 11px / 400 / #a1a1a1（人像 ID 行 10px 由 meta-mono 提供） */
 .portrait-tab :deep(.ref-card__meta-right) {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-weight: 400;
 }
 

@@ -16,7 +16,7 @@
  * 通用参数面板、提示词只读预览。本文件不读写 localStorage / IndexedDB。
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
@@ -50,6 +50,8 @@ export const DEFAULT_RECIPE_SEED = 100000
 export const MAX_BATCH_RECIPES = 100
 /** 提交并发上限：逐组 POST 时最多同时 2 个请求。 */
 export const MAX_SUBMIT_CONCURRENCY = 2
+/** 提示词 dry-run 预览的防抖间隔：槽位 / 画风 / 补充要求变化后 400ms 刷新。 */
+export const RECIPE_PREVIEW_DEBOUNCE_MS = 400
 /** 任务成功终态（逐字对齐 React）。 */
 export const SUCCESS_JOB_STATUSES: ReadonlySet<string> = new Set([
   'success',
@@ -106,6 +108,14 @@ export interface RecipeSubmitResponse {
   errors: string[]
   prompt?: string
   workflow_path?: string
+}
+
+/** `POST /api/reference/recipes` 的 dry-run 响应（只声明预览用到的字段）。 */
+export interface RecipePreviewResponse {
+  success?: boolean
+  dry_run?: boolean
+  /** 后端按三槽自动组合出的提示词。 */
+  prompt?: string
 }
 
 /** 任务条目里的单张图片（后端 `JobImage`）。 */
@@ -643,6 +653,26 @@ export function describeSubmitFailure(cause: unknown): string {
   return `提交出图任务失败。原因：${message}。下一步：确认网络与后端服务正常后点击「重试」。`
 }
 
+/** 提示词预览失败 → 三句式中文错误（现象 + 原因 + 下一步）。 */
+export function describePreviewFailure(cause: unknown): string {
+  if (cause instanceof RecipeSubmitError) {
+    const detail = cause.detail
+    if (cause.status === 0) {
+      return '提示词预览失败。原因：无法连接后端（网络中断或服务未启动）。下一步：确认后端服务在线后点击「重试」。'
+    }
+    if (detail.includes('请至少选择一个参考图')) {
+      return `提示词预览失败。原因：${detail}。下一步：从人像 / 服装 / 姿势任一库选择至少一张参考图，选择后会自动刷新预览。`
+    }
+    if (/只有\s*\d+\s*个输入|无法裁剪/.test(detail)) {
+      return `提示词预览失败。原因：${detail}。下一步：补齐参考图，或切换到输入数更少的工作流后点击「重试」。`
+    }
+    return `提示词预览失败（HTTP ${cause.status}）。原因：${detail}。下一步：按提示调整后点击「重试」。`
+  }
+
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return `提示词预览失败。原因：${message}。下一步：确认网络与后端服务正常后点击「重试」。`
+}
+
 /** 轮询失败 → 三句式中文错误。 */
 export function describePollFailure(cause: unknown, jobId: number | null): string {
   if (cause instanceof RecipeTimeoutError) {
@@ -697,6 +727,50 @@ export async function submitRecipe(request: RecipeSubmitRequest): Promise<Recipe
       '提交出图任务失败',
       response.status,
       `响应不是 JSON（HTTP ${response.status}）`,
+    )
+  }
+}
+
+/**
+ * 只读提示词预览：同一个提交端点 + `dry_run: true`，不产生任务。
+ *
+ * 与正式提交**互相独立**：这里只取响应里的 `prompt`，绝不把响应当作提交结果，
+ * 正式提交仍走 {@link submitRecipe}。
+ */
+export async function previewRecipePrompt(
+  request: RecipeSubmitRequest,
+): Promise<RecipePreviewResponse> {
+  let response: Response
+  try {
+    response = await fetch(RECIPE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...request, dry_run: true }),
+    })
+  } catch {
+    throw new RecipeSubmitError('获取提示词预览失败', 0, '网络请求失败')
+  }
+
+  if (!response.ok) {
+    throw new RecipeSubmitError(
+      '获取提示词预览失败',
+      response.status,
+      await readErrorDetail(response),
+    )
+  }
+
+  try {
+    const body = (await response.json()) as RecipePreviewResponse
+    if (typeof body?.prompt !== 'string') {
+      throw new Error('响应缺少 prompt 字段')
+    }
+    return body
+  } catch (cause) {
+    if (cause instanceof RecipeSubmitError) throw cause
+    throw new RecipeSubmitError(
+      '获取提示词预览失败',
+      response.status,
+      '响应不是有效的 JSON，或缺少 prompt 字段',
     )
   }
 }
@@ -987,6 +1061,110 @@ export function useReferenceRecipe() {
       batchTotal.value > 0 &&
       !batchOverLimit.value,
   )
+
+  // -------------------------------------------------------------------------
+  // 提示词 dry-run 预览（只读，不产生任务）
+  // -------------------------------------------------------------------------
+
+  /** 后端组合出的提示词；空串表示尚未拿到有效预览。 */
+  const previewPrompt = ref('')
+  const previewError = ref('')
+  const previewLoading = ref(false)
+
+  /** 防抖定时器与请求序号：新请求会丢弃旧响应，避免快速切换槽位时串轮。 */
+  let previewTimer: ReturnType<typeof setTimeout> | null = null
+  let previewRequestSeq = 0
+
+  /**
+   * 预览用请求：三槽各取**第一张**作为代表组合。
+   *
+   * 批量提交时每组提示词只在槽位条目名上不同，取首张即可反映组合结构与画风；
+   * 第 4 张按需求不参与预览。带上当前工作流，避免默认工作流输入数不匹配。
+   */
+  function buildPreviewRequest(): RecipeSubmitRequest {
+    return buildRecipeRequest(
+      {
+        portrait: draft.portrait.value[0] ?? null,
+        costume: draft.costume.value[0] ?? null,
+        pose: draft.pose.value[0]?.item ?? null,
+      },
+      {
+        style: style.value,
+        promptSuffix: promptSuffix.value,
+        extraPath: '',
+        workflow: workflowPath.value,
+        seed: baseSeed.value,
+        seedMode: 'fixed',
+      },
+    )
+  }
+
+  /** 立即刷新预览（按请求序号丢弃过期响应）；失败只写 `previewError`，不影响提交状态机。 */
+  async function refreshPreviewPrompt(): Promise<void> {
+    const seq = ++previewRequestSeq
+    previewLoading.value = true
+    previewError.value = ''
+
+    try {
+      const response = await previewRecipePrompt(buildPreviewRequest())
+      if (seq !== previewRequestSeq) return
+      previewPrompt.value = typeof response.prompt === 'string' ? response.prompt : ''
+      if (!previewPrompt.value) {
+        previewError.value =
+          '提示词预览为空。原因：后端未返回 prompt 字段。下一步：点击「重试」再次请求，仍为空请检查工作流是否支持提示词。'
+      }
+    } catch (cause) {
+      if (seq !== previewRequestSeq) return
+      previewPrompt.value = ''
+      previewError.value = describePreviewFailure(cause)
+    } finally {
+      if (seq === previewRequestSeq) previewLoading.value = false
+    }
+  }
+
+  /**
+   * 400ms 防抖刷新。
+   *
+   * 三槽全空时不发请求：后端对 `total == 0` 明确返回 400「请至少选择一个参考图」，
+   * 预览区改为中性占位，避免一进页面就出现红色错误。
+   */
+  function schedulePreviewRefresh(): void {
+    if (previewTimer !== null) clearTimeout(previewTimer)
+
+    if (draft.totalSelected.value === 0) {
+      previewTimer = null
+      previewRequestSeq += 1
+      previewPrompt.value = ''
+      previewError.value = ''
+      previewLoading.value = false
+      return
+    }
+
+    previewTimer = setTimeout(() => {
+      previewTimer = null
+      void refreshPreviewPrompt()
+    }, RECIPE_PREVIEW_DEBOUNCE_MS)
+  }
+
+  watch(
+    [
+      () => draft.portrait.value,
+      () => draft.costume.value,
+      () => draft.pose.value,
+      style,
+      promptSuffix,
+      workflowPath,
+      baseSeed,
+    ],
+    () => schedulePreviewRefresh(),
+    { immediate: true },
+  )
+
+  onBeforeUnmount(() => {
+    if (previewTimer !== null) clearTimeout(previewTimer)
+    previewTimer = null
+    previewRequestSeq += 1
+  })
 
   /**
    * 切换工作流后重建尺寸选项：
@@ -1406,6 +1584,11 @@ export function useReferenceRecipe() {
     extraName,
     setExtra,
     clearExtra,
+    // 提示词只读预览（dry_run，与正式提交完全独立）
+    previewPrompt,
+    previewError,
+    previewLoading,
+    refreshPreviewPrompt,
     // 降级确认
     workflowDowngrade,
     confirmWorkflowDowngrade,

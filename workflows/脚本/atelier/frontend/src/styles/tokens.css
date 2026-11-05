@@ -29,6 +29,83 @@
   --on-primary: #ffffff;
   --danger-text: #fecaca;
 
+  /**
+   * 参考图库组件级语义（S1.5 未覆盖的层级）。
+   *
+   * 这些变量原先以字面量直接写在各组件里（#0a0a0a / #171717 / #262626 /
+   * #a1a1a1 / rgba(255,255,255,.06)…）。集中成同名令牌后，浅色主题只覆盖
+   * 本组变量，不必改组件选择器，也不会出现「深色能看、浅色灰成一片」。
+   */
+  --surface-deep: #0a0a0a;          /* 输入框 / 槽位 / 图片视口底 */
+  --surface-raised: #171717;        /* 面板 / 弹窗 / 下拉面板底 */
+  --surface-card: #262626;          /* 卡片 / 药丸 / 分段底 */
+  --surface-panel: #262626;         /* 面板 / 筛选条 / 分区卡底 */
+  --surface-inset: #262626;         /* 小标签 / ID 行 / 占位块底 */
+  --surface-thumb: #0a0a0a;         /* 图片缩略图 / 视口占位底 */
+  --surface-code: #0a0a0a;          /* 代码块 / 只读预览 / 批注块底 */
+  --surface-card-hover: #303030;
+  --surface-inset-hover: #141414;
+  --surface-image: rgba(38, 38, 38, 0.6);
+  --surface-overlay: rgba(23, 23, 23, 0.94);
+  --scrim: rgba(0, 0, 0, 0.1);
+
+  --text-strong: #fafafa;
+  --text-body: #e5e5e5;
+  --text-body-soft: #d4d4d4;
+  --text-muted: #a1a1a1;
+  --text-faint: #737373;
+  --text-disabled: #6b6b6b;
+
+  /* 反色按钮：深色主题下是浅底深字，浅色主题下反过来。 */
+  --btn-inverse-bg: #e5e5e5;
+  --btn-inverse-bg-hover: #d4d4d4;
+  --btn-inverse-bg-hover-strong: #f5f5f5;
+  --on-inverse: #171717;
+  --border-active: #e5e5e5;
+
+  /* 填充 / 边框：原先散落的 rgba(255,255,255,.04 ~ .3) */
+  --fill-faint: rgba(255, 255, 255, 0.045);
+  --fill-subtle: rgba(255, 255, 255, 0.06);
+  --fill-soft: rgba(255, 255, 255, 0.08);
+  --fill-medium: rgba(255, 255, 255, 0.1);
+  --fill-strong: rgba(255, 255, 255, 0.12);
+  --fill-heavy: rgba(255, 255, 255, 0.14);
+
+  --border-faint: rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.12);
+  --border-medium: rgba(255, 255, 255, 0.16);
+  --border-stronger: rgba(255, 255, 255, 0.2);
+  --border-hover: rgba(255, 255, 255, 0.3);
+
+  /* 错误 / 成功 / 强调色 */
+  --danger-text-soft: #fca5a5;
+  --danger-surface: rgba(239, 68, 68, 0.1);
+  --danger-surface-faint: rgba(239, 68, 68, 0.06);
+  --danger-surface-mid: rgba(239, 68, 68, 0.08);
+  --danger-border: rgba(239, 68, 68, 0.45);
+  --danger-border-soft: rgba(239, 68, 68, 0.35);
+  --danger-border-strong: rgba(239, 68, 68, 0.5);
+  --danger-text-strong: #f87171;
+  --danger-surface-strong: rgba(239, 68, 68, 0.15);
+  --spinner-track-inverse: rgba(23, 23, 23, 0.25);
+  --scrim-strong: rgba(0, 0, 0, 0.62);
+  --shadow-overlay: 0 24px 60px rgba(0, 0, 0, 0.55);
+
+  --success-text: #86efac;
+  --success-border: rgb(34 197 94 / 0.35);
+  --success-surface: rgb(34 197 94 / 0.12);
+  --accent-green: #009966;
+  --accent-green-strong: #00875a;
+  --accent-green-text: #00d492;
+  --accent-green-soft: rgba(0, 188, 128, 0.15);
+  --accent-green-border: rgba(0, 189, 123, 0.3);
+  --accent-red-text: #ff637e;
+  --accent-red-soft: rgba(255, 29, 88, 0.1);
+  --accent-red-soft-faint: rgba(255, 29, 88, 0.05);
+  --accent-red-border: rgba(255, 34, 87, 0.3);
+  --accent-red-border-strong: rgba(255, 29, 88, 0.4);
+  --accent-link: #818cf8;
+
   /* 尺度 */
   --radius-sm: 6px;
   --radius: 10px;
@@ -80,6 +157,116 @@
   --lh-xl: 1.3;
 
   color-scheme: dark;
+}
+
+/**
+ * 浅色主题：只覆盖同名令牌，不引入第二套命名。
+ *
+ * 对比度基线（WCAG 2.x，白底）：
+ * - --text / --text-strong #111111 ≈ 18.9:1
+ * - --text-body #1a1a1a ≈ 16.7:1
+ * - --muted / --text-muted #3f4a5a ≈ 8.1:1（面板 #f6f7f9 上 ≈ 8.4:1）
+ * - --danger-text / --danger-text-soft #991b1b ≈ 8.3:1
+ * - --accent-green / --accent-green-text #064e3b ≈ 9.6:1
+ * - --accent-link #3730a3 ≈ 9.9:1
+ * 正文类文字均不低于 7:1；只保留禁用态 #6b7280 作为「不可用」提示。
+ */
+:root[data-theme='light'] {
+  /* 底色：页面纯白、面板浅灰、卡片纯白；靠边框/阴影区分层级 */
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --panel-2: #ffffff;
+  --panel-3: #eef0f3;
+  --border: #e3e5e8;
+  --border-strong: #cfd3d8;
+
+  /* 文字：接近纯黑，不用灰淡色压层级 */
+  --text: #111111;
+  --muted: #3f4a5a;
+  --primary: #3730a3;
+  --primary-soft: rgba(55, 48, 163, 0.1);
+  --danger: #b91c1c;
+  --danger-soft: rgba(185, 28, 28, 0.1);
+  --success: #047857;
+  --warn: #b45309;
+
+  --on-primary: #ffffff;
+  --danger-text: #991b1b;
+
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.08);
+  --shadow-2: 0 4px 16px rgb(15 23 42 / 0.1);
+  --shadow-3: 0 12px 32px rgb(15 23 42 / 0.14);
+
+  /* 参考库层级 */
+  --surface-deep: #ffffff;
+  --surface-raised: #f6f7f9;
+  --surface-card: #ffffff;
+  --surface-panel: #f6f7f9;
+  --surface-inset: #f3f4f6;
+  --surface-thumb: #eef0f3;
+  --surface-code: #f6f7f9;
+  --surface-card-hover: #eef0f3;
+  --surface-inset-hover: #f3f4f6;
+  --surface-image: #eef0f3;
+  --surface-overlay: rgba(255, 255, 255, 0.97);
+  --scrim: rgba(15, 23, 42, 0.28);
+
+  --text-strong: #111111;
+  --text-body: #1a1a1a;
+  --text-body-soft: #1f2937;
+  --text-muted: #3f4a5a;
+  --text-faint: #3f4a5a;
+  --text-disabled: #6b7280;
+
+  --btn-inverse-bg: #111111;
+  --btn-inverse-bg-hover: #000000;
+  --btn-inverse-bg-hover-strong: #1f2937;
+  --on-inverse: #ffffff;
+  --border-active: #111111;
+
+  --fill-faint: rgba(15, 23, 42, 0.03);
+  --fill-subtle: rgba(15, 23, 42, 0.04);
+  --fill-soft: rgba(15, 23, 42, 0.05);
+  --fill-medium: rgba(15, 23, 42, 0.06);
+  --fill-strong: rgba(15, 23, 42, 0.07);
+  --fill-heavy: rgba(15, 23, 42, 0.09);
+
+  --border-faint: #e3e5e8;
+  --border-soft: #dfe2e6;
+  --border-medium: #d5d9df;
+  --border-stronger: #c8cdd4;
+  --border-hover: #b6bcc5;
+
+  --danger-text-soft: #991b1b;
+  --danger-surface: #fef2f2;
+  --danger-surface-faint: #fff5f5;
+  --danger-surface-mid: #fef2f2;
+  --danger-border: #fca5a5;
+  --danger-border-soft: #fecaca;
+  --danger-border-strong: #f87171;
+  --danger-text-strong: #991b1b;
+  --danger-surface-strong: #fee2e2;
+  --spinner-track-inverse: rgba(255, 255, 255, 0.3);
+  --scrim-strong: rgba(15, 23, 42, 0.38);
+  --shadow-overlay: 0 24px 60px rgba(15, 23, 42, 0.18);
+
+  --success-text: #166534;
+  --success-border: #86efac;
+  --success-surface: #f0fdf4;
+  --accent-green: #064e3b;
+  --accent-green-strong: #022c22;
+  --accent-green-text: #064e3b;
+  --accent-green-soft: rgba(4, 120, 87, 0.1);
+  --accent-green-border: rgba(4, 120, 87, 0.35);
+  --accent-red-text: #9f1239;
+  --accent-red-soft: rgba(159, 18, 57, 0.06);
+  --accent-red-soft-faint: rgba(159, 18, 57, 0.04);
+  --accent-red-border: rgba(159, 18, 57, 0.35);
+  --accent-red-border-strong: rgba(159, 18, 57, 0.45);
+  --accent-link: #3730a3;
+
+  color-scheme: light;
 }
 
 * {

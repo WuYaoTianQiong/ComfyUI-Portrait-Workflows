@@ -15,8 +15,8 @@ import { computed } from 'vue'
  * - 「加入配方 / 已选」：未选 80 × 24.5、已选 58 × 24.5、圆角 10px、11px / 600、
  *   内边距 4px 10px，未选底 rgba(0,0,0,.75)、已选底 #009966。
  *
- * 浅色主题：Vue 主站目前只有深色令牌（`styles/tokens.css` 无 light 变量），
- * TODO(浅色)：接入浅色令牌后按 §5 换成卡片底 #f5f5f5 / 辅助字 #737373 / 标题 #0a0a0a。
+ * 浅色主题：卡片底 / 标题 / 辅助字均走 `styles/tokens.css` 的同名令牌，
+ * 浅色下自动变为白卡 + `#111111` 标题 + `#4b5563` 辅助字，无需组件内分支。
  */
 const props = withDefaults(
   defineProps<{
@@ -150,7 +150,7 @@ const imageAlt = computed(() => props.alt || props.title)
 </template>
 
 <style scoped>
-/* 深色主题数值来自 §5；浅色待接入（见 script 顶部 TODO）。 */
+/* 深色主题数值来自 §5；浅色由 tokens 覆盖。 */
 .ref-card {
   display: flex;
   flex-direction: column;
@@ -158,7 +158,7 @@ const imageAlt = computed(() => props.alt || props.title)
   overflow: hidden;
   padding: 8px;
   border-radius: 20px;
-  background: #262626;
+  background: var(--surface-card);
   transition:
     transform var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease);
@@ -174,7 +174,7 @@ const imageAlt = computed(() => props.alt || props.title)
   width: 100%;
   overflow: hidden;
   border-radius: 18px;
-  background: #0a0a0a;
+  background: var(--surface-thumb);
   cursor: zoom-in;
 }
 
@@ -208,10 +208,10 @@ const imageAlt = computed(() => props.alt || props.title)
   justify-content: center;
   width: 100%;
   height: 100%;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 /* 左上编号角标：高 19px / 圆角 8px / 内边距 2px 6px / 10px 700 */
@@ -272,17 +272,17 @@ const imageAlt = computed(() => props.alt || props.title)
 }
 
 .ref-card__select:hover {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .ref-card__select.is-selected {
-  background: #009966;
-  color: #ffffff;
+  background: var(--accent-green);
+  color: var(--on-primary);
 }
 
 .ref-card__select.is-selected:hover {
-  background: #00875a;
+  background: var(--accent-green-strong);
 }
 
 .ref-card__icon {
@@ -302,7 +302,7 @@ const imageAlt = computed(() => props.alt || props.title)
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 36px;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 600;
   line-height: 16.5px;
@@ -315,7 +315,7 @@ const imageAlt = computed(() => props.alt || props.title)
   justify-content: space-between;
   gap: 8px;
   margin-top: 4px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.5;
@@ -336,7 +336,7 @@ const imageAlt = computed(() => props.alt || props.title)
 .ref-card__meta-right {
   flex: none;
   font-weight: 500;
-  color: rgba(250, 250, 250, 0.8);
+  color: var(--text-muted);
 }
 
 .ref-card__extra {

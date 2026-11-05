@@ -11,10 +11,9 @@
  * - 尺寸档位 / 比例按 `caps` 渲染；Qwen 系隐藏并显示「跟随参考图」说明；
  * - 画风预设（`none` / `realistic`）+ `prompt_suffix`；
  * - `POST /api/reference/recipes` → 轮询 1500ms / 30min → 结果图 / 任务中心；
- * - 历史只读面板。
+ * - 提示词只读预览（后端 `dry_run` 组合，只读、不可编辑、与正式提交独立）。
  *
- * 明确不迁：配方草稿持久化、旧历史导出、参考图拼合、未决任务恢复、
- * 提示词只读预览。
+ * 明确不迁：配方草稿持久化、旧历史导出、参考图拼合、未决任务恢复、历史只读面板。
  *
  * 视觉基线 §5：槽位卡、分区卡、主按钮、工作流下拉与预览区的尺寸/圆角/配色
  * 见各子组件与下方 scoped CSS 的数值注释。
@@ -37,7 +36,7 @@ import {
 } from '../../composables/useReferenceRecipe'
 import { useToast } from '../../composables/useToast'
 
-import ReferenceHistoryPanel from './components/ReferenceHistoryPanel.vue'
+
 import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vue'
 import ReferenceSlotCard from './components/reference/ReferenceSlotCard.vue'
 import ReferenceWorkflowSelect from './components/reference/ReferenceWorkflowSelect.vue'
@@ -90,6 +89,10 @@ const {
   promptSuffix,
   extraPath,
   extraName,
+  previewPrompt,
+  previewError,
+  previewLoading,
+  refreshPreviewPrompt,
 
   progress,
   progressPercent,
@@ -339,6 +342,19 @@ function onBaseSeedInput(event: Event): void {
   setBaseSeed((event.target as HTMLInputElement).value)
 }
 
+/** 复制只读预览文本；剪贴板不可用时退化为手动复制提示。 */
+async function copyPromptPreview(): Promise<void> {
+  if (!previewPrompt.value) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板 API')
+    await navigator.clipboard.writeText(previewPrompt.value)
+    toast.success('提示词已复制到剪贴板')
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    toast.error(`复制失败。原因：${message}。下一步：手动选中预览文本后按 Ctrl+C 复制。`)
+  }
+}
+
 async function onRetry(): Promise<void> {
   showingPrevious.value = false
   afterSubmit(await retry())
@@ -376,7 +392,7 @@ onMounted(() => {
     </header>
 
     <div class="studio-grid">
-      <!-- 左栏：参考图组合、工作流与画风、补充要求、生成按钮 -->
+      <!-- 左栏：参考图组合、工作流与画风、补充要求、提示词预览 -->
       <div class="studio-column studio-column--left">
         <ReferenceSectionCard title="参考图组合" :subtitle="`已选 ${countLabel}`" :min-height="226.5">
           <template #actions>
@@ -463,14 +479,26 @@ onMounted(() => {
         </ReferenceSectionCard>
 
         <ReferenceSectionCard title="工作流与画风">
-          <div class="field">
-            <label class="field__label" for="studio-workflow">工作流（本机工作流目录）</label>
-            <ReferenceWorkflowSelect
-              id="studio-workflow"
-              v-model="workflowPath"
-              :workflows="workflows"
-              :loading="workflowsLoading"
-            />
+          <!-- 工作流 2fr / 画风 1fr 并排；<768px 回落单列（见下方 media query） -->
+          <div class="field-row">
+            <div class="field">
+              <label class="field__label" for="studio-workflow">工作流（本机工作流目录）</label>
+              <ReferenceWorkflowSelect
+                id="studio-workflow"
+                v-model="workflowPath"
+                :workflows="workflows"
+                :loading="workflowsLoading"
+              />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="studio-style">画风预设</label>
+              <select id="studio-style" v-model="style" class="studio-select" data-testid="studio-style">
+                <option v-for="option in STYLE_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
           </div>
 
           <p v-if="workflowsError" class="studio-error" role="alert">
@@ -531,14 +559,6 @@ onMounted(() => {
             输出尺寸跟随参考图（当前实际尺寸未知时不显示数值）
           </p>
 
-          <div class="field">
-            <label class="field__label" for="studio-style">画风预设</label>
-            <select id="studio-style" v-model="style" class="studio-select" data-testid="studio-style">
-              <option v-for="option in STYLE_OPTIONS" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
 
           <!-- 常驻说明（D4 冻结） -->
           <p class="studio-note" data-testid="studio-node-note">
@@ -557,7 +577,7 @@ onMounted(() => {
             data-testid="studio-prompt-suffix"
           />
           <p class="studio-hint">
-            补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，前端不预览、不改写。
+            补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，下方预览只读、不可编辑。
           </p>
 
           <!-- 基础种子：第 i 组 seed = base_seed + i（fixed），便于按固定种子复现 -->
@@ -577,8 +597,57 @@ onMounted(() => {
               基础种子 {{ baseSeed }} · 提交时固定为 seed_mode=fixed，第 i 组使用 {{ baseSeed }}+i。
             </p>
           </div>
+        </ReferenceSectionCard>
 
-          <!-- 主按钮 44px 高、圆角 8、14px / 600、深色底 #e5e5e5 / 字 #171717 -->
+        <!-- 提示词只读预览：后端 dry_run 组合，与正式提交完全独立 -->
+        <ReferenceSectionCard title="提示词预览">
+          <template #actions>
+            <button
+              type="button"
+              class="studio-btn studio-btn--ghost studio-btn--sm"
+              data-testid="studio-prompt-copy"
+              :disabled="!previewPrompt || previewLoading"
+              @click="copyPromptPreview"
+            >
+              复制提示词
+            </button>
+          </template>
+
+          <p class="studio-hint">
+            提示词由后端按三槽自动生成，此处仅预览，不可编辑。
+            <template v-if="totalSelected > 1">多选时按每槽第一张生成代表组合。</template>
+          </p>
+
+          <div class="prompt-preview" data-testid="studio-prompt-preview">
+            <span v-if="previewLoading" class="prompt-preview__state">
+              正在生成提示词预览…
+            </span>
+            <span v-else-if="previewError" class="prompt-preview__error" role="alert">
+              {{ previewError }}
+            </span>
+            <pre v-else-if="previewPrompt" class="prompt-preview__text">{{ previewPrompt }}</pre>
+            <span v-else class="prompt-preview__state">
+              三槽均未选择：选择任一参考图后将在此显示后端组合出的提示词。
+            </span>
+          </div>
+
+          <button
+            v-if="previewError"
+            type="button"
+            class="studio-btn studio-btn--ghost studio-btn--sm"
+            data-testid="studio-prompt-retry"
+            :disabled="previewLoading"
+            @click="refreshPreviewPrompt"
+          >
+            重试
+          </button>
+        </ReferenceSectionCard>
+      </div>
+
+      <!-- 右栏：生成按钮（结果卡上方）+ 生成结果 -->
+      <div class="studio-column studio-column--right">
+        <!-- 主按钮 44px 高、圆角 8、14px / 600、底 #e5e5e5 / 字 #171717；宽度撑满右栏 -->
+        <div class="generate-block">
           <button
             type="button"
             class="generate-btn"
@@ -589,14 +658,15 @@ onMounted(() => {
             <span v-if="busy" class="generate-btn__spinner" aria-hidden="true" />
             {{ busy ? '生成中…' : '生成角色图' }}
           </button>
-          <p v-if="batchOverLimit" class="studio-error studio-error--inline" data-testid="studio-generate-blocked">
+          <p
+            v-if="batchOverLimit"
+            class="studio-error studio-error--inline"
+            data-testid="studio-generate-blocked"
+          >
             {{ batchLimitMessage }}
           </p>
-        </ReferenceSectionCard>
-      </div>
+        </div>
 
-      <!-- 右栏：生成结果 -->
-      <div class="studio-column studio-column--right">
         <ReferenceSectionCard title="生成结果">
           <template #actions>
             <a
@@ -771,9 +841,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 历史：只读，来自 /api/images -->
-    <ReferenceHistoryPanel class="studio-history" />
-  </div>
+    </div>
 </template>
 
 <style scoped>
@@ -792,7 +860,7 @@ onMounted(() => {
 
 .ref-studio__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
@@ -800,7 +868,7 @@ onMounted(() => {
 
 .ref-studio__desc {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -832,9 +900,6 @@ onMounted(() => {
   grid-column: span 5;
 }
 
-.studio-history {
-  margin-top: 16px;
-}
 
 /* 三槽：736.66 内容区 - gap 16 → 单卡 224.22px */
 .slot-grid {
@@ -846,8 +911,8 @@ onMounted(() => {
 .studio-count {
   padding: 1px 8px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #a1a1a1;
+  background: var(--fill-soft);
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
   line-height: 16px;
@@ -879,11 +944,11 @@ onMounted(() => {
 .studio-btn--ghost {
   border: 1px solid var(--border);
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 
 .studio-btn--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .studio-btn:disabled {
@@ -917,7 +982,7 @@ onMounted(() => {
   min-width: 0;
   padding: 8px 10px;
   border-radius: 12px;
-  background: #0a0a0a;
+  background: var(--surface-code);
 }
 
 .extra-item__mark {
@@ -928,8 +993,8 @@ onMounted(() => {
   width: 32px;
   height: 40px;
   border-radius: 10px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-inset);
+  color: var(--text-muted);
 }
 
 .extra-item__mark svg {
@@ -946,7 +1011,7 @@ onMounted(() => {
 
 .extra-item__name {
   overflow: hidden;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -954,7 +1019,7 @@ onMounted(() => {
 }
 
 .extra-item__meta {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 1.4;
 }
@@ -967,7 +1032,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 11px;
   cursor: pointer;
 }
@@ -985,9 +1050,23 @@ onMounted(() => {
 }
 
 .field__label {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
+}
+
+/* 工作流 / 画风并排：2fr / 1fr；<768px 回落单列 */
+.field-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* 子组件下拉原本 max-width 336.33；并排时让它撑满所在列 */
+.field-row :deep(.wf-select) {
+  max-width: none;
 }
 
 /* 画风下拉与工作流下拉同尺寸（336.33 × 36、圆角 8、12px） */
@@ -999,8 +1078,8 @@ onMounted(() => {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-code);
+  color: var(--text-strong);
   font-size: 12px;
   line-height: 1;
 }
@@ -1017,8 +1096,8 @@ onMounted(() => {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-code);
+  color: var(--text-strong);
   font-family: inherit;
   font-size: 12px;
   line-height: 1.6;
@@ -1032,14 +1111,14 @@ onMounted(() => {
 
 .studio-note {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }
 
 .studio-hint {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -1051,12 +1130,58 @@ onMounted(() => {
   gap: 8px;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
-  background: rgba(239, 68, 68, 0.08);
-  color: #fecaca;
+  background: var(--danger-surface-mid);
+  color: var(--danger-text);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 生成按钮块：位于右栏「生成结果」卡上方，宽度撑满该列 */
+.generate-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 提示词只读预览：等宽字体、保留换行、长词可断 */
+.prompt-preview {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-code);
+}
+
+.prompt-preview__text {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prompt-preview__state {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.prompt-preview__error {
+  display: block;
+  color: var(--danger-text-soft);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* 主按钮：44px 高、圆角 8px、14px / 600、底 #e5e5e5 / 字 #171717 */
@@ -1071,8 +1196,8 @@ onMounted(() => {
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
   font-size: 14px;
   font-weight: 600;
   line-height: 1;
@@ -1080,7 +1205,7 @@ onMounted(() => {
 }
 
 .generate-btn:hover:not(:disabled) {
-  background: #f5f5f5;
+  background: var(--btn-inverse-bg-hover-strong);
 }
 
 .generate-btn:disabled {
@@ -1096,8 +1221,8 @@ onMounted(() => {
 .generate-btn__spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(23, 23, 23, 0.25);
-  border-top-color: #171717;
+  border: 2px solid var(--spinner-track-inverse);
+  border-top-color: var(--on-inverse);
   border-radius: 50%;
   animation: studio-spin 0.8s linear infinite;
 }
@@ -1113,7 +1238,7 @@ onMounted(() => {
   padding: 16px;
   overflow: hidden;
   border-radius: 18px;
-  background: #0a0a0a;
+  background: var(--surface-code);
 }
 
 .preview-state {
@@ -1133,8 +1258,8 @@ onMounted(() => {
   width: 48px;
   height: 48px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #a1a1a1;
+  background: var(--fill-subtle);
+  color: var(--text-muted);
 }
 
 .preview-state__mark svg {
@@ -1145,8 +1270,8 @@ onMounted(() => {
 .preview-state__spinner {
   width: 48px;
   height: 48px;
-  border: 3px solid rgba(255, 255, 255, 0.12);
-  border-top-color: #e5e5e5;
+  border: 3px solid var(--border-soft);
+  border-top-color: var(--btn-inverse-bg);
   border-radius: 16px;
   animation: studio-spin 1s linear infinite;
 }
@@ -1159,27 +1284,27 @@ onMounted(() => {
 
 .preview-state__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 14px;
   font-weight: 600;
 }
 
 .preview-state__message {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .preview-state__job {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .preview-state__tip {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1198,19 +1323,19 @@ onMounted(() => {
   height: 1.5px;
   overflow: hidden;
   border-radius: 9999px;
-  background: #262626;
+  background: var(--surface-inset);
 }
 
 .progress__fill {
   height: 100%;
   border-radius: 9999px;
-  background: #e5e5e5;
+  background: var(--btn-inverse-bg);
   transition: width 0.2s var(--ease);
 }
 
 .progress__pct {
   flex: none;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1;
 }
@@ -1232,22 +1357,22 @@ onMounted(() => {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  background: var(--danger-surface-strong);
+  color: var(--danger-text-strong);
   font-size: 16px;
   font-weight: 700;
 }
 
 .preview-error__title {
   margin: 0;
-  color: #f87171;
+  color: var(--danger-text-strong);
   font-size: 14px;
   font-weight: 600;
 }
 
 .preview-error__text {
   margin: 0;
-  color: #d4d4d4;
+  color: var(--text-body-soft);
   font-size: 12px;
   line-height: 1.7;
   text-align: left;
@@ -1280,7 +1405,7 @@ onMounted(() => {
   gap: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1315,6 +1440,13 @@ onMounted(() => {
   }
 }
 
+/* <768px：工作流与画风回落单列 */
+@media (max-width: 767px) {
+  .field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* 390px：三槽改单列，避免压缩到不可读 */
 @media (max-width: 639px) {
   .slot-grid {
@@ -1338,7 +1470,7 @@ onMounted(() => {
   box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 12px;
-  background: #0a0a0a;
+  background: var(--surface-code);
 }
 
 .batch-summary__row {
@@ -1351,7 +1483,7 @@ onMounted(() => {
 
 .batch-summary__label {
   flex: none;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -1360,8 +1492,8 @@ onMounted(() => {
   flex: none;
   padding: 1px 8px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fafafa;
+  background: var(--fill-medium);
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 600;
   line-height: 18px;
@@ -1369,21 +1501,21 @@ onMounted(() => {
 
 .batch-summary__selected {
   min-width: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
 }
 
 .batch-summary__hint {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }
 
 .batch-summary__limit {
   margin: 0;
-  color: #fca5a5;
+  color: var(--danger-text-soft);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.6;
@@ -1404,7 +1536,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 9999px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
@@ -1418,8 +1550,8 @@ onMounted(() => {
 
 .chip.is-active {
   border-color: transparent;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
   font-weight: 600;
 }
 
@@ -1439,7 +1571,7 @@ onMounted(() => {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #fca5a5;
+  color: var(--danger-text-soft);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -1458,7 +1590,7 @@ onMounted(() => {
   display: block;
   overflow: hidden;
   border-radius: 10px;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 .preview-grid__image {
@@ -1477,7 +1609,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.62);
+  background: var(--scrim-strong);
 }
 
 .studio-modal__panel {
@@ -1490,13 +1622,13 @@ onMounted(() => {
   overflow-y: auto;
   padding: 18px 18px 16px;
   border-radius: 16px;
-  background: #171717;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-overlay);
 }
 
 .studio-modal__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
@@ -1504,7 +1636,7 @@ onMounted(() => {
 
 .studio-modal__message {
   margin: 0;
-  color: #d4d4d4;
+  color: var(--text-body-soft);
   font-size: 12px;
   line-height: 1.7;
   word-break: break-word;
@@ -1512,7 +1644,7 @@ onMounted(() => {
 
 .studio-modal__meta {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1533,7 +1665,7 @@ onMounted(() => {
 
 .downgrade-list__head {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1549,8 +1681,8 @@ onMounted(() => {
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-code);
+  color: var(--text-strong);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
@@ -1558,7 +1690,7 @@ onMounted(() => {
 
 .downgrade-list__item:hover {
   border-color: var(--primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fill-faint);
 }
 
 .downgrade-list__item:focus-visible {
@@ -1575,7 +1707,7 @@ onMounted(() => {
 
 .downgrade-list__count {
   flex: none;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
 }
 

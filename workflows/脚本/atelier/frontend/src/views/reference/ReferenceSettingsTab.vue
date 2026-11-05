@@ -546,7 +546,7 @@ function goStudio(): void {
   /* 24px 是 §5 实测值；不能换成 --gap-lg（该令牌为 20px） */
   padding: 24px;
   border-radius: 22px;
-  background: #262626;
+  background: var(--surface-panel);
 }
 
 .settings__section-head {
@@ -631,14 +631,14 @@ function goStudio(): void {
 }
 
 .settings__feedback.is-success {
-  border-color: rgb(34 197 94 / 0.35);
-  background: rgb(34 197 94 / 0.12);
-  color: #86efac;
+  border-color: var(--success-border);
+  background: var(--success-surface);
+  color: var(--success-text);
 }
 
 .settings__feedback.is-error {
-  border-color: rgb(239 68 68 / 0.35);
-  background: rgb(239 68 68 / 0.12);
+  border-color: var(--danger-border-soft);
+  background: var(--danger-surface);
   color: var(--danger-text);
 }
 

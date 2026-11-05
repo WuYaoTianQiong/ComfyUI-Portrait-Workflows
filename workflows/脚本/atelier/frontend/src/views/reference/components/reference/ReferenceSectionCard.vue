@@ -45,7 +45,7 @@ withDefaults(
   min-width: 0;
   padding: 24px;
   border-radius: 22px;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 .section-card__head {
@@ -59,14 +59,14 @@ withDefaults(
 /* 分区标题 14px / 600（React Section title） */
 .section-card__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
 }
 
 .section-card__subtitle {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
 }

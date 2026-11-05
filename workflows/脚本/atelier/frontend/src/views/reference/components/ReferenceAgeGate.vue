@@ -49,12 +49,12 @@ const emit = defineEmits<{
   flex-direction: column;
   gap: 12px;
   padding: 24px;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 .age-gate__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
@@ -62,7 +62,7 @@ const emit = defineEmits<{
 
 .age-gate__text {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 13px;
   line-height: 1.65;
 }
@@ -77,17 +77,17 @@ const emit = defineEmits<{
 .age-gate__btn {
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-medium);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
 }
 
 .age-gate__btn.is-primary {
   border-color: transparent;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 </style>

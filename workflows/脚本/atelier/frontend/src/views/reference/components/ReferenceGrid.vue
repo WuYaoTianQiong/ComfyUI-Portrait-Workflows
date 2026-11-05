@@ -155,7 +155,7 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   flex-direction: column;
   padding: 8px;
   border-radius: 20px;
-  background: #262626;
+  background: var(--surface-card);
 }
 
 .ref-skeleton__thumb {
@@ -163,7 +163,7 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   width: 100%;
   overflow: hidden;
   border-radius: 18px;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 .ref-skeleton__body {
@@ -180,10 +180,10 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  border: 1px solid rgba(239, 68, 68, 0.45);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
-  background: rgba(239, 68, 68, 0.1);
-  color: #fca5a5;
+  background: var(--danger-surface);
+  color: var(--danger-text-soft);
   font-size: 12px;
 }
 
@@ -204,15 +204,15 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   align-items: center;
   gap: 12px;
   padding: 48px 16px;
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  border: 1px solid var(--danger-border-soft);
   border-radius: 20px;
-  background: rgba(239, 68, 68, 0.06);
+  background: var(--danger-surface-faint);
   text-align: center;
 }
 
 .ref-grid__error-text {
   margin: 0;
-  color: #fca5a5;
+  color: var(--danger-text-soft);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -231,8 +231,8 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.045);
-  color: #fafafa;
+  background: var(--fill-faint);
+  color: var(--text-strong);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -244,7 +244,7 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
 
 .ref-grid__more-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--fill-soft);
 }
 
 .ref-grid__more-btn:disabled {

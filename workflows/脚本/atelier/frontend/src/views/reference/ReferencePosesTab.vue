@@ -741,7 +741,7 @@ onMounted(() => {
 
 .pose-head__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
@@ -762,7 +762,7 @@ onMounted(() => {
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #262626;
+  background: var(--surface-inset);
 }
 
 .pose-segment button {
@@ -770,7 +770,7 @@ onMounted(() => {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -778,12 +778,12 @@ onMounted(() => {
 }
 
 .pose-segment button:hover {
-  color: #fafafa;
+  color: var(--text-strong);
 }
 
 .pose-segment button.is-active {
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   box-shadow: var(--shadow-1);
 }
 
@@ -799,19 +799,19 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
 }
 
 .pose-view-mode button:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .pose-view-mode button.is-active {
   border-color: transparent;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 /* 安全模式按钮：§5 SFW 态 / 18+ 态 */
@@ -830,15 +830,15 @@ onMounted(() => {
 }
 
 .pose-safe.is-safe {
-  border: 1px solid rgba(0, 189, 123, 0.3);
-  background: rgba(255, 255, 255, 0.045);
-  color: #00d492;
+  border: 1px solid var(--accent-green-border);
+  background: var(--fill-faint);
+  color: var(--accent-green-text);
 }
 
 .pose-safe.is-full {
-  border: 1px solid rgba(255, 34, 87, 0.3);
-  background: rgba(255, 29, 88, 0.1);
-  color: #ff637e;
+  border: 1px solid var(--accent-red-border);
+  background: var(--accent-red-soft);
+  color: var(--accent-red-text);
 }
 
 .pose-safe:disabled {
@@ -879,8 +879,8 @@ onMounted(() => {
   padding: 6px 14px;
   border: 1px solid transparent;
   border-radius: 9999px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-panel);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -891,19 +891,19 @@ onMounted(() => {
 }
 
 .pose-pill:hover {
-  background: #303030;
-  color: #fafafa;
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
 }
 
 .pose-pill.is-active {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .pose-pill.is-unlock {
-  border: 1px dashed rgba(255, 29, 88, 0.4);
-  background: rgba(255, 29, 88, 0.05);
-  color: #ff637e;
+  border: 1px dashed var(--accent-red-border-strong);
+  background: var(--accent-red-soft-faint);
+  color: var(--accent-red-text);
 }
 
 .pose-pill:disabled {
@@ -920,7 +920,7 @@ onMounted(() => {
   margin: 12px 0 16px;
   padding: 16px;
   border-radius: 22px;
-  background: #262626;
+  background: var(--surface-panel);
 }
 
 @media (max-width: 1023px) {
@@ -948,13 +948,13 @@ onMounted(() => {
   padding: 0 12px 0 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
 .pose-search input::placeholder {
-  color: #737373;
+  color: var(--text-faint);
 }
 
 .pose-search input:focus {
@@ -968,7 +968,7 @@ onMounted(() => {
   left: 12px;
   width: 16px;
   height: 16px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -980,8 +980,8 @@ onMounted(() => {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
@@ -993,7 +993,7 @@ onMounted(() => {
   padding: 4px;
   overflow-x: auto;
   border-radius: 8px;
-  background: #0a0a0a;
+  background: var(--surface-deep);
   scrollbar-width: none;
 }
 
@@ -1007,7 +1007,7 @@ onMounted(() => {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -1015,12 +1015,12 @@ onMounted(() => {
 }
 
 .pose-angles button:hover {
-  color: #fafafa;
+  color: var(--text-strong);
 }
 
 .pose-angles button.is-active {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .pose-reset {
@@ -1032,7 +1032,7 @@ onMounted(() => {
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -1044,8 +1044,8 @@ onMounted(() => {
 }
 
 .pose-reset:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fafafa;
+  background: var(--fill-subtle);
+  color: var(--text-strong);
 }
 
 /* 5 格角度缩略条：列宽 42.23 / 单格 42.23 × 57.73 / gap 4 / 圆角 10 / 内边距 2 / 边框 1 */
@@ -1063,16 +1063,16 @@ onMounted(() => {
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
 }
 
 .angle-cell.is-active {
-  border-color: #e5e5e5;
-  background: #0a0a0a;
+  border-color: var(--border-active);
+  background: var(--surface-deep);
 }
 
 .angle-cell:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: var(--border-hover);
 }
 
 .angle-cell img {
@@ -1088,7 +1088,7 @@ onMounted(() => {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 8px;
-  background: #171717;
+  background: var(--surface-raised);
 }
 
 .angle-cell__label {

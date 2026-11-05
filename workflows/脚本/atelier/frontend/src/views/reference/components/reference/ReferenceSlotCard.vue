@@ -170,7 +170,7 @@ function onKeydown(event: KeyboardEvent): void {
   padding: 10px;
   border: 0;
   border-radius: 14px;
-  background: #0a0a0a;
+  background: var(--surface-deep);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -184,7 +184,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .slot-card:hover {
-  background: #141414;
+  background: var(--surface-inset-hover);
 }
 
 .slot-card:focus-visible {
@@ -208,13 +208,13 @@ function onKeydown(event: KeyboardEvent): void {
   width: 19px;
   height: 28px;
   border-radius: 6px;
-  background: #262626;
+  background: var(--surface-thumb);
   object-fit: cover;
 }
 
 /* 无缩略图的条目：保留同尺寸占位，避免缩略图条抖动 */
 .slot-card__thumb.is-empty {
-  background: #171717;
+  background: var(--surface-inset);
 }
 
 .slot-card__more {
@@ -225,8 +225,8 @@ function onKeydown(event: KeyboardEvent): void {
   width: 19px;
   height: 28px;
   border-radius: 6px;
-  background: #262626;
-  color: #fafafa;
+  background: var(--surface-inset);
+  color: var(--text-strong);
   font-size: 9px;
   font-weight: 600;
   line-height: 1;
@@ -241,8 +241,8 @@ function onKeydown(event: KeyboardEvent): void {
   width: 32px;
   height: 40px;
   border-radius: 10px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-inset);
+  color: var(--text-muted);
 }
 
 .slot-card__placeholder svg {
@@ -279,7 +279,7 @@ function onKeydown(event: KeyboardEvent): void {
 /* 类型名 11px（React text-[11px]） */
 .slot-card__label {
   flex: none;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -290,8 +290,8 @@ function onKeydown(event: KeyboardEvent): void {
   min-width: 16px;
   padding: 0 5px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fafafa;
+  background: var(--fill-strong);
+  color: var(--text-strong);
   font-size: 10px;
   font-weight: 600;
   line-height: 15px;
@@ -302,7 +302,7 @@ function onKeydown(event: KeyboardEvent): void {
 .slot-card__name {
   display: -webkit-box;
   overflow: hidden;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.32;
@@ -312,7 +312,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 .slot-card__hint {
   overflow: hidden;
-  color: #818cf8;
+  color: var(--accent-link);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -333,7 +333,7 @@ function onKeydown(event: KeyboardEvent): void {
   border: 0;
   border-radius: 9999px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   cursor: pointer;
   transition:
     background-color var(--dur-fast) var(--ease),
@@ -341,8 +341,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .slot-card__clear:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fafafa;
+  background: var(--fill-soft);
+  color: var(--text-strong);
 }
 
 .slot-card__clear svg {
@@ -356,9 +356,9 @@ function onKeydown(event: KeyboardEvent): void {
   flex: none;
   align-items: center;
   padding: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-faint);
 }
 
 .depth-toggle__btn {
@@ -366,7 +366,7 @@ function onKeydown(event: KeyboardEvent): void {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 500;
   line-height: 1;
@@ -374,13 +374,13 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .depth-toggle__btn.is-active {
-  background: #171717;
-  color: #fafafa;
+  background: var(--surface-raised);
+  color: var(--text-strong);
 }
 
 .depth-toggle__btn.is-active:last-child {
   background: var(--primary);
-  color: #fafafa;
+  color: var(--on-primary);
 }
 
 .depth-toggle__btn:focus-visible {

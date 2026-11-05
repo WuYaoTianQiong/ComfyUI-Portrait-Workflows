@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 
@@ -7,9 +7,36 @@ import ToastHost from './components/ToastHost.vue'
 import OutputLocationField from './components/OutputLocationField.vue'
 import { getSystemStatus, listJobs, type SystemStatus } from './api/endpoints'
 import { setupNaive } from './utils/naive'
+import {
+  applyInitialTheme,
+  applyTheme,
+  persistTheme,
+  readStoredTheme,
+  toggledTheme,
+  type Theme,
+} from './utils/theme'
 
 // 只初始化一次；测试不挂载 App，不会触发
 setupNaive()
+
+/**
+ * 主题状态。
+ *
+ * `applyInitialTheme()` 在 main.ts 挂载前已执行过一次；这里再读一次是为了
+ * 组件被单独挂载（测试 / 嵌入）时也能拿到一致的值。切换时同步三件事：
+ * 更新 `<html data-theme>`、写入 `pb.theme_v1`、更新按钮文案。
+ */
+const theme = ref<Theme>(readStoredTheme())
+applyInitialTheme()
+
+const themeLabel = computed(() => (theme.value === 'dark' ? '浅色' : '深色'))
+const themeAriaLabel = computed(() => `切换到${themeLabel.value}主题`)
+
+function switchTheme() {
+  theme.value = toggledTheme(theme.value)
+  applyTheme(theme.value)
+  persistTheme(theme.value)
+}
 
 /**
  * 顶栏的「进行中任务」角标。
@@ -148,6 +175,16 @@ function jumpToPrompt(promptId: number) {
         <span>{{ online ? 'ComfyUI 在线' : 'ComfyUI 离线' }}</span>
       </div>
 
+      <button
+        class="btn btn-sm theme-toggle"
+        type="button"
+        :aria-label="themeAriaLabel"
+        :title="themeAriaLabel"
+        @click="switchTheme"
+      >
+        {{ themeLabel }}
+      </button>
+
       <OutputLocationField />
     </header>
 
@@ -193,6 +230,8 @@ function jumpToPrompt(promptId: number) {
   height: 26px;
   border-radius: var(--radius-sm);
   background: var(--primary);
+  /* 品牌块上的字必须用反色前景：浅色主题的 primary 更深，不能再继承正文黑字。 */
+  color: var(--on-primary);
   font-size: var(--fs-sm);
   font-weight: 700;
 }
@@ -257,6 +296,11 @@ function jumpToPrompt(promptId: number) {
 
 .status.online {
   color: var(--muted);
+}
+
+/* 主题切换按钮：文案显示「要切到的主题」，不参与窄屏收缩。 */
+.theme-toggle {
+  flex: none;
 }
 
 /* 窄屏：压缩顶栏留白，隐藏状态文字；页签仍可横向滚动，桌面端视觉不变。 */

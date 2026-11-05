@@ -170,8 +170,8 @@ onBeforeUnmount(() => {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 12px;
   line-height: 1;
   text-align: left;
@@ -202,7 +202,7 @@ onBeforeUnmount(() => {
 
 .wf-trigger__caret {
   flex: none;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -217,8 +217,8 @@ onBeforeUnmount(() => {
   height: 13px;
   padding: 2px 4px;
   border-radius: 4px;
-  background: rgba(0, 188, 128, 0.15);
-  color: #009966;
+  background: var(--accent-green-soft);
+  color: var(--accent-green);
   font-size: 9px;
   font-weight: 500;
   line-height: 1;
@@ -241,10 +241,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
   border-radius: 10px;
-  background: #171717;
+  background: var(--surface-raised);
   box-shadow:
     0 0 0 1px var(--border-strong, var(--border)),
-    0 12px 32px rgba(0, 0, 0, 0.45);
+    var(--shadow-3);
 }
 
 .wf-list {
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   line-height: 1.3;
   text-align: left;
@@ -277,12 +277,12 @@ onBeforeUnmount(() => {
 }
 
 .wf-option:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .wf-option.is-active {
   background: var(--primary-soft, rgba(99, 102, 241, 0.16));
-  color: #fafafa;
+  color: var(--text-strong);
 }
 
 .wf-option:focus-visible {
@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
 .wf-empty {
   margin: 0;
   padding: 10px 8px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }

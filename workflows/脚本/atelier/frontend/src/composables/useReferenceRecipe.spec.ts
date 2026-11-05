@@ -29,11 +29,13 @@ import {
   describeJobProgress,
   describeMissingResult,
   describePollFailure,
+  describePreviewFailure,
   describeSubmitFailure,
   isJobSucceeded,
   isJobTerminal,
   normalizeRecipeStyle,
   pollRecipeJob,
+  previewRecipePrompt,
   recipeJobResultUrls,
   resolveInitialWorkflowPath,
   submitRecipe,
@@ -441,3 +443,69 @@ describe('submitRecipe / pollRecipeJob', () => {
   })
 })
 
+
+describe('提示词 dry-run 预览', () => {
+  const previewRequest = (): RecipeSubmitRequest =>
+    buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      { style: 'realistic', promptSuffix: '暖色灯光', extraPath: '', workflow: 'wf.json' },
+    )
+
+  it('POST 同一端点并带 dry_run=true，返回 prompt', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, dry_run: true, prompt: '组合后的提示词' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await previewRecipePrompt(previewRequest())
+
+    expect(result.prompt).toBe('组合后的提示词')
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/reference/recipes')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      dry_run: true,
+      portrait_id: 'portrait-1',
+      prompt_suffix: '暖色灯光',
+    })
+  })
+
+  it('后端 400 时抛 RecipeSubmitError，预览文案为三句式', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ detail: '请至少选择一个参考图或上传一张参考图' }),
+      })),
+    )
+
+    await expect(previewRecipePrompt(previewRequest())).rejects.toBeInstanceOf(RecipeSubmitError)
+
+    const message = describePreviewFailure(
+      new RecipeSubmitError('获取提示词预览失败', 400, '请至少选择一个参考图或上传一张参考图'),
+    )
+    expect(message).toContain('提示词预览失败')
+    expect(message).toContain('原因：')
+    expect(message).toContain('下一步：')
+  })
+
+  it('响应缺少 prompt 字段时按失败处理', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, dry_run: true }),
+      })),
+    )
+
+    await expect(previewRecipePrompt(previewRequest())).rejects.toBeInstanceOf(RecipeSubmitError)
+    const message = describePreviewFailure(
+      new RecipeSubmitError('获取提示词预览失败', 200, '响应不是有效的 JSON，或缺少 prompt 字段'),
+    )
+    expect(message).toContain('下一步：')
+  })
+})

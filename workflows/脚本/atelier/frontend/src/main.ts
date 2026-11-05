@@ -4,7 +4,12 @@ import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 
 import App from './App.vue'
 import { router } from './router'
+import { applyInitialTheme } from './utils/theme'
 import './styles/tokens.css'
+
+// 必须在 createApp().mount() 之前写 `<html data-theme>`：
+// 让 tokens.css 在首帧就按用户上次选择的主题生效，避免深色闪一下再变浅色。
+applyInitialTheme()
 
 /**
  * 全局查询客户端。

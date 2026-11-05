@@ -503,7 +503,7 @@ async function copyId() {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
 }
 
@@ -521,7 +521,7 @@ async function copyId() {
   max-height: 90dvh;
   overflow: hidden;
   border-radius: 14px;
-  background: #171717;
+  background: var(--surface-raised);
   box-shadow: var(--shadow-3);
 }
 
@@ -538,14 +538,14 @@ async function copyId() {
   padding: 0;
   border: 0;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fafafa;
+  background: var(--fill-soft);
+  color: var(--text-strong);
   font-size: 14px;
   line-height: 1;
 }
 
 .ref-lightbox__close:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--fill-heavy);
 }
 
 /* 左侧：缩放控制 + 图片视口 + 提示；下边距 16 ���，stage 吸收剩余高度 */
@@ -573,10 +573,10 @@ async function copyId() {
   min-width: 44px;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-medium);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 14px;
   line-height: 1;
 }
@@ -586,8 +586,8 @@ async function copyId() {
 }
 
 .ref-lightbox__ctrl:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-hover);
+  background: var(--fill-subtle);
 }
 
 .ref-lightbox__ctrl:disabled {
@@ -597,7 +597,7 @@ async function copyId() {
 
 .ref-lightbox__zoom {
   min-width: 48px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -612,7 +612,7 @@ async function copyId() {
   margin: 0;
   overflow: hidden;
   border-radius: 10px;
-  background: rgba(38, 38, 38, 0.6);
+  background: var(--surface-image);
   cursor: grab;
   touch-action: none;
 }
@@ -646,14 +646,14 @@ async function copyId() {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   text-align: center;
   pointer-events: none;
 }
 
 .ref-lightbox__placeholder.is-error {
-  color: #fca5a5;
+  color: var(--danger-text-soft);
   pointer-events: auto;
 }
 
@@ -669,7 +669,7 @@ async function copyId() {
 .ref-lightbox__hint {
   flex: none;
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 16px;
   text-align: center;
@@ -685,10 +685,10 @@ async function copyId() {
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-medium);
   border-radius: 50%;
-  background: #262626;
-  color: #fafafa;
+  background: var(--surface-card);
+  color: var(--text-strong);
   font-size: 22px;
   line-height: 1;
   transform: translateY(-50%);
@@ -696,7 +696,7 @@ async function copyId() {
 }
 
 .ref-lightbox__nav:hover {
-  background: #333333;
+  background: var(--surface-card-hover);
 }
 
 .ref-lightbox__nav.prev {
@@ -715,7 +715,7 @@ async function copyId() {
   min-height: 0;
   padding: 20px;
   padding-top: 56px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--border-faint);
   overflow-y: auto;
 }
 
@@ -734,7 +734,7 @@ async function copyId() {
 }
 
 .ref-lightbox__counter {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -745,8 +745,8 @@ async function copyId() {
   min-height: 19px;
   padding: 2px 6px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fafafa;
+  background: var(--fill-medium);
+  color: var(--text-strong);
   font-size: 10px;
   font-weight: 600;
   line-height: 15px;
@@ -754,9 +754,9 @@ async function copyId() {
 }
 
 .ref-lightbox__badge.is-outline {
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-stronger);
   background: transparent;
-  color: #d4d4d4;
+  color: var(--text-body-soft);
 }
 
 /* 白模 / 深度图分段 */
@@ -766,9 +766,9 @@ async function copyId() {
   gap: 2px;
   margin-left: auto;
   padding: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: #262626;
+  background: var(--surface-inset);
 }
 
 .ref-lightbox__segment-btn {
@@ -776,21 +776,21 @@ async function copyId() {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
 }
 
 .ref-lightbox__segment-btn.is-active {
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-card);
+  color: var(--text-strong);
   box-shadow: var(--shadow-1);
 }
 
 .ref-lightbox__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 18px;
   font-weight: 600;
   line-height: 1.4;
@@ -804,7 +804,7 @@ async function copyId() {
   gap: 8px;
   padding: 6px 10px;
   border-radius: 8px;
-  background: #262626;
+  background: var(--surface-inset);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
@@ -812,7 +812,7 @@ async function copyId() {
 .ref-lightbox__id-text {
   min-width: 0;
   overflow: hidden;
-  color: #e5e5e5;
+  color: var(--text-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -822,7 +822,7 @@ async function copyId() {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #00d492;
+  color: var(--accent-green-text);
   font-family: inherit;
   font-size: 12px;
 }
@@ -833,7 +833,7 @@ async function copyId() {
 
 .ref-lightbox__section-title {
   margin: 0 0 6px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
 }
@@ -854,17 +854,17 @@ async function copyId() {
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
 }
 
 .ref-lightbox__thumb.is-active {
-  border-color: #e5e5e5;
-  background: #0a0a0a;
-  color: #fafafa;
+  border-color: var(--border-active);
+  background: var(--surface-card);
+  color: var(--text-strong);
 }
 
 .ref-lightbox__thumb:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: var(--border-hover);
 }
 
 .ref-lightbox__thumb-img {
@@ -873,7 +873,7 @@ async function copyId() {
   aspect-ratio: 1 / 1;
   overflow: hidden;
   border-radius: 8px;
-  background: #262626;
+  background: var(--surface-thumb);
 }
 
 .ref-lightbox__thumb-img img {
@@ -889,7 +889,7 @@ async function copyId() {
   width: 100%;
   height: 100%;
   font-size: 9px;
-  color: #737373;
+  color: var(--text-faint);
 }
 
 .ref-lightbox__thumb-label {
@@ -908,12 +908,12 @@ async function copyId() {
 }
 
 .ref-lightbox__facts dt {
-  color: #a1a1a1;
+  color: var(--text-muted);
 }
 
 .ref-lightbox__facts dd {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-weight: 500;
   word-break: break-all;
 }
@@ -932,16 +932,16 @@ async function copyId() {
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
 }
 
 .ref-lightbox__select.is-selected {
-  background: #262626;
-  color: #fafafa;
+  background: var(--surface-card);
+  color: var(--text-strong);
 }
 
 .ref-lightbox__action-grid {
@@ -956,16 +956,16 @@ async function copyId() {
   justify-content: center;
   min-height: 32px;
   padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-medium);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   text-decoration: none;
 }
 
 .ref-lightbox__action:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 /* 窄屏：改为上下堆叠，弹窗内部滚动 */
@@ -989,7 +989,7 @@ async function copyId() {
 
   .ref-lightbox__aside {
     padding: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--border-faint);
     border-left: 0;
     overflow: visible;
   }

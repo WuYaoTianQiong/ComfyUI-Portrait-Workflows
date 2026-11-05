@@ -635,7 +635,7 @@ onBeforeUnmount(() => {
 
 .costume-head__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
@@ -665,15 +665,15 @@ onBeforeUnmount(() => {
 }
 
 .costume-safe.is-safe {
-  border: 1px solid rgba(0, 189, 123, 0.3);
-  background: rgba(255, 255, 255, 0.045);
-  color: #00d492;
+  border: 1px solid var(--accent-green-border);
+  background: var(--fill-faint);
+  color: var(--accent-green-text);
 }
 
 .costume-safe.is-full {
-  border: 1px solid rgba(255, 34, 87, 0.3);
-  background: rgba(255, 29, 88, 0.1);
-  color: #ff637e;
+  border: 1px solid var(--accent-red-border);
+  background: var(--accent-red-soft);
+  color: var(--accent-red-text);
 }
 
 .costume-safe:disabled {
@@ -696,7 +696,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
@@ -708,13 +708,13 @@ onBeforeUnmount(() => {
 }
 
 .costume-kind:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .costume-kind.is-active {
   border-color: transparent;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 /* 分类药丸：32px / 全圆 / 内边距 6px 14px / 14px 500 / gap 8px */
@@ -744,8 +744,8 @@ onBeforeUnmount(() => {
   padding: 6px 14px;
   border: 1px solid transparent;
   border-radius: 9999px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-panel);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -756,19 +756,19 @@ onBeforeUnmount(() => {
 }
 
 .costume-pill:hover {
-  background: #303030;
-  color: #fafafa;
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
 }
 
 .costume-pill.is-active {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .costume-pill.is-unlock {
-  border: 1px dashed rgba(255, 29, 88, 0.4);
-  background: rgba(255, 29, 88, 0.05);
-  color: #ff637e;
+  border: 1px dashed var(--accent-red-border-strong);
+  background: var(--accent-red-soft-faint);
+  color: var(--accent-red-text);
 }
 
 .costume-pill:disabled {
@@ -785,7 +785,7 @@ onBeforeUnmount(() => {
   margin: 12px 0 16px;
   padding: 16px;
   border-radius: 22px;
-  background: #262626;
+  background: var(--surface-panel);
 }
 
 @media (max-width: 1023px) {
@@ -813,13 +813,13 @@ onBeforeUnmount(() => {
   padding: 0 12px 0 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
 .costume-search input::placeholder {
-  color: #737373;
+  color: var(--text-faint);
 }
 
 .costume-search input:focus {
@@ -833,7 +833,7 @@ onBeforeUnmount(() => {
   left: 12px;
   width: 16px;
   height: 16px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -845,8 +845,8 @@ onBeforeUnmount(() => {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0a0a0a;
-  color: #fafafa;
+  background: var(--surface-deep);
+  color: var(--text-strong);
   font-size: 14px;
 }
 
@@ -859,7 +859,7 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -871,8 +871,8 @@ onBeforeUnmount(() => {
 }
 
 .costume-reset:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fafafa;
+  background: var(--fill-subtle);
+  color: var(--text-strong);
 }
 
 /* 卡片底部：标签（前 5 个）+ 英文关键词 */
@@ -892,15 +892,15 @@ onBeforeUnmount(() => {
 .costume-card__tag {
   padding: 2px 6px;
   border-radius: 4px;
-  background: #0a0a0a;
-  color: #a1a1a1;
+  background: var(--surface-inset);
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 16px;
 }
 
 .costume-card__keywords {
   overflow: hidden;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
   line-height: 1.5;
@@ -922,16 +922,16 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   max-width: min(96vw, 560px);
   padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-soft);
   border-radius: 12px;
-  background: rgba(23, 23, 23, 0.94);
+  background: var(--surface-overlay);
   box-shadow: var(--shadow-3);
-  color: #fafafa;
+  color: var(--text-strong);
   transform: translateX(-50%);
 }
 
 .costume-actions__note {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -942,10 +942,10 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-medium);
   border-radius: 8px;
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   text-decoration: none;
@@ -953,17 +953,17 @@ onBeforeUnmount(() => {
 }
 
 .costume-actions__btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .costume-actions__btn.is-primary {
   border-color: transparent;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .costume-actions__btn.is-primary:hover {
-  background: #d4d4d4;
+  background: var(--btn-inverse-bg-hover);
 }
 
 @media (max-width: 639px) {

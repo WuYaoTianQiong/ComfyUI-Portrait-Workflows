@@ -169,11 +169,13 @@ function selectTab(key: ReferenceTabKey): void {
   padding: 16px 32px 40px;
 }
 
-/* 内层内容区最大宽度 1280px 居中，使栅格可用宽度与 §5 实测一致。 */
+/*
+ * 与主站 `.content` 同宽：不设 max-width，避免 1920 视口下两侧大留白。
+ * 左右留白只由外层 `.reference-page__main` 的内边距提供。
+ */
 .reference-page__inner {
   width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
+  min-width: 0;
 }
 
 /*
@@ -212,8 +214,8 @@ function selectTab(key: ReferenceTabKey): void {
   padding: 6px 14px;
   border: 1px solid transparent;
   border-radius: 9999px;
-  background: #262626;
-  color: #a1a1a1;
+  background: var(--surface-inset);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -224,13 +226,13 @@ function selectTab(key: ReferenceTabKey): void {
 }
 
 .reference-tab:hover {
-  background: #303030;
-  color: #fafafa;
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
 }
 
 .reference-tab.is-active {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
 }
 
 .reference-tab:focus-visible {

@@ -569,7 +569,7 @@ onMounted(() => {
 
 .ref-home__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
@@ -577,7 +577,7 @@ onMounted(() => {
 
 .ref-home__desc {
   margin: 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -599,7 +599,7 @@ onMounted(() => {
   padding: 16px;
   border: 0;
   border-radius: 20px;
-  background: #262626;
+  background: var(--surface-card);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -609,7 +609,7 @@ onMounted(() => {
 }
 
 .home-card:hover {
-  background: #303030;
+  background: var(--surface-card-hover);
 }
 
 .home-card:focus-visible {
@@ -631,7 +631,7 @@ onMounted(() => {
   gap: 6px;
   min-width: 0;
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
@@ -669,8 +669,8 @@ onMounted(() => {
   min-width: 32px;
   padding: 2px 8px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fafafa;
+  background: var(--fill-soft);
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -691,12 +691,12 @@ onMounted(() => {
   width: 100%;
   aspect-ratio: 3 / 4;
   border-radius: 10px;
-  background: #0a0a0a;
+  background: var(--surface-thumb);
   object-fit: cover;
 }
 
 .home-card__thumb.is-empty {
-  background: #171717;
+  background: var(--surface-inset);
 }
 
 .ref-home__error {
@@ -706,10 +706,10 @@ onMounted(() => {
   gap: 8px;
   margin: 12px 0 0;
   padding: 10px 12px;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
-  background: rgba(239, 68, 68, 0.08);
-  color: #fecaca;
+  background: var(--danger-surface-mid);
+  color: var(--danger-text);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -717,10 +717,10 @@ onMounted(() => {
 .ref-home__retry {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid rgba(239, 68, 68, 0.5);
+  border: 1px solid var(--danger-border-strong);
   border-radius: 8px;
   background: transparent;
-  color: #fecaca;
+  color: var(--danger-text);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -731,7 +731,7 @@ onMounted(() => {
   margin-top: 16px;
   padding: 16px;
   border-radius: 20px;
-  background: #262626;
+  background: var(--surface-panel);
 }
 
 .home-recipe__head {
@@ -744,7 +744,7 @@ onMounted(() => {
 
 .home-recipe__title {
   margin: 0;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
@@ -763,8 +763,8 @@ onMounted(() => {
   flex: none;
   padding: 1px 8px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fafafa;
+  background: var(--fill-medium);
+  color: var(--text-strong);
   font-size: 11px;
   font-weight: 500;
   line-height: 17px;
@@ -805,22 +805,22 @@ onMounted(() => {
 .home-btn--ghost {
   border: 1px solid var(--border);
   background: transparent;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 
 .home-btn--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-subtle);
 }
 
 .home-btn--primary {
   border: 0;
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--btn-inverse-bg);
+  color: var(--on-inverse);
   font-weight: 600;
 }
 
 .home-btn--primary:hover {
-  background: #f5f5f5;
+  background: var(--btn-inverse-bg-hover-strong);
 }
 
 .home-btn:disabled {
@@ -851,14 +851,14 @@ onMounted(() => {
   padding: 8px;
   border: 0;
   border-radius: 14px;
-  background: #0a0a0a;
+  background: var(--surface-deep);
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .home-slot:hover {
-  background: #171717;
+  background: var(--surface-card-hover);
 }
 
 .home-slot:focus-visible {
@@ -873,7 +873,7 @@ onMounted(() => {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: #262626;
+  background: var(--surface-thumb);
   object-fit: cover;
 }
 
@@ -881,7 +881,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #a1a1a1;
+  color: var(--text-muted);
 }
 
 .home-slot__thumb.is-empty svg {
@@ -906,7 +906,7 @@ onMounted(() => {
 
 .home-slot__count {
   flex: none;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
@@ -914,14 +914,14 @@ onMounted(() => {
 
 /* 槽位标签 10px，名称 12px / 500（React text-[10px] / text-xs） */
 .home-slot__label {
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 1.4;
 }
 
 .home-slot__name {
   overflow: hidden;
-  color: #fafafa;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -931,7 +931,7 @@ onMounted(() => {
 
 .home-slot__hint {
   overflow: hidden;
-  color: #818cf8;
+  color: var(--accent-link);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -941,7 +941,7 @@ onMounted(() => {
 
 .home-recipe__note {
   margin: 8px 0 0;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -949,7 +949,7 @@ onMounted(() => {
 /* 素材来源段落：11px、行高 relaxed */
 .ref-home__source {
   margin: 16px 0 8px;
-  color: #a1a1a1;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.6;
 }
