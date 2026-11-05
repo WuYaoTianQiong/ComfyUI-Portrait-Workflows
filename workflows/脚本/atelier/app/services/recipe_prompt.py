@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.pose_phrases import expand_pose_name
+
 #: 与上游同名画风键保持一一对应，前端下拉直接用这两个 key。
 STYLE_PRESETS: dict[str, dict[str, str]] = {
     "none": {
@@ -106,9 +108,15 @@ def build_recipe_prompt(
             if is_photo
             else f"人物的肤色与质感按风格要求呈现{wear}"
         )
-        pose_desc = f"{pose.name}，{pose.angle}" if pose.angle else pose.name
+        pose_desc = expand_pose_name(pose.name) or pose.name
+        if pose.angle:
+            pose_desc = f"{pose_desc}；镜头角度：{pose.angle}"
         clauses.append(
-            f"• 姿势：按照图{idx}中人体模型的动作和镜头角度摆姿势（{pose_desc}）；"
+            f"• 姿势：严格复现图{idx}中人体模型的身体姿态与镜头角度。"
+            f"身体姿态要点：{pose_desc}。"
+            "必须逐项落实这些身体部位的状态：重心落在哪条腿、胯部朝哪边顶、"
+            "肩线与躯干的前后倾斜、手臂的位置（扶腰/搭肩/下垂）、膝盖的朝向与弯曲程度。"
+            "不要画成双脚并拢、身体笔直、手臂自然下垂的站立姿势，不要军姿，不要 T-pose。"
             f"图{idx}只是动作示意，{body}。"
         )
         idx += 1
