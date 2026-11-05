@@ -57,6 +57,11 @@
 
    只跑阶段四可设置 `T3_E2E_ONLY=phase4`（仍执行静态检查与 dist 产物检查）。
 
+    T29/T30（embedded 去重）专项：`T3_E2E_ONLY=nav` 额外校验 iframe 内不再出现
+    侧栏品牌块、「返回画廊」、顶栏「画室画廊」与面包屑根，同时保留 SidebarTrigger、
+    三组侧栏导航与角色配方 footer；外层 Vue 仍保持 9 项导航，直接访问 `/ref-web/`
+    （非 embedded）仍保留 3 个返回入口。
+
 跑法（二选一，脚本会自动判断是否需要自起实例）：
 
     ATELIER_PORT=8766 ATELIER_REFERENCE_ALLOW_NSFW=1 python main.py   # 手动先起
@@ -2969,6 +2974,16 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
         status = goto_settle(page, "/ref-web/")
         check(status == 200, "[T21] /ref-web/ 返回 200", f"status={status}")
 
+        # 直接访问（非 embedded）时 Vue 侧不参与，仪表盘页签与 React 侧均同步渲染；
+        # 仍等待面包屑出现，避免把首屏加载中的空 dom 误判成缺项。
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('nav[aria-label=\"breadcrumb\"]').length >= 1",
+                timeout=20000,
+            )
+        except Exception:
+            pass
+
         nav = _nav_scope(page)
         check(nav.count() == 1, "[T21] 存在画室全局导航", f"count={nav.count()}")
 
@@ -3025,6 +3040,18 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
         ]
         check(hrefs == ["/gallery", "/gallery", "/gallery"],
               "[T21] 3 个返回入口 href 均为 /gallery", f"hrefs={hrefs}")
+
+        # T29 回归保护：非 embedded（直接访问 /ref-web/）时面包屑仍正常渲染当前页。
+        # 说明：HEAD 基线的 __root.tsx 未声明 staticData.title，crumbs 只含叶子路由，
+        # 因此非 embedded 面包屑从来不含「画室画廊」根；T29 只过滤 embedded 分支，
+        # 不改变这一既有行为。这里硬检查当前页存在，并对根 crumb 缺失如实观察。
+        bc_plain = page.locator('nav[aria-label="breadcrumb"]')
+        bc_plain_text = bc_plain.first.inner_text().strip() if bc_plain.count() else ""
+        check(bc_plain.count() >= 1, "[T29] 非 embedded 面包屑存在", f"count={bc_plain.count()}")
+        check("图库总览" in bc_plain_text, "[T29] 非 embedded 面包屑含当前页『图库总览』",
+              f"text={bc_plain_text!r}")
+        observe("非 embedded 面包屑根 crumb",
+                f"text={bc_plain_text!r}；根路由无 staticData.title，HEAD 基线同样不含「画室画廊」")
 
         # h. 首页裂图 0
         wait_images_settled(page)
@@ -3161,6 +3188,15 @@ def check_embed_nav(browser, shots_dir: Path) -> None:
         labels = ["画廊", "参考图库", "提示词", "组合器", "图像编辑", "批量超分",
                   "分类与标签", "任务", "统计"]
         btns = tabs.locator("button")
+        # Vue 的「参考图库」按钮受 /api/system/status 的 v-if 控制，首屏可能短暂只有
+        # 8 项；等 9 项到齐再计数，否则会把加载时序误判为缺项（T30 专项复测时遇到）。
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('nav.tabs button').length >= 9",
+                timeout=20000,
+            )
+        except Exception:
+            pass
         count = btns.count()
         check(count == 9, "[T25] 外层顶栏 9 项", f"count={count}")
         for i, label in enumerate(labels):
@@ -3255,7 +3291,8 @@ def check_embed_nav(browser, shots_dir: Path) -> None:
               "[T25] console error/pageerror 为 0",
               f"page={errors[:2]} outer={outer_errs[:2]} inner={inner_errs[:2]}")
 
-        # d. iframe 内点击侧栏「返回画廊」-> 顶层 URL 变为 /gallery
+        # d. T29/T30 清理专项：embedded 时 iframe 内不得再出现重复的品牌块、
+        #    「返回画廊」、顶栏「画室画廊」与面包屑根；但侧栏导航与角色配方必须保留。
         inner_frames = [f for f in page.frames if "/ref-web" in (f.url or "")]
         if inner_frames:
             try:
@@ -3265,18 +3302,64 @@ def check_embed_nav(browser, shots_dir: Path) -> None:
                 pass
         page.wait_for_timeout(1200)
         frame = page.frame_locator(".reference-embed iframe")
-        back_link = frame.locator('a[href="/gallery"]:has-text("返回画廊")')
-        check(back_link.count() >= 1, "[T25] iframe 侧栏返回画廊存在", f"count={back_link.count()}")
-        target = back_link.first.get_attribute("target") if back_link.count() else None
-        check(target == "_top", "[T25] iframe 返回画廊 target=_top", f"target={target!r}")
-        if back_link.count():
-            back_link.first.click()
-            try:
-                page.wait_for_function("() => location.pathname === '/gallery'", timeout=30000)
-            except Exception:
-                pass
-            check(urlsplit(page.url).path.rstrip("/") == "/gallery",
-                  "[T25] 点击返回画廊后顶层跳转到 /gallery", page.url)
+        try:
+            frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
+
+        check(frame.locator('[data-slot="sidebar-header"]').count() == 0,
+              "[T30] iframe 侧栏品牌块不存在（sidebar-header count 0）",
+              f"count={frame.locator('[data-slot=\"sidebar-header\"]').count()}")
+        inner_gallery_links = frame.locator('a[href="/gallery"]')
+        check(inner_gallery_links.count() == 0,
+              "[T30] iframe 内跨应用返回链接 count 0",
+              f"count={inner_gallery_links.count()} texts="
+              f"{[inner_gallery_links.nth(i).inner_text() for i in range(inner_gallery_links.count())]}")
+        back_text_count = frame.locator('text="返回画廊"').count()
+        check(back_text_count == 0, "[T30] iframe 内『返回画廊』文本 count 0",
+              f"count={back_text_count}")
+        gallery_text_count = frame.locator('text="画室画廊"').count()
+        check(gallery_text_count == 0, "[T30] iframe 内『画室画廊』文本 count 0",
+              f"count={gallery_text_count}")
+        studio_brand_count = frame.locator('[data-slot="sidebar"]').locator('text="画室"').count()
+        check(studio_brand_count == 0, "[T30] iframe 侧栏『画室』品牌文本 count 0",
+              f"count={studio_brand_count}")
+
+        inner_bc = frame.locator('nav[aria-label="breadcrumb"]')
+        inner_bc_text = inner_bc.first.inner_text().strip() if inner_bc.count() else ""
+        check(inner_bc.count() >= 1, "[T30] iframe 面包屑存在", f"count={inner_bc.count()}")
+        check("画室画廊" not in inner_bc_text, "[T30] iframe 面包屑不含『画室画廊』根",
+              f"text={inner_bc_text!r}")
+        check(inner_bc_text == "图库总览", "[T30] iframe 面包屑只剩当前页『图库总览』",
+              f"text={inner_bc_text!r}")
+
+        # T29 明确要求保留的部分：折叠触发器、三组侧栏导航、角色配方 footer。
+        check(frame.locator('[data-slot="sidebar-trigger"]').count() == 1,
+              "[T30] iframe SidebarTrigger 仍在",
+              f"count={frame.locator('[data-slot=\"sidebar-trigger\"]').count()}")
+        inner_group_labels = [
+            frame.locator('[data-slot="sidebar-group-label"]').nth(i).inner_text()
+            for i in range(frame.locator('[data-slot="sidebar-group-label"]').count())
+        ]
+        check(inner_group_labels == ["工作台", "三大参考图库", "配置"],
+              "[T30] iframe 侧栏三组仍在", f"labels={inner_group_labels}")
+        inner_body_text = frame.locator("body").inner_text(timeout=15000)
+        required_items = ["图库总览", "AI 角色合成台", "动作姿势库", "服装穿搭库",
+                          "人像颜值库", "ComfyUI 连接"]
+        missing_items = [item for item in required_items if item not in inner_body_text]
+        check(not missing_items, "[T30] iframe 侧栏导航项完整", f"缺失={missing_items}")
+        footer_text = (
+            frame.locator('[data-slot="sidebar-footer"]').first.inner_text()
+            if frame.locator('[data-slot="sidebar-footer"]').count() else ""
+        )
+        check("角色配方槽" in footer_text, "[T30] iframe 角色配方 footer 仍在",
+              f"text={footer_text!r}")
+
+        # T29 清理后，跨应用返回入口只由外层 Vue 提供；iframe 内不得有 target=_top 残留。
+        inner_top_targets = frame.locator('a[target="_top"]')
+        check(inner_top_targets.count() == 0, "[T30] iframe 内无 target=_top 返回入口",
+              f"count={inner_top_targets.count()}")
 
         # f. 桌面 1280x800：无横向溢出、9 项、iframe embedded、iframe 内无全局导航
         page.set_viewport_size({"width": 1280, "height": 800})

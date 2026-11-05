@@ -28,39 +28,44 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="返回画室画廊">
-              {/* 整页导航回 atelier：TanStack Link 会把 basepath 拼成 /ref-web/gallery；内嵌时跳出 iframe。 */}
-              <a href={ATELIER_GALLERY_PATH} target={embedded ? '_top' : undefined}>
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <PaletteIcon className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold">画室</span>
-                  <span className="truncate text-xs text-muted-foreground">参考图库</span>
-                </div>
-              </a>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-
-      <SidebarContent>
-        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明；内嵌时需跳出 iframe。 */}
-        <SidebarGroup>
+      {/* embedded 时外层 Vue 已提供「画室 / 参考图库」品牌入口，此处隐藏以免重复。 */}
+      {!embedded && (
+        <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="返回画室画廊">
+              <SidebarMenuButton size="lg" asChild tooltip="返回画室画廊">
+                {/* 整页导航回 atelier：TanStack Link 会把 basepath 拼成 /ref-web/gallery；内嵌时跳出 iframe。 */}
                 <a href={ATELIER_GALLERY_PATH} target={embedded ? '_top' : undefined}>
-                  <ArrowLeftIcon />
-                  <span className="flex-1 truncate">返回画廊</span>
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <PaletteIcon className="size-4" />
+                  </div>
+                  <div className="grid flex-1 text-left leading-tight">
+                    <span className="truncate text-sm font-semibold">画室</span>
+                    <span className="truncate text-xs text-muted-foreground">参考图库</span>
+                  </div>
                 </a>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
-        </SidebarGroup>
+        </SidebarHeader>
+      )}
+
+      <SidebarContent>
+        {/* embedded 时外层 Vue 已有返回入口，隐藏侧栏这条重复的「返回画廊」。 */}
+        {!embedded && (
+          <SidebarGroup>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="返回画室画廊">
+                  <a href={ATELIER_GALLERY_PATH} target={embedded ? '_top' : undefined}>
+                    <ArrowLeftIcon />
+                    <span className="flex-1 truncate">返回画廊</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
         {navGroups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>

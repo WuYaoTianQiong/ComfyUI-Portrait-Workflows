@@ -32,6 +32,11 @@ export function AppHeader() {
 
   const selectedCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length
 
+  // embedded 时外层 Vue 已提供「画室画廊」根入口，面包屑只保留当前页；
+  // 若过滤后为空（例如当前页标题恰好就是根标题），回退原 crumbs，避免渲染空白面包屑。
+  const crumbBase = embedded ? crumbs.filter((c) => c.title !== '画室画廊' && c.path !== '/') : crumbs
+  const breadcrumbCrumbs = crumbBase.length > 0 ? crumbBase : crumbs
+
   const handleRandom = async () => {
     const [posesRes, costumes, portraits] = await Promise.all([
       qc.ensureQueryData(posesQuery),
@@ -53,26 +58,30 @@ export function AppHeader() {
       {/* 第二层：沿用原有工具条，断点、尺寸与行为均保持不变。 */}
       <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
         <SidebarTrigger className="-ml-1" />
-        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明；内嵌时需跳出 iframe。 */}
-        <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
-          <a
-            href={ATELIER_GALLERY_PATH}
-            target={embedded ? '_top' : undefined}
-            aria-label="返回画室画廊"
-            title="返回画室画廊"
-          >
-            <ArrowLeftIcon className="size-4" />
-            <span className="hidden @lg/header:inline">画室画廊</span>
-          </a>
-        </Button>
-        <Separator orientation="vertical" className="mr-2 h-4 data-vertical:self-center" />
+        {/* 跨应用返回入口：原生 a 整页导航，见 lib/atelierLinks.ts 的说明；embedded 时外层 Vue 已有该入口，隐藏。 */}
+        {!embedded && (
+          <>
+            <Button variant="ghost" size="sm" asChild className="gap-1.5 px-2">
+              <a
+                href={ATELIER_GALLERY_PATH}
+                target={embedded ? '_top' : undefined}
+                aria-label="返回画室画廊"
+                title="返回画室画廊"
+              >
+                <ArrowLeftIcon className="size-4" />
+                <span className="hidden @lg/header:inline">画室画廊</span>
+              </a>
+            </Button>
+            <Separator orientation="vertical" className="mr-2 h-4 data-vertical:self-center" />
+          </>
+        )}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap">
-            {crumbs.map((c, i) => (
+            {breadcrumbCrumbs.map((c, i) => (
               <Fragment key={c.path}>
                 {i > 0 && <BreadcrumbSeparator />}
                 <BreadcrumbItem className="min-w-0">
-                  {i === crumbs.length - 1 ? (
+                  {i === breadcrumbCrumbs.length - 1 ? (
                     <BreadcrumbPage className="truncate">{c.title}</BreadcrumbPage>
                   ) : (
                     <BreadcrumbLink asChild>
