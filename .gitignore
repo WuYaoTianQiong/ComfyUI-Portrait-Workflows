@@ -94,6 +94,8 @@ workflows/thumbnails/
 
 # Temporary directories (experiment/scratch pads)
 temp_*/
+# 会话内的临时实验目录（脚本、日志、诊断产物，按需本地保留）
+workflows/_tmp_*/
 
 # Reasonix cache
 workflows/.reasonix/
@@ -163,6 +165,9 @@ workflows/.codeartsdoer/
 # 前端工程（S2）：依赖目录与开发期日志不入库
 workflows/脚本/atelier/frontend/node_modules/
 workflows/脚本/atelier/frontend/_dev*.log
+# vue-tsc / tsc -b 的增量构建缓存，每次类型检查都会重写
+workflows/脚本/atelier/frontend/tsconfig.tsbuildinfo
+workflows/脚本/atelier/gallery-web/tsconfig.tsbuildinfo
 # 参考图库 Web（v0.8 接管的 React 台）：依赖与构建缓存在本地生成
 workflows/脚本/atelier/gallery-web/node_modules/
 workflows/脚本/atelier/gallery-web/.vite/
