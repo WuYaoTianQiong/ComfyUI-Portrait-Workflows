@@ -19,7 +19,7 @@
     - /api/reference/recipes              参考库出图（dry_run，不提交任务）
     - /api/reference/libraries            四库统计与 allow_nsfw
     - /*.js / *.css / index.html   前端静态资源（带内容断言）
-    - /ref-web/ 与 /ref-web/poses  单端口托管的 gallery-web（校验产物特征，防被 Vue 兜底假通过）
+    - /ref-web、/ref-web/poses  旧深链 301 重定向到 /reference?tab=...（不校验 React 产物）
     - /data/*.json /thumbs/* /img/depth/*  参考素材静态挂载（文件名取自 pose-zh.json）
 
 - 启动前先清理占用该端口的残留实例，避免结果混淆
@@ -262,16 +262,32 @@ def main() -> int:
                 checks.append((label, code if ok else -2,
                                f"bytes={len(body)}" if ok else "未返回占位图"))
 
-            # 参考图库 Web（v0.8 单端口托管）：/ref-web 与其深链接、三个素材挂载。
-            # 只断言 200 会被 Vue 的 SPA 兜底（781B 的 index.html）假通过，必须校验内容特征。
-            code, body = _get(BASE + "/ref-web/")
-            ok_ref = code == 200 and b"/ref-web/assets/" in body
-            checks.append(("ref-web 首页（gallery-web 产物）", code if ok_ref else -2,
-                           f"len={len(body)}" if ok_ref else "不是 gallery-web 产物（可能被 Vue 兜底）"))
-            code, body = _get(BASE + "/ref-web/poses")
-            ok_deep = code == 200 and b"/ref-web/assets/" in body
-            checks.append(("ref-web 深链接 /poses", code if ok_deep else -2,
-                           f"len={len(body)}" if ok_deep else "前缀兜底未生效"))
+            # 参考图库旧深链：阶段 4.3 删除 React 子应用后只保留重定向。
+            # 必须校验状态码与 Location；仍返回 200 说明旧静态挂载还在（后端未重启）。
+            class _NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None
+
+            opener = urllib.request.build_opener(_NoRedirect)
+            for label, url, expected_code, expected_location in (
+                ("/ref-web 首页重定向", "/ref-web/", 301, "/reference"),
+                ("/ref-web/poses 深链重定向", "/ref-web/poses", 301, "/reference?tab=pose"),
+                ("/ref-web 未知深链兜底", "/ref-web/__missing__", 302, "/reference"),
+            ):
+                try:
+                    with opener.open(BASE + url, timeout=10) as resp:
+                        checks.append((label, -2,
+                                       f"未重定向（HTTP {resp.status}）；旧静态挂载仍在或后端未重启"))
+                except urllib.error.HTTPError as exc:
+                    location = exc.headers.get("Location") or ""
+                    parsed = urllib.parse.urlsplit(location)
+                    actual = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+                    ok = exc.code == expected_code and actual == expected_location
+                    checks.append((label, exc.code if ok else -2,
+                                   f"→ {actual}" if ok else
+                                   f"期望 {expected_code} {expected_location}，实测 {exc.code} {actual}"))
+                except Exception as exc:  # noqa: BLE001
+                    checks.append((label, -2, f"请求失败：{exc}"))
 
             # 素材挂载：从 pose-zh.json 里取真实文件名，不写死上游数据
             code, body = _get(BASE + "/data/pose-zh.json")

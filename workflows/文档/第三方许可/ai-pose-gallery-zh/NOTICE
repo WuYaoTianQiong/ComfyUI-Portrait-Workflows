@@ -1,0 +1,52 @@
+NOTICE
+======
+
+本目录保存的是已移除的 React 子应用（原 `脚本/atelier/gallery-web/`）的
+第三方许可与署名材料。该子应用是上游仓库的本地客制化副本（vendored copy），
+已于 2026-11-05（施工手册阶段 4.3）删除；按 MIT 许可的保留义务，
+其版权声明与许可文本继续保存在这里，不得删除或改写版权行。
+
+1. 代码来源与许可
+------------------
+
+- 上游仓库：https://github.com/anhao/ai-pose-gallery-zh
+- pin 的 commit：a6c02596ce105c5f17a65d9fc54914cd6742963b
+- 上游版本：2.0.0
+- 许可：MIT License，Copyright (c) 2026 Anhao
+  许可原文见本目录 `LICENSE`（与原 `gallery-web/LICENSE`、上游 LICENSE 逐字节一致，
+  SHA-256 = 7f8b59e5d91bc2c4957618b45fc063d739a26e0a30ef13b8260f115b7dec7b71）。
+  上游 LICENSE 同时包含「适用范围说明 / Scope」：MIT 仅适用于源代码
+  （index.html、scripts/ 下的 Python 脚本、_headers 等构建/说明文件）。
+- 原目录相对上游的改动点：见 `脚本/atelier/UPSTREAM.md` 的「已移除的 React 子应用」一节。
+- 本机只读上游副本：`workflows/ai-pose-gallery-zh/`（junction 指向上游，不入库）。
+
+2. 素材授权边界
+---------------
+
+姿势、现实服装、人像素材不属于 MIT 授权范围，其著作权归原作者
+**ギア（@giaaibusi）**；上游出处为 https://ai-pose-gallery.pages.dev/ ，
+作者主页 https://x.com/giaaibusi 。使用与分发时须遵守以下边界：
+
+- 姿势 / 现实服装 / 人像素材：著作权归原作者 ギア（@giaaibusi），
+  保留署名与出处，不得据以主张本项目或本目录的著作权。
+- 标记 CC0 的素材：按该素材自身的 CC0 声明使用，可依其条款复制与改编，
+  但仍保留出处记录，不改变上游其他素材的授权状态。
+- CharaDB 图片：**仅作参考展示**，禁止再分发；禁止用于真人及未成年人相关用途；
+  禁止下载后入库（不得进入 git），禁止随构建产物分发。
+  若为本机访问提速而做缓存，缓存目录必须写入 `.gitignore`，
+  缓存内容仅限本机、不得提交、不得随产物发布。
+
+3. 迁移去向
+-----------
+
+原 React 子应用的 UI 已由 Vue 版 `/reference` 承接（六个页签：
+图库总览 / 姿势 / 服装 / 人像 / 合成台 / 设置）。
+旧 `/ref-web/*` 深链由后端 301/302 重定向到 `/reference?tab=...`。
+React 源码与 `dist/` 不再存在于仓库中。
+
+4. 保留义务
+-----------
+
+MIT 许可要求副本保留原始版权声明与许可文本，因此 `LICENSE` 必须随仓库提交。
+界面中的上游链接可以按需移除或替换，但 `LICENSE` 与本 `NOTICE`
+不得删除、不得改写版权行与作者署名。

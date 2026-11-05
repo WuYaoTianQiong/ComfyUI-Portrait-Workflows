@@ -24,7 +24,7 @@ def _validate_reference_cache_dir(
     """校验外链图片缓存根目录的落点（C-REMOTE-CACHE@1）。
 
     硬约束：必须在 app_root 下；不得与 reference_root 互相包含；不得落在
-    data/ 或 dist/ 内（含 gallery-web/dist）。缓存只存储本机参考素材，禁止随发布物扩散。
+    data/ 或 dist/ 内。缓存只存储本机参考素材，禁止随发布物扩散。
     """
     cache_dir = Path(cache_dir)
     if not cache_dir.is_absolute():
@@ -43,7 +43,6 @@ def _validate_reference_cache_dir(
         library_root / "data",
         app_root / "dist",
         library_root / "dist",
-        app_root / "gallery-web" / "dist",
     )
     for directory in forbidden:
         if _is_inside(directory, cache_dir):
@@ -143,9 +142,7 @@ class Settings(BaseSettings):
     # 否则会固化成模块加载时的类默认值，ATELIER_LIBRARY_ROOT 覆盖后不会跟着变。
     reference_root: Path | None = None
     reference_allow_nsfw: bool = False
-    # 上游 React 台（参考图库 Web）地址；置空则 atelier 顶栏不显示该入口。
-    # v0.8 起由 atelier 自己在 /ref-web 单端口托管，默认同源子路径。
-    reference_web_url: str = "/ref-web"
+
     reference_page_size: int = 60
     reference_nsfw_pose_systems: str = "全身单人・性感系,双人缠绵"
     reference_nsfw_costume_categories: str = "内衣・睡衣,性感穿搭"

@@ -3793,6 +3793,11 @@
             "title": "Path",
             "type": "string"
           },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          },
           "rel_path": {
             "default": "",
             "title": "Rel Path",

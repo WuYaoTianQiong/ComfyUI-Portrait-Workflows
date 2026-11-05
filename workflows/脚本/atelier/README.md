@@ -65,17 +65,20 @@ atelier/
 
 ---
 
-## 参考图库 Web（gallery-web）
+## 参考图库（Vue）
 
-`gallery-web/` 是从上游 `ai-pose-gallery-zh` 接管进来的 React 工作台，由本后端挂在 `/ref-web` 子路径下，
-与 atelier 同端口访问（不再单独跑 8760 静态服务）。
+`/reference` 是纯 Vue 实现（六页签：图库总览 / 姿势 / 服装 / 人像 / 合成台 / 设置），
+与 atelier 同端口，不再有 iframe 与第二套前端。
 
-- 源码：`gallery-web/src/`；产物：`gallery-web/dist/`（**必须随源码一起提交**，运行时不需要 Node）
-- 构建：`cd gallery-web && pnpm run build:prod`（先由 `scripts/clean-dist.mjs` 清空 `dist/`，
-  再执行 `vite build --base=/ref-web/`，避免旧 hash 产物堆积；Git Bash 下加 `MSYS_NO_PATHCONV=1`，
-  否则基路径会被改写成 Git 安装路径）
+- 源码：`frontend/src/views/ReferenceView.vue` 与 `frontend/src/views/reference/`
+- 产物：`web/`（`cd frontend && pnpm run build`，产物由后端挂在 `/`）
+- 旧深链：`/ref-web`、`/ref-web/poses` 等由后端 301/302 重定向到 `/reference?tab=...`
+  （映射表见施工手册 §6；`/ref-webevil` 不会被误匹配）
 - 素材：`/data`、`/thumbs`、`/img` 三个挂载指向上游只读目录（junction 经 `_resolve_if_reparse`），不复制、不入库
-- 升级：来源、pin 的 commit 与合并步骤见 `gallery-web/UPSTREAM.md`；改完 `src/` 必须重新构建 `dist/`
+- 上游来源、pin 的 commit 与历史改造记录见 `UPSTREAM.md`；MIT 许可原文与
+  「ギア（@giaaibusi）」素材署名见 `文档/第三方许可/ai-pose-gallery-zh/`
+- 历史：原 React 子应用 `gallery-web/` 已于 2026-11-05（施工手册阶段 4.3）删除，
+  git 历史仍可追溯（`git log -- 脚本/atelier/gallery-web`）
 
 ### 合成台的工作流从哪来
 

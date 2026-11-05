@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteLocationNormalized, RouteLocationRaw } from 'vue-router'
 
 import GalleryView from './views/GalleryView.vue'
 import PromptView from './views/PromptView.vue'
@@ -9,23 +10,48 @@ import JobCenterView from './views/JobCenterView.vue'
 import TaxonomyView from './views/TaxonomyView.vue'
 import StatsView from './views/StatsView.vue'
 import DesignView from './views/DesignView.vue'
-import ReferenceEmbedView from './views/ReferenceEmbedView.vue'
+import ReferenceView from './views/ReferenceView.vue'
+import {
+  referenceTabFromDeepLink,
+  resolveExplicitReferencePath,
+  sanitizeReferencePath,
+} from './views/reference/referenceDeepLink'
 
 /**
- * 参考图库（上游 React 台）由 `/reference` 用 iframe 承载。
+ * 参考图库入口归一（施工手册《参考图库_React转Vue统一迁移》§6）。
  *
- * 阶段一曾用 `location.replace('/ref-web/')` 整页跳走，外层顶栏随之中断；
- * 本轮用户拍板改为 iframe 承载，Vue 侧导航常驻，切换完全无感。
+ * 阶段 4.3 已删除 React 子应用与 iframe 壳，`/reference` 只剩纯 Vue 实现：
+ * - `?shell=` 开关已废弃：无论带什么值都渲染 Vue 版，这里顺手把它从 URL 移除，
+ *   避免旧书签继续传播已失效的参数；
+ * - `?path=<旧前缀>/xxx` 是 iframe 时代的深链：用与后端同一套校验
+ *   （旧前缀边界、禁 `..` / `//` / `\` / `:`、URL 解析后二次校验）
+ *   翻译成 `?tab=xxx`；非法值直接去掉 `path`，回落默认页（图库总览），不白屏。
  *
- * 入口地址仍由后端 `/api/system/status` 的 `reference_web_url` 下发，
- * 由 `ReferenceEmbedView` 组装（强制 `embedded=1`，隐藏 React 侧全局导航）。
- *
- * `/ref-web` 是服务端子路径，不属于 Vue Router：Vue 只负责 `/reference`
- * 这一层壳，iframe 内的刷新与深链仍由服务端静态挂载处理，不能改成
- * router 的内部 redirect（会被 catch-all 兜回 /gallery）。
- * 旧的 `ReferenceView.vue` / `RefLightbox.vue` / `api/reference.ts` 已删除
- * （2026-11-04 验收收尾）；`/api/reference/*` 后端接口保留，继续服务混源出图与参考板。
+ * 返回 `true` 表示参数已干净、无需跳转；返回路由地址时用 `replace`，
+ * 不把旧深链记进浏览器历史。
  */
+function normalizeReferenceEntry(to: RouteLocationNormalized): RouteLocationRaw | true {
+  const query = { ...to.query }
+  let changed = false
+
+  if (to.query.path !== undefined) {
+    changed = true
+    delete query.path
+
+    const rawPath = sanitizeReferencePath(to.query.path)
+    const resolved = rawPath ? resolveExplicitReferencePath(rawPath) : null
+    const tab = resolved ? referenceTabFromDeepLink(resolved) : null
+    if (tab) query.tab = tab
+  }
+
+  if (to.query.shell !== undefined) {
+    changed = true
+    delete query.shell
+  }
+
+  if (!changed) return true
+  return { path: '/reference', query, hash: to.hash, replace: true }
+}
 
 /**
  * URL 路由：每个页签一个真实路径。
@@ -44,7 +70,12 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/gallery' },
     { path: '/gallery', name: 'gallery', component: GalleryView },
-    { path: '/reference', name: 'reference', component: ReferenceEmbedView },
+    {
+      path: '/reference',
+      name: 'reference',
+      component: ReferenceView,
+
+    },
     {
       path: '/prompt/:id?',
       name: 'prompt',
@@ -66,4 +97,15 @@ export const router = createRouter({
     { path: '/design', redirect: '/dev/design' },
     { path: '/:pathMatch(.*)*', redirect: '/gallery' },
   ],
+})
+/**
+ * 参考图库入口守卫：注册为全局 `beforeEach` 而不是路由级 `beforeEnter`。
+ *
+ * 原因：子视图切页签时是「同一路由的 query 变化」，不会触发 `beforeEnter`；
+ * 全局守卫能在每次导航（含同路由 query 更新）都把 `shell` / `path` 清洗掉，
+ * 保证旧参数不会在 SPA 内部传播。
+ */
+router.beforeEach((to) => {
+  if (to.name !== 'reference') return true
+  return normalizeReferenceEntry(to)
 })

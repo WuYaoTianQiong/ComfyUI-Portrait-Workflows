@@ -1,5 +1,10 @@
 """前端端到端回归（Playwright + 真实后端 + 数据库副本）。
 
+**部分过期（2026-11-05 起）**：参考图库断言基于 iframe 承载的 React 台
+（`/ref-web?embedded=1`），而 React 子应用已在施工手册阶段 4.3 删除、
+`/ref-web` 改为 301/302 重定向。下文第 172 行起的参考图库断言不再适用，
+现行参考图库验收请用 `tools/e2e_reference_vue.py`；本脚本其余页面断言仍有效。
+
 为什么要有这一层：vitest 只能测纯逻辑与组件，测不到"静态资源 404 了没、
 接口路径拼错没、页面整体白屏没、路由挂载顺序对不对"。这些恰恰是重构期
 最常翻车的地方（历史事故：/api/images/html 的函数体引用了未传参数 → 500；
@@ -169,16 +174,10 @@ def run_browser_checks() -> None:
         cells = page.locator(".picker .cell")
         check(cells.count() > 0, "换脸页能列出生图", f"{cells.count()} 张")
 
-        # ---- 参考图库（/reference：Vue 用 iframe 承载上游 React 台 /ref-web）----
-        # T23 起顶栏入口由 `<a :href="referenceWebUrl">` 改为 `<button @click="go('reference')">`，
-        # `/reference` 由 ReferenceEmbedView 用 iframe 承载 `/ref-web/?embedded=1`。
-        # 旧断言（a 标签 + href 指向 /ref-web）随入口改造失效，属**脚本过期**而非回归：
-        # 改为验收按钮入口、前端路由、iframe 地址与内嵌内容加载。
-        # iframe 内是否隐藏自身导航属 T25（gallery-web 重建）验收项，此处不断言。
+        # ---- 参考图库（/reference：纯 Vue；阶段 4.3 已删除 iframe 与 React 台）----
+        # 入口是顶栏按钮 → 前端路由 /reference；页面内不再有 iframe，
+        # 旧 /ref-web/* 深链由后端 301/302 重定向到 /reference?tab=...。
         entry = page.locator("button:has-text('参考图库')")
-        # 入口由 /api/system/status 的 reference_web_url 驱动，而该接口要先等一次探活
-        # （离线实测 ~3s，另有 is_online 的 15s 结果缓存）；e2e 跑到这里可能还没拿到，
-        # 必须显式等待而不是靠时序碰运气（修缓存前该接口 8.2s，入口 ~8s 后才出现）。
         try:
             entry.first.wait_for(state="visible", timeout=25000)
         except Exception:
@@ -189,55 +188,37 @@ def run_browser_checks() -> None:
         if entry.count():
             entry.first.click()
         try:
-            page.wait_for_selector(".reference-embed iframe", timeout=25000)
+            page.wait_for_selector('nav[aria-label="参考图库页签"]', timeout=25000)
         except Exception:
             pass
         page.wait_for_timeout(800)
 
-        # 路由必须是 Vue 的 /reference，不能停在 /gallery，也不能整页跳去 /ref-web。
+        # 路由必须是 Vue 的 /reference，不能停在 /gallery。
         ref_path = urlparse(page.url).path.rstrip("/")
         check(ref_path == "/reference", "参考图库入口路由是 /reference", page.url)
+        ref_iframes = page.locator("iframe").count()
+        check(ref_iframes == 0, "参考图库页不再使用 iframe", f"{ref_iframes} 个")
 
-        ref_iframe = page.locator(".reference-embed iframe")
-        check(ref_iframe.count() == 1, "参考图库页用 iframe 承载", f"{ref_iframe.count()} 个")
-        iframe_src = ref_iframe.first.get_attribute("src") if ref_iframe.count() else ""
-        # 两个条件缺一不可：指向上游台 + embedded=1（gallery-web 据此隐藏自身导航）。
-        check(
-            "/ref-web" in (iframe_src or "") and "embedded=1" in (iframe_src or ""),
-            "iframe src 指向 /ref-web 且带 embedded=1",
-            iframe_src or "无 src",
-        )
-
-        # 内嵌内容加载：等 React 挂载（#root 出现子节点）后再取正文，确认不是白屏。
-        frame = page.frame_locator(".reference-embed iframe")
-        try:
-            frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
-        except Exception:
-            pass
-        page.wait_for_timeout(1200)
-        frame_body = ""
-        try:
-            frame_body = frame.locator("body").inner_text(timeout=10000)
-        except Exception:
-            pass
-        check(
-            "参考图库" in frame_body,
-            "iframe 内参考图库内容已加载",
-            frame_body.strip()[:60] or "空",
-        )
+        # 旧深链：后端 301 → /reference?tab=pose，页面渲染 Vue 姿势库（不再是 React 页）。
         page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded")
-        # 阶段三起图库图片统一走后端端点（kind=thumb|image|depth_thumb|depth），
+        # 图库图片统一走后端端点（kind=thumb|image|depth_thumb|depth），
         # 不再有 /thumbs/ 静态路径；选择器必须按端点匹配。
-        page.wait_for_selector('img[src*="/api/reference/items/pose/"]', timeout=30000)
+        page.wait_for_selector('[data-testid="pose-card"]', timeout=30000)
         page.wait_for_timeout(1200)
-        check(page.url.endswith("/ref-web/poses"), "深链接 /ref-web/poses 不 404", page.url)
-        check("动作姿势库" in page.inner_text("body"), "参考图库 poses 页渲染出页头")
+        ref_url = urlparse(page.url)
+        check(
+            ref_url.path.rstrip("/") == "/reference" and "tab=pose" in ref_url.query,
+            "旧深链 /ref-web/poses 重定向到 /reference?tab=pose",
+            page.url,
+        )
+        check("姿势库" in page.inner_text("h1"), "参考图库姿势页渲染出页头")
 
         thumbs = page.locator('img[src*="/api/reference/items/pose/"]')
         check(thumbs.count() > 0, "参考图库网格渲染出姿势卡片", f"{thumbs.count()} 张缩略图")
         check(
-            page.locator("button:has-text('全部 (')").count() >= 1,
-            "体系药丸有「全部 (N)」",
+            page.locator('[data-testid="pose-system-pills"]').count() >= 1,
+            "体系药丸已渲染",
+            f"{page.locator('[data-testid=\"pose-system-pills\"]').count()} 组",
         )
 
         decoded = page.evaluate(
@@ -247,11 +228,11 @@ def run_browser_checks() -> None:
         )
         check(decoded >= 5, "首屏缩略图真实解码", f"{decoded}/5 张 naturalWidth>0")
 
-        page.locator("button:has-text('深度图 (Depth)')").first.click()
+        page.locator('[data-testid="pose-depth-toggle"] button:has-text("深度图")').first.click()
         page.wait_for_timeout(1500)
         depth_thumbs = page.locator('img[src*="kind=depth_thumb"]').count()
         check(depth_thumbs > 0, "切深度模式后缩略图换成 depth 版", f"{depth_thumbs} 张")
-        page.locator("button:has-text('素体白模')").first.click()
+        page.locator('[data-testid="pose-depth-toggle"] button:has-text("素体白模")').first.click()
         page.wait_for_timeout(600)
 
         libs = api("/api/reference/libraries")
@@ -263,7 +244,12 @@ def run_browser_checks() -> None:
 
         page.goto(BASE + "/ref-web/costumes", wait_until="domcontentloaded")
         page.wait_for_timeout(2500)
-        check(page.url.endswith("/ref-web/costumes"), "深链接 /ref-web/costumes 不 404", page.url)
+        ref_url = urlparse(page.url)
+        check(
+            ref_url.path.rstrip("/") == "/reference" and "tab=costume" in ref_url.query,
+            "旧深链 /ref-web/costumes 重定向到 /reference?tab=costume",
+            page.url,
+        )
 
         ref_errors = errors[errors_before_ref:]
         check(not ref_errors, "参考图库无 console 错误", "; ".join(ref_errors[:3]))

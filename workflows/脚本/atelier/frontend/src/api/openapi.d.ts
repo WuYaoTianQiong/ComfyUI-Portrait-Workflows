@@ -3938,6 +3938,11 @@ export interface components {
             /** Path */
             path: string;
             /**
+             * Recommended
+             * @default false
+             */
+            recommended: boolean;
+            /**
              * Rel Path
              * @default
              */

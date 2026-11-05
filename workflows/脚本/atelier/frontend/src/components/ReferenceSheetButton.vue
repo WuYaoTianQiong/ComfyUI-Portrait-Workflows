@@ -13,8 +13,8 @@ import { useToast } from '../composables/useToast'
  * 「生成参考板」按钮（M5）。
  *
  * 只负责导出与下载：选中的 3–4 张参考图由父组件通过 props 传入。
- * 目前唯一入口是 `EditorView.vue`（旧参考库页 `ReferenceView.vue`
- * 已于 2026-11-04 验收收尾删除，参考图库改由 `/ref-web` 托管）。
+ * 目前唯一入口是 `EditorView.vue`（旧参考库页于 2026-11-04 删除；
+ * 参考图库现由纯 Vue 的 `/reference` 承接，阶段 4.3 已无 iframe）。
  */
 const props = withDefaults(
   defineProps<{

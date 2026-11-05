@@ -1,5 +1,10 @@
 """gallery-web 阶段三 / 阶段一（T3）独立验收脚本。
 
+**历史脚本（2026-11-05 起不再可运行）**：本脚本针对的 React 子应用
+`脚本/atelier/gallery-web/` 已在施工手册阶段 4.3 删除，`/ref-web` 前缀只剩
+301/302 重定向到 `/reference`。保留本文件仅作历史参考，不随 CI 执行；
+现行验收请用 `tools/e2e_reference_vue.py`。
+
 覆盖内容（对应计划 T3 的 acceptance_and_local_checks）：
 
 1. 静态检查：gallery-web `tsc -b --noEmit` / `oxlint src`、Vue `pnpm run typecheck`、

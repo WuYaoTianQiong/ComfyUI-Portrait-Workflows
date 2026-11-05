@@ -37,29 +37,19 @@ const online = computed(() => status.value?.comfyui === 'online')
 
 
 /**
- * 参考图库 Web（上游 React 台）入口。
+ * 参考图库入口开关。
  *
- * 后端未下发地址（旧后端）或显式置空时不渲染；`ATELIER_REFERENCE_ENABLED=0`
- * 时后端虽然仍下发地址，但 /ref-web 不会挂载，因此必须同时看 reference_enabled
- * （字段名以 /api/system/status 为准），否则入口会指向全 404 的页面。
- *
- * 本轮改为 iframe 承载（`/reference`），外层顶栏常驻，不再整页跳走；
- * 顶栏只负责路由与高亮，iframe 地址由 `ReferenceEmbedView` 自己取。
+ * `ATELIER_REFERENCE_ENABLED=0` 时后端不注册 `/api/reference/*`，入口也不渲染；
+ * 旧后端没有该字段时按开启处理。阶段 4.3 起旧的状态字段随旧静态挂载
+ * 一并移除，入口只由开关决定（纯 Vue 版不再有第二套地址）。
  */
-const referenceWebUrl = computed(
-  () =>
-    (status.value as (SystemStatus & { reference_web_url?: string | null }) | undefined)
-      ?.reference_web_url ?? '',
-)
-
-/** 后端显式关闭参考库开关时不显示入口；旧后端没有该字段时按开启处理。 */
 const referenceEnabled = computed(
   () =>
     (status.value as (SystemStatus & { reference_enabled?: boolean }) | undefined)
       ?.reference_enabled !== false,
 )
 
-const showReferenceEntry = computed(() => referenceEnabled.value && referenceWebUrl.value !== '')
+const showReferenceEntry = computed(() => referenceEnabled.value)
 
 const route = useRoute()
 const router = useRouter()

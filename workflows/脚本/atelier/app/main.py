@@ -7,6 +7,7 @@ import time
 import uuid
 import webbrowser
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 import httpx
 import websockets
@@ -14,7 +15,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from app import __version__
 from app.config import settings
@@ -196,11 +197,85 @@ from app.routers.legacy import router as legacy_router
 
 app.include_router(legacy_router, prefix="/api")
 
-# 参考图库 Web 的路径前缀。用精确前缀判断，避免 /ref-web-foo 被误判。
+# 参考图库旧前缀。阶段 4.3 删除 React 子应用与 `/ref-web` 静态挂载后，
+# 该前缀只用于把旧书签重定向到 `/reference`（施工手册 §6）。
+# 用精确路径段判断，避免 /ref-webevil 被误匹配。
 _REF_WEB_PREFIX = "/ref-web"
 
 def _is_ref_web_path(path: str) -> bool:
     return path == _REF_WEB_PREFIX or path.startswith(_REF_WEB_PREFIX + "/")
+
+# 旧深链段 → 新页签键（与前端 referenceDeepLink.ts 的映射保持一致）。
+_REF_WEB_TAB_BY_SEGMENT = {
+    "poses": "pose",
+    "costumes": "costume",
+    "portraits": "portrait",
+    "studio": "studio",
+    "settings": "settings",
+}
+
+def _is_safe_reference_path(value: str) -> bool:
+    """校验旧 `?path=` 深链的原始值。
+
+    只接受带 `/ref-web` 前缀的值，禁 `..`（穿越）、`//`（协议相对地址）、
+    `\\`（浏览器等价 `/`）、`:`（绝对 URL / 端口）；再用 URL 解析后的 pathname
+    二次校验，挡掉 `%2e%2e` 这类规范化之后才暴露的穿越。规则与删除前的
+    与阶段 4.3 删除的 iframe 壳校验一致，不因解析页签而放宽。
+    """
+    if not value:
+        return False
+    if not (
+        value == _REF_WEB_PREFIX
+        or value.startswith(_REF_WEB_PREFIX + "/")
+        or value.startswith(_REF_WEB_PREFIX + "?")
+        or value.startswith(_REF_WEB_PREFIX + "#")
+    ):
+        return False
+    if ".." in value or "//" in value or "\\" in value or ":" in value:
+        return False
+
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return False
+    decoded_path = unquote(parsed.path)
+    if any(segment in (".", "..") for segment in decoded_path.split("/")):
+        return False
+    return decoded_path == _REF_WEB_PREFIX or decoded_path.startswith(_REF_WEB_PREFIX + "/")
+
+def _reference_tab_from_path(value: str) -> str | None:
+    """合法旧深链 → 页签键；`/ref-web` 本身与未知段返回 None（回落默认页）。"""
+    if not _is_safe_reference_path(value):
+        return None
+    path = unquote(urlsplit(value).path).rstrip("/")
+    if path == _REF_WEB_PREFIX:
+        return None
+    return _REF_WEB_TAB_BY_SEGMENT.get(path[len(_REF_WEB_PREFIX) + 1:])
+
+def _merge_reference_query(raw_query: str, extra: list[tuple[str, str]]) -> str:
+    """把页签等参数前置，其余 query 原样保留（同名项以显式参数为准）。"""
+    reserved = {key for key, _ in extra}
+    pairs = [
+        (key, value)
+        for key, value in parse_qsl(raw_query, keep_blank_values=True)
+        if key not in reserved
+    ]
+    return urlencode(extra + pairs, doseq=True)
+
+def _drop_query_keys(raw_query: str, keys: set[str]) -> str:
+    """删除指定 query 键，其余参数与顺序保持不变。"""
+    pairs = [
+        (key, value)
+        for key, value in parse_qsl(raw_query, keep_blank_values=True)
+        if key not in keys
+    ]
+    return urlencode(pairs, doseq=True)
+
+def _redirect_to_reference(raw_query: str, tab: str | None, status_code: int) -> RedirectResponse:
+    """组装 `/reference?tab=...` 重定向地址（保留原 query）。"""
+    extra = [("tab", tab)] if tab else []
+    merged = _merge_reference_query(raw_query, extra)
+    target = "/reference" + (f"?{merged}" if merged else "")
+    return RedirectResponse(target, status_code=status_code)
 
 # SPA Fallback 中间件：静态文件返回 404 后返回 index.html（支持前端 History API 路由）
 class SPAFallbackMiddleware(BaseHTTPMiddleware):
@@ -219,8 +294,8 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
         # （缩略图/原图等自带 Cache-Control 长缓存的端点不受影响）
         if request.url.path.startswith("/api/") and "cache-control" not in {k.lower() for k in response.headers.keys()}:
             response.headers["Cache-Control"] = "no-store"
-        # /ref-web/* 的 404 交给 RefWebFallbackMiddleware 判定：本中间件在外层，
-        # 若这里再按 Vue SPA 兜底，缺失的 /ref-web/assets/*.js 又会被 HTML 顶替。
+        # /ref-web/* 由下方重定向路由处理，不再走 Vue 的 index.html 兜底：
+        # 否则旧深链会被 SPA 接住，书签不会跳到 /reference。
         if (
             response.status_code == 404
             and not request.url.path.startswith("/api/")
@@ -233,58 +308,6 @@ class SPAFallbackMiddleware(BaseHTTPMiddleware):
                 return resp
         return response
 
-# 参考图库 Web 深链接兜底：StaticFiles(html=True) 只处理目录请求，
-# /ref-web/poses 这类前端路由需要回 gallery-web 的 index.html。
-#
-# 只兜底「页面导航」，不能兜底静态资源：以前任何 /ref-web/* 的 404 都回 index.html，
-# 于是缺失的 /ref-web/assets/xxx.js 会以 200 text/html 返回，浏览器按脚本加载时
-# 报 MIME 类型错误，还会把 HTML 当 JS 解析失败，掩盖真正的缺文件问题。
-def _is_ref_web_page_request(request: Request) -> bool:
-    if request.method != "GET":
-        return False
-    path = request.url.path
-    if not _is_ref_web_path(path):
-        return False
-    last_segment = path.rstrip("/").rsplit("/", 1)[-1]
-    # 无扩展名 → 前端路由深链（/ref-web/poses、/ref-web/studio 等）
-    if "." not in last_segment:
-        return True
-    # 有扩展名的路径默认是静态资源，缺失时必须保持 404；
-    # 只有客户端明确声明 Accept: text/html 时才视为页面导航兜底。
-    return "text/html" in request.headers.get("accept", "").lower()
-
-
-class RefWebFallbackMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, index_file=None):
-        super().__init__(app)
-        self._index_file = index_file
-
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        index_file = self._index_file
-        if (
-            response.status_code == 404
-            and _is_ref_web_page_request(request)
-            and index_file is not None
-            and index_file.exists()
-        ):
-            resp = FileResponse(index_file)
-            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            return resp
-        return response
-
-# 参考图库 Web（接管来的上游 React 台）：构建产物在 gallery-web/dist。
-# /comfy 反代必须与上游前端默认地址一致（本机访问时它默认用 `/comfy`），
-# 转发时删掉 Origin/Referer，否则 ComfyUI 对异源请求返回 403。
-_gallery_web_dir = settings.app_root / "gallery-web"
-_gallery_dist = _gallery_web_dir / "dist"
-_gallery_index = _gallery_dist / "index.html"
-
-if _gallery_index.exists():
-    app.mount("/ref-web", StaticFiles(directory=str(_gallery_dist), html=True), name="ref-web")
-    print(f"  [mount] /ref-web -> {_gallery_dist}")
-else:
-    logger.warning("参考图库 Web 未构建：缺少 %s，跳过 /ref-web 挂载", _gallery_index)
 
 # 图片数据外挂到上游目录（只读），junction 先解析，避免 WinError 448。
 _ref_dir = _resolve_if_reparse(settings.reference_dir)
@@ -430,10 +453,55 @@ if _temp_dir.exists():
 _front_dir = settings.web_dir
 _front_index = _front_dir / "index.html"
 
-# 先注册 RefWeb 兜底，再注册 SPA 兜底：中间件后添加者在外层，
-# 这样 /ref-web 的 404 会先被本中间件改写，不会被 Vue 的 index.html 抢走。
-if _gallery_index.exists():
-    app.add_middleware(RefWebFallbackMiddleware, index_file=_gallery_index)
+# 参考图库旧深链重定向（施工手册 §6）。
+#
+# 阶段 4.3 删除了 `/ref-web` 的 React 静态挂载，但该前缀必须仍有归宿：
+# 不注册这些路由时旧书签会落到 SPA 兜底，书签不会跳到 `/reference`。
+# 全部用精确前缀判断，`/ref-webevil` 不匹配 `/ref-web` 或 `/ref-web/{...}`。
+@app.api_route(_REF_WEB_PREFIX, methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route(_REF_WEB_PREFIX + "/", methods=["GET", "HEAD"], include_in_schema=False)
+def _redirect_ref_web_root(request: Request) -> RedirectResponse:
+    """`/ref-web` 与 `/ref-web/` → `/reference`（301）。"""
+    return _redirect_to_reference(request.url.query, None, 301)
+
+
+@app.api_route(
+    _REF_WEB_PREFIX + "/{rest:path}",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+def _redirect_ref_web_deep(rest: str, request: Request) -> RedirectResponse:
+    """`/ref-web/<页签>` → `/reference?tab=...`（301）；未知段 302 兜底，不 404。
+
+    `rest` 带前导 `/`（`/ref-web//poses`）或含多段（`/ref-web/poses/extra`）
+    都按未知段处理，避免把畸形路径映射成正常页签。
+    """
+    tab = None
+    if not rest.startswith("/"):
+        tab = _REF_WEB_TAB_BY_SEGMENT.get(rest.rstrip("/"))
+    return _redirect_to_reference(request.url.query, tab, 301 if tab else 302)
+
+
+@app.api_route("/reference", methods=["GET", "HEAD"], include_in_schema=False)
+def _reference_page(request: Request):
+    """SPA 入口：`?path=/ref-web/xxx` 翻译为 `?tab=xxx`，其余直接返回 Vue index.html。
+
+    iframe 壳已删除，`?path=` 不再有承载页，必须就地翻译；非法值去掉 `path`
+    后回落默认页（图库总览），不白屏、不 404。
+    """
+    if "path" in request.query_params:
+        tab = _reference_tab_from_path(request.query_params.get("path") or "")
+        return _redirect_to_reference(
+            _drop_query_keys(request.url.query, {"path", "shell"}),
+            tab,
+            301,
+        )
+    if not _front_index.exists():
+        return JSONResponse({"detail": "前端未构建：缺少 web/index.html"}, status_code=404)
+    resp = FileResponse(_front_index)
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
 
 if _front_index.exists():
     if (_front_dir / "assets").exists():
