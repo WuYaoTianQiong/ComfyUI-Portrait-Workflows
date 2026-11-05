@@ -213,6 +213,18 @@ _STUDIO_SOURCE_RANK = {"图库专用": 5, "我的工作流": 4, "上游原版": 
 #: 与它在同一来源（图库专用工作流/）的候选按 mtime 排，所以这里写文件名即可。
 _PREFERRED_STUDIO_NAMES = ("图库专用_QwenEdit_GGUF-Q5KM_三图_4步_标准.api.json",)
 
+#: 合成台下拉里打「推荐」标签的工作流。
+#: 2026-11-05 实测定档：它是唯一同时具备「人像槽 + 服装槽 + 姿势槽 + 姿势 LoRA」的链路，
+#: 5 姿势 × 3 种子 15/15 PASS，热跑 27s（cfg 2.5 后 81–110s）。
+_RECOMMENDED_STUDIO_NAMES = ("图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",)
+
+#: studio 下拉的屏蔽名单：文件名 → 不可用原因。
+#: 上游参考库的 `src/workflows` 是只读目录，缺模型的工作流无法靠移文件隐藏，只能在这里排除；
+#: 维护方式：当 `wf_probe.py`（逐工作流实测）判定为 LOAD_FAIL / REJECTED / ERROR / TIMEOUT 时追加。
+_UNUSABLE_STUDIO: dict[str, str] = {
+    "qwen_image_edit_2509_3img.api.json": "缺模型 qwen_image_edit_2509_fp8_e4m3fn.safetensors，选中会报不匹配",
+}
+
 
 def studio_sort_key(item: dict) -> tuple:
     """studio 列表排序：三槽优先 → 来源权重 → 新到旧。"""
@@ -244,6 +256,10 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
         for file in sorted(directory.glob("*.json")):
             if not is_valid_workflow(file):
                 continue
+            blocked_reason = _UNUSABLE_STUDIO.get(file.name)
+            if blocked_reason:
+                logger.info("studio 下拉已屏蔽不可用工作流 %s：%s", file.name, blocked_reason)
+                continue
             resolved = str(file.resolve(strict=False))
             if resolved in seen:
                 continue
@@ -266,5 +282,6 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
                 "media_kind": media_kind,
                 "image_slots": slots,
                 "studio_ready": ready,
+                "recommended": file.name in _RECOMMENDED_STUDIO_NAMES,
             })
     return results

@@ -313,6 +313,8 @@ class WorkflowRow(BaseModel):
     image_slots: int = 0
     #: 是否能用于参考图库合成台（有图片槽位 + 有文本编码节点）
     studio_ready: bool = False
+    #: 是否为实测推荐项（三槽齐全 + 姿势 LoRA），前端下拉据此打「推荐」标签
+    recommended: bool = False
     caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
     params: WorkflowParams | None = None
 
