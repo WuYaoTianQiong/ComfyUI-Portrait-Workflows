@@ -1535,7 +1535,8 @@ function clearFilters() {
   place-items: center;
   border-radius: 50%;
   background: var(--primary);
-  color: var(--text);
+  /* 主色实底：浅色下 --text 是近黑，必须换成垫在主色上的专用前景色 */
+  color: var(--on-primary-soft);
   font-size: var(--fs-sm);
   font-weight: 700;
   box-shadow: var(--shadow-1);
@@ -1577,7 +1578,7 @@ function clearFilters() {
 .pick.on {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--text);
+  color: var(--on-primary-soft);
 }
 
 .fav.on {

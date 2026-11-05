@@ -429,7 +429,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .tabs .btn.active {
   border-color: var(--primary);
   background: var(--primary);
-  color: rgb(255 255 255);
+  color: var(--on-primary);
 }
 
 .skipped-bar {
@@ -660,7 +660,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .btn.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: rgb(255 255 255);
+  color: var(--on-primary);
 }
 
 .btn.primary:disabled {

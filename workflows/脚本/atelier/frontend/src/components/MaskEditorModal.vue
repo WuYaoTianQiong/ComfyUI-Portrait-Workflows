@@ -50,6 +50,34 @@ function ctxOf(el: HTMLCanvasElement | null) {
   return el?.getContext('2d') ?? null
 }
 
+/**
+ * canvas 2d 的 fillStyle / strokeStyle 只接受具体色值，不能直接吃 CSS 变量。
+ * 这里按当前主题解析一次并缓存；`data-theme` 变化时自动失效，避免 draw() 在
+ * 指针移动的每一帧都调用 getComputedStyle。
+ */
+interface CanvasTheme {
+  background: string
+  mask: string
+  cursor: string
+}
+
+let canvasTheme: CanvasTheme | null = null
+let canvasThemeKey = ''
+
+function resolveCanvasTheme(): CanvasTheme {
+  const key = document.documentElement.getAttribute('data-theme') ?? 'dark'
+  if (canvasTheme && canvasThemeKey === key) return canvasTheme
+  const root = getComputedStyle(document.documentElement)
+  const read = (name: string, fallback: string) => root.getPropertyValue(name).trim() || fallback
+  canvasTheme = {
+    background: read('--canvas-bg', 'rgb(20 20 20)'),
+    mask: read('--mask-overlay', 'rgba(255, 58, 58, 0.92)'),
+    cursor: read('--canvas-cursor', 'rgba(255, 255, 255, 0.85)'),
+  }
+  canvasThemeKey = key
+  return canvasTheme
+}
+
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!url) {
@@ -106,10 +134,11 @@ function draw() {
   const ctx = ctxOf(canvas)
   const octx = ctxOf(ov)
   if (!canvas || !ctx || !img || !m || !ov || !octx) return
+  const theme = resolveCanvasTheme()
 
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.fillStyle = 'rgb(20 20 20)'
+  ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.save()
   ctx.translate(view.x, view.y)
@@ -126,7 +155,7 @@ function draw() {
   octx.drawImage(m, 0, 0)
   octx.restore()
   octx.globalCompositeOperation = 'source-in'
-  octx.fillStyle = 'rgba(255, 58, 58, 0.92)'
+  octx.fillStyle = theme.mask
   octx.fillRect(0, 0, ov.width, ov.height)
   octx.globalCompositeOperation = 'source-over'
 
@@ -138,7 +167,7 @@ function draw() {
   if (hover.show && (tool.value === 'brush' || tool.value === 'eraser')) {
     ctx.beginPath()
     ctx.arc(hover.x, hover.y, Math.max(2, (brushSize.value * view.scale) / 2), 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+    ctx.strokeStyle = theme.cursor
     ctx.lineWidth = 1
     ctx.stroke()
   }

@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
   z-index: var(--z-compare);
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.92);
+  background: var(--compare-scrim);
 }
 
 .bar {
@@ -246,7 +246,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--gap-sm);
   padding: var(--gap-sm) var(--gap);
-  background: rgba(20, 24, 30, 0.95);
+  background: var(--compare-bar-bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -332,7 +332,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--compare-cell-bg);
 }
 
 .cell-scroll {
@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
   color: var(--muted);
   padding: 3px 6px;
   overflow: hidden;
-  background: rgba(20, 24, 30, 0.85);
+  background: var(--compare-caption-bg);
 }
 
 .cell figcaption .name {

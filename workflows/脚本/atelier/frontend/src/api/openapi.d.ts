@@ -2668,6 +2668,11 @@ export interface components {
             subfolder?: string | null;
             /** Tags */
             tags?: components["schemas"]["TagRef"][];
+            /**
+             * Version
+             * @default
+             */
+            version: string;
             /** View Url */
             view_url?: string | null;
             /** Width */
@@ -2767,6 +2772,11 @@ export interface components {
             subfolder?: string | null;
             /** Tags */
             tags?: components["schemas"]["TagRef"][];
+            /**
+             * Version
+             * @default
+             */
+            version: string;
             /** View Url */
             view_url?: string | null;
             /** Width */

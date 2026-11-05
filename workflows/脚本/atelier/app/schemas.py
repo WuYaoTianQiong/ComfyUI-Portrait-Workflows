@@ -75,6 +75,12 @@ class HistoryItem(BaseModel):
     is_favorite: bool = False
     # 文件缺失（派生状态，可自愈）：只影响展示与筛选，不代表记录被删除
     missing: bool = False
+    # 源文件内容版本 = st_mtime_ns 的十进制字符串（原图同名覆盖时该值必变）。
+    # 前端拿它当缩略图 URL 的 `v`，配合缩略图的 immutable 缓存实现"内容不变就永久命中"。
+    # 用字符串而非 int：纳秒时间戳早已超过 JS Number 的安全整数上限（2^53），
+    # 走 JSON number 会在浏览器侧丢精度，导致内容变了 URL 却没变。
+    # 源文件找不到时为空串，前端回落用记录 id 作 cache-busting。
+    version: str = ""
     width: Optional[int] = None
     height: Optional[int] = None
     file_size: Optional[int] = None

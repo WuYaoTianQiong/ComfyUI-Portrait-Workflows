@@ -126,6 +126,10 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
         # （meta 为空 = 路径 stat 失败 = 取不到图）。只用于展示与筛选，不参与删除。
         "missing": bool(r.missing_since) or not meta,
         **meta,
+        # 内容版本（st_mtime_ns 字符串）：文件缺失时为空串，前端回落 id
+        "version": _source_version(
+            r.filename or "", r.subfolder or "", r.img_type or "output"
+        ),
     }
     # 优先从缓存获取提示词名称
     if prompt_id and prompt_cache:
@@ -316,6 +320,22 @@ def _safe_mtime(path: Path) -> float:
         return path.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def _source_version(filename: str, subfolder: str, img_type: str) -> str:
+    """源文件的内容版本：`st_mtime_ns` 的十进制字符串；取不到返回空串。
+
+    前端用它做缩略图 URL 的 `v`：同名覆盖时 mtime（纳秒）必变 → URL 变 →
+    浏览器里带 immutable 的旧缓存自然失效。必须返回字符串，纳秒时间戳超出
+    JS Number 安全整数范围，走 JSON number 会在浏览器侧被抹掉精度。
+    """
+    path = resolve_image_path(filename or "", subfolder or "", img_type or "output")
+    if path is None:
+        return ""
+    try:
+        return str(path.stat().st_mtime_ns)
+    except OSError:
+        return ""
 
 
 def _iter_output_images(root: Path, max_depth: int = 4, force: bool = False):

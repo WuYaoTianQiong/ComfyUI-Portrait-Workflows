@@ -392,8 +392,52 @@ onMounted(() => {
     </header>
 
     <div class="studio-grid">
-      <!-- 左栏：参考图组合、工作流与画风、补充要求、提示词预览 -->
+      <!-- 左栏：提示词预览、参考图组合、工作流与画风、补充要求 -->
       <div class="studio-column studio-column--left">
+        <!-- 提示词只读预览：后端 dry_run 组合，与正式提交完全独立 -->
+        <ReferenceSectionCard title="提示词预览">
+          <template #actions>
+            <button
+              type="button"
+              class="studio-btn studio-btn--ghost studio-btn--sm"
+              data-testid="studio-prompt-copy"
+              :disabled="!previewPrompt || previewLoading"
+              @click="copyPromptPreview"
+            >
+              复制提示词
+            </button>
+          </template>
+
+          <p class="studio-hint">
+            提示词由后端按三槽自动生成，此处仅预览，不可编辑。
+            <template v-if="totalSelected > 1">多选时按每槽第一张生成代表组合。</template>
+          </p>
+
+          <div class="prompt-preview" data-testid="studio-prompt-preview">
+            <span v-if="previewLoading" class="prompt-preview__state">
+              正在生成提示词预览…
+            </span>
+            <span v-else-if="previewError" class="prompt-preview__error" role="alert">
+              {{ previewError }}
+            </span>
+            <pre v-else-if="previewPrompt" class="prompt-preview__text">{{ previewPrompt }}</pre>
+            <span v-else class="prompt-preview__state">
+              三槽均未选择：选择任一参考图后将在此显示后端组合出的提示词。
+            </span>
+          </div>
+
+          <button
+            v-if="previewError"
+            type="button"
+            class="studio-btn studio-btn--ghost studio-btn--sm"
+            data-testid="studio-prompt-retry"
+            :disabled="previewLoading"
+            @click="refreshPreviewPrompt"
+          >
+            重试
+          </button>
+        </ReferenceSectionCard>
+
         <ReferenceSectionCard title="参考图组合" :subtitle="`已选 ${countLabel}`" :min-height="226.5">
           <template #actions>
             <span class="studio-count" data-testid="studio-recipe-count">{{ countLabel }}</span>
@@ -599,49 +643,6 @@ onMounted(() => {
           </div>
         </ReferenceSectionCard>
 
-        <!-- 提示词只读预览：后端 dry_run 组合，与正式提交完全独立 -->
-        <ReferenceSectionCard title="提示词预览">
-          <template #actions>
-            <button
-              type="button"
-              class="studio-btn studio-btn--ghost studio-btn--sm"
-              data-testid="studio-prompt-copy"
-              :disabled="!previewPrompt || previewLoading"
-              @click="copyPromptPreview"
-            >
-              复制提示词
-            </button>
-          </template>
-
-          <p class="studio-hint">
-            提示词由后端按三槽自动生成，此处仅预览，不可编辑。
-            <template v-if="totalSelected > 1">多选时按每槽第一张生成代表组合。</template>
-          </p>
-
-          <div class="prompt-preview" data-testid="studio-prompt-preview">
-            <span v-if="previewLoading" class="prompt-preview__state">
-              正在生成提示词预览…
-            </span>
-            <span v-else-if="previewError" class="prompt-preview__error" role="alert">
-              {{ previewError }}
-            </span>
-            <pre v-else-if="previewPrompt" class="prompt-preview__text">{{ previewPrompt }}</pre>
-            <span v-else class="prompt-preview__state">
-              三槽均未选择：选择任一参考图后将在此显示后端组合出的提示词。
-            </span>
-          </div>
-
-          <button
-            v-if="previewError"
-            type="button"
-            class="studio-btn studio-btn--ghost studio-btn--sm"
-            data-testid="studio-prompt-retry"
-            :disabled="previewLoading"
-            @click="refreshPreviewPrompt"
-          >
-            重试
-          </button>
-        </ReferenceSectionCard>
       </div>
 
       <!-- 右栏：生成按钮（结果卡上方）+ 生成结果 -->

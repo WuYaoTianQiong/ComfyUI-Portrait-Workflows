@@ -2079,7 +2079,7 @@ onBeforeUnmount(() => {
 
 .btn.danger {
   border-color: var(--danger);
-  color: color-mix(in srgb, var(--danger) 35%, rgb(255 255 255));
+  color: var(--danger-text-button);
 }
 
 .btn.danger:hover {
@@ -2476,7 +2476,8 @@ onBeforeUnmount(() => {
 .star-btn {
   border: none;
   background: transparent;
-  color: var(--border-strong);
+  /* 未收藏态：深色下沿用边框色，浅色下由令牌换成可辨识的中灰。 */
+  color: var(--icon-idle);
   font-size: var(--fs-lg);
   line-height: 1;
   padding: 0 1px;
@@ -2578,7 +2579,7 @@ onBeforeUnmount(() => {
   max-height: 28vh;
   field-sizing: content;
   border-left: 3px solid var(--danger);
-  color: color-mix(in srgb, var(--danger) 45%, rgb(255 255 255));
+  color: var(--danger-text-field);
 }
 
 .editor:focus {
@@ -2671,7 +2672,17 @@ onBeforeUnmount(() => {
 .cat-chip.on {
   background: var(--c, var(--primary));
   border-color: var(--c, var(--primary));
-  color: rgb(255 255 255);
+  color: var(--on-primary);
+}
+
+/**
+ * 浅色主题：分类色来自用户数据，可能是 #f59e0b / #22c55e 这类高亮度色，
+ * 白字只有 2.15:1。把底色调暗 40%（保留色相）后，8 个默认色板上的白字
+ * 均回到 5.4:1 以上。深色主题不命中此规则，外观不变。
+ */
+:root[data-theme='light'] .cat-chip.on {
+  background: color-mix(in srgb, var(--c, var(--primary)) 60%, #000000);
+  border-color: color-mix(in srgb, var(--c, var(--primary)) 60%, #000000);
 }
 
 .shot-grid {

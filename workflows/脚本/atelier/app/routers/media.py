@@ -150,17 +150,23 @@ def serve_thumbnail(
         raise HTTPException(400, "非法的图片路径")
     thumb_path = generate_thumbnail(filename, subfolder, type, size)
     if thumb_path is not None:
+        # 命中本地缩略图缓存（也可能本次才生成，但生成后立刻落盘）：
+        # 缓存键含原图 st_size + st_mtime_ns，前端 URL 又带同源内容版本 `v`，
+        # 只要内容不变，同一 URL 永远对应同一张图 → 可以放心 immutable，
+        # 让画廊首屏 40 个缩略图请求在第二次刷新时全部走浏览器磁盘缓存。
         return FileResponse(
             str(thumb_path),
             media_type="image/webp",
-            headers={"Cache-Control": "no-cache"},
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
     # 本地原图不存在：回退到 ComfyUI 代理取图并即时生成缩略图
     # （与 /api/media/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
     raw = _fetch_remote_image(filename, subfolder, type)
     if raw is None:
-        # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404
+        # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404。
+        # missing_image_response 自带 no-store —— 占位图绝不能被缓存，
+        # 否则原图恢复后浏览器仍会一直显示裂图。
         return missing_image_response()
     try:
         with PILImage.open(BytesIO(raw)) as img:
@@ -170,12 +176,15 @@ def serve_thumbnail(
             buf = BytesIO()
             img.save(buf, "WEBP", quality=80)
             buf.seek(0)
+        # 远程回退每次都要重新取图+PIL 编码，且结果不落缩略图缓存：
+        # 只给 5 分钟短缓存，既不重复压 ComfyUI，也不会长期看不到更新后的图。
         return StreamingResponse(
             buf,
             media_type="image/webp",
-            headers={"Cache-Control": "no-cache"},
+            headers={"Cache-Control": "public, max-age=300"},
         )
     except Exception:
+        # 远程拿到的是坏图 / 不支持的格式 → 同样退回占位图（no-store）
         return missing_image_response()
 
 

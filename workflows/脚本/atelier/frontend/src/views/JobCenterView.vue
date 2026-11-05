@@ -709,7 +709,8 @@ function openInGallery(filename: string) {
 
 .btn.cancel {
   border-color: var(--danger);
-  color: color-mix(in srgb, var(--danger) 35%, white);
+  /* 深色主题是「危险色混白」的浅红；浅色主题由令牌换成深红，避免白底淡红字。 */
+  color: var(--danger-text-button);
   transition:
     color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),
@@ -815,7 +816,7 @@ function openInGallery(filename: string) {
 .drawer-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.32);
+  background: var(--drawer-scrim);
   z-index: var(--z-modal);
 }
 

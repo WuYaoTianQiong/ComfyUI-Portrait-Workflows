@@ -28,6 +28,8 @@
      同一语义散在多处，改对比度时找不到全部落点。 */
   --on-primary: #ffffff;
   --danger-text: #fecaca;
+  /* 主色实底上的次要文字（选中徽标/已选按钮）：深色下沿用正文色，浅色下用纯白。 */
+  --on-primary-soft: #e6edf3;
 
   /**
    * 参考图库组件级语义（S1.5 未覆盖的层级）。
@@ -90,6 +92,40 @@
   --spinner-track-inverse: rgba(23, 23, 23, 0.25);
   --scrim-strong: rgba(0, 0, 0, 0.62);
   --shadow-overlay: 0 24px 60px rgba(0, 0, 0, 0.55);
+
+  /**
+   * 危险色「文字型」按钮 / 输入框。
+   *
+   * 原先直接写 color-mix(in srgb, var(--danger) 35%|45%, white)：深色主题下是
+   * 浅红字，浅色主题下红被白稀释成 #e6afaf / #df9999，白底上只有 1.9:1 / 2.6:1。
+   * 这里把深色主题的计算结果固化成变量，浅色主题换成深红，两套各自满足对比度。
+   */
+  --danger-text-button: #f9bebe;   /* = color-mix(in srgb, #ef4444 35%, #fff) */
+  --danger-text-field: #f8abab;    /* = color-mix(in srgb, #ef4444 45%, #fff) */
+
+  /* 未激活图标（收藏星标等）：深色下保持低调，浅色下要实于边框色。 */
+  --icon-idle: var(--border-strong);
+
+  /**
+   * 全屏对比层（CompareModal）与任务抽屉遮罩。
+   *
+   * 对比层在深色主题下是近黑遮罩 + 深色顶栏；浅色主题若继续用深色底，
+   * `var(--text)` 变成 #111111 压在 #141820 上几乎不可读。这组令牌让浅色
+   * 主题换成浅底，组件选择器不用分支。
+   */
+  --compare-scrim: rgba(0, 0, 0, 0.92);
+  --compare-bar-bg: rgba(20, 24, 30, 0.95);
+  --compare-caption-bg: rgba(20, 24, 30, 0.85);
+  --compare-cell-bg: rgba(255, 255, 255, 0.02);
+  --drawer-scrim: rgba(0, 0, 0, 0.32);
+
+  /**
+   * 遮罩编辑器画布。canvas 2d 只能吃具体色值（不能直接吃 var()），
+   * 由 MaskEditorModal 在主题变化时读取一次。
+   */
+  --canvas-bg: rgb(20 20 20);
+  --canvas-cursor: rgba(255, 255, 255, 0.85);
+  --mask-overlay: rgba(255, 58, 58, 0.92);
 
   --success-text: #86efac;
   --success-border: rgb(34 197 94 / 0.35);
@@ -187,11 +223,12 @@
   --primary-soft: rgba(55, 48, 163, 0.1);
   --danger: #b91c1c;
   --danger-soft: rgba(185, 28, 28, 0.1);
-  --success: #047857;
-  --warn: #b45309;
+  --success: #065f46;
+  --warn: #92400e;
 
   --on-primary: #ffffff;
   --danger-text: #991b1b;
+  --on-primary-soft: #ffffff;
 
   --shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   --shadow-1: 0 1px 2px rgb(15 23 42 / 0.08);
@@ -250,6 +287,22 @@
   --spinner-track-inverse: rgba(255, 255, 255, 0.3);
   --scrim-strong: rgba(15, 23, 42, 0.38);
   --shadow-overlay: 0 24px 60px rgba(15, 23, 42, 0.18);
+
+  /* 浅色下「危险色文字按钮」直接用深红，白底 8.3:1；不再混白稀释。 */
+  --danger-text-button: #991b1b;
+  --danger-text-field: #991b1b;
+  --icon-idle: #5b6472;
+
+  /* 浅色下的对比层与抽屉遮罩换成浅底/浅色遮罩，避免黑底黑字。 */
+  --compare-scrim: rgba(246, 247, 249, 0.98);
+  --compare-bar-bg: rgba(255, 255, 255, 0.96);
+  --compare-caption-bg: rgba(255, 255, 255, 0.95);
+  --compare-cell-bg: #eef0f3;
+  --drawer-scrim: rgba(15, 23, 42, 0.28);
+
+  --canvas-bg: #eef0f3;
+  --canvas-cursor: rgba(17, 17, 17, 0.85);
+  --mask-overlay: rgba(220, 38, 38, 0.92);
 
   --success-text: #166534;
   --success-border: #86efac;

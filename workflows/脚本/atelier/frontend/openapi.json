@@ -1296,6 +1296,11 @@
             "title": "Tags",
             "type": "array"
           },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          },
           "view_url": {
             "anyOf": [
               {
@@ -1514,6 +1519,11 @@
             },
             "title": "Tags",
             "type": "array"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
           },
           "view_url": {
             "anyOf": [

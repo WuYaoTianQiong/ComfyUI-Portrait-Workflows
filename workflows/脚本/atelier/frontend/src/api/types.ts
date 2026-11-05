@@ -34,15 +34,26 @@ export type CategoryNode = Required<Omit<Schemas['CategoryNode'], 'children'>> &
 // 图片（原"历史/画廊"）
 // ---------------------------------------------------------------------------
 
-export type HistoryItem = Required<Schemas['HistoryItem']>
+// `version`（源文件 st_mtime_ns 字符串）是缩略图强缓存新增的附加字段：
+// openapi-typescript 会把「带 default 的属性」当成必定存在而生成必填，
+// 但老快照 / 旧后端 / 测试 fixture 里都可能没有它，这里显式保持可选。
+// 其余字段仍按 Required<> 处理（列表接口事实上总会返回）。
+export type HistoryItem = Omit<Required<Schemas['HistoryItem']>, 'version'> & {
+  version?: string | null
+}
 // 分页信封：字段名/数量仍取自 schema，只把 `items` 换成上面那个 Required 版本
 // （schema 里的 `items` 引用的是原始组件类型，不会跟着别名一起变）
 export type HistoryPage = Omit<Required<Schemas['HistoryListResponse']>, 'items'> & {
   items: HistoryItem[]
 }
 export type ImageRunInfo = Required<Schemas['ImageRunInfo']>
-export type ImageDetail = Omit<Required<Schemas['ImageDetailResponse']>, 'run'> & {
+export type ImageDetail = Omit<
+  Required<Schemas['ImageDetailResponse']>,
+  'run' | 'version'
+> & {
   run: ImageRunInfo
+  // 与 HistoryItem 一致：新增附加字段保持可选
+  version?: string | null
 }
 
 // ---------------------------------------------------------------------------

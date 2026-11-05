@@ -26,6 +26,8 @@ def test_history_response_contains_frontend_fields(api, seed_history):
         "id", "filename", "view_url", "is_favorite", "missing",
         "created_at", "captured_at", "source", "prompt_name",
         "categories", "tags",
+        # 缩略图强缓存依赖它拼 URL 的 v（源文件 st_mtime_ns 字符串）
+        "version",
     }
     assert required <= set(item), f"画廊响应缺字段：{required - set(item)}"
 
