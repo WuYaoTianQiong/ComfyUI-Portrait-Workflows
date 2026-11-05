@@ -2,16 +2,19 @@
 /**
  * 合成台（阶段 3 最薄版）。
  *
- * 范围逐条对齐施工手册 §7「合成台」冻结行：
- * - 三槽位选择（人像 / 服装 / 姿势）+ 第 4 张 `extra`（只提交 1 张，仅 uploads）；
- * - 服装槽提交 `costume_library`（仅 `costume` / `costume-anime`）；
- * - 工作流下拉（`/api/workflows?scope=studio`，自动选中 `default`，`recommended` 徽章）；
- * - 画风预设（`none` / `realistic`，旧值降级 realistic）+ `prompt_suffix`；
+ * 范围逐条对齐施工手册 §7「合成台」冻结行 + 阶段 3 多选升级：
+ * - 三槽位**多选**（人像 / 服装 / 姿势）+ 第 4 张 `extra`（只提交 1 张，仅 uploads）；
+ * - 全组合 = 槽位组合 × 画质档 × 比例，常驻显示「当前 N / 上限 100」；
+ * - 每组独立 POST、并发上限 2；种子第 i 组 = base_seed + i；
+ * - 工作流下拉（`/api/workflows?scope=studio`，自动选中 `default`，展示 input_count）；
+ * - M（非空槽数）< N（input_count）时提交前弹降级确认框，不做静默切换；
+ * - 尺寸档位 / 比例按 `caps` 渲染；Qwen 系隐藏并显示「跟随参考图」说明；
+ * - 画风预设（`none` / `realistic`）+ `prompt_suffix`；
  * - `POST /api/reference/recipes` → 轮询 1500ms / 30min → 结果图 / 任务中心；
  * - 历史只读面板。
  *
- * 明确不迁：通用参数面板（D4 冻结）、配方草稿持久化、旧历史导出、
- * 参考图拼合、未决任务恢复、提示词只读预览。
+ * 明确不迁：配方草稿持久化、旧历史导出、参考图拼合、未决任务恢复、
+ * 提示词只读预览。
  *
  * 视觉基线 §5：槽位卡、分区卡、主按钮、工作流下拉与预览区的尺寸/圆角/配色
  * 见各子组件与下方 scoped CSS 的数值注释。
@@ -28,9 +31,9 @@ import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import type { RecipeSlotKey } from '../../composables/useReferenceRecipeDraft'
 import {
-  armStudioReturn,
-  resetStudioReturn,
+  MAX_BATCH_RECIPES,
   useReferenceRecipe,
+  workflowDisplayName,
 } from '../../composables/useReferenceRecipe'
 import { useToast } from '../../composables/useToast'
 
@@ -39,13 +42,11 @@ import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vu
 import ReferenceSlotCard from './components/reference/ReferenceSlotCard.vue'
 import ReferenceWorkflowSelect from './components/reference/ReferenceWorkflowSelect.vue'
 import {
-  costumeSlotName,
-  costumeSlotThumb,
-  poseSlotName,
-  poseSlotThumb,
-  portraitSlotName,
-  portraitSlotThumb,
+  costumeSlotItems,
+  poseSlotItems,
+  portraitSlotItems,
 } from './components/reference/slotView'
+import type { SlotSelectedItem } from './components/reference/slotView'
 import { useStudioLibraries } from './components/reference/studioLibraries'
 import { poseDepthMode, setPoseDepthMode } from './components/poseView'
 
@@ -70,26 +71,44 @@ const {
   workflowPath,
   workflowsLoading,
   workflowsError,
+  caps,
+  qualityOptions,
+  aspectRatios,
+  qualitySelection,
+  ratioSelection,
+  toggleQuality,
+  toggleRatio,
+  followsReferenceSize,
+  baseSeed,
+  setBaseSeed,
+  activeSlotCount,
+  batchTotal,
+  batchOverLimit,
+  batchLimitMessage,
+  workflowDowngrade,
   style,
   promptSuffix,
   extraPath,
   extraName,
-  status,
+
   progress,
   progressPercent,
   jobId,
+  jobIds,
+  resultUrls,
   primaryResultUrl,
   previousResultUrl,
   errorMessage,
   busy,
-  missingSlots,
   canSubmit,
   loadStudioWorkflows,
   setExtra,
   clearExtra,
   submit,
+  confirmWorkflowDowngrade,
+  confirmCurrentWorkflowDowngrade,
+  cancelWorkflowDowngrade,
   retry,
-
 } = useReferenceRecipe()
 
 const { poses, costumes, portraits, loadAll } = useStudioLibraries()
@@ -111,13 +130,12 @@ function goTab(tab: 'portrait' | 'costume' | 'pose' | 'studio'): void {
 }
 
 /**
- * 点击槽位：先登记「选完自动回合成台」，再跳到对应库页签。
+ * 点击槽位：跳到对应库页签继续**多选**。
  *
- * 库页（阶段 2 已完成、白名单外）加入配方时不会主动跳转，所以回跳由
- * `useReferenceRecipe` 的模块级 watch 完成，不需要改库页。
+ * 多选后不再做「选一张就自动跳回合成台」：那会让用户无法连续勾选多张。
+ * 用户选完通过页签手动回到合成台即可（草稿是模块级单例，不会丢）。
  */
 function openSlot(slot: RecipeSlotKey): void {
-  armStudioReturn(slot, router)
   goTab(slot)
 }
 
@@ -134,48 +152,37 @@ function clearSlot(slot: RecipeSlotKey): void {
 interface SlotCardView {
   key: RecipeSlotKey
   label: string
-  name: string
-  thumb: string | null
+  items: SlotSelectedItem[]
   hint: string
-  selected: boolean
   showDepthToggle: boolean
   useDepth: boolean
 }
 
 const slotCards = computed<SlotCardView[]>(() => {
-  const portrait = draft.portrait.value
-  const costume = draft.costume.value
-  const poseSlot = draft.pose.value
-  const useDepth = poseSlot?.useDepth ?? poseDepthMode.value
+  const useDepth = draft.pose.value[0]?.useDepth ?? poseDepthMode.value
 
   return [
     {
       key: 'portrait',
       label: '人像',
-      name: portraitSlotName(portrait),
-      thumb: portraitSlotThumb(portrait),
-      hint: '+ 选人像',
-      selected: Boolean(portrait),
+      items: portraitSlotItems(draft.portrait.value),
+      hint: '+ 选人像（可多选）',
       showDepthToggle: false,
       useDepth: false,
     },
     {
       key: 'costume',
       label: '服装',
-      name: costumeSlotName(costume),
-      thumb: costumeSlotThumb(costume),
-      hint: '+ 选服装',
-      selected: Boolean(costume),
+      items: costumeSlotItems(draft.costume.value),
+      hint: '+ 选服装（可多选）',
       showDepthToggle: false,
       useDepth: false,
     },
     {
       key: 'pose',
       label: '姿势',
-      name: poseSlotName(poseSlot?.item ?? null),
-      thumb: poseSlotThumb(poseSlot?.item ?? null, useDepth),
-      hint: '+ 选姿势',
-      selected: Boolean(poseSlot),
+      items: poseSlotItems(draft.pose.value),
+      hint: '+ 选姿势（可多选）',
       showDepthToggle: true,
       useDepth,
     },
@@ -183,13 +190,12 @@ const slotCards = computed<SlotCardView[]>(() => {
 })
 
 const countLabel = computed(() => draft.countLabel.value)
+const totalSelected = computed(() => draft.totalSelected.value)
 
-/** 姿势槽切换白模 / 深度图：同步全局模式与三槽状态。 */
+/** 姿势槽切换白模 / 深度图：同步全局模式与槽内全部姿势。 */
 function changePoseDepth(useDepth: boolean): void {
-  const current = draft.pose.value
-  if (!current) return
   setPoseDepthMode(useDepth)
-  draft.setPose(current.item, useDepth)
+  draft.setPoseMode(useDepth)
 }
 
 // ---------------------------------------------------------------------------
@@ -275,32 +281,67 @@ function onExtraError(message: string): void {
 // ---------------------------------------------------------------------------
 
 const previewUrl = computed(() => {
-  if (status.value === 'success') return primaryResultUrl.value
   if (showingPrevious.value) return previousResultUrl.value
-  return ''
+  // 批量 / 部分失败时只要拿到图片就展示第一张，错误区仍会显示失败原因。
+  return primaryResultUrl.value
 })
 
-async function onGenerate(): Promise<void> {
-  showingPrevious.value = false
-  if (missingSlots.value.length) {
-    toast.error(
-      `提交缺少必要槽位。原因：当前未选择${missingSlots.value.join('、')}。下一步：从对应图库各选一条参考图后再提交。`,
+/** 提交结束后统一处理提示；降级确认框打开时不弹错误 toast。 */
+function afterSubmit(ok: boolean): void {
+  if (ok) {
+    const count = resultUrls.value.length
+    toast.success(
+      jobIds.value.length > 1
+        ? `已完成 ${jobIds.value.length} 个任务，共 ${count} 张`
+        : `角色图已完成（任务 #${jobId.value}）`,
     )
     return
   }
-  const ok = await submit()
-  if (ok) {
-    toast.success(`角色图已完成（任务 #${jobId.value}）`)
-  } else if (errorMessage.value) {
-    toast.error(errorMessage.value)
+  if (workflowDowngrade.value) return
+  if (errorMessage.value) toast.error(errorMessage.value)
+}
+
+async function onGenerate(): Promise<void> {
+  showingPrevious.value = false
+  if (activeSlotCount.value === 0) {
+    toast.error(
+      '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。',
+    )
+    return
   }
+  if (batchOverLimit.value) {
+    toast.error(`无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`)
+    return
+  }
+  afterSubmit(await submit())
+}
+
+/** 降级确认框：切到候选工作流并继续提交。 */
+async function onConfirmDowngrade(path: string): Promise<void> {
+  showingPrevious.value = false
+  afterSubmit(await confirmWorkflowDowngrade(path))
+}
+
+/** 降级确认框：不切换，仍用当前工作流提交（后端会尝试裁剪空槽）。 */
+async function onConfirmCurrentWorkflow(): Promise<void> {
+  showingPrevious.value = false
+  afterSubmit(await confirmCurrentWorkflowDowngrade())
+}
+
+/** 降级确认框：取消，不提交。 */
+function onCancelDowngrade(): void {
+  cancelWorkflowDowngrade()
+  toast.info('已取消提交：当前工作流输入数与所选参考图不匹配')
+}
+
+/** 基础种子输入：非负整数；非法值由 composable 回落默认种子。 */
+function onBaseSeedInput(event: Event): void {
+  setBaseSeed((event.target as HTMLInputElement).value)
 }
 
 async function onRetry(): Promise<void> {
   showingPrevious.value = false
-  const ok = await retry()
-  if (ok) toast.success(`角色图已完成（任务 #${jobId.value}）`)
-  else if (errorMessage.value) toast.error(errorMessage.value)
+  afterSubmit(await retry())
 }
 
 function showPreviousResult(): void {
@@ -317,8 +358,7 @@ function reloadWorkflows(): void {
 }
 
 onMounted(() => {
-  // 已在合成台：解除上一次「选完回跳」登记，避免历史残留抢导航。
-  resetStudioReturn()
+
   void loadStudioWorkflows()
   void loadAll()
 })
@@ -331,7 +371,7 @@ onMounted(() => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：从人像 / 服装 / 姿势三个库各选一张参考图，提交后由 atelier 后端排队出图；第 4 张为可选的上传附加图。
+        AI 角色合成台：人像 / 服装 / 姿势三个库均可多选，按「槽位组合 × 画质档 × 比例」逐组提交；第 4 张为可选的上传附加图。
       </p>
     </header>
 
@@ -360,22 +400,39 @@ onMounted(() => {
             </button>
           </template>
 
-          <!-- 三槽位：用类型名 + 缩略图表达，不出现编号按钮 -->
+          <!-- 三槽位：多选；展示已选数量与前 3 张缩略图 -->
           <div class="slot-grid">
             <ReferenceSlotCard
               v-for="slot in slotCards"
               :key="slot.key"
               :label="slot.label"
-              :name="slot.name"
-              :thumb="slot.thumb"
+              :items="slot.items"
               :hint="slot.hint"
-              :selected="slot.selected"
               :show-depth-toggle="slot.showDepthToggle"
               :use-depth="slot.useDepth"
               @select="openSlot(slot.key)"
               @clear="clearSlot(slot.key)"
               @depth-change="changePoseDepth"
             />
+          </div>
+
+          <!-- 批量预览：常驻显示「当前 N / 上限 100」与基础种子 -->
+          <div class="batch-summary" data-testid="studio-batch-summary">
+            <div class="batch-summary__row">
+              <span class="batch-summary__label">全组合预览</span>
+              <span class="batch-summary__total" data-testid="studio-batch-total">
+                当前 {{ batchTotal }} / 上限 {{ MAX_BATCH_RECIPES }}
+              </span>
+              <span class="batch-summary__selected" data-testid="studio-selected-total">
+                已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}
+              </span>
+            </div>
+            <p v-if="batchOverLimit" class="batch-summary__limit" role="alert" data-testid="studio-batch-limit">
+              {{ batchLimitMessage }}
+            </p>
+            <p v-else class="batch-summary__hint">
+              {{ activeSlotCount === 0 ? '三槽与第 4 张都为空：请至少选择一张参考图。' : `共 ${batchTotal} 个独立任务，每组一个 job。` }}
+            </p>
           </div>
 
           <!-- 第 4 张：只提交 1 张，仅 uploads；说明并入上传框 label/hint 以对齐 §5 卡高 -->
@@ -427,6 +484,53 @@ onMounted(() => {
             本机库目录中没有可用工作流，请先放入出图工作流 JSON 后刷新本页。
           </div>
 
+          <!-- 尺寸能力：按 caps 渲染；不支持时整块隐藏，提交体也不带对应字段 -->
+          <div v-if="caps.quality && qualityOptions.length" class="field" data-testid="studio-quality-field">
+            <span class="field__label">画质档位（可多选，每档一组任务）</span>
+            <div class="chip-group" data-testid="studio-quality-options">
+              <button
+                v-for="option in qualityOptions"
+                :key="option.value"
+                type="button"
+                class="chip"
+                :class="{ 'is-active': qualitySelection.includes(option.value) }"
+                :aria-pressed="qualitySelection.includes(option.value)"
+                :data-quality="option.value"
+                @click="toggleQuality(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <p v-if="qualitySelection.length === 0" class="studio-hint">
+              未选择画质档位：本轮不发送 quality，沿用工作流原生尺寸。
+            </p>
+          </div>
+
+          <div v-if="caps.orientation && aspectRatios.length" class="field" data-testid="studio-ratio-field">
+            <span class="field__label">输出比例（可多选，每档一组任务）</span>
+            <div class="chip-group" data-testid="studio-ratio-options">
+              <button
+                v-for="ratio in aspectRatios"
+                :key="ratio"
+                type="button"
+                class="chip"
+                :class="{ 'is-active': ratioSelection.includes(ratio) }"
+                :aria-pressed="ratioSelection.includes(ratio)"
+                :data-ratio="ratio"
+                @click="toggleRatio(ratio)"
+              >
+                {{ ratio }}
+              </button>
+            </div>
+            <p v-if="ratioSelection.length === 0" class="studio-hint">
+              未选择比例：本轮不发送 aspect_ratio / orientation。
+            </p>
+          </div>
+
+          <p v-if="followsReferenceSize" class="studio-note" data-testid="studio-size-follow-note">
+            输出尺寸跟随参考图（当前实际尺寸未知时不显示数值）
+          </p>
+
           <div class="field">
             <label class="field__label" for="studio-style">画风预设</label>
             <select id="studio-style" v-model="style" class="studio-select" data-testid="studio-style">
@@ -456,6 +560,24 @@ onMounted(() => {
             补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，前端不预览、不改写。
           </p>
 
+          <!-- 基础种子：第 i 组 seed = base_seed + i（fixed），便于按固定种子复现 -->
+          <div class="field">
+            <label class="field__label" for="studio-base-seed">基础种子（第 i 组 = 基础种子 + i）</label>
+            <input
+              id="studio-base-seed"
+              class="studio-select studio-select--number"
+              type="number"
+              min="0"
+              step="1"
+              :value="baseSeed"
+              data-testid="studio-base-seed"
+              @input="onBaseSeedInput"
+            />
+            <p class="studio-hint" data-testid="studio-seed-hint">
+              基础种子 {{ baseSeed }} · 提交时固定为 seed_mode=fixed，第 i 组使用 {{ baseSeed }}+i。
+            </p>
+          </div>
+
           <!-- 主按钮 44px 高、圆角 8、14px / 600、深色底 #e5e5e5 / 字 #171717 -->
           <button
             type="button"
@@ -467,6 +589,9 @@ onMounted(() => {
             <span v-if="busy" class="generate-btn__spinner" aria-hidden="true" />
             {{ busy ? '生成中…' : '生成角色图' }}
           </button>
+          <p v-if="batchOverLimit" class="studio-error studio-error--inline" data-testid="studio-generate-blocked">
+            {{ batchLimitMessage }}
+          </p>
         </ReferenceSectionCard>
       </div>
 
@@ -509,7 +634,7 @@ onMounted(() => {
               <p class="preview-state__tip">切换页签不会中断后端任务</p>
             </div>
 
-            <div v-else-if="errorMessage && !showingPrevious" class="preview-error" role="alert">
+            <div v-else-if="errorMessage && !showingPrevious && resultUrls.length === 0" class="preview-error" role="alert">
               <span class="preview-error__mark" aria-hidden="true">!</span>
               <p class="preview-error__title">生成失败</p>
               <p class="preview-error__text">{{ errorMessage }}</p>
@@ -526,6 +651,25 @@ onMounted(() => {
                   查看上一张结果
                 </button>
               </div>
+            </div>
+
+            <!-- 批量结果：多张时网格展示，单张保持大图 -->
+            <div v-else-if="resultUrls.length > 1 && !showingPrevious" class="preview-grid" data-testid="studio-result-grid">
+              <a
+                v-for="(url, index) in resultUrls"
+                :key="url"
+                class="preview-grid__cell"
+                :href="url"
+                download="image.png"
+              >
+                <img
+                  :src="url"
+                  :alt="`生成结果 ${index + 1}`"
+                  class="preview-grid__image"
+                  loading="lazy"
+                  :data-testid="index === 0 ? 'studio-result-image' : undefined"
+                />
+              </a>
             </div>
 
             <img
@@ -552,13 +696,78 @@ onMounted(() => {
             </div>
           </div>
 
+          <!-- 部分任务失败但有结果图：结果照常展示，错误集中在下方说明 -->
+          <p v-if="errorMessage && resultUrls.length" class="studio-error studio-error--inline" role="alert">
+            {{ errorMessage }}
+          </p>
+
           <div class="result-footer">
-            <span>{{ jobId ? `当前任务 #${jobId}` : '任务由 atelier 后端排队执行' }}</span>
+            <span>
+              {{ jobIds.length > 1 ? `共 ${jobIds.length} 个任务（首个 #${jobIds[0]}）` : jobId ? `当前任务 #${jobId}` : '任务由 atelier 后端排队执行' }}
+            </span>
             <button type="button" class="result-footer__link" data-testid="studio-job-center" @click="goJobCenter">
               任务中心
             </button>
           </div>
         </ReferenceSectionCard>
+      </div>
+    </div>
+
+    <!-- 工作流降级确认框：M（非空槽数）< N（input_count）时出现，取消则不提交 -->
+    <div
+      v-if="workflowDowngrade"
+      class="studio-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="studio-downgrade-title"
+      data-testid="studio-workflow-downgrade"
+    >
+      <div class="studio-modal__panel">
+        <h2 id="studio-downgrade-title" class="studio-modal__title">当前工作流输入数不匹配</h2>
+        <p class="studio-modal__message" data-testid="studio-downgrade-message">
+          {{ workflowDowngrade.message }}
+        </p>
+
+        <p class="studio-modal__meta">
+          非空槽 {{ workflowDowngrade.slotCount }} 个 · 当前工作流需要 {{ workflowDowngrade.inputCount }} 个输入
+        </p>
+
+        <div v-if="workflowDowngrade.candidates.length" class="downgrade-list">
+          <p class="downgrade-list__head">可切换的候选工作流（input_count ≤ {{ workflowDowngrade.slotCount }}）</p>
+          <button
+            v-for="candidate in workflowDowngrade.candidates"
+            :key="candidate.path"
+            type="button"
+            class="downgrade-list__item"
+            :title="candidate.path"
+            @click="onConfirmDowngrade(candidate.path)"
+          >
+            <span class="downgrade-list__name">{{ workflowDisplayName(candidate.name) }}</span>
+            <span class="downgrade-list__count">{{ candidate.inputCount }} 图</span>
+          </button>
+        </div>
+        <p v-else class="studio-modal__message">
+          当前没有 input_count ≤ {{ workflowDowngrade.slotCount }} 的候选工作流。可取消后补齐参考图再提交，或仍用当前工作流尝试（后端会裁掉空槽，无法裁剪时返回 400）。
+        </p>
+
+        <div class="studio-modal__actions">
+          <button
+            type="button"
+            class="studio-btn studio-btn--ghost"
+            data-testid="studio-downgrade-current"
+            @click="onConfirmCurrentWorkflow"
+          >
+            仍用当前工作流提交
+          </button>
+          <button
+            type="button"
+            class="studio-btn studio-btn--ghost"
+            data-testid="studio-downgrade-cancel"
+            @click="onCancelDowngrade"
+          >
+            取消，不提交
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1114,6 +1323,265 @@ onMounted(() => {
 
   .preview-box {
     min-height: 340px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 批量预览 / 尺寸多选 / 降级确认框（多选升级新增）
+ * ------------------------------------------------------------------------- */
+
+/* 批量摘要：常驻 N/100，放在槽位卡下方 */
+.batch-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0a0a0a;
+}
+
+.batch-summary__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.batch-summary__label {
+  flex: none;
+  color: #a1a1a1;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.batch-summary__total {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fafafa;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.batch-summary__selected {
+  min-width: 0;
+  color: #a1a1a1;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.batch-summary__hint {
+  margin: 0;
+  color: #a1a1a1;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.batch-summary__limit {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+/* 尺寸多选 chip：可换行、选中深色底 */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chip {
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: transparent;
+  color: #fafafa;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--primary);
+}
+
+.chip.is-active {
+  border-color: transparent;
+  background: #e5e5e5;
+  color: #171717;
+  font-weight: 600;
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* 数字输入沿用下拉尺寸 */
+.studio-select--number {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 主按钮下方的超限说明：不再重复整块错误卡的内边距 */
+.studio-error--inline {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fca5a5;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* 批量结果网格：两列，单格保持 3:4 */
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.preview-grid__cell {
+  display: block;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #171717;
+}
+
+.preview-grid__image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+/* 降级确认框：全屏遮罩 + 居中面板 */
+.studio-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.studio-modal__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(480px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+  background: #171717;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.studio-modal__title {
+  margin: 0;
+  color: #fafafa;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.studio-modal__message {
+  margin: 0;
+  color: #d4d4d4;
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.studio-modal__meta {
+  margin: 0;
+  color: #a1a1a1;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.studio-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.downgrade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.downgrade-list__head {
+  margin: 0;
+  color: #a1a1a1;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.downgrade-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0a0a0a;
+  color: #fafafa;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.downgrade-list__item:hover {
+  border-color: var(--primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.downgrade-list__item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.downgrade-list__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downgrade-list__count {
+  flex: none;
+  color: #a1a1a1;
+  font-size: 11px;
+}
+
+@media (max-width: 639px) {
+  .preview-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

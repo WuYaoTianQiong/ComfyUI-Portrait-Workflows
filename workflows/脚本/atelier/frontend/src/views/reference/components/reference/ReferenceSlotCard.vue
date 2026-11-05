@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * 合成台槽位卡（人像 / 服装 / 姿势）。
+ * 合成台槽位卡（人像 / 服装 / 姿势，多选版）。
  *
  * 视觉按施工手册 §5「合成台」行：
- * - 空态 224.22 × 68px、已选态 224.22 × 75px，内边距 10px、圆角 14px、底 `#0a0a0a`；
- * - 槽位缩略图 40 × 48px、圆角 10px；
+ * - 空态 224.22 × 68px、已选态高度自适应（≥75px），内边距 10px、圆角 14px、底 `#0a0a0a`；
+ * - 槽位缩略图 40 × 48px、圆角 10px；多选时展示**前 3 张**缩略图 + 溢出数量；
  * - 空槽位占位块 32 × 40px、圆角 10px、底 `#262626`。
  *
  * 宽度由父级三列栅格决定（736.66 内容区 - gap 16 → 224.22），不写死像素，
@@ -15,17 +15,18 @@
 
 import { computed } from 'vue'
 
+import type { SlotSelectedItem } from './slotView'
+
+/** 槽位内最多平铺展示的缩略图数量；其余用 `+N` 表示。 */
+const MAX_PREVIEW_THUMBS = 3
+
 const props = defineProps<{
   /** 类型名：人像 / 服装 / 姿势 */
   label: string
-  /** 已选条目名（空串表示空态） */
-  name: string
-  /** 缩略图地址；空态传 null */
-  thumb: string | null
+  /** 已选条目（顺序即加入顺序）；空数组表示空态 */
+  items: readonly SlotSelectedItem[]
   /** 空态提示文案（如「+ 选人像」） */
   hint: string
-  /** 是否已选 */
-  selected: boolean
   /** 姿势槽：是否显示白模 / 深度分段 */
   showDepthToggle?: boolean
   /** 姿势槽：当前是否深度图 */
@@ -35,13 +36,29 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 点击卡片主体：跳到对应库页签 */
   select: []
-  /** 清除当前槽位 */
+  /** 清除当前槽位全部条目 */
   clear: []
   /** 姿势槽切换白模 / 深度图 */
   depthChange: [useDepth: boolean]
 }>()
 
-const selectedClass = computed(() => (props.selected ? 'is-selected' : 'is-empty'))
+const selected = computed(() => props.items.length > 0)
+const selectedClass = computed(() => (selected.value ? 'is-selected' : 'is-empty'))
+const previewThumbs = computed(() => props.items.slice(0, MAX_PREVIEW_THUMBS))
+const overflowCount = computed(() => Math.max(0, props.items.length - MAX_PREVIEW_THUMBS))
+const firstItem = computed(() => props.items[0] ?? null)
+
+/** 已选文案：单张显示名称；多张显示「已选 N 张 · 首张名称」。 */
+const nameText = computed(() => {
+  if (!props.items.length) return ''
+  if (props.items.length === 1) return firstItem.value?.name ?? ''
+  const first = firstItem.value?.name ?? ''
+  return first ? `已选 ${props.items.length} 张 · ${first}` : `已选 ${props.items.length} 张`
+})
+
+const testKey = computed(() =>
+  props.label === '人像' ? 'portrait' : props.label === '服装' ? 'costume' : 'pose',
+)
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Enter' || event.key === ' ') {
@@ -57,23 +74,30 @@ function onKeydown(event: KeyboardEvent): void {
     :class="selectedClass"
     role="button"
     tabindex="0"
-    :aria-label="selected ? `${label}槽：${name}，点击更换` : `${label}槽未选择，点击前往${label}库`"
-    :data-testid="`studio-slot-${label === '人像' ? 'portrait' : label === '服装' ? 'costume' : 'pose'}`"
+    :aria-label="
+      selected
+        ? `${label}槽已选 ${items.length} 张，点击前往${label}库继续多选`
+        : `${label}槽未选择，点击前往${label}库`
+    "
+    :data-testid="`studio-slot-${testKey}`"
     @click="emit('select')"
     @keydown="onKeydown"
   >
-    <img
-      v-if="selected && thumb"
-      :src="thumb"
-      :alt="name || label"
-      class="slot-card__thumb"
-      loading="lazy"
-    />
-    <span v-else-if="selected" class="slot-card__thumb is-empty" aria-hidden="true">
-      <svg viewBox="0 0 16 16">
-        <rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.2" />
-      </svg>
+    <!-- 多选缩略图：前 3 张 + 溢出数量 -->
+    <span v-if="selected" class="slot-card__thumbs" aria-hidden="true">
+      <template v-for="entry in previewThumbs" :key="entry.key">
+        <img
+          v-if="entry.thumb"
+          :src="entry.thumb"
+          :alt="entry.name"
+          class="slot-card__thumb"
+          loading="lazy"
+        />
+        <span v-else class="slot-card__thumb is-empty" />
+      </template>
+      <span v-if="overflowCount > 0" class="slot-card__more">+{{ overflowCount }}</span>
     </span>
+
     <!-- 空态占位块：32 × 40、圆角 10、底 #262626 -->
     <span v-else class="slot-card__placeholder" aria-hidden="true">
       <svg viewBox="0 0 16 16">
@@ -85,6 +109,9 @@ function onKeydown(event: KeyboardEvent): void {
       <span class="slot-card__head">
         <span class="slot-card__head-left">
           <span class="slot-card__label">{{ label }}</span>
+          <span v-if="selected" class="slot-card__count" :data-testid="`studio-slot-count-${testKey}`">
+            {{ items.length }}
+          </span>
           <span
             v-if="showDepthToggle && selected"
             class="depth-toggle"
@@ -115,7 +142,7 @@ function onKeydown(event: KeyboardEvent): void {
           v-if="selected"
           type="button"
           class="slot-card__clear"
-          :aria-label="`清除${label}参考图`"
+          :aria-label="`清除${label}槽全部参考图`"
           @click.stop="emit('clear')"
         >
           <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -124,14 +151,14 @@ function onKeydown(event: KeyboardEvent): void {
         </button>
       </span>
 
-      <span v-if="selected" class="slot-card__name" :title="name">{{ name }}</span>
+      <span v-if="selected" class="slot-card__name" :title="nameText">{{ nameText }}</span>
       <span v-else class="slot-card__hint">{{ hint }}</span>
     </span>
   </div>
 </template>
 
 <style scoped>
-/* 空态 68px / 已选态 75px（§5），宽度跟随三列栅格。 */
+/* 空态 68px / 已选态 ≥75px（§5），宽度跟随三列栅格。 */
 .slot-card {
   display: flex;
   align-items: flex-start;
@@ -139,7 +166,7 @@ function onKeydown(event: KeyboardEvent): void {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 68px;
+  min-height: 68px;
   padding: 10px;
   border: 0;
   border-radius: 14px;
@@ -149,12 +176,11 @@ function onKeydown(event: KeyboardEvent): void {
   cursor: pointer;
   transition:
     background-color var(--dur-fast) var(--ease),
-    height var(--dur-fast) var(--ease);
+    min-height var(--dur-fast) var(--ease);
 }
 
 .slot-card.is-selected {
-  height: 75px;
-  align-items: flex-start;
+  min-height: 75px;
 }
 
 .slot-card:hover {
@@ -166,27 +192,44 @@ function onKeydown(event: KeyboardEvent): void {
   outline-offset: 2px;
 }
 
-/* 缩略图 40 × 48、圆角 10 */
+/* 多选缩略图条：最多 3 张，单张 24 × 30、圆角 6、gap 2 */
+.slot-card__thumbs {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px;
+  width: 40px;
+}
+
+/* 缩略图 24 × 30、圆角 6（多选时收窄，保证 3 张仍能塞进 40px 列） */
 .slot-card__thumb {
   display: block;
-  flex: none;
-  width: 40px;
-  height: 48px;
-  border-radius: 10px;
+  width: 19px;
+  height: 28px;
+  border-radius: 6px;
   background: #262626;
   object-fit: cover;
 }
 
+/* 无缩略图的条目：保留同尺寸占位，避免缩略图条抖动 */
 .slot-card__thumb.is-empty {
+  background: #171717;
+}
+
+.slot-card__more {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #a1a1a1;
-}
-
-.slot-card__thumb.is-empty svg {
-  width: 18px;
-  height: 18px;
+  box-sizing: border-box;
+  width: 19px;
+  height: 28px;
+  border-radius: 6px;
+  background: #262626;
+  color: #fafafa;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* 空占位块 32 × 40、圆角 10、底 #262626 */
@@ -239,6 +282,20 @@ function onKeydown(event: KeyboardEvent): void {
   color: #a1a1a1;
   font-size: 11px;
   line-height: 1.4;
+}
+
+/* 已选数量徽标：11px / 600、全圆、深色底 */
+.slot-card__count {
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fafafa;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
 }
 
 /* 名称 12px / 500、最多两行 */

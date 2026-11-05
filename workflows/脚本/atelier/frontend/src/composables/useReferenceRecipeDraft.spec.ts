@@ -1,8 +1,9 @@
 /**
- * 三槽位配方选择状态单测。
+ * 三槽位配方选择状态单测（多选版）。
  *
- * 覆盖：加入 / 替换 / 移除、n/3 计数、已选判定（姿势区分白模与深度图）、清空；
- * 并显式断言「不做持久化」——操作后 localStorage / sessionStorage 不被写入。
+ * 覆盖：多选追加 / 去重 / 移除、非空槽数 n/3 与条目总数、已选判定
+ * （姿势区分白模与深度图）、切换模式、清空；并显式断言「不做持久化」——
+ * 操作后 localStorage / sessionStorage 不被写入。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -92,12 +93,26 @@ beforeEach(() => {
   sessionStorage.clear()
 })
 
-describe('三槽位计数', () => {
-  it('初始为空，n/3 为 0/3', () => {
+describe('多选计数', () => {
+  it('初始为空：n/3 为 0/3，条目总数 0', () => {
     expect(draft.count.value).toBe(0)
     expect(draft.countLabel.value).toBe('0/3')
+    expect(draft.totalSelected.value).toBe(0)
+    expect(draft.portraitCount.value).toBe(0)
     expect(draft.isComplete.value).toBe(false)
     expect(RECIPE_SLOT_TOTAL).toBe(3)
+  })
+
+  it('同一槽位多张：非空槽数不增加，条目总数增加', () => {
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+    draft.togglePortrait(portrait('pt3'))
+
+    expect(draft.portraitCount.value).toBe(3)
+    expect(draft.totalSelected.value).toBe(3)
+    expect(draft.count.value).toBe(1)
+    expect(draft.countLabel.value).toBe('1/3')
+    expect(draft.isComplete.value).toBe(false)
   })
 
   it('三个槽位各加一条 → 3/3 且 isComplete', () => {
@@ -107,66 +122,99 @@ describe('三槽位计数', () => {
 
     expect(draft.count.value).toBe(3)
     expect(draft.countLabel.value).toBe('3/3')
+    expect(draft.totalSelected.value).toBe(3)
     expect(draft.isComplete.value).toBe(true)
   })
 
-  it('同一槽位重复设置不会增加计数', () => {
-    draft.setPortrait(portrait('pt1'))
-    draft.setPortrait(portrait('pt2'))
-    expect(draft.count.value).toBe(1)
-    expect(draft.portrait.value?.id).toBe('pt2')
+  it('同一 id 重复加入不会产生重复条目', () => {
+    draft.addPortrait(portrait('pt1'))
+    draft.addPortrait(portrait('pt1'))
+    expect(draft.portraitCount.value).toBe(1)
   })
 })
 
-describe('加入 / 移除', () => {
-  it('人像槽点击同一条取消，点击别的替换', () => {
+describe('加入 / 移除 / 去重', () => {
+  it('人像槽：多选 toggle，点已选只移除该条，其余保留', () => {
     expect(draft.togglePortrait(portrait('pt1'))).toBe(true)
-    expect(draft.isPortraitSelected('pt1')).toBe(true)
     expect(draft.togglePortrait(portrait('pt2'))).toBe(true)
-    expect(draft.portrait.value?.id).toBe('pt2')
-    expect(draft.togglePortrait(portrait('pt2'))).toBe(false)
-    expect(draft.isPortraitSelected()).toBe(false)
-    expect(draft.count.value).toBe(0)
+    expect(draft.isPortraitSelected('pt1')).toBe(true)
+    expect(draft.isPortraitSelected('pt2')).toBe(true)
+
+    expect(draft.togglePortrait(portrait('pt1'))).toBe(false)
+    expect(draft.isPortraitSelected('pt1')).toBe(false)
+    expect(draft.isPortraitSelected('pt2')).toBe(true)
+    expect(draft.portraitCount.value).toBe(1)
   })
 
-  it('服装槽同理，removeCostume 直接清空', () => {
+  it('人像槽：removePortrait(id) 只删一条，不传 id 清空', () => {
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+    draft.removePortrait('pt1')
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt2'])
+
+    draft.removePortrait()
+    expect(draft.portrait.value).toEqual([])
+    expect(draft.isPortraitSelected()).toBe(false)
+  })
+
+  it('服装槽同理：多选 toggle 与清空', () => {
     draft.toggleCostume(costume('c1'))
+    draft.toggleCostume(costume('c2'))
+    expect(draft.costumeCount.value).toBe(2)
     expect(draft.isCostumeSelected('c1')).toBe(true)
-    expect(draft.isCostumeSelected('c2')).toBe(false)
+
+    draft.removeCostume('c1')
+    expect(draft.costume.value.map((item) => item.id)).toEqual(['c2'])
+
     draft.removeCostume()
-    expect(draft.costume.value).toBeNull()
+    expect(draft.costume.value).toEqual([])
     expect(draft.isCostumeSelected()).toBe(false)
   })
 
-  it('姿势槽：同 id 同模式点击移除，同 id 换模式视为替换', () => {
+  it('setX(null) 清空整个槽位（随机捏人 / 旧语义）', () => {
+    draft.toggleCostume(costume('c1'))
+    draft.toggleCostume(costume('c2'))
+    draft.setCostume(null)
+    expect(draft.costume.value).toEqual([])
+  })
+
+  it('姿势槽：同 id 同模式点击移除，同 id 换模式更新该条目', () => {
     const item = pose('p1')
     expect(draft.togglePose(item, false)).toBe(true)
-    expect(draft.pose.value).toMatchObject({ useDepth: false })
+    expect(draft.pose.value[0]).toMatchObject({ useDepth: false })
 
-    // 卡片口径：只看 id，已选态不区分模式
     expect(draft.isPoseSelected('p1')).toBe(true)
-    // 灯箱口径：必须 id + 模式都一致
     expect(draft.isPoseSelected('p1', false)).toBe(true)
     expect(draft.isPoseSelected('p1', true)).toBe(false)
 
-    // 切到深度图再点：替换而不是取消
+    // 切到深度图再点：更新模式而不是新增第二条
     expect(draft.togglePose(item, true)).toBe(true)
-    expect(draft.pose.value).toMatchObject({ useDepth: true })
-    expect(draft.count.value).toBe(1)
+    expect(draft.pose.value).toHaveLength(1)
+    expect(draft.pose.value[0]).toMatchObject({ useDepth: true })
 
     // 同模式再点才移除
     expect(draft.togglePose(item, true)).toBe(false)
-    expect(draft.pose.value).toBeNull()
+    expect(draft.pose.value).toEqual([])
   })
 
-  it('setPose(null) 与 removePose 等价', () => {
+  it('姿势槽：多选不同 id；setPoseMode 统一改模式', () => {
+    draft.togglePose(pose('p1'), false)
+    draft.togglePose(pose('p2'), false)
+    expect(draft.poseCount.value).toBe(2)
+
+    draft.setPoseMode(true)
+    expect(draft.pose.value.every((entry) => entry.useDepth)).toBe(true)
+    expect(draft.isPoseSelected('p1', true)).toBe(true)
+  })
+
+  it('setPose(null) / removePose 清空', () => {
     draft.setPose(pose('p1'), true)
     draft.setPose(null)
-    expect(draft.pose.value).toBeNull()
+    expect(draft.pose.value).toEqual([])
 
     draft.setPose(pose('p2'))
     draft.removePose()
-    expect(draft.pose.value).toBeNull()
+    expect(draft.pose.value).toEqual([])
   })
 })
 
@@ -179,15 +227,16 @@ describe('清空与不持久化', () => {
 
     draft.clearDraft()
     expect(draft.count.value).toBe(0)
-    expect(draft.portrait.value).toBeNull()
-    expect(draft.costume.value).toBeNull()
-    expect(draft.pose.value).toBeNull()
+    expect(draft.totalSelected.value).toBe(0)
+    expect(draft.portrait.value).toEqual([])
+    expect(draft.costume.value).toEqual([])
+    expect(draft.pose.value).toEqual([])
   })
 
   it('M3：不写 localStorage / sessionStorage', () => {
-    draft.setPortrait(portrait('pt1'))
-    draft.setCostume(costume('c1'))
-    draft.setPose(pose('p1'), true)
+    draft.addPortrait(portrait('pt1'))
+    draft.addCostume(costume('c1'))
+    draft.addPose(pose('p1'), true)
 
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)

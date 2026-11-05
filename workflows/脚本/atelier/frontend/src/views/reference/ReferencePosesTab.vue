@@ -71,7 +71,7 @@ const {
 } = useReferenceSafeMode()
 
 const {
-  pose: poseSlot,
+  pose: poseItems,
   togglePose,
   isPoseSelected,
 } = useReferenceRecipeDraft()
@@ -235,15 +235,16 @@ function setHoverAngle(group: PoseGroup, next: string): void {
   hoverAngles.value = { ...hoverAngles.value, [group.key]: next }
 }
 
-/** 卡片「加入配方 / 已选」：模式参与移除判定（同 id 不同模式视为替换）。 */
+/** 卡片「加入配方 / 已选」：多选 toggle，模式参与移除判定（同 id 同模式才算移除）。 */
 function onTogglePose(item: PoseItem): void {
   const added = togglePose(item, poseDepthMode.value)
+  const mode = poseDepthMode.value ? ' · 深度图' : ''
   if (added) {
     toast.success(
-      `已选姿势：${item.姿势名称}（${item.角度}${poseDepthMode.value ? ' · 深度图' : ''}）`,
+      `已加入姿势：${item.姿势名称}（${item.角度}${mode}，姿势槽共 ${poseItems.value.length} 张）`,
     )
   } else {
-    toast.success('已移除姿势')
+    toast.success(`已移除姿势：${item.姿势名称}（姿势槽共 ${poseItems.value.length} 张）`)
   }
 }
 
@@ -713,11 +714,12 @@ onMounted(() => {
       @cancel="onCancelAgeGate"
     />
 
-    <!-- 供自动化断言：当前配方已选姿势（不渲染可见文案） -->
+    <!-- 供自动化断言：当前配方已选姿势（多选，逗号分隔，深度图带 |depth） -->
     <span class="pose-sr-only" data-testid="pose-selected-id">
-      {{ poseSlot?.item.id ?? '' }}{{ poseSlot?.useDepth ? '|depth' : '' }}
+      {{ poseItems.map((entry) => `${entry.item.id}${entry.useDepth ? '|depth' : ''}`).join(',') }}
     </span>
-    <span class="pose-sr-only" data-testid="pose-recipe-count">{{ poseSlot ? 1 : 0 }}/3</span>
+    <span class="pose-sr-only" data-testid="pose-selected-count">{{ poseItems.length }}</span>
+    <span class="pose-sr-only" data-testid="pose-recipe-count">{{ poseItems.length ? 1 : 0 }}/3</span>
     <span class="pose-sr-only" data-testid="pose-can-unlock">{{ canUnlock ? '1' : '0' }}</span>
   </div>
 </template>

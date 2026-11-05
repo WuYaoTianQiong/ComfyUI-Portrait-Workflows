@@ -41,15 +41,21 @@ const triggerLabel = computed(() => {
   if (props.loading) return '正在读取本机工作流…'
   const item = current.value
   if (!item) return '选择本机工作流'
-  return `${workflowDisplayName(item.name)}${item.imageSlots ? `（${item.imageSlots} 图）` : ''}`
+  return `${workflowDisplayName(item.name)}${inputLabel(item)}`
 })
 
-/** 行内展示：来源前缀（库根本身不加）+ 名称 + 槽位数。 */
+/** 输入数文案：优先后端 `input_count`，旧响应回退 `image_slots`。 */
+function inputLabel(item: StudioWorkflowOption): string {
+  const count = item.inputCount || item.imageSlots
+  return count ? `（${count} 输入）` : ''
+}
+
+/** 行内展示：来源前缀（库根本身不加）+ 名称 + 输入数。 */
 function optionLabel(item: StudioWorkflowOption): string {
   const name = workflowDisplayName(item.name)
   const prefix =
     item.source && item.source !== '库根' && !name.startsWith(item.source) ? `${item.source} · ` : ''
-  return `${prefix}${name}${item.imageSlots ? `（${item.imageSlots} 图）` : ''}`
+  return `${prefix}${name}${inputLabel(item)}`
 }
 
 function toggle(): void {

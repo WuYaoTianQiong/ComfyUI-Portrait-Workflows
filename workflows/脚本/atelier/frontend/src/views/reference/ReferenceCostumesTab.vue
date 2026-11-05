@@ -77,7 +77,11 @@ const {
   toggleSafeMode,
 } = useReferenceSafeMode()
 
-const { costume: costumeSlot, toggleCostume, isCostumeSelected } = useReferenceRecipeDraft()
+const {
+  costume: costumeItems,
+  toggleCostume,
+  isCostumeSelected,
+} = useReferenceRecipeDraft()
 
 const toast = useToast()
 
@@ -184,9 +188,14 @@ function loadMore(): void {
 // 配方
 // ---------------------------------------------------------------------------
 
+/** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onToggleCostume(item: CostumeItem): void {
   const added = toggleCostume(item)
-  toast.success(added ? `已选服装：${item.服装名称}` : '已移除服装')
+  toast.success(
+    added
+      ? `已加入${item.服装名称}（服装槽共 ${costumeItems.value.length} 张）`
+      : `已移除${item.服装名称}（服装槽共 ${costumeItems.value.length} 张）`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -589,12 +598,15 @@ onBeforeUnmount(() => {
       @cancel="cancelUnlock"
     />
 
-    <!-- 供自动化断言：不渲染可见文案 -->
+    <!-- 供自动化断言：不渲染可见文案（多选，逗号分隔） -->
     <span class="costume-sr-only" data-testid="costume-selected-id">
-      {{ costumeSlot?.id ?? '' }}
+      {{ costumeItems.map((item) => item.id).join(',') }}
+    </span>
+    <span class="costume-sr-only" data-testid="costume-selected-count">
+      {{ costumeItems.length }}
     </span>
     <span class="costume-sr-only" data-testid="costume-recipe-count">
-      {{ costumeSlot ? 1 : 0 }}/3
+      {{ costumeItems.length ? 1 : 0 }}/3
     </span>
     <span class="costume-sr-only" data-testid="costume-filtered-total">
       {{ initialLoading ? 0 : filtered.length }}

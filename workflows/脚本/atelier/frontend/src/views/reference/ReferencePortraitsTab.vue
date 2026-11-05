@@ -43,7 +43,11 @@ import {
  */
 
 const { items, loading, error, load, retry } = useReferencePortraits()
-const { portrait: portraitSlot, togglePortrait, isPortraitSelected } = useReferenceRecipeDraft()
+const {
+  portrait: portraitItems,
+  togglePortrait,
+  isPortraitSelected,
+} = useReferenceRecipeDraft()
 const toast = useToast()
 
 // ---------------------------------------------------------------------------
@@ -145,11 +149,15 @@ function loadMore(): void {
   shown.value = nextPortraitShown(shown.value, filtered.value.length)
 }
 
-/** 卡片「加入配方 / 已选」：同一 id 再点即移除。 */
+/** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onTogglePortrait(item: PortraitItem): void {
   const added = togglePortrait(item)
   const label = item.发型名称 || item.标题
-  toast.success(added ? `已选人像：${label}` : '已移除人像')
+  toast.success(
+    added
+      ? `已加入${label}（人像槽共 ${portraitItems.value.length} 张）`
+      : `已移除${label}（人像槽共 ${portraitItems.value.length} 张）`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -449,12 +457,15 @@ onMounted(() => {
       @toggle-select="toggleViewerSelection"
     />
 
-    <!-- 供自动化断言：当前配方已选人像（不渲染可见文案） -->
+    <!-- 供自动化断言：当前配方已选人像（多选，逗号分隔） -->
     <span class="portrait-sr-only" data-testid="portrait-selected-id">
-      {{ portraitSlot?.id ?? '' }}
+      {{ portraitItems.map((item) => item.id).join(',') }}
+    </span>
+    <span class="portrait-sr-only" data-testid="portrait-selected-count">
+      {{ portraitItems.length }}
     </span>
     <span class="portrait-sr-only" data-testid="portrait-recipe-count">
-      {{ portraitSlot ? 1 : 0 }}/3
+      {{ portraitItems.length ? 1 : 0 }}/3
     </span>
   </div>
 </template>

@@ -98,3 +98,42 @@ export function poseSlotName(item: PoseItem | null): string {
   if (!item) return ''
   return item.角度 ? `${item.姿势名称} · ${item.角度}` : item.姿势名称
 }
+// ---------------------------------------------------------------------------
+// 多选槽位视图（合成台展示「已选数量 + 前 N 张缩略图」）
+// ---------------------------------------------------------------------------
+
+/** 单个已选槽位条目的展示数据。 */
+export interface SlotSelectedItem {
+  key: string
+  name: string
+  thumb: string | null
+}
+
+/** 人像槽：数组 → 展示条目（顺序即加入顺序）。 */
+export function portraitSlotItems(items: readonly PortraitItem[]): SlotSelectedItem[] {
+  return items.map((item) => ({
+    key: item.id,
+    name: portraitSlotName(item),
+    thumb: portraitSlotThumb(item),
+  }))
+}
+
+/** 服装槽：数组 → 展示条目。 */
+export function costumeSlotItems(items: readonly CostumeItem[]): SlotSelectedItem[] {
+  return items.map((item) => ({
+    key: item.id,
+    name: costumeSlotName(item),
+    thumb: costumeSlotThumb(item),
+  }))
+}
+
+/** 姿势槽：数组 → 展示条目；每条按自身加入时的白模 / 深度图模式取图。 */
+export function poseSlotItems(
+  items: readonly { item: PoseItem; useDepth: boolean }[],
+): SlotSelectedItem[] {
+  return items.map((entry) => ({
+    key: entry.item.id,
+    name: poseSlotName(entry.item),
+    thumb: poseSlotThumb(entry.item, entry.useDepth),
+  }))
+}

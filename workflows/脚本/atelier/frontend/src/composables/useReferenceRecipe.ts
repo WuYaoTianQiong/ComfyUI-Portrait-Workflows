@@ -1,28 +1,33 @@
 /**
- * 合成台提交与轮询（阶段 3 最薄版，契约 C-REF-RECIPES@2 / C-JOB-PROGRESS@1）。
+ * 合成台批量提交与轮询（契约 C-REF-RECIPES@2 / C-JOB-PROGRESS@1）。
  *
- * 逐条平移 React 侧 `services/recipeClient.ts` + `store/studioStore.tsx` 的提交语义：
- * - 提交：`POST /api/reference/recipes`，提交体字段以后端 `RecipeRequest` 为准；
- * - 查询：`GET /api/jobs/{id}`，轮询间隔 1500ms，上限 30 分钟；
- * - 终态集合与 React 一致（success/done/completed/finished 与
- *   failed/error/cancelled/canceled/stopped）；
- * - 连续 3 次查询失败才抛错，单次网络抖动继续重试；
- * - 结果图只取后端同源的 `/api/media/image?filename=...`，**零**直连 8188 /
- *   `/prompt` / `/comfy`；
- * - 错误统一转成中文三句式（现象 + 原因 + 下一步），由页面直接渲染。
+ * 与阶段 3 最薄版的差异（本次升级）：
+ * - 三槽改为**多选**：每槽 N 张，前端按「槽位组合 × 画质档 × 比例」做笛卡尔积，
+ *   **每组独立 POST**（后端 `RecipeRequest` 的槽位仍是单值）；
+ * - 全组合上限 {@link MAX_BATCH_RECIPES}（100），超限时页面禁用提交；
+ * - 提交并发上限 {@link MAX_SUBMIT_CONCURRENCY}（2），不一次打满后端；
+ * - 种子按组派生：第 i 组 `seed = base_seed + i`、`seed_mode='fixed'`；
+ * - 提交体透传 `workflow` / `quality` / `aspect_ratio` / `orientation`，
+ *   但 `caps.quality` / `caps.orientation` 为 false 时**绝不发送**对应字段；
+ * - 非空槽数 M < 所选工作流 input_count N 时，提交前弹出降级确认框
+ *   （列出 `input_count <= M` 的候选），不做静默自动切换。
  *
  * 明确不迁（施工手册 §7 冻结）：配方草稿持久化、未决任务恢复追踪、
- * 通用参数面板、提示词只读预览。因此本文件不读写 localStorage / IndexedDB，
- * 也不提交 workflow_path —— 后端 `RecipeRequest` 没有该字段，出图工作流由
- * 后端按「是否有第 4 张」固定选择。
+ * 通用参数面板、提示词只读预览。本文件不读写 localStorage / IndexedDB。
  */
 
 import { computed, ref, watch } from 'vue'
-import type { Router } from 'vue-router'
+
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
 import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
-import type { RecipeSlotKey } from './useReferenceRecipeDraft'
+import {
+  useWorkflowCaps,
+  type QualityOption,
+  type WorkflowCaps,
+  type WorkflowParams,
+} from './useWorkflowCaps'
+import type { WorkflowRow } from './useWorkflows'
 
 // ---------------------------------------------------------------------------
 // 契约常量
@@ -41,6 +46,10 @@ export const RECIPE_POLL_TIMEOUT_MS = 30 * 60 * 1000
 export const MAX_CONSECUTIVE_POLL_ERRORS = 3
 /** 后端 `RecipeRequest.seed` 的固定种子默认值。 */
 export const DEFAULT_RECIPE_SEED = 100000
+/** 全组合上限：超过后页面禁用提交，避免一次排爆后端队列。 */
+export const MAX_BATCH_RECIPES = 100
+/** 提交并发上限：逐组 POST 时最多同时 2 个请求。 */
+export const MAX_SUBMIT_CONCURRENCY = 2
 /** 任务成功终态（逐字对齐 React）。 */
 export const SUCCESS_JOB_STATUSES: ReadonlySet<string> = new Set([
   'success',
@@ -73,6 +82,14 @@ export interface RecipeSubmitRequest {
   pose_id?: string
   costume_library?: RecipeCostumeLibrary
   extra_path?: string
+  /** 合成台工作流文件名 / 库内路径；空 = 后端默认 Qwen21+VNCCS。 */
+  workflow?: string
+  /** 画质档位；`caps.quality === false` 时不发送。 */
+  quality?: string
+  /** 输出比例；`caps.orientation === false` 时不发送。 */
+  aspect_ratio?: string
+  /** 横竖方向（由比例推导）；`caps.orientation === false` 时不发送。 */
+  orientation?: 'portrait' | 'landscape'
   style: RecipeStyle
   prompt_suffix: string
   seed: number
@@ -131,8 +148,15 @@ export interface StudioWorkflowOption {
   name: string
   source: string
   relPath: string
+  /** LoadImage 槽位数（兼容旧字段）。 */
   imageSlots: number
+  /** LoadImage 输入数；提交前能力预判用它和「非空槽数 M」比较。 */
+  inputCount: number
   recommended: boolean
+  /** 后端探测的注入能力；缺失时由 `useWorkflowCaps` 回落到乐观默认值。 */
+  caps?: WorkflowCaps
+  /** 画质 / 方向参数描述；用于生成真实档位与比例选项。 */
+  params?: WorkflowParams
 }
 
 /** 工作流目录响应。 */
@@ -141,11 +165,18 @@ export interface StudioWorkflowCatalog {
   default: string
 }
 
-/** 三槽当前选择（只取提交需要的字段）。 */
+/** 三槽当前选择（单组提交时的单值快照）。 */
 export interface RecipeSlots {
   portrait: PortraitItem | null
   costume: CostumeItem | null
   pose: PoseItem | null
+}
+
+/** 各槽条目数（用于组合数计算）。 */
+export interface RecipeSlotCounts {
+  portrait: number
+  costume: number
+  pose: number
 }
 
 /** 提交体构造参数。 */
@@ -154,8 +185,53 @@ export interface RecipeRequestOptions {
   promptSuffix: string
   /** 第 4 张上传图的后端路径；空串表示不带第 4 张 */
   extraPath: string
+  /** 所选工作流路径 / 文件名；空串不发送（后端用默认工作流）。 */
+  workflow?: string
+  /** 画质档位；空串不发送。 */
+  quality?: string
+  /** 输出比例；空串不发送。 */
+  aspectRatio?: string
+  /** 横竖方向；空串不发送。 */
+  orientation?: 'portrait' | 'landscape' | ''
   seed?: number
   seedMode?: 'fixed' | 'random'
+}
+
+/** 批量输入：三槽多选 + 尺寸档位多选。 */
+export interface RecipeBatchInput {
+  portrait: readonly PortraitItem[]
+  costume: readonly CostumeItem[]
+  pose: readonly PoseItem[]
+  qualities: readonly string[]
+  ratios: readonly string[]
+  qualityEnabled: boolean
+  orientationEnabled: boolean
+  baseSeed: number
+}
+
+/** 一个笛卡尔积组合（= 一次 POST / 一个独立 job）。 */
+export interface RecipeBatchGroup {
+  /** 组下标（从 0 开始），种子 = baseSeed + index。 */
+  index: number
+  slots: RecipeSlots
+  /** 空串表示本轮不发送 quality。 */
+  quality: string
+  /** 空串表示本轮不发送 aspect_ratio。 */
+  aspectRatio: string
+  /** 空串表示本轮不发送 orientation；否则由比例推导。 */
+  orientation: 'portrait' | 'landscape' | ''
+  seed: number
+}
+
+/** 提交前降级确认框数据。 */
+export interface WorkflowDowngradePrompt {
+  message: string
+  /** 非空槽数 M（含第 4 张）。 */
+  slotCount: number
+  /** 当前工作流 input_count N。 */
+  inputCount: number
+  /** `input_count <= M` 的候选工作流（不含当前项）。 */
+  candidates: StudioWorkflowOption[]
 }
 
 /** 提交阶段的错误：保留 HTTP 状态码与后端 `detail`。 */
@@ -197,10 +273,11 @@ export function costumeLibraryOf(item: CostumeItem | null): RecipeCostumeLibrary
 }
 
 /**
- * 构造提交体。
+ * 构造单组提交体。
  *
- * 与 React `startGeneration` 的差异只有一处：不发送 workflow_path / 参数覆盖，
- * 因为后端 `RecipeRequest` 没有这些字段（D4 冻结：节点映射由后端固定）。
+ * 空槽不发送对应字段（后端按「未提供」裁掉该图位）；第 4 张只接受 uploads
+ * 路径。`quality` / `aspect_ratio` / `orientation` 只有非空才发送，调用方
+ * 负责在 `caps` 不支持时不要传值 —— 这样 Qwen 系永远发不出用不上的参数。
  */
 export function buildRecipeRequest(
   slots: RecipeSlots,
@@ -221,7 +298,200 @@ export function buildRecipeRequest(
   const extra = options.extraPath.trim()
   if (extra) request.extra_path = extra
 
+  const workflow = options.workflow?.trim()
+  if (workflow) request.workflow = workflow
+
+  const quality = options.quality?.trim()
+  if (quality) request.quality = quality
+
+  const ratio = options.aspectRatio?.trim()
+  if (ratio) request.aspect_ratio = ratio
+
+  if (options.orientation) request.orientation = options.orientation
+
   return request
+}
+
+/**
+ * 槽位组合数：三个维度各自「空 → 1 种，非空 → 条目数种」。
+ *
+ * 三槽都为空时返回 0 —— 这不是「1 种空组合」，而是后端会拒绝的 M==0。
+ */
+export function countSlotCombinations(counts: RecipeSlotCounts): number {
+  const dims = [counts.portrait, counts.costume, counts.pose]
+  if (dims.every((value) => value <= 0)) return 0
+  return dims.reduce((total, value) => total * Math.max(1, value), 1)
+}
+
+/**
+ * 全组合数 = 槽位组合数 × 画质档数 × 比例数。
+ *
+ * 尺寸维度传 0 表示「该能力不可用 / 未选择」，按 1 计。
+ */
+export function countBatchTotal(
+  counts: RecipeSlotCounts,
+  qualityCount: number,
+  ratioCount: number,
+): number {
+  const combos = countSlotCombinations(counts)
+  if (combos === 0) return 0
+  return combos * Math.max(1, qualityCount) * Math.max(1, ratioCount)
+}
+
+/** 是否超过全组合上限。 */
+export function exceedsBatchLimit(total: number): boolean {
+  return total > MAX_BATCH_RECIPES
+}
+
+/** 超限文案（与页面按钮禁用提示逐字一致）。 */
+export function describeBatchLimit(total: number): string {
+  return `全组合共 ${total} 张，超过上限 ${MAX_BATCH_RECIPES} 张；请减少素材或尺寸档位`
+}
+
+/** 比例 → 横竖；1:1 按竖版（与项目默认 `portrait` 一致）。 */
+export function orientationForRatio(ratio: string): 'portrait' | 'landscape' {
+  const [width, height] = ratio.split(':').map((part) => Number(part))
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height <= 0) return 'portrait'
+  return width > height ? 'landscape' : 'portrait'
+}
+
+/** 三槽多选 → 单值槽位组合（空槽维度用 null 占位，计数为 1）。 */
+export function buildSlotCombinations(
+  portrait: readonly PortraitItem[],
+  costume: readonly CostumeItem[],
+  pose: readonly PoseItem[],
+): RecipeSlots[] {
+  const portraitDim: (PortraitItem | null)[] = portrait.length ? [...portrait] : [null]
+  const costumeDim: (CostumeItem | null)[] = costume.length ? [...costume] : [null]
+  const poseDim: (PoseItem | null)[] = pose.length ? [...pose] : [null]
+
+  const combos: RecipeSlots[] = []
+  for (const portraitItem of portraitDim) {
+    for (const costumeItem of costumeDim) {
+      for (const poseItem of poseDim) {
+        combos.push({ portrait: portraitItem, costume: costumeItem, pose: poseItem })
+      }
+    }
+  }
+  return combos
+}
+
+/**
+ * 生成笛卡尔积分组（= 前端要逐组 POST 的请求清单）。
+ *
+ * 顺序固定：槽位组合 → 画质 → 比例；第 i 组种子 = baseSeed + i。
+ * caps 不支持时对应维度折叠为「不发参数」（空串），计数仍为 1。
+ */
+export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
+  const slotCombos = buildSlotCombinations(input.portrait, input.costume, input.pose)
+  const qualityDim =
+    input.qualityEnabled && input.qualities.length ? [...input.qualities] : ['']
+  const ratioDim = input.orientationEnabled && input.ratios.length ? [...input.ratios] : ['']
+  const baseSeed = Math.max(0, Math.trunc(Number(input.baseSeed) || DEFAULT_RECIPE_SEED))
+
+  const groups: RecipeBatchGroup[] = []
+  let index = 0
+  for (const slots of slotCombos) {
+    for (const quality of qualityDim) {
+      for (const ratio of ratioDim) {
+        groups.push({
+          index,
+          slots,
+          quality,
+          aspectRatio: ratio,
+          orientation: ratio ? orientationForRatio(ratio) : '',
+          seed: baseSeed + index,
+        })
+        index += 1
+      }
+    }
+  }
+  return groups
+}
+
+/**
+ * 切换工作流后重建画质选择：
+ * - 新工作流不支持画质（options 为空）→ 清空，绝不把旧参数发出去；
+ * - 保留仍然可用的档位；一个都不剩时回落到 4K / 首档。
+ */
+export function reconcileQualitySelection(
+  selected: readonly string[],
+  options: readonly QualityOption[],
+): string[] {
+  if (!options.length) return []
+  const available = new Set(options.map((option) => option.value))
+  const kept = selected.filter((value) => available.has(value))
+  if (kept.length) return [...kept]
+  const preferred = options.find((option) => option.value === '4K') ?? options[0]
+  return preferred ? [preferred.value] : []
+}
+
+/**
+ * 切换工作流后重建比例选择：
+ * - 新工作流不支持横竖（ratios 为空）→ 清空；
+ * - 保留仍然可用的比例；一个都不剩时回落到工作流默认比例 / 首项。
+ */
+export function reconcileRatioSelection(
+  selected: readonly string[],
+  ratios: readonly string[],
+  defaultRatio: string,
+): string[] {
+  if (!ratios.length) return []
+  const kept = selected.filter((value) => ratios.includes(value))
+  if (kept.length) return [...kept]
+  const preferred =
+    defaultRatio && ratios.includes(defaultRatio) ? defaultRatio : ratios[0]
+  return preferred ? [preferred] : []
+}
+
+/** 降级确认框文案：必须写明「切换后任务语义可能变为换衣/编辑」。 */
+export function describeWorkflowDowngrade(inputCount: number, slotCount: number): string {
+  return (
+    `当前工作流需要 ${inputCount} 个输入，但只提供了 ${slotCount} 个非空槽位。` +
+    '切换后任务语义可能变为换衣/编辑。' +
+    '下一步：从下方候选工作流中切换，或取消后补齐参考图再提交。'
+  )
+}
+
+/** 候选工作流：`input_count <= M` 且不含当前项（0 输入无法参与出图）。 */
+export function buildWorkflowDowngradeCandidates(
+  workflows: readonly StudioWorkflowOption[],
+  currentPath: string,
+  slotCount: number,
+): StudioWorkflowOption[] {
+  return workflows.filter(
+    (workflow) =>
+      workflow.path !== currentPath &&
+      workflow.inputCount > 0 &&
+      workflow.inputCount <= slotCount,
+  )
+}
+
+/**
+ * 限并发执行：最多 `limit` 个 worker 同时进行，返回顺序与输入一致。
+ *
+ * 用于「逐组 POST，并发上限 2」与轮询阶段，避免一次把后端队列打满。
+ */
+export async function runWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!items.length) return []
+  const size = Math.max(1, Math.min(Math.trunc(limit) || 1, items.length))
+  const results = new Array<R>(items.length)
+  let cursor = 0
+
+  async function drain(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await worker(items[index], index)
+    }
+  }
+
+  await Promise.all(Array.from({ length: size }, () => drain()))
+  return results
 }
 
 /** 任务状态小写归一，避免后端大小写差异导致终态判断失效。 */
@@ -332,18 +602,30 @@ export function describeJobFailure(snapshot: RecipeJobSnapshot): string {
   return `生成失败。原因：${reason}。下一步：点击「重试」重新提交，或前往任务中心查看任务 #${snapshot.id} 的详细日志。`
 }
 
-/** 提交失败 → 三句式中文错误（现象 + 原因 + 下一步）。 */
+/** 提交失败 → 三句式中文错误（现象 + 原因 + 下一步），始终带后端原文。 */
 export function describeSubmitFailure(cause: unknown): string {
   if (cause instanceof RecipeSubmitError) {
     const detail = cause.detail
     if (cause.status === 0) {
       return '提交出图任务失败。原因：无法连接后端（网络中断或服务未启动）。下一步：确认后端服务在线后点击「重试」。'
     }
+    if (detail.includes('请至少选择一个参考图')) {
+      return `提交被拒绝。原因：${detail}。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。`
+    }
+    if (/只有\s*\d+\s*个输入/.test(detail)) {
+      return `提交被拒绝。原因：${detail}。下一步：减少本次提交的参考图数量，或切换到输入数更多的工作流后重试。`
+    }
+    if (detail.includes('无法裁剪')) {
+      return `提交被拒绝。原因：${detail}。下一步：按提示补齐参考图，或切换到输入数更少的工作流后重试。`
+    }
+    if (detail.includes('不属于合成台可用范围')) {
+      return `提交被拒绝。原因：${detail}。下一步：在合成台工作流下拉中重新选择一个可用工作流后重试。`
+    }
     if (/uploads|上传目录|上传的/i.test(detail)) {
       return `第 4 张参考图被后端拒绝。原因：${detail}（后端只接受通过上传接口落盘的图片）。下一步：用页面上的「添加附加参考图」重新上传后再提交，不要填本地磁盘路径。`
     }
     if (detail.includes('缺少')) {
-      return `提交被拒绝。原因：${detail}。下一步：补齐人像、服装、姿势三槽参考图后再提交。`
+      return `提交被拒绝。原因：${detail}。下一步：补齐对应槽位的参考图后再提交。`
     }
     if (detail.includes('服装库')) {
       return `提交被拒绝。原因：${detail}。下一步：重新选择服装槽参考图（服装库只支持 costume 与 costume-anime）。`
@@ -489,78 +771,62 @@ export async function pollRecipeJob(
 }
 
 // ---------------------------------------------------------------------------
-// 「选完图自动回合成台」：跨页签的一次性跳转约定
+// 响应解析（后端 `/api/workflows?scope=studio`）
 // ---------------------------------------------------------------------------
 
-/**
- * 从合成台槽位跳到对应库页签后，用户一旦「加入配方」，自动把 `?tab=` 切回
- * `studio`。
- *
- * 为什么放在模块级：合成台组件在跳走时已卸载，组件内 watch 无法存活；
- * 而库页（阶段 2 已完成）不允许改。因此这里注册一次性的模块级 watch：
- * - 记录被点击的槽位与点击前的条目 id（baseline）；
- * - 只有该槽位真的被**换成另一条**时才跳回，点同一张取消不跳；
- * - 跳转前校验当前仍在对应库页签（用户已手动回合成台则不跳，避免抢导航）；
- * - 跳转后立即解除，避免后续浏览时被意外拉回。
- */
-let returnRouter: Router | null = null
-let returnSlot: RecipeSlotKey | null = null
-let returnBaselineId = ''
-let returnWatcherInstalled = false
-
-function slotIdOf(slot: RecipeSlotKey): string {
-  const draft = useReferenceRecipeDraft()
-  if (slot === 'portrait') return draft.portrait.value?.id ?? ''
-  if (slot === 'costume') return draft.costume.value?.id ?? ''
-  return draft.pose.value?.item.id ?? ''
-}
-
-function disarmStudioReturn(): void {
-  returnRouter = null
-  returnSlot = null
-  returnBaselineId = ''
-}
-
-function handleSlotChange(slot: RecipeSlotKey, id: string): void {
-  if (!returnRouter || returnSlot !== slot) return
-  if (!id || id === returnBaselineId) return
-
-  const router = returnRouter
-  const route = router.currentRoute.value
-  const tab = typeof route.query.tab === 'string' ? route.query.tab : ''
-  if (tab !== slot) {
-    disarmStudioReturn()
-    return
+function optionalNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+    return Number(value)
   }
-
-  disarmStudioReturn()
-  void router.replace({
-    path: route.path,
-    query: { ...route.query, tab: 'studio' },
-    hash: route.hash,
-  })
+  return null
 }
 
-function ensureReturnWatcher(): void {
-  if (returnWatcherInstalled) return
-  returnWatcherInstalled = true
-  const draft = useReferenceRecipeDraft()
-  watch(draft.portrait, (value) => handleSlotChange('portrait', value?.id ?? ''))
-  watch(draft.costume, (value) => handleSlotChange('costume', value?.id ?? ''))
-  watch(draft.pose, (value) => handleSlotChange('pose', value?.item.id ?? ''))
+/** 解析后端 caps；字段缺失时保持「可用」的乐观默认，与后端探测口径一致。 */
+function parseStudioCaps(raw: unknown): WorkflowCaps | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  return {
+    prompt: value.prompt !== false,
+    negative: value.negative !== false,
+    negative_effective: value.negative_effective !== false,
+    negative_cfg: optionalNumber(value.negative_cfg),
+    quality: value.quality !== false,
+    orientation: value.orientation !== false,
+  }
 }
 
-/** 合成台槽位点击时调用：登记「选完自动回合成台」。 */
-export function armStudioReturn(slot: RecipeSlotKey, router: Router): void {
-  ensureReturnWatcher()
-  returnRouter = router
-  returnSlot = slot
-  returnBaselineId = slotIdOf(slot)
-}
+/** 解析后端 params；非对象时返回 undefined，交由 `useWorkflowCaps` 回落。 */
+function parseStudioParams(raw: unknown): WorkflowParams | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  const qualityModes = new Set(['seedvr', 'scale', 'megapixels', 'none'])
+  const orientationModes = new Set(['swap', 'knob', 'none'])
+  const qualityMode =
+    typeof value.quality_mode === 'string' && qualityModes.has(value.quality_mode)
+      ? (value.quality_mode as WorkflowParams['quality_mode'])
+      : 'none'
+  const orientationMode =
+    typeof value.orientation_mode === 'string' && orientationModes.has(value.orientation_mode)
+      ? (value.orientation_mode as WorkflowParams['orientation_mode'])
+      : 'none'
+  const strings = (input: unknown): string[] =>
+    Array.isArray(input) ? input.filter((item): item is string => typeof item === 'string') : []
 
-/** 合成台挂载 / 手动回到合成台时解除，避免历史登记残留。 */
-export function resetStudioReturn(): void {
-  disarmStudioReturn()
+  return {
+    quality_mode: qualityMode,
+    base_width: optionalNumber(value.base_width),
+    base_height: optionalNumber(value.base_height),
+    base_megapixels: optionalNumber(value.base_megapixels),
+    mp_unit: value.mp_unit === 'mip' ? 'mip' : 'mp',
+    post_scale: optionalNumber(value.post_scale) ?? 1,
+    orientation_mode: orientationMode,
+    aspect_ratios: strings(value.aspect_ratios),
+    default_ratio: typeof value.default_ratio === 'string' ? value.default_ratio : '',
+    multiple: optionalNumber(value.multiple) ?? undefined,
+    quality_tiers: strings(value.quality_tiers),
+    default_quality: typeof value.default_quality === 'string' ? value.default_quality : '',
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,8 +836,43 @@ export function resetStudioReturn(): void {
 /** 提交状态机。 */
 export type RecipeRunStatus = 'idle' | 'submitting' | 'polling' | 'success' | 'failed'
 
+/** 单组提交结果（内部聚合用）。 */
+interface SubmitOutcome {
+  group: RecipeBatchGroup
+  response: RecipeSubmitResponse | null
+  error: unknown
+}
+
+/** 单组轮询结果（内部聚合用）。 */
+interface PollOutcome {
+  outcome: SubmitOutcome & { response: RecipeSubmitResponse }
+  snapshot: RecipeJobSnapshot | null
+  error: unknown
+}
+
+/** 批量进度聚合：按 job 记录各组的 total / done。 */
+function describeBatchProgress(
+  aggregates: ReadonlyMap<number, { total: number; done: number }>,
+): RecipeProgress {
+  let total = 0
+  let done = 0
+  for (const value of aggregates.values()) {
+    total += Math.max(0, value.total)
+    done += Math.max(0, value.done)
+  }
+  if (total <= 0) {
+    return { stage: 'running', message: '正在出图…', percent: null }
+  }
+  const percent = Math.min(100, Math.max(0, Math.round((done / total) * 100)))
+  return {
+    stage: 'running',
+    message: `正在出图…（已完成 ${done}/${total}）`,
+    percent,
+  }
+}
+
 /**
- * 合成台提交与进度状态。
+ * 合成台批量提交与进度状态。
  *
  * 所有状态都是组件级内存态：切页签会重置（草稿与未决任务恢复按 §7 不迁），
  * 三槽选择本身来自 `useReferenceRecipeDraft` 单例，不受影响。
@@ -590,6 +891,12 @@ export function useReferenceRecipe() {
   const extraPath = ref('')
   const extraName = ref('')
 
+  /** 尺寸档位 / 比例均为多选；空数组表示本轮不发对应参数。 */
+  const qualitySelection = ref<string[]>([])
+  const ratioSelection = ref<string[]>([])
+  /** 基础种子；第 i 组 = baseSeed + i。 */
+  const baseSeed = ref<number>(DEFAULT_RECIPE_SEED)
+
   const status = ref<RecipeRunStatus>('idle')
   const progress = ref<RecipeProgress>({
     stage: 'submit',
@@ -597,9 +904,71 @@ export function useReferenceRecipe() {
     percent: null,
   })
   const jobId = ref<number | null>(null)
+  const jobIds = ref<number[]>([])
   const resultUrls = ref<string[]>([])
   const previousResultUrl = ref('')
   const errorMessage = ref('')
+  /** 非空时页面渲染降级确认框；用户确认切换后才继续提交。 */
+  const workflowDowngrade = ref<WorkflowDowngradePrompt | null>(null)
+
+  // 工作流能力：复用主站唯一实现，避免合成台再写一份档位规则。
+  const studioRows = computed<WorkflowRow[]>(() =>
+    workflows.value.map((item) => ({
+      path: item.path,
+      name: item.name,
+      caps: item.caps,
+      params: item.params,
+    })),
+  )
+  const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
+    workflowPath,
+    studioRows,
+  )
+
+  /** 当前工作流：input_count 用于提交前能力预判。 */
+  const currentWorkflow = computed(
+    () => workflows.value.find((item) => item.path === workflowPath.value) ?? null,
+  )
+  const workflowInputCount = computed(() => currentWorkflow.value?.inputCount ?? 0)
+
+  const slotCounts = computed<RecipeSlotCounts>(() => ({
+    portrait: draft.portraitCount.value,
+    costume: draft.costumeCount.value,
+    pose: draft.poseCount.value,
+  }))
+
+  /** 非空槽位名（含第 4 张）：后端按「非空槽数 M」校验工作流输入数。 */
+  const filledSlotNames = computed<string[]>(() => {
+    const names: string[] = []
+    if (draft.portraitCount.value > 0) names.push('人像')
+    if (draft.costumeCount.value > 0) names.push('服装')
+    if (draft.poseCount.value > 0) names.push('姿势')
+    if (extraPath.value.trim()) names.push('第 4 张')
+    return names
+  })
+  const activeSlotCount = computed(() => filledSlotNames.value.length)
+
+  /** 尺寸维度：caps 不支持时折叠为 1（页面也会隐藏控件）。 */
+  const qualityDimension = computed(() =>
+    caps.value.quality ? qualitySelection.value.length : 0,
+  )
+  const ratioDimension = computed(() =>
+    caps.value.orientation ? ratioSelection.value.length : 0,
+  )
+
+  /** 全组合数（常驻展示 N/100，提交前也用它做上限判断）。 */
+  const batchTotal = computed(() =>
+    countBatchTotal(slotCounts.value, qualityDimension.value, ratioDimension.value),
+  )
+  const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
+  const batchLimitMessage = computed(() =>
+    batchOverLimit.value ? describeBatchLimit(batchTotal.value) : '',
+  )
+
+  /** Qwen 系（尺寸跟随参考图）：caps 既不支持画质也不支持横竖。 */
+  const followsReferenceSize = computed(
+    () => !caps.value.quality && !caps.value.orientation,
+  )
 
   const busy = computed(() => status.value === 'submitting' || status.value === 'polling')
   const progressPercent = computed<number | null>(() => {
@@ -608,23 +977,44 @@ export function useReferenceRecipe() {
     return Math.min(100, Math.max(0, Math.round(value)))
   })
   const primaryResultUrl = computed(() => resultUrls.value[0] ?? '')
-  const selectedCount = computed(() => draft.count.value)
-  const missingSlots = computed(() => {
-    const missing: string[] = []
-    if (!draft.portrait.value) missing.push('人像')
-    if (!draft.costume.value) missing.push('服装')
-    if (!draft.pose.value) missing.push('姿势')
-    return missing
-  })
+  const selectedCount = computed(() => draft.totalSelected.value)
   const canSubmit = computed(
-    () => !busy.value && missingSlots.value.length === 0 && !workflowsLoading.value,
+    () =>
+      !busy.value &&
+      !workflowsLoading.value &&
+      Boolean(workflowPath.value) &&
+      activeSlotCount.value > 0 &&
+      batchTotal.value > 0 &&
+      !batchOverLimit.value,
+  )
+
+  /**
+   * 切换工作流后重建尺寸选项：
+   * 清掉新工作流不支持但已选中的档位 / 比例，绝不把用不上的参数发出去。
+   */
+  function reconcileSizeSelections(): void {
+    qualitySelection.value = reconcileQualitySelection(
+      qualitySelection.value,
+      qualityOptions.value,
+    )
+    ratioSelection.value = reconcileRatioSelection(
+      ratioSelection.value,
+      aspectRatios.value,
+      defaultRatio.value,
+    )
+  }
+
+  watch(
+    [workflowPath, qualityOptions, aspectRatios, defaultRatio],
+    () => reconcileSizeSelections(),
+    { immediate: true, flush: 'sync' },
   )
 
   /**
    * 读取本机工作流目录（scope=studio）。
    *
-   * 自动选中后端 `default`；它缺失或不在列表时回落第一条。用户已手动选择
-   * 且该路径仍可用时保留用户选择（重试刷新不应覆盖）。
+   * 自动选中后端 `default`（当前为 Qwen21+VNCCS）；它缺失或不在列表时回落
+   * 第一条。用户已手动选择且该路径仍可用时保留用户选择（重试刷新不覆盖）。
    */
   async function loadStudioWorkflows(): Promise<void> {
     workflowsLoading.value = true
@@ -649,7 +1039,10 @@ export function useReferenceRecipe() {
           source: typeof item.source === 'string' ? item.source : '',
           relPath: typeof item.rel_path === 'string' ? item.rel_path : '',
           imageSlots: Number(item.image_slots) || 0,
+          inputCount: Number(item.input_count) || 0,
           recommended: item.recommended === true,
+          caps: parseStudioCaps(item.caps),
+          params: parseStudioParams(item.params),
         })
       }
 
@@ -660,12 +1053,34 @@ export function useReferenceRecipe() {
       if (!stillUsable) {
         workflowPath.value = resolveInitialWorkflowPath(options, workflowDefault.value)
       }
+      reconcileSizeSelections()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       workflowsError.value = `读取工作流列表失败。原因：${message}。下一步：点击「重试」重新读取，或确认后端服务在线。`
     } finally {
       workflowsLoading.value = false
     }
+  }
+
+  /** 画质档多选：点已选取消，否则追加。 */
+  function toggleQuality(value: string): void {
+    qualitySelection.value = qualitySelection.value.includes(value)
+      ? qualitySelection.value.filter((item) => item !== value)
+      : [...qualitySelection.value, value]
+  }
+
+  /** 比例多选：点已选取消，否则追加。 */
+  function toggleRatio(value: string): void {
+    ratioSelection.value = ratioSelection.value.includes(value)
+      ? ratioSelection.value.filter((item) => item !== value)
+      : [...ratioSelection.value, value]
+  }
+
+  /** 基础种子输入归一：非负整数，非法值回落默认种子。 */
+  function setBaseSeed(value: number | string): void {
+    const parsed = Number(value)
+    baseSeed.value =
+      Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : DEFAULT_RECIPE_SEED
   }
 
   /** 第 4 张：只保存 1 张（后传覆盖前传，与「只提交 extraImages[0]」一致）。 */
@@ -685,91 +1100,268 @@ export function useReferenceRecipe() {
     progress.value = { stage: 'submit', message: '', percent: null }
     errorMessage.value = ''
     resultUrls.value = []
+    jobIds.value = []
+    jobId.value = null
+    workflowDowngrade.value = null
   }
 
   /**
-   * 提交 + 轮询。
+   * 逐组提交 + 聚合轮询。
    *
-   * 返回 true 表示拿到成功终态（结果图可能为空，由页面按 `resultUrls` 判断）；
-   * false 表示失败 / 中断，`errorMessage` 已写好三句式文案。
+   * 提交并发上限 2；每组独立 job，种子已在分组阶段派生。
+   * 返回 true 表示全部组成功且至少有一张结果图。
+   */
+  async function runBatch(groups: RecipeBatchGroup[]): Promise<boolean> {
+    status.value = 'submitting'
+    progress.value = {
+      stage: 'submit',
+      message: `正在提交 0/${groups.length} 组…`,
+      percent: 0,
+    }
+
+    let submittedCount = 0
+    const outcomes = await runWithConcurrency(
+      groups,
+      MAX_SUBMIT_CONCURRENCY,
+      async (group): Promise<SubmitOutcome> => {
+        const request = buildRecipeRequest(group.slots, {
+          style: style.value,
+          promptSuffix: promptSuffix.value,
+          extraPath: extraPath.value,
+          workflow: workflowPath.value,
+          quality: group.quality,
+          aspectRatio: group.aspectRatio,
+          orientation: group.orientation,
+          seed: group.seed,
+          seedMode: 'fixed',
+        })
+        try {
+          const response = await submitRecipe(request)
+          if (!response?.success || !response.job_id) {
+            const detail =
+              response?.errors?.filter(Boolean).join('；') || '后端未返回任务编号'
+            throw new RecipeSubmitError('提交出图任务失败', 0, detail)
+          }
+          submittedCount += 1
+          progress.value = {
+            stage: 'submit',
+            message: `正在提交 ${submittedCount}/${groups.length} 组…`,
+            percent: Math.round((submittedCount / groups.length) * 100),
+          }
+          return { group, response, error: null }
+        } catch (error) {
+          return { group, response: null, error }
+        }
+      },
+    )
+
+    const submitted = outcomes.filter(
+      (outcome): outcome is SubmitOutcome & { response: RecipeSubmitResponse } =>
+        outcome.response !== null,
+    )
+    const submitFailures = outcomes.filter((outcome) => outcome.response === null)
+
+    if (!submitted.length) {
+      const first = submitFailures[0]
+      errorMessage.value = describeSubmitFailure(
+        first?.error ?? new RecipeSubmitError('提交出图任务失败', 0, '提交分组为空'),
+      )
+      status.value = 'failed'
+      progress.value = { stage: 'done', message: '提交失败', percent: null }
+      return false
+    }
+
+    jobIds.value = submitted.map((outcome) => outcome.response.job_id)
+    jobId.value = jobIds.value[0] ?? null
+    status.value = 'polling'
+
+    const aggregates = new Map<number, { total: number; done: number }>()
+    for (const id of jobIds.value) aggregates.set(id, { total: 1, done: 0 })
+    progress.value = {
+      stage: 'queued',
+      message: `已提交 ${jobIds.value.length} 个任务，正在排队…`,
+      percent: 0,
+    }
+
+    const pollOutcomes = await runWithConcurrency(
+      submitted,
+      MAX_SUBMIT_CONCURRENCY,
+      async (outcome): Promise<PollOutcome> => {
+        const id = outcome.response.job_id
+        try {
+          const snapshot = await pollRecipeJob(id, {
+            onUpdate: (next) => {
+              aggregates.set(id, {
+                total: Number(next.total) || 1,
+                done: Number(next.done_count) || 0,
+              })
+              progress.value = describeBatchProgress(aggregates)
+            },
+          })
+          return { outcome, snapshot, error: null }
+        } catch (error) {
+          return { outcome, snapshot: null, error }
+        }
+      },
+    )
+
+    const urls: string[] = []
+    const failureMessages: string[] = []
+    let lastSnapshot: RecipeJobSnapshot | null = null
+
+    for (const result of pollOutcomes) {
+      lastSnapshot = result.snapshot ?? lastSnapshot
+      if (result.snapshot && isJobSucceeded(result.snapshot)) {
+        urls.push(...recipeJobResultUrls(result.snapshot))
+      } else if (result.snapshot) {
+        failureMessages.push(describeJobFailure(result.snapshot))
+      } else {
+        failureMessages.push(
+          describePollFailure(result.error, result.outcome.response.job_id),
+        )
+      }
+    }
+    if (submitFailures.length) {
+      failureMessages.unshift(
+        describeSubmitFailure(
+          submitFailures[0]?.error ??
+            new RecipeSubmitError('提交出图任务失败', 0, '部分分组提交失败'),
+        ),
+      )
+    }
+
+    resultUrls.value = [...new Set(urls)]
+    if (failureMessages.length) {
+      errorMessage.value = failureMessages.slice(0, 3).join('\n')
+      status.value = 'failed'
+      progress.value = {
+        stage: 'done',
+        message: `部分任务失败（成功 ${resultUrls.value.length} 张）`,
+        percent: progressPercent.value,
+      }
+      return false
+    }
+
+    if (!resultUrls.value.length) {
+      errorMessage.value = describeMissingResult(
+        lastSnapshot ?? { id: jobId.value ?? 0, status: 'done', total: 0, done_count: 0, error_count: 0, items: [] },
+      )
+      status.value = 'failed'
+      progress.value = {
+        stage: 'done',
+        message: '任务已完成，但没有可展示的结果图',
+        percent: 100,
+      }
+      return false
+    }
+
+    previousResultUrl.value = resultUrls.value[0]
+    status.value = 'success'
+    progress.value = {
+      stage: 'done',
+      message: `已完成 ${resultUrls.value.length} 张`,
+      percent: 100,
+    }
+    return true
+  }
+
+  /** 用当前工作流与当前选择构造分组（提交前 / 强制提交共用）。 */
+  function buildCurrentBatchGroups(): RecipeBatchGroup[] {
+    return buildBatchGroups({
+      portrait: draft.portrait.value,
+      costume: draft.costume.value,
+      pose: draft.pose.value.map((entry) => entry.item),
+      qualities: qualitySelection.value,
+      ratios: ratioSelection.value,
+      qualityEnabled: caps.value.quality,
+      orientationEnabled: caps.value.orientation,
+      baseSeed: baseSeed.value,
+    })
+  }
+
+  /**
+   * 提交入口。
    *
-   * 不做 abort：切换页签只放弃展示，后端任务继续执行（本阶段不迁任务恢复）。
+   * 返回 false 有两种含义：真的失败（`errorMessage` 已写好三句式文案），或
+   * 需要先过降级确认框（`workflowDowngrade` 非空，页面据此弹窗）。
    */
   async function submit(): Promise<boolean> {
     if (busy.value) return false
+    workflowDowngrade.value = null
     errorMessage.value = ''
     // 先记住上一次成功的结果，再清空本次结果：失败区「查看上一张结果」依赖它。
     if (resultUrls.value[0]) previousResultUrl.value = resultUrls.value[0]
     resultUrls.value = []
-
-    const missing = missingSlots.value
-    if (missing.length) {
-      errorMessage.value = `提交缺少必要槽位。原因：当前未选择${missing.join('、')}。下一步：从对应图库各选一条参考图后再提交。`
-      status.value = 'failed'
-      return false
-    }
-
-    const request = buildRecipeRequest(
-      {
-        portrait: draft.portrait.value,
-        costume: draft.costume.value,
-        pose: draft.pose.value?.item ?? null,
-      },
-      {
-        style: style.value,
-        promptSuffix: promptSuffix.value,
-        extraPath: extraPath.value,
-      },
-    )
-
-    status.value = 'submitting'
-    progress.value = { stage: 'submit', message: '正在提交出图任务…', percent: null }
+    jobIds.value = []
     jobId.value = null
 
-    try {
-      const submitted = await submitRecipe(request)
-      if (!submitted?.success || !submitted.job_id) {
-        const detail = submitted?.errors?.filter(Boolean).join('；') || '后端未返回任务编号'
-        throw new RecipeSubmitError('提交出图任务失败', 0, detail)
-      }
-
-      jobId.value = submitted.job_id
-      status.value = 'polling'
-      progress.value = { stage: 'queued', message: '任务已提交，正在排队…', percent: null }
-
-      const snapshot = await pollRecipeJob(submitted.job_id, {
-        onUpdate: (next) => {
-          progress.value = describeJobProgress(next)
-        },
-      })
-
-      if (isJobSucceeded(snapshot)) {
-        resultUrls.value = recipeJobResultUrls(snapshot)
-        status.value = 'success'
-        if (resultUrls.value.length) {
-          progress.value = { stage: 'done', message: '任务已完成', percent: 100 }
-          previousResultUrl.value = resultUrls.value[0]
-          return true
-        }
-        progress.value = { stage: 'done', message: '任务已完成，但没有可展示的结果图', percent: 100 }
-        errorMessage.value = describeMissingResult(snapshot)
-        status.value = 'failed'
-        return false
-      }
-
-      errorMessage.value = describeJobFailure(snapshot)
-      status.value = 'failed'
-      return false
-    } catch (cause) {
+    if (!workflowPath.value) {
       errorMessage.value =
-        cause instanceof RecipeTimeoutError
-          ? describePollFailure(cause, jobId.value)
-          : status.value === 'submitting'
-            ? describeSubmitFailure(cause)
-            : describePollFailure(cause, jobId.value)
+        '无法提交。原因：尚未选择出图工作流。下一步：在工作流下拉中选择一个可用工作流后重试。'
       status.value = 'failed'
       return false
     }
+
+    if (activeSlotCount.value === 0) {
+      errorMessage.value =
+        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。'
+      status.value = 'failed'
+      return false
+    }
+
+    if (batchOverLimit.value) {
+      errorMessage.value = `无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`
+      status.value = 'failed'
+      return false
+    }
+
+    // 能力预判：M（非空槽数）< N（工作流输入数）时先确认，不做静默自动切换。
+    const inputCount = workflowInputCount.value
+    if (inputCount > 0 && activeSlotCount.value < inputCount) {
+      workflowDowngrade.value = {
+        message: describeWorkflowDowngrade(inputCount, activeSlotCount.value),
+        slotCount: activeSlotCount.value,
+        inputCount,
+        candidates: buildWorkflowDowngradeCandidates(
+          workflows.value,
+          workflowPath.value,
+          activeSlotCount.value,
+        ),
+      }
+      return false
+    }
+
+    const groups = buildCurrentBatchGroups()
+    return runBatch(groups)
+  }
+
+  /** 降级确认：切到候选工作流（按新 caps 重建尺寸）后继续提交。 */
+  async function confirmWorkflowDowngrade(path: string): Promise<boolean> {
+    if (!workflowDowngrade.value) return false
+    workflowDowngrade.value = null
+    workflowPath.value = path
+    // watch 是 sync，但显式再对齐一次，保证提交体不会带旧工作流的尺寸参数。
+    reconcileSizeSelections()
+    return submit()
+  }
+
+  /**
+   * 降级确认：不切换工作流，仍然提交。
+   *
+   * 空槽允许提交是硬要求；后端会尝试裁剪工作流副本，成功则照常出图，
+   * 无法裁剪时返回 400（原文由 `describeSubmitFailure` 展示给用户）。
+   */
+  async function confirmCurrentWorkflowDowngrade(): Promise<boolean> {
+    if (!workflowDowngrade.value) return false
+    workflowDowngrade.value = null
+    return runBatch(buildCurrentBatchGroups())
+  }
+
+  /** 取消降级：不提交，保持当前工作流与选择。 */
+  function cancelWorkflowDowngrade(): void {
+    workflowDowngrade.value = null
+    errorMessage.value = ''
+    status.value = 'idle'
   }
 
   /** 重试：清空失败态后重新提交（沿用当前槽位与设置）。 */
@@ -786,6 +1378,27 @@ export function useReferenceRecipe() {
     workflowsLoading,
     workflowsError,
     loadStudioWorkflows,
+    currentWorkflow,
+    workflowInputCount,
+    // 能力与尺寸
+    caps,
+    qualityOptions,
+    aspectRatios,
+    defaultRatio,
+    qualitySelection,
+    ratioSelection,
+    toggleQuality,
+    toggleRatio,
+    followsReferenceSize,
+    baseSeed,
+    setBaseSeed,
+    // 批量预览
+    slotCounts,
+    filledSlotNames,
+    activeSlotCount,
+    batchTotal,
+    batchOverLimit,
+    batchLimitMessage,
     // 提交设置
     style,
     promptSuffix,
@@ -793,18 +1406,23 @@ export function useReferenceRecipe() {
     extraName,
     setExtra,
     clearExtra,
+    // 降级确认
+    workflowDowngrade,
+    confirmWorkflowDowngrade,
+    confirmCurrentWorkflowDowngrade,
+    cancelWorkflowDowngrade,
     // 运行状态
     status,
     progress,
     progressPercent,
     jobId,
+    jobIds,
     resultUrls,
     primaryResultUrl,
     previousResultUrl,
     errorMessage,
     busy,
     selectedCount,
-    missingSlots,
     canSubmit,
     submit,
     retry,

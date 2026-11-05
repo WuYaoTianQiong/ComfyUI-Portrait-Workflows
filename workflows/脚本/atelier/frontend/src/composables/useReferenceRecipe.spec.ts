@@ -7,24 +7,22 @@
  * - 工作流默认选中（default 优先，缺失回落首条）；
  * - 进度文案与终态集合（与 React `recipeClient` 一致）；
  * - 结果图地址（`/api/media/image?...`、去重、默认 type=output）；
- * - 三句式中文错误；
- * - 轮询 1500ms 语义：连续 3 次失败才抛错、超时抛 RecipeTimeoutError；
- * - 「从槽位跳库页，选完自动回合成台」的一次性跳转约定。
+ * - 三句式中文错误（含后端空槽 / 输入数 / 白名单原文）；
+ * - 轮询 1500ms 语义：连续 3 次失败才抛错、超时抛 RecipeTimeoutError。
+ *
+ * 多选批量（笛卡尔积、上限、caps 过滤、seed 派生、切换工作流清空尺寸）
+ * 的用例见 `useReferenceRecipeBatch.spec.ts`。
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
-import type { Router } from 'vue-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '@/api/reference'
-import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 
 import {
   DEFAULT_RECIPE_SEED,
   MAX_CONSECUTIVE_POLL_ERRORS,
   RecipeSubmitError,
   RecipeTimeoutError,
-  armStudioReturn,
   buildRecipeRequest,
   costumeLibraryOf,
   describeJobFailure,
@@ -37,7 +35,6 @@ import {
   normalizeRecipeStyle,
   pollRecipeJob,
   recipeJobResultUrls,
-  resetStudioReturn,
   resolveInitialWorkflowPath,
   submitRecipe,
   workflowDisplayName,
@@ -118,6 +115,7 @@ function workflow(path: string, overrides: Partial<StudioWorkflowOption> = {}): 
     source: '图库专用',
     relPath: path,
     imageSlots: 3,
+    inputCount: 3,
     recommended: false,
     ...overrides,
   }
@@ -296,7 +294,8 @@ describe('三句式中文错误', () => {
     expect(upload).toContain('下一步：')
 
     const missing = describeSubmitFailure(new RecipeSubmitError('提交出图任务失败', 400, '缺少姿势'))
-    expect(missing).toContain('补齐人像、服装、姿势')
+    expect(missing).toContain('缺少姿势')
+    expect(missing).toContain('补齐对应槽位')
   })
 
   it('任务失败终态带上后端条目错误', () => {
@@ -322,6 +321,33 @@ describe('三句式中文错误', () => {
     const network = describePollFailure(new Error('查询任务状态失败：网络请求失败'), 12)
     expect(network).toContain('连续 3 次查询失败')
     expect(network).toContain('下一步：')
+  })
+
+  it('新增后端错误文案保留原文并给下一步', () => {
+    const noReference = describeSubmitFailure(
+      new RecipeSubmitError('提交出图任务失败', 400, '请至少选择一个参考图或上传一张参考图'),
+    )
+    expect(noReference).toContain('请至少选择一个参考图或上传一张参考图')
+    expect(noReference).toContain('下一步：')
+
+    const tooMany = describeSubmitFailure(
+      new RecipeSubmitError('提交出图任务失败', 400, '该工作流只有 3 个输入，但提交了 4 张'),
+    )
+    expect(tooMany).toContain('该工作流只有 3 个输入，但提交了 4 张')
+
+    const untrimmable = describeSubmitFailure(
+      new RecipeSubmitError(
+        '提交出图任务失败',
+        400,
+        '该工作流有 4 个输入且无法裁剪到 2 个；请至少提供 4 张参考图',
+      ),
+    )
+    expect(untrimmable).toContain('无法裁剪')
+
+    const outOfScope = describeSubmitFailure(
+      new RecipeSubmitError('提交出图任务失败', 400, '该工作流不属于合成台可用范围'),
+    )
+    expect(outOfScope).toContain('不属于合成台可用范围')
   })
 })
 
@@ -415,58 +441,3 @@ describe('submitRecipe / pollRecipeJob', () => {
   })
 })
 
-describe('槽位选完自动回合成台', () => {
-  beforeEach(() => {
-    useReferenceRecipeDraft().clearDraft()
-    resetStudioReturn()
-  })
-
-  it('跳库页后选中新条目 → replace 回 tab=studio', async () => {
-    const replace = vi.fn(async (..._args: unknown[]) => undefined)
-    const router = {
-      currentRoute: { value: { path: '/reference', query: { tab: 'portrait' }, hash: '' } },
-      replace,
-    } as unknown as Router
-
-    armStudioReturn('portrait', router)
-    useReferenceRecipeDraft().setPortrait(portrait({ id: 'new-portrait' }))
-    await nextTick()
-
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace.mock.calls[0][0]).toMatchObject({
-      path: '/reference',
-      query: { tab: 'studio' },
-    })
-  })
-
-  it('点同一张取消（id 未变化）不跳转', async () => {
-    const draft = useReferenceRecipeDraft()
-    draft.setPortrait(portrait({ id: 'keep' }))
-
-    const replace = vi.fn(async (..._args: unknown[]) => undefined)
-    const router = {
-      currentRoute: { value: { path: '/reference', query: { tab: 'portrait' }, hash: '' } },
-      replace,
-    } as unknown as Router
-
-    armStudioReturn('portrait', router)
-    draft.setPortrait(null)
-    await nextTick()
-
-    expect(replace).not.toHaveBeenCalled()
-  })
-
-  it('用户已手动回到合成台时不抢导航', async () => {
-    const replace = vi.fn(async (..._args: unknown[]) => undefined)
-    const router = {
-      currentRoute: { value: { path: '/reference', query: { tab: 'studio' }, hash: '' } },
-      replace,
-    } as unknown as Router
-
-    armStudioReturn('costume', router)
-    useReferenceRecipeDraft().setCostume(costume({ id: 'new-costume' }))
-    await nextTick()
-
-    expect(replace).not.toHaveBeenCalled()
-  })
-})

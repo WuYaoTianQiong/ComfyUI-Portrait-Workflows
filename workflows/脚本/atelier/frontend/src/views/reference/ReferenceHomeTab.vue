@@ -264,14 +264,21 @@ interface RecipeSlotView {
   label: string
   hint: string
   tab: 'portrait' | 'costume' | 'pose'
+  /** 该槽已选条目数（多选口径）。 */
+  count: number
+  /** 首条名称；多选时展示为「首条名称 等 N 张」。 */
   name: string | null
+  /** 首条缩略图。 */
   thumb: string | null
 }
 
 const recipeSlots = computed<RecipeSlotView[]>(() => {
   const portrait = draft.portrait.value
   const costume = draft.costume.value
-  const pose = draft.pose.value
+  const posed = draft.pose.value
+  const portraitFirst = portrait[0]
+  const costumeFirst = costume[0]
+  const poseFirst = posed[0]
 
   return [
     {
@@ -279,29 +286,33 @@ const recipeSlots = computed<RecipeSlotView[]>(() => {
       label: '人像',
       hint: '选择人像',
       tab: 'portrait',
-      name: portrait ? portrait.发型名称 || portrait.标题 || null : null,
-      thumb: portrait ? referenceImageUrl(portraitDto(portrait), 'thumb') : null,
+      count: portrait.length,
+      name: portraitFirst ? portraitFirst.发型名称 || portraitFirst.标题 || null : null,
+      thumb: portraitFirst ? referenceImageUrl(portraitDto(portraitFirst), 'thumb') : null,
     },
     {
       key: 'costume',
       label: '服装',
       hint: '选择服装',
       tab: 'costume',
-      name: costume ? costume.服装名称 || null : null,
-      thumb: costume ? referenceImageUrl(costumeDto(costume), 'thumb') : null,
+      count: costume.length,
+      name: costumeFirst ? costumeFirst.服装名称 || null : null,
+      thumb: costumeFirst ? referenceImageUrl(costumeDto(costumeFirst), 'thumb') : null,
     },
     {
       key: 'pose',
       label: '姿势',
       hint: '选择姿势',
       tab: 'pose',
-      name: pose ? pose.item.姿势名称 || null : null,
-      thumb: pose ? poseThumbnailUrl(pose.item, pose.useDepth) : null,
+      count: posed.length,
+      name: poseFirst ? poseFirst.item.姿势名称 || null : null,
+      thumb: poseFirst ? poseThumbnailUrl(poseFirst.item, poseFirst.useDepth) : null,
     },
   ]
 })
 
-const selectedCount = computed(() => draft.count.value)
+/** 三槽选中的条目总数（多选口径，用于按钮副文案）。 */
+const selectedCount = computed(() => draft.totalSelected.value)
 const countLabel = computed(() => draft.countLabel.value)
 const hasDraft = computed(() => selectedCount.value > 0)
 
@@ -426,7 +437,12 @@ onMounted(() => {
     <!-- 当前角色配方摘要：三槽 + 进入合成台 n/3 -->
     <section class="home-recipe" data-testid="reference-home-recipe">
       <div class="home-recipe__head">
-        <h2 class="home-recipe__title">当前角色配方</h2>
+        <div class="home-recipe__title-group">
+          <h2 class="home-recipe__title">当前角色配方</h2>
+          <span class="home-recipe__total" data-testid="reference-home-recipe-total">
+            共 {{ selectedCount }} 张
+          </span>
+        </div>
         <div class="home-recipe__actions">
           <button
             type="button"
@@ -460,7 +476,7 @@ onMounted(() => {
                 stroke-linejoin="round"
               />
             </svg>
-            进入合成台 ({{ selectedCount }}/{{ draft.total }})
+            进入合成台 ({{ countLabel }})
           </button>
         </div>
       </div>
@@ -472,7 +488,7 @@ onMounted(() => {
           type="button"
           class="home-slot"
           :data-testid="`home-slot-${slot.key}`"
-          :title="slot.name ? `已选：${slot.name}` : slot.hint"
+          :title="slot.count ? `已选 ${slot.count} 张${slot.name ? `：${slot.name}` : ''}` : slot.hint"
           @click="goTab(slot.tab)"
         >
           <img
@@ -501,7 +517,14 @@ onMounted(() => {
           </span>
 
           <span class="home-slot__body">
-            <span class="home-slot__label">{{ slot.label }}</span>
+            <span class="home-slot__label-row">
+              <span class="home-slot__label">{{ slot.label }}</span>
+              <span
+                v-if="slot.count"
+                class="home-slot__count"
+                :data-testid="`home-slot-count-${slot.key}`"
+              >×{{ slot.count }}</span>
+            </span>
             <span v-if="slot.name" class="home-slot__name" :title="slot.name">{{ slot.name }}</span>
             <span v-else class="home-slot__hint">{{ slot.hint }}</span>
           </span>
@@ -727,6 +750,26 @@ onMounted(() => {
   line-height: 1.3;
 }
 
+/* 标题 + 总选中数（多选口径） */
+.home-recipe__title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.home-recipe__total {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fafafa;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+}
+
 .home-recipe__actions {
   display: flex;
   flex-wrap: wrap;
@@ -851,6 +894,22 @@ onMounted(() => {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+/* 槽位标签行：名称 + 多选数量 */
+.home-slot__label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.home-slot__count {
+  flex: none;
+  color: #fafafa;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 /* 槽位标签 10px，名称 12px / 500（React text-[10px] / text-xs） */
