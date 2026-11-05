@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { CategoryNode } from '../api/types'
 import { flattenCategories } from '../utils/categories'
@@ -22,12 +22,32 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: number | null] }>()
 
 const flat = computed(() => flattenCategories(props.categories))
+
+/**
+ * 非 inline 模式下「分类」分组可折叠，默认展开。
+ * 仅控制展示，不参与 v-model：收起再展开后已选分类保持不变（选中值在父组件）。
+ * inline（提示词页横向药丸条）不渲染组头，也不受该状态影响。
+ */
+const collapsed = ref(false)
+
+function toggleCollapsed() {
+  if (props.inline) return
+  collapsed.value = !collapsed.value
+}
 </script>
 
 <template>
   <section class="group">
-    <div v-if="!inline" class="group-head"><span>分类</span></div>
-    <div class="cat-list" :class="{ inline }">
+    <button
+      v-if="!inline"
+      type="button"
+      class="group-head"
+      :aria-expanded="!collapsed"
+      @click="toggleCollapsed"
+    >
+      <span>{{ collapsed ? '▸' : '▾' }} 分类</span>
+    </button>
+    <div v-show="inline || !collapsed" class="cat-list" :class="{ inline }">
       <button
         class="cat"
         :class="{ active: modelValue === null }"
@@ -52,13 +72,32 @@ const flat = computed(() => flattenCategories(props.categories))
 </template>
 
 <style scoped>
+/* 与 GalleryView 侧栏其它可折叠分面组头保持一致（字号/颜色/hover/右侧不占位）。 */
 .group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  margin: 0 0 var(--gap-sm);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  line-height: inherit;
   font-size: var(--fs-sm);
   color: var(--muted);
-  margin-bottom: var(--gap-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.group-head:hover {
+  color: var(--text);
+}
+
+.group-head:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .cat-list {
