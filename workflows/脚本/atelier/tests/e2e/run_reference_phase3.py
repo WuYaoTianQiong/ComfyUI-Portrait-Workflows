@@ -59,8 +59,11 @@
 
     T29/T30（embedded 去重）专项：`T3_E2E_ONLY=nav` 额外校验 iframe 内不再出现
     侧栏品牌块、「返回画廊」、顶栏「画室画廊」与面包屑根，同时保留 SidebarTrigger、
-    三组侧栏导航与角色配方 footer；外层 Vue 仍保持 9 项导航，直接访问 `/ref-web/`
-    （非 embedded）仍保留 3 个返回入口。
+    三组侧栏导航与角色配方 footer；外层 Vue 仍保持 9 项导航。
+    T31/T32（统一入口）专项：`T3_E2E_ONLY=nav` 追加校验直接访问 /ref-web/、
+    /ref-web/poses 会整页归壳到 /reference?path=...，/reference 无 path 时仍为外壳；
+    三入口外层仅一套 9 项导航、iframe 内无品牌/返回入口/全局导航；非法 ?path=
+    回落 /ref-web/?embedded=1 且 console 0；390x844 无横向溢出。
 
 跑法（二选一，脚本会自动判断是否需要自起实例）：
 
@@ -86,7 +89,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 # ---------------------------------------------------------------------------
 # 路径与常量
@@ -2971,8 +2974,12 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
     errors: list[str] = []
     page = new_page(ctx, errors, "t21-nav")
     try:
-        status = goto_settle(page, "/ref-web/")
-        check(status == 200, "[T21] /ref-web/ 返回 200", f"status={status}")
+        # T31 之后直接访问 `/ref-web/` 会整页归壳到 `/reference`，React 独立导航只在
+        # 显式 embedded=1 的顶层页面上保留；本专项验证后者（归壳行为见 check_unified_entry）。
+        observe("T21 语义调整：直接 /ref-web 已归壳，本专项改用 /ref-web/?embedded=1 验证 React 独立导航",
+                "T31 统一入口后 deep link 不再原地渲染 React 站点")
+        status = goto_settle(page, "/ref-web/?embedded=1")
+        check(status == 200, "[T21] /ref-web/?embedded=1 返回 200", f"status={status}")
 
         # 直接访问（非 embedded）时 Vue 侧不参与，仪表盘页签与 React 侧均同步渲染；
         # 仍等待面包屑出现，避免把首屏加载中的空 dom 误判成缺项。
@@ -3074,7 +3081,7 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
               body_text[:60].replace("\n", " "))
 
         # e. 点击画廊 -> /gallery 200
-        goto_settle(page, "/ref-web/")
+        goto_settle(page, "/ref-web/?embedded=1")
         _nav_scope(page).locator("div > a").filter(has_text="画廊").first.click()
         page.wait_for_function("() => window.location.pathname === '/gallery'", timeout=30000)
         page.wait_for_timeout(1200)
@@ -3085,18 +3092,19 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
         check(gallery_status == 200, "[T21] /gallery 返回 200", f"status={gallery_status}")
         page.screenshot(path=str(shots_dir / "t21_nav_gallery.png"))
 
-        # e. 点击参考图库 -> 回到 /ref-web/
-        goto_settle(page, "/ref-web/")
+        # e. 点击参考图库：T31 后原生链接会整页归壳到 /reference?path=/ref-web
+        goto_settle(page, "/ref-web/?embedded=1")
         _nav_scope(page).locator("div > a").filter(has_text="参考图库").first.click()
-        page.wait_for_function(
-            "() => /^\\/ref-web\\/?$/.test(window.location.pathname)", timeout=30000)
+        page.wait_for_function("() => location.pathname === '/reference'", timeout=30000)
         page.wait_for_timeout(800)
         ref_url = page.url
-        check(re.fullmatch(r"https?://[^/]+/ref-web/?", ref_url) is not None,
-              "[T21] 参考图库回到 /ref-web/", ref_url)
+        ref_parsed = urlsplit(ref_url)
+        check(ref_parsed.path.rstrip("/") == "/reference"
+              and parse_qs(ref_parsed.query).get("path") in (["/ref-web"], ["/ref-web/"]),
+              "[T21] 参考图库入口归壳到 /reference?path=/ref-web(/)", ref_url)
 
         # h. poses 裂图 0（不重复跑四页全量）
-        poses_status = goto_settle(page, "/ref-web/poses", "动作姿势库")
+        poses_status = goto_settle(page, "/ref-web/poses?embedded=1", "动作姿势库")
         check(poses_status == 200, "[T21] /ref-web/poses 返回 200", f"status={poses_status}")
         wait_images_settled(page)
         poses_stats = image_stats(page)
@@ -3108,7 +3116,7 @@ def check_nav_merge(browser, shots_dir: Path) -> None:
 
         # f. 窄屏 390x844：导航可横向滚动、页面不横向溢出
         page.set_viewport_size({"width": 390, "height": 844})
-        goto_settle(page, "/ref-web/")
+        goto_settle(page, "/ref-web/?embedded=1")
         scroll_data = page.evaluate(
             """() => {
                 const nav = document.querySelector('nav[aria-label="画室全局导航"]');
@@ -3447,6 +3455,449 @@ def check_embed_nav(browser, shots_dir: Path) -> None:
         ctx.close()
 
 
+# ---------------------------------------------------------------------------
+# T31/T32 统一入口深链专项
+# ---------------------------------------------------------------------------
+#: 外层 Vue 顶栏 9 项（与 check_nav_merge 的 NAV_ITEMS 文案一致）。
+T32_OUTER_LABELS = ["画廊", "参考图库", "提示词", "组合器", "图像编辑", "批量超分",
+                    "分类与标签", "任务", "统计"]
+#: 外层与 iframe 两份 document 各自记录错误，避免 iframe 的 pageerror 不冒泡。
+T32_INIT_SCRIPT = (
+    "window.__t32errs = [];"
+    "window.addEventListener('error', (e) => { try { window.__t32errs.push(String(e.message)); } catch (_) {} });"
+    "window.addEventListener('unhandledrejection', (e) => { try { window.__t32errs.push(String(e.reason)); } catch (_) {} });"
+)
+
+
+def _t32_new_page(browser, tag: str, viewport: dict | None = None):
+    """新 context + 错误收集（外层/iframe 各一份），返回 (ctx, page, errors, navs)。"""
+    ctx = browser.new_context(viewport=viewport or {"width": 1500, "height": 950})
+    ctx.add_init_script(T32_INIT_SCRIPT)
+    errors: list[str] = []
+    page = new_page(ctx, errors, tag)
+    navs: list[str] = []
+    page.on("framenavigated", lambda frame: navs.append(frame.url or ""))
+    return ctx, page, errors, navs
+
+
+def _t32_wait_shell(page, timeout: int = 30000) -> None:
+    """等待非 embedded 深链整页 replace 到 Vue 外壳，并等外层 9 项到齐。"""
+    page.wait_for_function("() => location.pathname === '/reference'", timeout=timeout)
+    page.wait_for_timeout(1200)
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_function(
+            "() => document.querySelectorAll('nav.tabs button').length >= 9",
+            timeout=20000,
+        )
+    except Exception:
+        pass
+
+
+def _t32_inner_frame(page):
+    """拿到 iframe 的 FrameLocator 并等 React 根挂载。"""
+    frame = page.frame_locator(".reference-embed iframe")
+    try:
+        frame.locator("#root > *").first.wait_for(state="attached", timeout=30000)
+    except Exception:
+        pass
+    page.wait_for_timeout(1200)
+    return frame
+
+
+def _t32_inner_image_stats(frame) -> dict:
+    return frame.locator("body").evaluate(
+        """() => {
+            const imgs = Array.from(document.images);
+            const broken = imgs.filter((i) => i.complete && i.naturalWidth === 0);
+            return {
+                total: imgs.length,
+                broken: broken.length,
+                src: broken.slice(0, 3).map((i) => i.currentSrc || i.src),
+            };
+        }"""
+    )
+
+
+def _t32_inner_errors(frame) -> list[str]:
+    try:
+        return frame.locator("body").evaluate("() => window.__t32errs || []")
+    except Exception:
+        return []
+
+
+def _t32_outer_injected_errors(page) -> list[str]:
+    try:
+        return page.evaluate("() => window.__t32errs || []")
+    except Exception:
+        return []
+
+
+def _t32_assert_shell_chrome(page, frame, label: str) -> None:
+    """外层单导航 + iframe 内无品牌/返回入口/全局导航（三入口共用断言）。"""
+    btns = page.locator("nav.tabs button")
+    labels = [(btns.nth(i).inner_text() or "").strip() for i in range(btns.count())]
+    check(btns.count() == 9, f"[T32] {label} 外层顶栏 9 项", f"count={btns.count()}")
+    check(labels == T32_OUTER_LABELS, f"[T32] {label} 外层顶栏文案完整", f"labels={labels}")
+    active = [
+        text for i, text in enumerate(labels)
+        if "active" in (btns.nth(i).get_attribute("class") or "").split()
+    ]
+    check(active == ["参考图库"], f"[T32] {label} 仅参考图库 active", f"active={active}")
+
+    outer_nav = page.locator('nav[aria-label="画室全局导航"]')
+    check(outer_nav.count() == 0, f"[T32] {label} 外层无 React 独立全局导航",
+          f"count={outer_nav.count()}")
+
+    check(frame.locator("nav.tabs").count() == 0,
+          f"[T32] {label} iframe 内 nav.tabs 为 0",
+          f"count={frame.locator('nav.tabs').count()}")
+    check(frame.locator('[data-slot="sidebar-header"]').count() == 0,
+          f"[T32] {label} iframe 内 sidebar-header 为 0",
+          f"count={frame.locator('[data-slot=\"sidebar-header\"]').count()}")
+    check(frame.locator('nav[aria-label="画室全局导航"]').count() == 0,
+          f"[T32] {label} iframe 内无全局导航",
+          f"count={frame.locator('nav[aria-label=\"画室全局导航\"]').count()}")
+    check(frame.locator('text="返回画廊"').count() == 0,
+          f"[T32] {label} iframe 内『返回画廊』为 0",
+          f"count={frame.locator('text=\"返回画廊\"').count()}")
+    check(frame.locator('text="画室画廊"').count() == 0,
+          f"[T32] {label} iframe 内『画室画廊』为 0",
+          f"count={frame.locator('text=\"画室画廊\"').count()}")
+    check(frame.locator('a[href="/gallery"]').count() == 0,
+          f"[T32] {label} iframe 内 `/gallery` 返回链接为 0",
+          f"count={frame.locator('a[href=\"/gallery\"]').count()}")
+
+    inner_text = frame.locator("body").inner_text(timeout=15000)
+    leaked = [word for word in ["提示词", "组合器", "批量超分", "统计"] if word in inner_text]
+    check(not leaked, f"[T32] {label} iframe 正文无外层导航项", f"命中={leaked}")
+
+    # 侧栏核心导航仍在，证明 iframe 不是空壳/白屏。
+    for item in ["图库总览", "动作姿势库", "服装穿搭库", "人像颜值库"]:
+        check(item in inner_text, f"[T32] {label} iframe 侧栏含『{item}』", "")
+    check(frame.locator('[data-slot="sidebar-trigger"]').count() == 1,
+          f"[T32] {label} iframe SidebarTrigger 仍在",
+          f"count={frame.locator('[data-slot=\"sidebar-trigger\"]').count()}")
+
+
+def _t32_finish_entry(page, frame, errors: list[str], label: str, shot: Path) -> None:
+    """iframes 裂图 0 + 外层/iframe console 0 + 截图。"""
+    stats = _t32_inner_image_stats(frame)
+    check(stats["broken"] == 0, f"[T32] {label} iframe 裂图为 0",
+          f"broken={stats['broken']}/{stats['total']} src={stats['src']}")
+    inner_errs = _t32_inner_errors(frame)
+    outer_injected = _t32_outer_injected_errors(page)
+    check(not errors and not inner_errs and not outer_injected,
+          f"[T32] {label} 外层与 iframe console/pageerror 为 0",
+          f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errs[:2]}")
+    try:
+        page.screenshot(path=str(shot))
+    except Exception as exc:
+        observe(f"[T32] {label} 截图失败", f"{type(exc).__name__}: {exc}")
+
+
+def _t32_entry(browser, label: str, path: str, expected_path: str | None,
+               shots_dir: Path, shot_name: str) -> dict | None:
+    """打开一个入口并断言：最终 URL、外层单导航、iframe 单导航、深链内容。"""
+    ctx, page, errors, navs = _t32_new_page(browser, f"t32-{label}")
+    try:
+        resp = page.goto(BASE + path, wait_until="domcontentloaded", timeout=60000)
+        status = resp.status if resp else None
+        check(status == 200, f"[T32] {label} 返回 200", f"status={status}")
+        _t32_wait_shell(page)
+
+        final_path = urlsplit(page.url).path.rstrip("/") or "/"
+        check(final_path == "/reference", f"[T32] {label} 最终 URL 为 /reference",
+              page.url)
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, f"[T32] {label} 恰有 1 个 iframe", f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check("embedded=1" in src, f"[T32] {label} iframe src 含 embedded=1", src or "无 src")
+
+        frame = _t32_inner_frame(page)
+        _t32_assert_shell_chrome(page, frame, label)
+        _t32_finish_entry(page, frame, errors, label, shots_dir / shot_name)
+        return {"url": page.url, "src": src, "navs": list(navs), "errors": list(errors)}
+    except Exception as exc:
+        check(False, f"[T32] {label} 专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / f"t32_{label}_error.png"))
+        except Exception:
+            pass
+        return None
+    finally:
+        ctx.close()
+
+
+def _t32_entry_home(browser, shots_dir: Path) -> None:
+    section("T32-a 直接访问 /ref-web/ 自动归壳")
+    ctx, page, errors, navs = _t32_new_page(browser, "t32-home")
+    try:
+        resp = page.goto(BASE + "/ref-web/", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, "[T32-a] /ref-web/ 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        query = page.evaluate("() => new URLSearchParams(location.search).get('path')")
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T32-a] 最终 URL 为 /reference", page.url)
+        check(query == "/ref-web/", "[T32-a] path 参数为原始深链 /ref-web/", f"path={query!r}")
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, "[T32-a] 恰有 1 个 iframe", f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check(urlsplit(src or "/").path == "/ref-web/", "[T32-a] iframe 指向 /ref-web/", src)
+        check("embedded=1" in src, "[T32-a] iframe src 含 embedded=1", src)
+
+        frame = _t32_inner_frame(page)
+        _t32_assert_shell_chrome(page, frame, "a.home")
+        check(frame.locator('nav[aria-label="breadcrumb"]').first.inner_text().strip() == "图库总览",
+              "[T32-a] iframe 面包屑为『图库总览』",
+              frame.locator('nav[aria-label="breadcrumb"]').first.inner_text().strip())
+        _t32_finish_entry(page, frame, errors, "a.home", shots_dir / "t32_entry_home.png")
+    except Exception as exc:
+        check(False, "[T32-a] 专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t32_home_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t32_entry_poses(browser, shots_dir: Path) -> None:
+    section("T32-b 直接访问 /ref-web/poses 深链归壳并渲染姿势内容")
+    ctx, page, errors, navs = _t32_new_page(browser, "t32-poses")
+    try:
+        resp = page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, "[T32-b] /ref-web/poses 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        query = page.evaluate("() => new URLSearchParams(location.search).get('path')")
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T32-b] 最终 URL 为 /reference", page.url)
+        check(query == "/ref-web/poses", "[T32-b] path 参数保留 poses 深链", f"path={query!r}")
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, "[T32-b] 恰有 1 个 iframe", f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check("/ref-web/poses" in src, "[T32-b] iframe src 含 /ref-web/poses", src)
+        check("embedded=1" in src, "[T32-b] iframe src 含 embedded=1", src)
+
+        frame = _t32_inner_frame(page)
+        _t32_assert_shell_chrome(page, frame, "b.poses")
+
+        inner_text = frame.locator("body").inner_text(timeout=15000)
+        check("动作姿势库" in inner_text, "[T32-b] iframe 渲染『动作姿势库』标题", "")
+        check(frame.locator("h1").filter(has_text="动作姿势库").count() >= 1,
+              "[T32-b] iframe h1 为动作姿势库",
+              f"count={frame.locator('h1').filter(has_text='动作姿势库').count()}")
+        join_cards = frame.locator("button:has-text('加入配方')").count()
+        check(join_cards >= 10, "[T32-b] iframe 姿势卡片可见", f"加入配方按钮={join_cards}")
+        breadcrumb = frame.locator('nav[aria-label="breadcrumb"]').first.inner_text().strip()
+        check(breadcrumb == "动作姿势库", "[T32-b] iframe 面包屑为『动作姿势库』",
+              f"breadcrumb={breadcrumb!r}")
+        _t32_finish_entry(page, frame, errors, "b.poses", shots_dir / "t32_entry_poses.png")
+
+        # T32-d：iframe 内不得再发生二次重定向，也不得嵌套 /reference iframe。
+        frames = [f.url for f in page.frames]
+        inner_frames = [url for url in frames if "/ref-web" in url]
+        check(len(inner_frames) == 1, "[T32-d] 仅 1 个 /ref-web iframe frame",
+              f"frames={frames}")
+        if inner_frames:
+            check("embedded=1" in inner_frames[0],
+                  "[T32-d] iframe frame URL 保持 embedded=1", inner_frames[0])
+            check("/reference" not in inner_frames[0],
+                  "[T32-d] iframe frame URL 未变成 /reference", inner_frames[0])
+        nested = frame.locator('iframe[src*="/reference"]').count()
+        check(nested == 0, "[T32-d] iframe 内无 /reference 嵌套 iframe", f"count={nested}")
+        inner_navs = [url for url in navs if "/ref-web" in url]
+        inner_embedded_navs = [url for url in inner_navs if "embedded=1" in url]
+        check(set(inner_embedded_navs) == {BASE + "/ref-web/poses?embedded=1"},
+              "[T32-d] iframe 仅加载过一次 embedded=1 深链",
+              f"navs={inner_embedded_navs}")
+        check(not any("/reference" in url for url in inner_embedded_navs),
+              "[T32-d] iframe 未二次导航到 /reference", f"navs={inner_embedded_navs}")
+    except Exception as exc:
+        check(False, "[T32-b] 专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t32_poses_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t32_entry_reference(browser, shots_dir: Path) -> None:
+    section("T32-c 直接访问 /reference（无 path 参数）")
+    ctx, page, errors, navs = _t32_new_page(browser, "t32-reference")
+    try:
+        resp = page.goto(BASE + "/reference", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, "[T32-c] /reference 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T32-c] 最终 URL 为 /reference", page.url)
+        query = page.evaluate("() => new URLSearchParams(location.search).get('path')")
+        check(query is None, "[T32-c] 无 path 参数", f"path={query!r}")
+
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, "[T32-c] 恰有 1 个 iframe", f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check(urlsplit(src or "/").path.rstrip("/") == "/ref-web",
+              "[T32-c] iframe 指向 /ref-web/", src)
+        check("embedded=1" in src, "[T32-c] iframe src 含 embedded=1", src)
+        check(urlsplit(src or "/").query == "embedded=1",
+              "[T32-c] iframe src 精确为 /ref-web/?embedded=1", src)
+
+        frame = _t32_inner_frame(page)
+        _t32_assert_shell_chrome(page, frame, "c.reference")
+        _t32_finish_entry(page, frame, errors, "c.reference", shots_dir / "t32_entry_reference.png")
+    except Exception as exc:
+        check(False, "[T32-c] 专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t32_reference_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t32_fallback(browser, shots_dir: Path, raw_query: str, slug: str) -> None:
+    """非法 `?path=` 必须回落到 /ref-web/，且 console 为 0。"""
+    ctx, page, errors, _navs = _t32_new_page(browser, f"t32-fb-{slug}")
+    try:
+        resp = page.goto(f"{BASE}/reference?path={raw_query}",
+                         wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, f"[T32-e] 回退探针 {slug} 返回 200",
+              f"status={resp.status if resp else None}")
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        page.wait_for_timeout(1500)
+        iframe = page.locator(".reference-embed iframe")
+        check(iframe.count() == 1, f"[T32-e] 回退探针 {slug} 恰有 1 个 iframe",
+              f"count={iframe.count()}")
+        src = (iframe.first.get_attribute("src") or "") if iframe.count() else ""
+        check(src == "/ref-web/?embedded=1",
+              f"[T32-e] 回退探针 {slug} iframe 回落 /ref-web/", src or "无 src")
+        bad_marks = [mark for mark in ["passwd", "evil.example", "..", "%2e%2e", "ref-webevil", "\\"]
+                     if mark in src]
+        check(not bad_marks, f"[T32-e] 回退探针 {slug} 未指向非法地址", f"命中={bad_marks}")
+        frame = _t32_inner_frame(page)
+        inner_errs = _t32_inner_errors(frame)
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errs and not outer_injected,
+              f"[T32-e] 回退探针 {slug} console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errs[:2]}")
+        page.screenshot(path=str(shots_dir / f"t32_fallback_{slug}.png"))
+    except Exception as exc:
+        check(False, f"[T32-e] 回退探针 {slug} 执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / f"t32_fallback_{slug}_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def _t32_multi_path(browser, shots_dir: Path) -> None:
+    """重复 path 参数只取第一个合法值（对抗探针）。"""
+    ctx, page, errors, _navs = _t32_new_page(browser, "t32-multi-path")
+    try:
+        page.goto(BASE + "/reference?path=/ref-web/poses&path=/etc/passwd",
+                  wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_selector(".reference-embed iframe", timeout=25000)
+        page.wait_for_timeout(1500)
+        src = page.locator(".reference-embed iframe").first.get_attribute("src") or ""
+        check(src == "/ref-web/poses?embedded=1",
+              "[T32-e+] 重复 path 只取第一个合法值", src or "无 src")
+        check(not errors, "[T32-e+] 重复 path console 为 0", f"page={errors[:2]}")
+        page.screenshot(path=str(shots_dir / "t32_multi_path.png"))
+    except Exception as exc:
+        check(False, "[T32-e+] 重复 path 执行异常", f"{type(exc).__name__}: {exc}")
+    finally:
+        ctx.close()
+
+
+def _t32_narrow(browser, shots_dir: Path) -> None:
+    """390x844 深链入口：外层无横向溢出、9 项完整、iframe 无裂图。"""
+    ctx, page, errors, _navs = _t32_new_page(browser, "t32-narrow",
+                                             viewport={"width": 390, "height": 844})
+    try:
+        resp = page.goto(BASE + "/ref-web/poses", wait_until="domcontentloaded", timeout=60000)
+        check(resp is not None and resp.status == 200, "[T32-f] 窄屏 /ref-web/poses 返回 200",
+              f"status={resp.status if resp else None}")
+        _t32_wait_shell(page)
+        check(urlsplit(page.url).path.rstrip("/") == "/reference",
+              "[T32-f] 窄屏最终 URL 为 /reference", page.url)
+        scroll_data = page.evaluate(
+            """() => {
+                const tabs = document.querySelector('nav.tabs');
+                return {
+                    innerWidth: window.innerWidth,
+                    docScrollWidth: document.documentElement.scrollWidth,
+                    tabsClientWidth: tabs ? tabs.clientWidth : -1,
+                    tabsScrollWidth: tabs ? tabs.scrollWidth : -1,
+                };
+            }"""
+        )
+        check(scroll_data["docScrollWidth"] <= scroll_data["innerWidth"] + 1,
+              "[T32-f] 窄屏页面无横向溢出",
+              f"docScrollWidth={scroll_data['docScrollWidth']} innerWidth={scroll_data['innerWidth']}")
+        check(scroll_data["tabsScrollWidth"] > scroll_data["tabsClientWidth"],
+              "[T32-f] 窄屏外层 tabs 可横向滚动",
+              f"scrollWidth={scroll_data['tabsScrollWidth']} clientWidth={scroll_data['tabsClientWidth']}")
+        btns = page.locator("nav.tabs button")
+        check(btns.count() == 9, "[T32-f] 窄屏外层顶栏 9 项", f"count={btns.count()}")
+        ref_cls = page.locator("nav.tabs button:has-text('参考图库')").first.get_attribute("class") or ""
+        check("active" in ref_cls.split(), "[T32-f] 窄屏参考图库 active", f"class={ref_cls!r}")
+        box = page.locator(".reference-embed iframe").bounding_box()
+        check(bool(box) and box["width"] > 0 and box["height"] > 0,
+              "[T32-f] 窄屏 iframe 可见", f"box={box}")
+        frame = _t32_inner_frame(page)
+        stats = _t32_inner_image_stats(frame)
+        check(stats["broken"] == 0, "[T32-f] 窄屏 iframe 裂图为 0",
+              f"broken={stats['broken']}/{stats['total']} src={stats['src']}")
+        inner_errs = _t32_inner_errors(frame)
+        outer_injected = _t32_outer_injected_errors(page)
+        check(not errors and not inner_errs and not outer_injected,
+              "[T32-f] 窄屏外层与 iframe console/pageerror 为 0",
+              f"page={errors[:2]} outer={outer_injected[:2]} inner={inner_errs[:2]}")
+        page.screenshot(path=str(shots_dir / "t32_narrow_poses.png"))
+    except Exception as exc:
+        check(False, "[T32-f] 窄屏专项执行异常", f"{type(exc).__name__}: {exc}")
+        try:
+            page.screenshot(path=str(shots_dir / "t32_narrow_error.png"))
+        except Exception:
+            pass
+    finally:
+        ctx.close()
+
+
+def check_unified_entry(browser, shots_dir: Path) -> None:
+    """T31/T32：三条入口统一归壳，外层单导航、iframe 内无重复导航与品牌入口。"""
+    section("T32 统一入口深链专项（/ref-web/、/ref-web/poses、/reference）")
+    _t32_entry_home(browser, shots_dir)
+    _t32_entry_poses(browser, shots_dir)
+    _t32_entry_reference(browser, shots_dir)
+
+    section("T32-e 非法 path 回退探针")
+    for raw, slug in [
+        ("/etc/passwd", "passwd"),
+        ("//evil.example/x", "protocol_relative"),
+        ("%2Fref-web%2F%2e%2e%2Fx", "encoded_traversal"),
+        ("%2Fref-webevil%2Fx", "refwebevil"),
+        ("%2Fref-web%5C..%5Cetc", "backslash"),
+    ]:
+        _t32_fallback(browser, shots_dir, raw, slug)
+    _t32_multi_path(browser, shots_dir)
+
+    section("T32-f 窄屏 390x844 深链入口")
+    _t32_narrow(browser, shots_dir)
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -3472,7 +3923,7 @@ def main() -> int:
         check_phase3_dist()
 
         if NAV_ONLY:
-            observe("T3_E2E_ONLY=nav：跑顶栏合并式与跨端无感切换专项",
+            observe("T3_E2E_ONLY=nav：跑顶栏合并式、跨端无感切换与统一入口专项",
                     "跳过阶段一/二/三其余检查与阶段四 TestClient")
         else:
             # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
@@ -3513,6 +3964,7 @@ def main() -> int:
             if NAV_ONLY:
                 check_nav_merge(browser, shots_dir)
                 check_embed_nav(browser, shots_dir)
+                check_unified_entry(browser, shots_dir)
             else:
                 if not P4_ONLY:
                     ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
