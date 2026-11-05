@@ -315,6 +315,8 @@ class WorkflowRow(BaseModel):
     studio_ready: bool = False
     #: 是否为实测推荐项（三槽齐全 + 姿势 LoRA），前端下拉据此打「推荐」标签
     recommended: bool = False
+    #: 工作流里的 LoadImage 输入数（与 find_loadimage_nodes 一致，供合成台按槽位校验）
+    input_count: int = 0
     caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
     params: WorkflowParams | None = None
 

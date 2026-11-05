@@ -54,6 +54,15 @@ def _hair_description(portrait: RecipeEntry) -> str:
     return portrait.facet
 
 
+def _figure_no(index_map: dict[str, int] | None, role: str, default: int) -> int:
+    """角色在提示词里的图号：调用方给了真实图位就按图位，否则用默认递增号。"""
+    if index_map:
+        value = index_map.get(role)
+        if isinstance(value, int) and value > 0:
+            return value
+    return default
+
+
 def build_recipe_prompt(
     portrait: RecipeEntry | None,
     costume: RecipeEntry | None,
@@ -61,8 +70,14 @@ def build_recipe_prompt(
     extra: RecipeEntry | None = None,
     style: str = "realistic",
     prompt_suffix: str = "",
+    index_map: dict[str, int] | None = None,
 ) -> str:
-    """按上游顺序拼出完整提示词；未知画风抛 ValueError（由路由转成 400）。"""
+    """按上游顺序拼出完整提示词；未知画风抛 ValueError（由路由转成 400）。
+
+    `index_map` 是角色 → 工作流真实图号（"portrait"/"costume"/"pose"/"extra"）。
+    合成台空槽裁剪后图位不会压缩重排（例如 Qwen21 缺人像时服装仍是图3、姿势仍是图1），
+    这里必须按真实图号写提示词；不传时退回按出现顺序递增的旧行为。
+    """
     if style not in STYLE_PRESETS:
         raise ValueError(f"不支持的画风：{style}")
 
@@ -75,6 +90,7 @@ def build_recipe_prompt(
     costume_idx = 0
 
     if portrait:
+        num = _figure_no(index_map, "portrait", idx)
         skin = (
             "人物的肤色必须与图一人物一致，所有裸露皮肤（包括服装镂空处露出的皮肤）"
             "必须与脸部肤色统一，统一后的肤色与质感按风格要求呈现。"
@@ -85,23 +101,23 @@ def build_recipe_prompt(
             else "保留图1人物原有可见服装与配饰，不复制姿势参考图的服装或白模外观。"
         )
         clauses.append(
-            f"• 人物：图{idx}中的人物，保持其脸型、五官、发型（{_hair_description(portrait)}）"
+            f"• 人物：图{num}中的人物，保持其脸型、五官、发型（{_hair_description(portrait)}）"
             f"和发色一致。{skin}{outfit}"
         )
         idx += 1
 
     if costume:
-        costume_idx = idx
+        costume_idx = _figure_no(index_map, "costume", idx)
         clauses.append(
-            f"• 服装：让人物穿上图{idx}中展示的整套服装和配饰"
-            f"（参考名称：{costume.name}），每件单品的颜色、款式、面料与配饰都以图{idx}为准，"
+            f"• 服装：让人物穿上图{costume_idx}中展示的整套服装和配饰"
+            f"（参考名称：{costume.name}），每件单品的颜色、款式、面料与配饰都以图{costume_idx}为准，"
             f"名称仅作辅助说明。"
         )
         idx += 1
 
     pose_idx = 0
     if pose:
-        pose_idx = idx
+        pose_idx = _figure_no(index_map, "pose", idx)
         wear = f"，穿着图{costume_idx}的服装" if costume_idx else ""
         body = (
             f"最终画面中的人物是真人，皮肤真实自然{wear}"
@@ -112,12 +128,12 @@ def build_recipe_prompt(
         if pose.angle:
             pose_desc = f"{pose_desc}；镜头角度：{pose.angle}"
         clauses.append(
-            f"• 姿势：严格复现图{idx}中人体模型的身体姿态与镜头角度。"
+            f"• 姿势：严格复现图{pose_idx}中人体模型的身体姿态与镜头角度。"
             f"身体姿态要点：{pose_desc}。"
             "必须逐项落实这些身体部位的状态：重心落在哪条腿、胯部朝哪边顶、"
             "肩线与躯干的前后倾斜、手臂的位置（扶腰/搭肩/下垂）、膝盖的朝向与弯曲程度。"
             "不要画成双脚并拢、身体笔直、手臂自然下垂的站立姿势，不要军姿，不要 T-pose。"
-            f"图{idx}只是动作示意，{body}。"
+            f"图{pose_idx}只是动作示意，{body}。"
         )
         idx += 1
 
@@ -146,8 +162,9 @@ def build_recipe_prompt(
         )
 
     if extra:
+        extra_num = _figure_no(index_map, "extra", idx)
         clauses.append(
-            f"• 附加参考：融合图{idx}（{extra.name or '补充元素'}）中的元素、配饰、背景或光影细节。"
+            f"• 附加参考：融合图{extra_num}（{extra.name or '补充元素'}）中的元素、配饰、背景或光影细节。"
         )
         idx += 1
 

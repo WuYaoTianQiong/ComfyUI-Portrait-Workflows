@@ -1487,8 +1487,9 @@ export interface paths {
         put?: never;
         /**
          * Create Reference Recipe
-         * @description 三图/四图出图：组提示词后直接复用 editor 的批量提交入口。
+         * @description 参考库出图：组提示词后直接复用 editor 的批量提交入口。
          *
+         *     每个槽都允许为空；空槽会在工作流副本上裁掉，提示词编号仍按真实图位书写。
          *     这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、
          *     任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。
          */
@@ -3251,10 +3252,13 @@ export interface components {
         };
         /**
          * RecipeRequest
-         * @description 参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。
+         * @description 参考库出图；人像/服装/姿势/第 4 张每个槽都允许留空。
          *
-         *     优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。
-         *     带第 4 张（库条目或上传图）时自动切四图工作流。
+         *     优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空表示该槽不参与本次出图。
+         *     空槽会在提交前从工作流副本里裁掉，提示词编号仍按工作流真实图位书写。
+         *
+         *     `workflow` 为空时使用合成台默认工作流；非空时必须是 `scope=studio` 的合法
+         *     工作流，否则 400（绝不静默回落到默认值）。
          *
          *     `costume_library` 只影响服装槽：默认本地 `costume`，也可选外链
          *     `costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。
@@ -3340,6 +3344,11 @@ export interface components {
              * @default realistic
              */
             style: string;
+            /**
+             * Workflow
+             * @default
+             */
+            workflow: string;
         };
         /** ReferenceFacetValue */
         ReferenceFacetValue: {
@@ -3922,6 +3931,11 @@ export interface components {
              * @default 0
              */
             image_slots: number;
+            /**
+             * Input Count
+             * @default 0
+             */
+            input_count: number;
             /**
              * Media Kind
              * @default image

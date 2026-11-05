@@ -161,12 +161,11 @@ def get_workflow_media_kind(path: Path) -> str:
 
 
 def find_default_workflow(include_video: bool = False, scope: str = "all") -> str:
-    """默认工作流：studio 范围优先"三槽 + 画廊本机改版"，all 范围优先文件名带「文生图」。"""
+    """默认工作流：studio 范围优先 T0 定稿的三槽链路，all 范围优先文件名带「文生图」。"""
     items = list_valid_workflows(include_video=include_video, scope=scope)
     if scope == "studio":
         # 合成台默认要「人像+服装+姿势」正好三槽：四图会多要一张、双图/单图会缺槽。
-        # 来源优先"画廊本机改版"（本机适配过、模型确定在），其次是"参考库专用"（上游原版，
-        # 可能需要另装模型），最后才是库根里的通用编辑工作流。
+        # 来源权重只用于兜底排序；`_PREFERRED_STUDIO_NAMES` 里的定稿项永远排最前。
         ready = [w for w in items if w["studio_ready"]]
         if ready:
             three = [w for w in ready if w["image_slots"] == 3]
@@ -210,8 +209,10 @@ def _path_source(path: Path) -> str:
 _STUDIO_SOURCE_RANK = {"图库专用": 5, "我的工作流": 4, "上游原版": 3, "旧版归档": 2, "库根": 1}
 
 #: 本机实测能出图、作为默认选中的工作流（按优先级排列）。
+#: 2026-11-05 T0 三候选实测对比后定稿：Qwen21+VNCCS 三图 25 步单人
+#: （人像 + 服装 + 姿势三槽齐全、带姿势 LoRA），与参考库配方的默认保持一致。
 #: 与它在同一来源（图库专用工作流/）的候选按 mtime 排，所以这里写文件名即可。
-_PREFERRED_STUDIO_NAMES = ("图库专用_QwenEdit_GGUF-Q5KM_三图_4步_标准.api.json",)
+_PREFERRED_STUDIO_NAMES = ("图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",)
 
 #: 合成台下拉里打「推荐」标签的工作流。
 #: 2026-11-05 实测定档：它是唯一同时具备「人像槽 + 服装槽 + 姿势槽 + 姿势 LoRA」的链路，

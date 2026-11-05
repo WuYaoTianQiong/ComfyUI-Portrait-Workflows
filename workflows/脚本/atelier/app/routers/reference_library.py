@@ -9,6 +9,8 @@
 - GET /api/reference/items/{library}/{item_id}
 - GET /api/reference/items/{library}/{item_id}/image?kind=thumb|image|depth|depth_thumb
 """
+import copy
+import json
 import logging
 from pathlib import Path
 
@@ -21,6 +23,13 @@ from app.config import settings
 from app.services import reference_library, reference_remote_cache, uploads
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 from app.services.recipe_prompt import RecipeEntry, STYLE_PRESETS, build_recipe_prompt
+from app.services.workflow_parser import (
+    find_image_input_keys,
+    find_loadimage_nodes,
+    image_input_key_index,
+    load_workflow,
+    loadimage_role,
+)
 
 router = APIRouter(tags=["参考图库"])
 logger = logging.getLogger(__name__)
@@ -36,12 +45,28 @@ def log_reference_libraries_on_startup():
     )
 
 
-#: 出图工作流文件名（都在 `settings.library_root` 根目录）。
-THREE_REF_WORKFLOW = "PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json"
-FOUR_REF_WORKFLOW = "PornMaster_Flux2Klein9B_四图参考_6步_自动尺寸.api.json"
+#: 合成台默认工作流：2026-11-05 T0 三候选实测对比后定为 Qwen21 + VNCCS
+#: （三槽齐全 + 姿势 LoRA，25 步单人链路）；空请求一律用它，不再按张数硬绑三图/四图。
+DEFAULT_STUDIO_WORKFLOW = "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
 
-#: 四图工作流里第 4 张的 LoadImage 节点（已接链尾，勿改接法）。
-EXTRA_REF_NODE = "78"
+#: 槽位固定顺序：提示词编号、提交顺序、错误文案都以它为准。
+SLOT_ROLES = ("portrait", "costume", "pose", "extra")
+
+#: 槽位中文名（仅用于错误信息，前端不依赖）
+SLOT_LABELS = {"portrait": "人像", "costume": "服装", "pose": "姿势", "extra": "第 4 张参考"}
+
+#: 参考图分支上可安全删除的节点类型：删掉它们只会移除这一路参考，
+#: 不会影响主链路（KSampler / SaveImage 等不在此列，遇到即停止向下裁剪）。
+_REFERENCE_BRANCH_TYPES = frozenset({
+    "ImageScaleToTotalPixels",
+    "ImageScale",
+    "ImageScaleBy",
+    "ImageResize",
+    "ImageResizeKJ",
+    "ImageResizeKJv2",
+    "VAEEncode",
+    "ReferenceLatent",
+})
 
 #: 服装槽允许的库：本地服装库 + 外链二次元服装库（后者需缓存就绪）。
 COSTUME_LIBRARIES = ("costume", "costume-anime")
@@ -202,10 +227,13 @@ async def get_reference_image(
     )
 
 class RecipeRequest(BaseModel):
-    """参考库三图/四图出图；每张参考可给库条目 id 或 uploads 内路径。
+    """参考库出图；人像/服装/姿势/第 4 张每个槽都允许留空。
 
-    优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空视为缺输入。
-    带第 4 张（库条目或上传图）时自动切四图工作流。
+    优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空表示该槽不参与本次出图。
+    空槽会在提交前从工作流副本里裁掉，提示词编号仍按工作流真实图位书写。
+
+    `workflow` 为空时使用合成台默认工作流；非空时必须是 `scope=studio` 的合法
+    工作流，否则 400（绝不静默回落到默认值）。
 
     `costume_library` 只影响服装槽：默认本地 `costume`，也可选外链
     `costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。
@@ -224,6 +252,8 @@ class RecipeRequest(BaseModel):
     extra_library: str = ""
     extra_id: str = ""
     extra_path: str = ""
+    #: 指定合成台工作流（文件名或库内路径）；空 = 默认 Qwen21+VNCCS 三图
+    workflow: str = ""
     style: str = "realistic"
     prompt_suffix: str = ""
     seed: int = 100000
@@ -296,13 +326,17 @@ def _recipe_entry(library: str, item_id: str, label: str) -> tuple[dict, Path]:
 
 def _resolve_slot(
     library: str, item_id: str, raw_path: str, label: str
-) -> tuple[dict | None, Path]:
-    """`*_id` 优先用库条目，否则回落到 uploads 内路径；条目为 None 表示上传图。"""
+) -> tuple[dict | None, Path | None]:
+    """解析槽位：库条目 / 上传图 / 空槽。
+
+    id 与 path 都为空时返回 `(None, None)` 表示该槽不参与本次出图；
+    其余非法输入（有 id 但查不到、path 越界）仍按原逻辑 400。
+    """
     if item_id.strip():
         return _recipe_entry(library, item_id.strip(), label)
     if raw_path.strip():
         return None, _upload_path(raw_path, label)
-    raise HTTPException(400, f"缺少{label}（库条目 id 或上传图路径）")
+    return None, None
 
 
 #: 上传图没有上游元数据，提示词里用中性描述占位，避免出现空括号。
@@ -329,8 +363,18 @@ def _as_entry(item: dict) -> RecipeEntry:
     )
 
 
-def _slot_info(role: str, item: dict | None, path: Path, library: str) -> dict:
-    """一个槽位的溯源信息：库条目与上传图统一成同一种形状，便于前端/日志核对。"""
+def _slot_info(role: str, item: dict | None, path: Path | None, library: str) -> dict:
+    """一个槽位的溯源信息：库条目、上传图与空槽统一成同一种形状。"""
+    if path is None:
+        # 空槽用 source=empty 明确标记，前端据此显示“未选择”而不是空白假路径
+        return {
+            "role": role,
+            "source": "empty",
+            "library": "",
+            "id": "",
+            "name": "",
+            "path": "",
+        }
     if item is None:
         return {
             "role": role,
@@ -350,10 +394,170 @@ def _slot_info(role: str, item: dict | None, path: Path, library: str) -> dict:
     }
 
 
+class _NotTrimmable(Exception):
+    """该工作流的空槽不能安全裁剪（不是纯文本编码器输入，或删了会断主链路）。"""
+
+
+def _downstream_consumers(api_workflow: dict, node_id: str) -> list[tuple[str, str]]:
+    """返回引用该节点的下游 (节点 id, 输入键)。"""
+    target = str(node_id)
+    out: list[tuple[str, str]] = []
+    for nid, node in api_workflow.items():
+        if not isinstance(node, dict):
+            continue
+        for key, value in (node.get("inputs") or {}).items():
+            if isinstance(value, (list, tuple)) and len(value) == 2 \
+                    and str(value[0]) == target:
+                out.append((str(nid), key))
+    return out
+
+
+def _role_nodes(api_workflow: dict) -> dict[str, str]:
+    """按标题把 LoadImage 映射到业务角色；同一角色重复时只认第一个。"""
+    out: dict[str, str] = {}
+    for node_id, title in find_loadimage_nodes(api_workflow):
+        role = loadimage_role(title)
+        if role and role not in out:
+            out[role] = node_id
+    return out
+
+
+def _build_index_map(api_workflow: dict, filled: dict[str, bool],
+                     role_nodes: dict[str, str]) -> dict[str, int]:
+    """角色 → 工作流真实图号（images.image_N / imageN 里的 N）。
+
+    裁剪后图位不压缩重排，所以提示词必须按真实图号书写（Qwen21 缺人像时
+    服装仍是图3、姿势仍是图1）。没有图片键的工作流（Flux 系）返回空映射，
+    提示词退回按出现顺序编号，与实际图位一致。
+    """
+    index_map: dict[str, int] = {}
+    for role in SLOT_ROLES:
+        node_id = role_nodes.get(role)
+        if not node_id or not filled.get(role):
+            continue
+        numbers = [
+            image_input_key_index(key)
+            for _enc_id, key in find_image_input_keys(api_workflow, node_id)
+        ]
+        numbers = [number for number in numbers if number]
+        if numbers:
+            index_map[role] = min(numbers)
+    return index_map
+
+
+def _trim_unfilled_slots(api_workflow: dict,
+                         filled: dict[str, bool]) -> tuple[dict, dict[str, int]]:
+    """在副本上裁掉空槽的参考图分支，返回 (裁剪后工作流, 角色→图号映射)。
+
+    只对“图片通过文本编码器参考图键进入”的 Qwen 系工作流生效：
+    · 先删文本编码器里的 images.image_N / imageN 键；
+    · 再沿参考图分支删除 ImageScale / VAEEncode / ReferenceLatent；
+    · 若被删节点是 conditioning 透传节点，把下游引用改接其上游 conditioning；
+    · 其它下游输入（如 KSampler.latent_image）无法直通 → `_NotTrimmable`。
+
+    Flux 系把参考图接到 ReferenceLatent.latent 而文本编码器没有图片键，
+    直接删节点会在 VAEEncode 上留下悬空输入，因此判定为不可裁剪。
+    """
+    api = copy.deepcopy(api_workflow)
+    role_nodes = _role_nodes(api)
+    index_map = _build_index_map(api, filled, role_nodes)
+
+    drop: set[str] = set()
+    drop_keys: list[tuple[str, str]] = []
+
+    for role in SLOT_ROLES:
+        node_id = role_nodes.get(role)
+        if not node_id or filled.get(role):
+            continue
+        keys = find_image_input_keys(api, node_id)
+        if not keys:
+            raise _NotTrimmable(role)
+        drop_keys.extend(keys)
+        drop.add(node_id)
+
+        # 只沿参考图预处理分支向下走；遇到 KSampler / SaveImage 等主链路节点就停。
+        stack = [node_id]
+        while stack:
+            current = stack.pop()
+            for consumer_id, key in _downstream_consumers(api, current):
+                # conditioning / positive / negative 是透传语义：沿它扩散会误删
+                # 另一条参考分支（例如服装的 ReferenceLatent），改由直通检查处理
+                if key == "conditioning" or key.startswith("conditioning_") \
+                        or key in ("positive", "negative"):
+                    continue
+                consumer = api.get(consumer_id)
+                if not isinstance(consumer, dict):
+                    continue
+                if consumer.get("class_type") not in _REFERENCE_BRANCH_TYPES:
+                    continue
+                if consumer_id in drop:
+                    continue
+                drop.add(consumer_id)
+                stack.append(consumer_id)
+
+    # 被删节点若仍被保留节点引用：只有 conditioning 语义能直通上游
+    drop_key_set = set(drop_keys)
+    replacements: list[tuple[str, str, object]] = []
+    for dropped in drop:
+        node = api.get(dropped) or {}
+        cond_src = (node.get("inputs") or {}).get("conditioning")
+        for consumer_id, key in _downstream_consumers(api, dropped):
+            if consumer_id in drop or (consumer_id, key) in drop_key_set:
+                continue
+            transparent = key == "conditioning" or key.startswith("conditioning_") \
+                or key in ("positive", "negative")
+            if transparent and cond_src is not None:
+                replacements.append((consumer_id, key, cond_src))
+                continue
+            raise _NotTrimmable(dropped)
+
+    for consumer_id, key, value in replacements:
+        api[consumer_id].setdefault("inputs", {})[key] = value
+    for enc_id, key in drop_keys:
+        inputs = api.get(enc_id, {}).get("inputs")
+        if isinstance(inputs, dict):
+            inputs.pop(key, None)
+    for node_id in drop:
+        api.pop(node_id, None)
+    return api, index_map
+
+
+def _resolve_studio_workflow(requested: str) -> Path:
+    """解析合成台工作流；显式指定不在 studio 范围内时 400，绝不静默回落。"""
+    from app.services.workflow_catalog import list_valid_workflows
+
+    items = list_valid_workflows(scope="studio")
+    if not items:
+        raise HTTPException(400, "合成台暂无可用工作流")
+
+    explicit = (requested or "").strip()
+    raw = explicit or DEFAULT_STUDIO_WORKFLOW
+    for item in items:
+        name = item["name"]
+        # 兼容前端只传简称：xxx.api.json 的 Path.stem 仍是 xxx.api，这里再去一层
+        candidates = {name, Path(name).stem, Path(Path(name).stem).stem}
+        if raw in candidates or item["path"] == raw:
+            return Path(item["path"])
+
+    try:
+        resolved = Path(raw).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        resolved = None
+    if resolved is not None:
+        for item in items:
+            if Path(item["path"]).resolve(strict=False) == resolved:
+                return Path(item["path"])
+
+    if explicit:
+        raise HTTPException(400, "该工作流不属于合成台可用范围")
+    raise HTTPException(400, f"默认工作流不可用：{DEFAULT_STUDIO_WORKFLOW}")
+
+
 @router.post("/reference/recipes")
 def create_reference_recipe(req: RecipeRequest):
-    """三图/四图出图：组提示词后直接复用 editor 的批量提交入口。
+    """参考库出图：组提示词后直接复用 editor 的批量提交入口。
 
+    每个槽都允许为空；空槽会在工作流副本上裁掉，提示词编号仍按真实图位书写。
     这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、
     任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。
     """
@@ -381,33 +585,87 @@ def create_reference_recipe(req: RecipeRequest):
     elif req.extra_path.strip():
         extra_path = _upload_path(req.extra_path, "第 4 张参考")
 
+    paths = {
+        "portrait": portrait_path,
+        "costume": costume_path,
+        "pose": pose_path,
+        "extra": extra_path,
+    }
+    filled = {role: paths[role] is not None for role in SLOT_ROLES}
+    total = sum(filled.values())
+
+    # 工作流：显式指定必须是 studio 白名单；为空用默认（不按张数/extra 静默切换）
+    workflow_path = _resolve_studio_workflow(req.workflow)
+    try:
+        api_wf = load_workflow(str(workflow_path))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"工作流加载失败：{exc}") from None
+
+    # 按槽位数校验工作流能力：工作流 LoadImage 数 = N，实际非空槽数（含 extra）= M
+    input_count = len(find_loadimage_nodes(api_wf))
+    if total == 0:
+        raise HTTPException(400, "请至少选择一个参考图或上传一张参考图")
+    if total > input_count:
+        raise HTTPException(
+            400, f"该工作流只有 {input_count} 个输入，但提交了 {total} 张",
+        )
+
+    role_nodes = _role_nodes(api_wf)
+    for role in SLOT_ROLES:
+        if filled[role] and role not in role_nodes:
+            raise HTTPException(400, f"该工作流没有{SLOT_LABELS[role]}输入")
+
+    if total < input_count:
+        try:
+            trimmed_api, index_map = _trim_unfilled_slots(api_wf, filled)
+        except _NotTrimmable:
+            trimmed_api = api_wf
+            index_map = _build_index_map(api_wf, filled, role_nodes)
+        if len(find_loadimage_nodes(trimmed_api)) != total:
+            # 工作流还有本次用不到、又无法安全删除的输入：明确告诉用户需要几张
+            raise HTTPException(
+                400,
+                f"该工作流有 {input_count} 个输入且无法裁剪到 {total} 个；"
+                f"请至少提供 {input_count} 张参考图",
+            )
+    else:
+        trimmed_api = api_wf
+        index_map = _build_index_map(api_wf, filled, role_nodes)
+
+    # 空槽直接传 None（不再用上传占位包装），否则 faceless 分支永远不会触发
     prompt = build_recipe_prompt(
-        _slot_entry(portrait, "portrait"),
-        _slot_entry(costume, "costume"),
-        _slot_entry(pose, "pose"),
+        _slot_entry(portrait, "portrait") if portrait_path else None,
+        _slot_entry(costume, "costume") if costume_path else None,
+        _slot_entry(pose, "pose") if pose_path else None,
         _slot_entry(extra, "extra") if extra_path else None,
         style=req.style,
         prompt_suffix=req.prompt_suffix,
+        index_map=index_map,
     )
 
-    workflow_name = FOUR_REF_WORKFLOW if extra_path else THREE_REF_WORKFLOW
-    workflow_path = settings.library_root / workflow_name
-    if not workflow_path.is_file():
-        raise HTTPException(400, f"出图工作流不存在：{workflow_name}")
+    # 提交顺序固定 人像 → 服装 → 姿势 → 附加；节点 id 用工作流真实图位（不重排）
+    ordered = [
+        (role, role_nodes[role], paths[role])
+        for role in SLOT_ROLES
+        if filled[role] and role_nodes.get(role)
+    ]
+    refs = ordered[1:]
 
-    # 节点顺序与提示词编号严格对应：图1 人像 / 图2 服装 / 图3 姿势 / 图4 附加。
     from app.routers import editor as editor_router
 
+    trimmed = len(trimmed_api) != len(api_wf)
     payload = editor_router.FaceswapRequest(
-        main_paths=[str(portrait_path)],
-        ref_paths=[str(costume_path)],
-        ref2_paths=[str(pose_path)],
-        ref3_paths=[str(extra_path)] if extra_path else [],
-        main_node="1",
-        ref_node="2",
-        ref2_node="3",
-        ref3_node=EXTRA_REF_NODE if extra_path else None,
+        main_paths=[str(ordered[0][2])],
+        ref_paths=[str(refs[0][2])] if len(refs) > 0 else [],
+        ref2_paths=[str(refs[1][2])] if len(refs) > 1 else [],
+        ref3_paths=[str(refs[2][2])] if len(refs) > 2 else [],
+        main_node=ordered[0][1],
+        ref_node=refs[0][1] if len(refs) > 0 else None,
+        ref2_node=refs[1][1] if len(refs) > 1 else None,
+        ref3_node=refs[2][1] if len(refs) > 2 else None,
         workflow_path=str(workflow_path),
+        # 空槽裁剪只作用在副本上：把裁剪后的 API 工作流随请求传下去，不改磁盘文件
+        workflow_content=json.dumps(trimmed_api, ensure_ascii=False) if trimmed else None,
         prompt=prompt,
         seed=req.seed,
         seed_mode=req.seed_mode,
@@ -421,16 +679,16 @@ def create_reference_recipe(req: RecipeRequest):
         _slot_info("portrait", portrait, portrait_path, "portrait"),
         _slot_info("costume", costume, costume_path, req.costume_library),
         _slot_info("pose", pose, pose_path, "pose"),
+        _slot_info("extra", extra, extra_path, req.extra_library or ""),
     ]
-    if extra_path is not None:
-        slots.append(_slot_info("extra", extra, extra_path, req.extra_library or ""))
 
     return {
         **result,
         "prompt": prompt,
         "style": req.style,
         "workflow_path": str(workflow_path),
-        #: 统一溯源：库条目与上传图同一形状（source/id/path）。`references` 保留兼容。
+        "input_count": input_count,
+        #: 统一溯源：库条目 / 上传图 / 空槽同一形状。`references` 保留兼容。
         "slots": slots,
         "references": {
             "portrait": portrait["id"] if portrait else "",

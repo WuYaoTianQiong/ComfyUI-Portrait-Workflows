@@ -431,6 +431,10 @@ def faceswap_batch(req: FaceswapRequest):
             )
         combos = list(itertools.product(*source_groups))
 
+    # 空组合不能静默入队 0 张（历史上会出现“提交成功但什么都没跑”）
+    if not combos:
+        raise HTTPException(400, "全组合为空：请至少选择一个参考图")
+
     node_info = {
         "inputs": inputs,
         "roles": roles,

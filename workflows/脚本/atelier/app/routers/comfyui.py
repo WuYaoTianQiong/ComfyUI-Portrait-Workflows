@@ -25,7 +25,8 @@ from app.services.workflow_catalog import (
     studio_sort_key,
 )
 from app.services.workflow_parser import (
-    RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt,
+    RatioNotSupported, detect_workflow_caps, find_loadimage_nodes,
+    load_workflow, inject_prompt,
 )
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
@@ -134,6 +135,29 @@ def validate_workflow(path: str = Query("")):
 
 # ---------- 工作流列表 ----------
 
+#: 工作流输入数缓存：路径 → (mtime, LoadImage 数)。列表每次都要带该字段，
+#: 不缓存会为了一个整数把每个工作流重新解析一遍。
+_input_count_cache: dict[str, tuple[float, int]] = {}
+
+
+def _workflow_input_count(path: str) -> int:
+    """工作流里的 LoadImage 输入数（与 `find_loadimage_nodes()` 完全一致）。"""
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError:
+        return 0
+    cached = _input_count_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        count = len(find_loadimage_nodes(load_workflow(path)))
+    except Exception as exc:  # noqa: BLE001 —— 单个工作流解析失败不能拖垮整个列表
+        logger.debug("统计工作流输入数失败 %s：%s", path, type(exc).__name__)
+        count = 0
+    _input_count_cache[path] = (mtime, count)
+    return count
+
+
 @router.get("/workflows", response_model=WorkflowListResponse)
 def list_workflows(
     sort: str = Query("mtime"),
@@ -146,6 +170,10 @@ def list_workflows(
 ):
     """列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。"""
     results = list_valid_workflows(include_video=include_video, scope=scope)
+
+    # input_count 必须在路由层显式补上：只靠 WorkflowRow 的默认值会把漏填字段静默变成 0
+    for item in results:
+        item["input_count"] = _workflow_input_count(item["path"])
 
     if scope == "studio":
         # 合成台：三槽（人像+服装+姿势）优先 → 画廊本机改版 > 参考库专用 > 库根 → 新到旧。

@@ -32,6 +32,24 @@ _SAVE_NODE_TYPES = {
 # 可注入宽高的空 latent 节点：SD3/Flux2/Z-Image 用各自的类名，宽高字段一致
 _LATENT_NODE_TYPES = {"EmptyLatentImage", "EmptySD3LatentImage", "EmptyFlux2LatentImage"}
 
+#: LoadImage 标题里的业务角色关键词（合成台靠它判定“哪张图放哪个槽”）。
+#: 工作流标题是人工标注，中文/英文、Java 全角冒号都可能出现，统一小写后包含匹配。
+_LOADIMAGE_ROLE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("portrait", ("人像", "portait", "portrait")),
+    ("costume", ("服装", "costume", "outfit")),
+    ("pose", ("姿势", "pose")),
+    # 附加图放最后匹配，避免“配饰”等词抢在服装/姿势前面
+    ("extra", ("附加", "第 4", "第4", "图4", "extra", "additional")),
+)
+
+#: 文本编码器里承载参考图的键名：
+#:   TextEncodeQwenImage21        → images.image_1 .. images.image_16（autogrow）
+#:   TextEncodeQwenImageEditPlus  → image1 / image2 / image3（optional）
+_IMAGE_INPUT_KEY_RE = re.compile(r"^(?:images\.image_(\d+)|image(\d+))$")
+
+#: LoadImage 实际像素尺寸缓存：{(绝对路径, mtime): (width, height) | None}
+_loadimage_size_cache: dict[tuple[str, float], tuple[int, int] | None] = {}
+
 # 项目统一比例；包含 ResolutionSelector 的 8 个选项 + 21:9 的竖版 9:21。
 CANONICAL_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "9:21")
 _RATIO_VALUES = {
@@ -106,6 +124,71 @@ def _parse_preset(text: object) -> tuple[int, int, str] | None:
     return width, height, normalize_aspect_ratio(text) or _closest_ratio(width, height)
 
 
+def _upstream_loadimage(api_workflow: dict, ref: object, seen: set[str] | None = None) -> str | None:
+    """从连线引用向上游回溯，返回第一个 LoadImage 节点 id。
+
+    LoadImage 与 GetImageSize 之间常隔着 ImageScaleToTotalPixels / VAEEncode，
+    因此不能只看直接输入；找不到时返回 None，调用方退回字面量模式。
+    """
+    if seen is None:
+        seen = set()
+    src = _linked_node(api_workflow, ref)
+    if not isinstance(src, dict):
+        return None
+    src_id = str((ref or [""])[0])
+    if src_id in seen:
+        return None
+    if src.get("class_type") == "LoadImage":
+        return src_id
+    seen.add(src_id)
+    for value in (src.get("inputs") or {}).values():
+        found = _upstream_loadimage(api_workflow, value, seen)
+        if found:
+            return found
+    return None
+
+
+def _loadimage_size(api_workflow: dict, node_id: str | None) -> tuple[int, int] | None:
+    """读取 LoadImage 指向的图片实际像素尺寸（ComfyUI input 目录内）；失败返回 None。
+
+    `linked-image` 模式下用它当默认宽高，避免对 Flux 系工作流返回 None 后
+    画质/方向旋钮整块消失。文件不存在或无法解码属正常降级，不抛异常。
+    """
+    if not node_id:
+        return None
+    node = api_workflow.get(str(node_id))
+    if not isinstance(node, dict) or node.get("class_type") != "LoadImage":
+        return None
+    image_name = (node.get("inputs") or {}).get("image")
+    if not isinstance(image_name, str) or not image_name.strip():
+        return None
+
+    # 延迟导入：config 依赖 settings 初始化，模块顶层导入会在部分测试/脚本里形成环
+    from app.config import settings
+
+    path = settings.input_dir / image_name
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    key = (str(path), mtime)
+    if key in _loadimage_size_cache:
+        return _loadimage_size_cache[key]
+
+    size: tuple[int, int] | None = None
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as img:
+            width, height = img.size
+        if width > 0 and height > 0:
+            size = (int(width), int(height))
+    except Exception:  # noqa: BLE001 —— 解码失败只影响默认尺寸，不阻塞提交
+        size = None
+    _loadimage_size_cache[key] = size
+    return size
+
+
 def _latent_info(api_workflow: dict) -> dict | None:
     """找出空 latent 的真实尺寸来源。
 
@@ -114,6 +197,7 @@ def _latent_info(api_workflow: dict) -> dict | None:
       - resolver：上游有 aspect_ratio + megapixels（ResolutionSelector）
       - preset：上游是固定尺寸 preset（ResolutionPresetPicker）
       - megapixels：只有 megapixels，没有比例旋钮
+      - linked-image：宽高来自 GetImageSize（Flux 系），默认值取该图实际像素
 
     unit：字面量/preset 用 1e6；ResolutionSelector 与 ImageScaleToTotalPixels
     的 megapixels 实际是 1024²（MiP），按错单位会偏小约 2.4%/边。
@@ -173,6 +257,33 @@ def _latent_info(api_workflow: dict) -> dict | None:
                 "width": width, "height": height, "megapixels": float(mp),
                 "ratio": ratio, "multiple": multiple, "unit": unit,
             }
+
+        # linked-image：宽高指向 GetImageSize（PornMaster/Flux 系）。
+        # 向上回溯到 LoadImage，用该图实际像素作为默认尺寸；注入时仍写字面量覆盖，
+        # 所以画质/方向旋钮对这类工作流同样有效。
+        if isinstance(src, dict) and src.get("class_type") == "GetImageSize":
+            image_node = _upstream_loadimage(
+                api_workflow, (src.get("inputs") or {}).get("image"),
+            )
+            if not image_node:
+                continue
+            size = _loadimage_size(api_workflow, image_node)
+            placeholder = size is None
+            if placeholder:
+                # 工作流里的默认图名往往只是占位（提交前才注入用户图），
+                # 文件缺失时用 1024² 兜底，保证旋钮可用；真正注入会写字面量覆盖。
+                size = (1024, 1024)
+            width, height = size
+            info = {
+                "mode": "linked-image", "id": node_id, "node": node, "src": src,
+                "width": width, "height": height,
+                "megapixels": width * height / 1_000_000,
+                "ratio": _closest_ratio(width, height),
+                "multiple": 16, "unit": 1_000_000,
+            }
+            if placeholder:
+                info["size_source"] = "placeholder"
+            return info
     return None
 
 # 文本编码节点：类名 → (正面字段, 负面粉字段 / None)
@@ -795,6 +906,32 @@ def _detect_negative_effectiveness(api_workflow: dict) -> tuple[bool, float | No
     return best > 1.0, best
 
 
+def _latent_size_overridable(api_workflow: dict, node: dict) -> bool:
+    """空 latent 的宽高是否能被字面量覆盖（含 linked-image 场景）。
+
+    - 宽高已是字面量：直接可改；
+    - 宽高指向 GetImageSize：只要上游能回溯到 LoadImage，就能拿到默认像素并改写；
+    - 其它上游计算节点（ResolutionSelector / preset 等）：沿用原有可覆盖判定。
+    """
+    inputs = node.get("inputs") or {}
+    if _as_int(inputs.get("width")) is not None and _as_int(inputs.get("height")) is not None:
+        return True
+    for key in ("width", "height"):
+        src = _linked_node(api_workflow, inputs.get(key))
+        if not isinstance(src, dict):
+            continue
+        if src.get("class_type") == "GetImageSize":
+            image_node = _upstream_loadimage(
+                api_workflow, (src.get("inputs") or {}).get("image"),
+            )
+            # 只要有 LoadImage 就可写字面量覆盖；默认图文件缺失不影响可覆盖性
+            if image_node:
+                return True
+            continue
+        return True
+    return False
+
+
 def detect_workflow_caps(api_workflow: dict) -> dict[str, object]:
     """探测工作流能接受哪些注入项。
 
@@ -838,8 +975,10 @@ def detect_workflow_caps(api_workflow: dict) -> dict[str, object]:
             caps["quality"] = True  # 4a：超分分辨率
         if cls not in _LATENT_NODE_TYPES:
             continue
-        # 图生图/编辑工作流的尺寸由输入图决定，不暴露比例和画质
-        if has_image_input:
+        # 图生图/编辑工作流的尺寸通常由输入图决定，不暴露比例和画质；
+        # 但只要独立 latent 的宽高可覆盖（字面量，或 linked-image 能回溯到输入图），
+        # 就仍然暴露旋钮——PornMaster/Flux2 属于后者。
+        if has_image_input and not _latent_size_overridable(api_workflow, node):
             continue
         inputs = node.get("inputs") or {}
         w = _as_int(inputs.get("width"))
@@ -1238,6 +1377,43 @@ def find_loadimage_nodes(api_workflow: dict) -> list[tuple[str, str]]:
         if isinstance(node, dict) and node.get("class_type") == "LoadImage":
             title = (node.get("_meta") or {}).get("title") or "LoadImage"
             out.append((str(node_id), str(title)))
+    return out
+
+
+def loadimage_role(title: str) -> str | None:
+    """按 LoadImage 标题判定业务角色：portrait / costume / pose / extra。
+
+    工作流标题是人写的（例如“图3：姿势参考 (Pose) · 深度图”），这里的“图3”
+    是提示词编号而不是槽位编号，所以只认角色关键词，不解析标题里的数字。
+    """
+    text = (title or "").lower()
+    for role, keywords in _LOADIMAGE_ROLE_KEYWORDS:
+        if any(word in text for word in keywords):
+            return role
+    return None
+
+
+def image_input_key_index(key: str) -> int | None:
+    """解析文本编码器的参考图键名，返回图号：images.image_3 / image3 → 3。"""
+    match = _IMAGE_INPUT_KEY_RE.match(key or "")
+    if not match:
+        return None
+    return int(match.group(1) or match.group(2))
+
+
+def find_image_input_keys(api_workflow: dict, node_id: str) -> list[tuple[str, str]]:
+    """找出所有文本编码器里指向该 LoadImage 的参考图键 [(编码节点 id, 键名)]。"""
+    target = str(node_id)
+    out: list[tuple[str, str]] = []
+    for enc_id, node in api_workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in _TEXT_ENCODE_NODES:
+            continue
+        for key, value in (node.get("inputs") or {}).items():
+            if image_input_key_index(key) is None:
+                continue
+            if isinstance(value, (list, tuple)) and len(value) == 2 \
+                    and str(value[0]) == target:
+                out.append((str(enc_id), key))
     return out
 
 
