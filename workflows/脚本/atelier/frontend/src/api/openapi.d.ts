@@ -2300,6 +2300,11 @@ export interface components {
         /** FaceswapRequest */
         FaceswapRequest: {
             /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
+            /**
              * Clean Source Name
              * @default false
              */
@@ -2341,6 +2346,11 @@ export interface components {
              * @default
              */
             negative_prompt: string;
+            /**
+             * Orientation
+             * @default
+             */
+            orientation: string;
             /**
              * Output Subfolder
              * @default
@@ -3265,6 +3275,11 @@ export interface components {
          */
         RecipeRequest: {
             /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
+            /**
              * Costume Id
              * @default
              */
@@ -3300,6 +3315,11 @@ export interface components {
              */
             extra_path: string;
             /**
+             * Orientation
+             * @default
+             */
+            orientation: string;
+            /**
              * Output Subfolder
              * @default
              */
@@ -3329,6 +3349,11 @@ export interface components {
              * @default
              */
             prompt_suffix: string;
+            /**
+             * Quality
+             * @default
+             */
+            quality: string;
             /**
              * Seed
              * @default 100000

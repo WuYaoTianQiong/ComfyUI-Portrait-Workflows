@@ -637,6 +637,11 @@
       },
       "FaceswapRequest": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "clean_source_name": {
             "default": false,
             "title": "Clean Source Name",
@@ -695,6 +700,11 @@
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "",
+            "title": "Orientation",
             "type": "string"
           },
           "output_subfolder": {
@@ -2592,6 +2602,11 @@
       "RecipeRequest": {
         "description": "参考库出图；人像/服装/姿势/第 4 张每个槽都允许留空。\n\n优先级：`*_id` 非空用库条目，否则用 `*_path`；两者都空表示该槽不参与本次出图。\n空槽会在提交前从工作流副本里裁掉，提示词编号仍按工作流真实图位书写。\n\n`workflow` 为空时使用合成台默认工作流；非空时必须是 `scope=studio` 的合法\n工作流，否则 400（绝不静默回落到默认值）。\n\n`costume_library` 只影响服装槽：默认本地 `costume`，也可选外链\n`costume-anime`（缓存就绪后才参与出图）。人像/姿势槽的库固定不变。",
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
           "costume_id": {
             "default": "",
             "title": "Costume Id",
@@ -2627,6 +2642,11 @@
             "title": "Extra Path",
             "type": "string"
           },
+          "orientation": {
+            "default": "",
+            "title": "Orientation",
+            "type": "string"
+          },
           "output_subfolder": {
             "default": "",
             "title": "Output Subfolder",
@@ -2655,6 +2675,11 @@
           "prompt_suffix": {
             "default": "",
             "title": "Prompt Suffix",
+            "type": "string"
+          },
+          "quality": {
+            "default": "",
+            "title": "Quality",
             "type": "string"
           },
           "seed": {

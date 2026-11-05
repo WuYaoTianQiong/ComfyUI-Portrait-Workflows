@@ -254,6 +254,10 @@ class RecipeRequest(BaseModel):
     extra_path: str = ""
     #: 指定合成台工作流（文件名或库内路径）；空 = 默认 Qwen21+VNCCS 三图
     workflow: str = ""
+    #: 尺寸参数（前端透传）：空 = 保持现有默认；工作流 caps 不支持时后端会忽略
+    quality: str = ""
+    aspect_ratio: str = ""
+    orientation: str = ""
     style: str = "realistic"
     prompt_suffix: str = ""
     seed: int = 100000
@@ -669,6 +673,10 @@ def create_reference_recipe(req: RecipeRequest):
         prompt=prompt,
         seed=req.seed,
         seed_mode=req.seed_mode,
+        #: 尺寸参数原样透传，由 editor 统一校验并按工作流能力做二次防护
+        quality=req.quality,
+        aspect_ratio=req.aspect_ratio,
+        orientation=req.orientation,
         output_subfolder=req.output_subfolder,
         dry_run=req.dry_run,
         job_label="参考库出图",

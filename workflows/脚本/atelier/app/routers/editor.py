@@ -50,13 +50,16 @@ from app.services.output_location import (
 )
 from app.services.submission import SubmitTask, enqueue_submission
 from app.services.paths import resolve_image_path
+from app.services.quality_keys import QUALITY_SCALES, normalize_quality
 from app.services.workflow_parser import (
+    CANONICAL_RATIOS,
     detect_workflow_caps,
     find_loadimage_nodes,
     find_size_source_loadimage,
     inject_input_image,
     inject_prompt,
     load_workflow,
+    normalize_aspect_ratio,
     set_output_prefix,
     set_save_subfolder,
 )
@@ -116,6 +119,10 @@ class FaceswapRequest(BaseModel):
     output_subfolder: str = ""     # 可选：output 下的相对子目录，空 = 平铺
     # 批量超分页专用（编辑页不传，保持旧行为）：空 = 沿用 QUALITY 常量
     quality: str = ""
+    #: 目标朝向：portrait / landscape；空 = 旧默认 portrait
+    orientation: str = ""
+    #: 标准比例（如 16:9）；空 = 工作流默认比例
+    aspect_ratio: str = ""
     job_label: str = ""            # 任务标题前缀；空 = 旧文案「图像编辑」
     clean_source_name: bool = False  # 拷进 input 时保留原文件名（SaveImageFromSource 取源图名）
     idempotency_key: str = ""
@@ -193,6 +200,24 @@ def _resolve_seed(mode: str, base: int, idx: int) -> int:
     if mode == "increment":
         return base + idx
     return base
+
+
+def _resolve_size_params(
+    caps: dict,
+    quality: str,
+    aspect_ratio: str,
+    orientation: str,
+) -> tuple[str, str, str]:
+    """按工作流能力归一尺寸参数，返回 (quality, aspect_ratio, orientation)。
+
+    后端二次防护：即使前端误传，工作流没有对应旋钮时也一律回默认值，
+    避免留下“参数已发送但永远不生效”的假控件（Qwen21 的 quality/orientation 都是 false）。
+    """
+    if not caps.get("quality"):
+        quality = QUALITY
+    if not caps.get("orientation"):
+        aspect_ratio, orientation = "", ORIENTATION
+    return quality, aspect_ratio, orientation
 
 
 def workflow_supports_mask(api_workflow: dict) -> bool:
@@ -335,16 +360,32 @@ def faceswap_batch(req: FaceswapRequest):
     if not workflow_path and not req.workflow_content:
         raise HTTPException(400, "缺少工作流")
 
-    # 编辑页不传 quality，沿用旧常量；批量超分页传 2K/4K/6K…
-    quality = (req.quality or "").strip() or QUALITY
-
-    try:
-        subfolder_preview = expand_subfolder(
-            req.output_subfolder, workflow_path=workflow_path, job_id=0,
-            quality=quality, orientation=ORIENTATION,
+    # 尺寸参数：只认全局合法档位，非法值直接 400（不静默忽略）；空值保持旧默认
+    requested_orientation = (req.orientation or "").strip().lower()
+    if requested_orientation and requested_orientation not in ("portrait", "landscape"):
+        raise HTTPException(
+            400,
+            f"不支持的 orientation：{req.orientation}（可用：portrait / landscape）",
         )
-    except OutputLocationError as e:
-        raise HTTPException(400, str(e))
+    requested_orientation = requested_orientation or ORIENTATION
+
+    raw_ratio = (req.aspect_ratio or "").strip()
+    normalized_ratio = normalize_aspect_ratio(raw_ratio) if raw_ratio else None
+    if raw_ratio and normalized_ratio is None:
+        raise HTTPException(
+            400,
+            f"不支持的 aspect_ratio：{req.aspect_ratio}"
+            f"（可用：{' / '.join(CANONICAL_RATIOS)}）",
+        )
+
+    requested_quality = (req.quality or "").strip()
+    if requested_quality and normalize_quality(requested_quality) not in QUALITY_SCALES:
+        raise HTTPException(
+            400,
+            f"不支持的 quality：{req.quality}"
+            f"（可用：{' / '.join(QUALITY_SCALES)}）",
+        )
+    requested_quality = requested_quality or QUALITY
 
     existing = find_job_by_idempotency(req.idempotency_key, "faceswap")
     if existing is not None:
@@ -363,6 +404,20 @@ def faceswap_batch(req: FaceswapRequest):
         api_wf, loads, req.main_node, req.ref_node, req.ref2_node, req.ref3_node
     )
     roles = [item["role"] for item in inputs]
+
+    # 尺寸能力探测必须在注入前完成：工作流不支持旋钮时忽略请求值（后端二次防护）
+    caps = detect_workflow_caps(api_wf)
+    quality, aspect_ratio, orientation = _resolve_size_params(
+        caps, requested_quality, normalized_ratio or "", requested_orientation,
+    )
+
+    try:
+        subfolder_preview = expand_subfolder(
+            req.output_subfolder, workflow_path=workflow_path, job_id=0,
+            quality=quality, orientation=orientation,
+        )
+    except OutputLocationError as e:
+        raise HTTPException(400, str(e))
 
     # 2) 按角色收集素材；工作流没有的角色不允许提交素材，避免"第四张图悄悄被丢掉"
     if "ref1" not in roles and (req.ref_ids or req.ref_paths):
@@ -477,7 +532,7 @@ def faceswap_batch(req: FaceswapRequest):
 
     # 纯图像工作流（超分等）没有文本编码节点：不要塞编辑用的默认提示词，
     # 否则任务记录 / 画廊会挂上一段根本没参与执行的假提示词。
-    caps = detect_workflow_caps(api_wf)
+    # `caps` 已在上方（注入前）探测过，这里直接复用。
     prompt_text = (req.prompt or "").strip()
     if not prompt_text and caps["prompt"]:
         prompt_text = DEFAULT_PROMPT
@@ -517,12 +572,12 @@ def faceswap_batch(req: FaceswapRequest):
     job_title = f"{req.job_label.strip()} {counts}" if req.job_label.strip() else f"图像编辑 {counts}"
     job_id = create_job(
         "faceswap", job_title,
-        items, workflow_path, ORIENTATION, quality,
+        items, workflow_path, orientation, quality,
         extra=extra,
     )
     subfolder = expand_subfolder(
         req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-        quality=quality, orientation=ORIENTATION,
+        quality=quality, orientation=orientation,
     )
 
     # 5) 构造每条 workflow 的函数交给后台提交线程；请求立即返回 job_id
@@ -535,7 +590,8 @@ def faceswap_batch(req: FaceswapRequest):
             "prompt": prompt_text,
             "negative_prompt": req.negative_prompt or "",
             "seed_override": plan[i]["seed"],
-            "orientation": ORIENTATION,
+            "orientation": orientation,
+            "aspect_ratio": aspect_ratio,
             "quality": quality,
         })
         # 按角色逐个注入 LoadImage；有遮罩的目标图换成 alpha 合成后的副本

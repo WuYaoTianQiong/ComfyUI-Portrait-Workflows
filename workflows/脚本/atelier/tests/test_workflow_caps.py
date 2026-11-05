@@ -107,6 +107,16 @@ def test_linked_image_size_can_be_overridden_by_literal(tmp_path, monkeypatch):
     assert isinstance(workflow["39"]["inputs"]["width"], int)
     assert isinstance(workflow["39"]["inputs"]["height"], int)
 
+def test_pornmaster_keeps_requested_size_params():
+    """PornMaster 的 caps 支持尺寸旋钮，请求里的三值必须原样保留。"""
+    from app.routers import editor as editor_router
+
+    caps = detect_workflow_caps(_load_real(PORNMASTER))
+    assert editor_router._resolve_size_params(
+        caps, "1.5x", "16:9", "landscape",
+    ) == ("1.5x", "16:9", "landscape")
+
+
 def test_workflow_list_exposes_input_count(api):
     """/api/workflows 必须同时经过路由层构造与 WorkflowRow 模型两道，不能漏字段。"""
     resp = api.get("/api/workflows", params={"scope": "studio"})

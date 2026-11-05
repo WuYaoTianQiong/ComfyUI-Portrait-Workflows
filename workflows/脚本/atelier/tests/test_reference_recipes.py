@@ -740,3 +740,39 @@ def test_empty_combos_is_400(api, recipe_env, monkeypatch):
     )
     assert resp.status_code == 400
     assert "全组合为空" in resp.json()["detail"]
+
+def test_size_params_are_passed_to_editor(api, recipe_env, captured):
+    """recipe 端点必须把三个尺寸参数原样透传，不能被 Pydantic 静默吞掉。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "quality": "1.5x",
+            "aspect_ratio": "16:9",
+            "orientation": "landscape",
+        },
+    )
+    assert resp.status_code == 200
+    req = captured[0]
+    assert (req.quality, req.aspect_ratio, req.orientation) == (
+        "1.5x", "16:9", "landscape",
+    )
+
+
+def test_qwen21_ignores_size_params_when_caps_unsupported(api, recipe_env, monkeypatch):
+    """Qwen21 的 caps 是 quality/orientation=false：误传也必须回默认（二次防护）。"""
+    monkeypatch.setattr(editor_router, "enqueue_submission", lambda task: None)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "dry_run": False,
+            "quality": "1.5x",
+            "aspect_ratio": "16:9",
+            "orientation": "landscape",
+        },
+    )
+    assert resp.status_code == 200
+    job = api.get(f"/api/jobs/{resp.json()['job_id']}").json()
+    assert job["quality"] == "1.0x"      # 1.5x 被忽略，回旧默认 4K→1.0x
+    assert job["orientation"] == "portrait"
