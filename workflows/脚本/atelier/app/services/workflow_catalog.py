@@ -52,8 +52,10 @@ def studio_dirs() -> list[Path]:
     1. `图库专用工作流/`：本机适配、实测能出图的三图合成（GGUF Q5_K_M / Nunchaku fp4），
        文件名带 `图库专用_` 前缀，见该目录 README；
     2. `我的工作流/`：用户自己丢进来的编辑类工作流，见该目录 README；
-    3. 上游开源项目自带的专用工作流：`<参考库>/src/workflows/*.api.json`
-       （例如 qwen_image_edit_2509_3img，引用本机没有的 2509 fp8，选中会报不匹配）；
+    3. 上游 ai-pose-gallery-zh 自带的专用工作流：`<参考库>/src/workflows/*.api.json`
+       （参考库根现指向 `<comfyui_root>/custom_nodes/ai-pose-gallery-zh`，不在工作流库内，
+       workflows 下不再需要 Junction；例如 qwen_image_edit_2509_3img，引用本机没有的
+       2509 fp8，选中会报不匹配）；
     4. `历史工作流/画廊旧版/`：旧位置，仅兜底（已被第 1 项取代）；
     5. 库根：用户临时放进来的编辑类工作流。
     """

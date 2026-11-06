@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.config import settings
+from app.config import _resolve_reference_root, settings
 from app.services import reference_library as rl
 from app.services import reference_remote_cache
 
@@ -188,8 +188,37 @@ def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     rl.clear_cache()
 
 
-def test_default_reference_root_follows_library_root():
-    assert settings.reference_root == settings.library_root / "ai-pose-gallery-zh"
+def test_default_reference_root_prefers_comfyui_custom_nodes():
+    """上游参考库固定在 `<comfyui_root>/custom_nodes/` 下；workflows 下不再需要 Junction。"""
+    assert settings.reference_root == (
+        settings.comfyui_root / "custom_nodes" / "ai-pose-gallery-zh"
+    )
+    assert settings.reference_dir == settings.reference_root
+
+
+def test_resolve_reference_root_priority(tmp_path):
+    """三级解析：显式 > custom_nodes 规范位置 > library_root 旧布局兼容回退。"""
+    library_root = tmp_path / "library"
+    comfyui_root = tmp_path / "comfyui"
+    library_root.mkdir()
+    comfyui_root.mkdir()
+    canonical = comfyui_root / "custom_nodes" / "ai-pose-gallery-zh"
+    legacy = library_root / "ai-pose-gallery-zh"
+
+    # 都不存在：仍返回规范位置，让下游明确报错，而不是静默指向旧布局
+    assert _resolve_reference_root(library_root, comfyui_root, None) == canonical
+
+    # 只有旧布局：兼容回退
+    legacy.mkdir()
+    assert _resolve_reference_root(library_root, comfyui_root, None) == legacy
+
+    # 规范位置存在：优先于旧布局
+    canonical.mkdir(parents=True)
+    assert _resolve_reference_root(library_root, comfyui_root, None) == canonical
+
+    # 显式指定：最高优先，且不校验存在性
+    explicit = tmp_path / "explicit-ref"
+    assert _resolve_reference_root(library_root, comfyui_root, explicit) == explicit
 
 
 def test_default_reference_cache_dir_is_under_app_root():

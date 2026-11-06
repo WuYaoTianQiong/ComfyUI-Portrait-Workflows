@@ -118,6 +118,38 @@ def _resolve_comfyui_root(library_root: Path, env_override: str | None = None) -
     return library_root.parent / "ComfyUI"
 
 
+def _resolve_reference_root(
+    library_root: Path,
+    comfyui_root: Path,
+    explicit: Path | None,
+) -> Path:
+    """解析上游 AI 参考图库（ai-pose-gallery-zh）的根目录。
+
+    上游项目固定位于 `<comfyui_root>/custom_nodes/`，不在工作流库内；
+    `workflows/` 下不再需要 Junction。优先级（从高到低）：
+
+    1. 显式传入 / 环境变量 `ATELIER_REFERENCE_ROOT`（尊重用户意图，不做存在性校验）；
+    2. `<comfyui_root>/custom_nodes/ai-pose-gallery-zh`（唯一规范位置，存在即用）；
+    3. `<library_root>/ai-pose-gallery-zh`（旧布局兼容回退，存在才用）；
+    4. 都不存在 → 仍返回第 2 项，让下游给出明确报错，而不是静默指向旧布局。
+
+    存在性探测走 `_safe_is_dir`（即 `Path.is_dir()` + 重解析点容错），
+    权限不足等探测失败一律按不存在处理，不抛异常。
+    """
+    if explicit is not None:
+        return Path(explicit)
+
+    canonical = Path(comfyui_root) / "custom_nodes" / "ai-pose-gallery-zh"
+    if _safe_is_dir(canonical):
+        return canonical
+
+    legacy = Path(library_root) / "ai-pose-gallery-zh"
+    if _safe_is_dir(legacy):
+        return legacy
+
+    return canonical
+
+
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8656
@@ -138,8 +170,11 @@ class Settings(BaseSettings):
 
     # AI 参考图库（只读素材层，上游 ai-pose-gallery-zh）
     reference_enabled: bool = True
-    # 由 model_validator 在 env 解析后计算；不要写成 library_root / "..."，
-    # 否则会固化成模块加载时的类默认值，ATELIER_LIBRARY_ROOT 覆盖后不会跟着变。
+    # 由 model_validator 在 env 解析后计算（见 `_resolve_reference_root`）：
+    # 上游项目固定位于 `<comfyui_root>/custom_nodes/` 下，不在工作流库内，
+    # `workflows/` 下不再需要 Junction。显式传入 ATELIER_REFERENCE_ROOT 时优先。
+    # 不要写成 library_root / "..."，否则会固化成模块加载时的类默认值，
+    # ATELIER_LIBRARY_ROOT / ATELIER_COMFYUI_ROOT_ENV 覆盖后不会跟着变。
     reference_root: Path | None = None
     reference_allow_nsfw: bool = False
 
@@ -164,8 +199,11 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_comfyui_root_field(self):
         self.comfyui_root = _resolve_comfyui_root(self.library_root, self.comfyui_root_env)
-        if self.reference_root is None:
-            self.reference_root = self.library_root / "ai-pose-gallery-zh"
+        # 三级解析：显式/env > comfyui_root/custom_nodes > library_root 旧布局兼容回退。
+        # 依赖上面的 comfyui_root，顺序不能颠倒。
+        self.reference_root = _resolve_reference_root(
+            self.library_root, self.comfyui_root, self.reference_root
+        )
         self.reference_cache_dir = _validate_reference_cache_dir(
             self.reference_cache_dir,
             self.app_root,
@@ -176,8 +214,13 @@ class Settings(BaseSettings):
 
     @property
     def reference_dir(self) -> Path:
-        """参考库根（只读）：默认走 <库>/ai-pose-gallery-zh 这个 junction。"""
-        return self.reference_root or (self.library_root / "ai-pose-gallery-zh")
+        """参考库根（只读）：指向上游 ai-pose-gallery-zh。
+
+        上游项目固定位于 `<comfyui_root>/custom_nodes/` 下，不在工作流库内，
+        `workflows/` 下不再需要 Junction。解析统一在 `_resolve_reference_root`
+        完成（validator 保证非 None），这里不再做第二处回退，避免两处逻辑漂移。
+        """
+        return self.reference_root
 
     @property
     def nsfw_pose_systems(self) -> frozenset[str]:
@@ -222,5 +265,5 @@ print(f"[config] comfyui_root = {settings.comfyui_root}")
 print(f"[config]   output dir = {settings.output_dir}")
 print(f"[config]   output dir exists = {_safe_is_dir(settings.output_dir)}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")
-print(f"[config]   reference_root = {settings.reference_dir} (enabled={settings.reference_enabled})")
+print(f"[config]   reference_root = {settings.reference_root} (enabled={settings.reference_enabled})")
 print(f"[config]   reference_cache_dir = {settings.reference_cache_dir}")
