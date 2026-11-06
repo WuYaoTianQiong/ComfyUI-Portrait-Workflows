@@ -24,6 +24,7 @@ import {
   RecipeSubmitError,
   RecipeTimeoutError,
   buildRecipeRequest,
+  costumeDimensionForBodyMode,
   costumeLibraryOf,
   describeJobFailure,
   describeJobProgress,
@@ -119,6 +120,7 @@ function workflow(path: string, overrides: Partial<StudioWorkflowOption> = {}): 
     imageSlots: 3,
     inputCount: 3,
     recommended: false,
+
     ...overrides,
   }
 }
@@ -158,12 +160,35 @@ describe('buildRecipeRequest', () => {
       costume_id: 'costume-1',
       pose_id: 'pose-1',
       costume_library: 'costume',
+      body_mode: 'costume',
       style: 'realistic',
       prompt_suffix: '暖色灯光，浅景深',
       seed: DEFAULT_RECIPE_SEED,
       seed_mode: 'fixed',
     })
     expect('extra_path' in request).toBe(false)
+  })
+
+  it('素体模式：body_mode=bare 且绝不发送 costume_id（即使槽位残留服装）', () => {
+    const bare = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '', bodyMode: 'bare' },
+    )
+    expect(bare.body_mode).toBe('bare')
+    expect('costume_id' in bare).toBe(false)
+    // 服装库字段保留默认值，不额外改变既有协议形状
+    expect(bare.costume_library).toBe('costume')
+
+    const normal = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '', bodyMode: 'costume' },
+    )
+    expect(normal.body_mode).toBe('costume')
+    expect(normal.costume_id).toBe('costume-1')
+
+    // 组合阶段同样裁掉服装维度：bare 时即使槽位里有服装也不进入分组
+    expect(costumeDimensionForBodyMode([costume()], 'bare')).toEqual([])
+    expect(costumeDimensionForBodyMode([costume()], 'costume')).toHaveLength(1)
   })
 
   it('二次元服装库原样进入提交体', () => {

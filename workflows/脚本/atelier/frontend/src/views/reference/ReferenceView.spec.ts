@@ -1,8 +1,32 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { flushReferenceStudioSettings, REFERENCE_TAB_STORAGE_KEY } from '../../composables/useReferenceStudioSettings'
+import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import ReferenceView from '../ReferenceView.vue'
+
+/**
+ * happy-dom / Node 25 的全局 localStorage 在当前运行方式下不是完整 Storage
+ * （缺 clear），按仓库其它 spec 的做法补一份最小实现。
+ */
+const localValues = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  get length() {
+    return localValues.size
+  },
+  getItem: (key: string) => localValues.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    localValues.set(key, value)
+  },
+  removeItem: (key: string) => {
+    localValues.delete(key)
+  },
+  clear: () => {
+    localValues.clear()
+  },
+  key: (index: number) => [...localValues.keys()][index] ?? null,
+} satisfies Storage)
 
 /**
  * 参考图库页签壳：验证 `?tab=` 双向同步、默认页与未知值回落。
@@ -55,6 +79,16 @@ const TABS = [
   { tab: 'studio', label: '合成台', title: '合成台' },
   { tab: 'settings', label: '设置', title: '设置' },
 ] as const
+
+/**
+ * 每个用例都从「无记忆」状态开始：页签与三槽都会写 localStorage，
+ * 不清空会让「无 tab 默认首页」等用例读到上一个用例写入的最后页签。
+ */
+beforeEach(() => {
+  useReferenceRecipeDraft().clearDraft()
+  flushReferenceStudioSettings()
+  localStorage.clear()
+})
 
 describe('ReferenceView 六页签壳', () => {
   it.each(TABS)('?tab=$tab 直达渲染「$title」并把「$label」标为选中', async ({ tab, label, title }) => {
@@ -155,5 +189,42 @@ describe('ReferenceView 六页签壳', () => {
     expect(wrapper.find('[data-testid="reference-home-recipe-count"]').text()).toBe('0/3')
     const slots = wrapper.findAll('[data-testid^="home-slot-"]')
     expect(slots).toHaveLength(3)
+  })
+})
+describe('最后访问页签恢复（URL > 存储 > home）', () => {
+  it('URL 有合法 tab 时优先于存储，并把该页签写回', async () => {
+    localStorage.setItem(REFERENCE_TAB_STORAGE_KEY, 'costume')
+
+    const { wrapper } = await mountAt('/reference?tab=pose')
+
+    expect(activeTabLabel(wrapper)).toBe('姿势')
+    expect(localStorage.getItem(REFERENCE_TAB_STORAGE_KEY)).toBe('pose')
+  })
+
+  it('URL 无 tab 时用存储里的最后页签', async () => {
+    localStorage.setItem(REFERENCE_TAB_STORAGE_KEY, 'portrait')
+
+    const { wrapper } = await mountAt('/reference')
+
+    expect(activeTabLabel(wrapper)).toBe('人像')
+    expect(wrapper.find('.tab-placeholder__title').text()).toBe('人像库')
+  })
+
+  it('存储值非法 / 不存在时回落图库总览', async () => {
+    localStorage.setItem(REFERENCE_TAB_STORAGE_KEY, 'not-a-tab')
+
+    const { wrapper } = await mountAt('/reference')
+
+    expect(activeTabLabel(wrapper)).toBe('图库总览')
+    expect(wrapper.find('[data-testid="reference-home"]').exists()).toBe(true)
+  })
+
+  it('点页签切换后写回存储，供下次无 tab 访问恢复', async () => {
+    const { wrapper } = await mountAt('/reference?tab=home')
+
+    await tabButton(wrapper, '设置').trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem(REFERENCE_TAB_STORAGE_KEY)).toBe('settings')
   })
 })

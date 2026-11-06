@@ -4,8 +4,12 @@
  * 口径（阶段 3 多选升级）：
  * - 每个槽位是**数组**，允许同一槽位加入多张参考图；空槽也允许提交，
  *   批量时由前端按组合逐组提交（后端每个请求仍是单值槽位）。
- * - 只做内存选择，**不做 IndexedDB / localStorage 持久化** —— 阶段 3 明确
- *   不迁配方草稿，用户已确认旧草稿全是测试数据。
+ * - **2026-11-05 用户要求记忆操作，取代 M3 不持久化**：阶段 3 曾因「草稿都是
+ *   测试数据」决定不做 localStorage / IndexedDB，该决策已被用户本次需求推翻。
+ *   三槽只持久化 `id + library + name + thumbnail (+ useDepth)`，与合成台其他
+ *   参数共用 `pb.reference_studio_v1`（见 `useReferenceStudioSettings`）。
+ * - 恢复必须**按 id + library 匹配库数据**，且只在库加载完成后 hydrate；
+ *   匹配不到的条目直接丢弃（可能已被删除），绝不凭空造卡片。
  * - 模块级单例：姿势库、服装库、人像库、合成台、顶部配方槽共用同一份状态，
  *   避免每个页面各存一份导致「库里提示已选、合成台却是空的」。
  *
@@ -20,9 +24,14 @@
  * 避免「白模已选 → 切深度图再点」被误判为取消。
  */
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
+import {
+  readReferenceStudioSettings,
+  writeReferenceStudioSettings,
+} from './useReferenceStudioSettings'
+import type { StoredReferenceSlotEntry } from './useReferenceStudioSettings'
 
 /** 姿势槽位的值：条目 + 加入时的图片模式。 */
 export interface PoseSlotSelection {
@@ -199,6 +208,156 @@ function clearDraft(): void {
   pose.value = []
 }
 
+// ---------------------------------------------------------------------------
+// 持久化（2026-11-05 用户要求记忆操作，取代 M3 不持久化）
+// ---------------------------------------------------------------------------
+
+/** hydrate 需要的三库全量数据；必须等三个库都加载成功后才能调用。 */
+export interface ReferenceDraftLibraries {
+  portrait: readonly PortraitItem[]
+  costume: readonly CostumeItem[]
+  pose: readonly PoseItem[]
+}
+
+/** 人像条目 → 最小持久化记录。 */
+function storedPortrait(item: PortraitItem): StoredReferenceSlotEntry {
+  return {
+    id: item.id,
+    library: item.library ?? 'portrait',
+    name: item.发型名称 || item.标题,
+    thumbnail: item.缩略图,
+  }
+}
+
+/** 服装条目 → 最小持久化记录；现实库与外链库靠 `library` 区分。 */
+function storedCostume(item: CostumeItem): StoredReferenceSlotEntry {
+  return {
+    id: item.id,
+    library: item.library ?? 'costume',
+    name: item.服装名称,
+    thumbnail: item.缩略图,
+  }
+}
+
+/** 姿势槽记录 → 最小持久化记录（带上白模 / 深度图模式）。 */
+function storedPose(entry: PoseSlotSelection): StoredReferenceSlotEntry {
+  return {
+    id: entry.item.id,
+    library: entry.item.library ?? 'pose',
+    name: entry.item.姿势名称,
+    thumbnail: entry.item.缩略图,
+    useDepth: entry.useDepth,
+  }
+}
+
+/**
+ * 把当前三槽写入 `pb.reference_studio_v1`（300ms 防抖，与合成台参数合并）。
+ *
+ * 只存恢复所需的最小字段；完整条目在 hydrate 时从库数据按 id 回查，
+ * 避免把整份库快照写进 localStorage。
+ */
+function persist(): void {
+  writeReferenceStudioSettings({
+    portrait: portrait.value.map(storedPortrait),
+    costume: costume.value.map(storedCostume),
+    pose: pose.value.map(storedPose),
+  })
+}
+
+/** 复合键：同一 id 可能同时存在于现实服装库与外链二次元库。 */
+function slotKey(library: string, id: string): string {
+  return `${library}\u0000${id}`
+}
+
+/**
+ * 从持久化记录恢复三槽（**按 id + library 匹配库数据**）。
+ *
+ * - 必须在三个库加载完成后调用；调用方应在任一库加载失败时跳过，避免把
+ *   「暂时没数据」误判成「条目已删除」进而覆盖存储；
+ * - 匹配不到的 id 直接丢弃，绝不凭空造卡片；
+ * - 恢复顺序保持存储顺序，去重后写入单例。
+ *
+ * 返回 true 表示读到了有效存储（无论是否匹配到条目）。
+ */
+function hydrate(libraries: ReferenceDraftLibraries): boolean {
+  const stored = readReferenceStudioSettings()
+  if (!stored) return false
+
+  const portraitByKey = new Map<string, PortraitItem>()
+  for (const item of libraries.portrait) {
+    portraitByKey.set(slotKey(item.library ?? 'portrait', item.id), item)
+  }
+  const costumeByKey = new Map<string, CostumeItem>()
+  for (const item of libraries.costume) {
+    costumeByKey.set(slotKey(item.library ?? 'costume', item.id), item)
+  }
+  const poseByKey = new Map<string, PoseItem>()
+  for (const item of libraries.pose) {
+    poseByKey.set(slotKey(item.library ?? 'pose', item.id), item)
+  }
+
+  const seenPortrait = new Set<string>()
+  const nextPortrait: PortraitItem[] = []
+  for (const entry of stored.portrait) {
+    if (entry.library !== 'portrait' || seenPortrait.has(entry.id)) continue
+    const item = portraitByKey.get(slotKey('portrait', entry.id))
+    if (!item) continue
+    seenPortrait.add(entry.id)
+    nextPortrait.push(item)
+  }
+
+  const seenCostume = new Set<string>()
+  const nextCostume: CostumeItem[] = []
+  for (const entry of stored.costume) {
+    if (entry.library !== 'costume' && entry.library !== 'costume-anime') continue
+    const key = slotKey(entry.library, entry.id)
+    if (seenCostume.has(key)) continue
+    const item = costumeByKey.get(key)
+    if (!item) continue
+    seenCostume.add(key)
+    nextCostume.push(item)
+  }
+
+  const seenPose = new Set<string>()
+  const nextPose: PoseSlotSelection[] = []
+  for (const entry of stored.pose) {
+    if (entry.library !== 'pose' || seenPose.has(entry.id)) continue
+    const item = poseByKey.get(slotKey('pose', entry.id))
+    if (!item) continue
+    seenPose.add(entry.id)
+    nextPose.push({ item, useDepth: entry.useDepth === true })
+  }
+
+  portrait.value = nextPortrait
+  costume.value = nextCostume
+  pose.value = nextPose
+  return true
+}
+
+/**
+ * 三槽变化自动落盘：**按槽位粒度**写入。
+ *
+ * 为什么不是整体写：三个库页签各自独立整页导航，未 hydrate 的页面里另外两个槽
+ * 只是空数组（不是用户清空）。若整体覆盖，用户在服装页选一张就会把之前存的
+ * 姿势 / 人像一并抹掉。分槽写只更新真正变化的槽，其余槽保留磁盘上的值。
+ *
+ * 放在模块级而不是某个组件里：选图发生在姿势 / 服装 / 人像页签，若只由合成台
+ * 监听，用户「在库页选完图 → 刷新」会丢数据。单例语义保持不变。
+ */
+function persistPortrait(): void {
+  writeReferenceStudioSettings({ portrait: portrait.value.map(storedPortrait) })
+}
+function persistCostume(): void {
+  writeReferenceStudioSettings({ costume: costume.value.map(storedCostume) })
+}
+function persistPose(): void {
+  writeReferenceStudioSettings({ pose: pose.value.map(storedPose) })
+}
+
+watch(portrait, persistPortrait, { deep: true, flush: 'sync' })
+watch(costume, persistCostume, { deep: true, flush: 'sync' })
+watch(pose, persistPose, { deep: true, flush: 'sync' })
+
 /** 人像槽已选判定；不传 id 时返回「该槽是否非空」。 */
 function isPortraitSelected(id?: string): boolean {
   if (id === undefined) return portrait.value.length > 0
@@ -251,6 +410,8 @@ export function useReferenceRecipeDraft() {
     removePose,
     setPoseMode,
     clearDraft,
+    persist,
+    hydrate,
     isPortraitSelected,
     isCostumeSelected,
     isPoseSelected,

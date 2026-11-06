@@ -8,6 +8,12 @@
  * 4. 第 i 组 seed = base_seed + i；
  * 5. 切换工作流后清空新工作流不支持的档位 / 比例；
  * 另补：逐组提交的并发上限 2、降级确认候选过滤。
+ *
+ * 2026-11-06 收紧（任务 13）：
+ * - `slots` 三态：undefined=未知不判定 / []=角色不可识别（对所有非空槽位禁用）/
+ *   非空=按角色匹配；
+ * - 槽位角色集合变化时只取消「已不适用」的工作流，仍适用的保持选中；
+ *   同一槽位换另一张图（角色集合不变）不取消任何工作流。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -24,14 +30,22 @@ import {
   countBatchTotal,
   countSlotCombinations,
   describeBatchLimit,
+  describePreviewWorkflowSkip,
   describeWorkflowDowngrade,
+  describeWorkflowInapplicable,
+  describeWorkflowUnavailable,
+  describeWorkflowUnavailableFor,
+  evaluateWorkflowApplicability,
   exceedsBatchLimit,
   orientationForRatio,
+  parseWorkflowSlots,
+  pruneInapplicableWorkflowSelection,
   reconcileQualitySelection,
   reconcileRatioSelection,
   runWithConcurrency,
+  workflowInapplicableRole,
 } from './useReferenceRecipe'
-import type { StudioWorkflowOption } from './useReferenceRecipe'
+import type { StudioWorkflowOption, StudioWorkflowSlot } from './useReferenceRecipe'
 
 function portrait(id: string): PortraitItem {
   return {
@@ -94,6 +108,7 @@ function workflow(
     imageSlots: inputCount,
     inputCount,
     recommended: false,
+    // 字段缺失 = 旧后端，能力未知（不判定）；需要判定时用 withSlots 显式给值。
     ...overrides,
   }
 }
@@ -133,9 +148,12 @@ describe('上限 100', () => {
     expect(exceedsBatchLimit(101)).toBe(true)
   })
 
-  it('超限文案逐字匹配页面按钮禁用提示', () => {
+  it('超限文案逐字匹配页面按钮禁用提示（含当前 / 上限与四项缩减建议）', () => {
     expect(describeBatchLimit(150)).toBe(
-      '全组合共 150 张，超过上限 100 张；请减少素材或尺寸档位',
+      '当前 150 / 上限 100，请减少工作流、槽位或尺寸档数',
+    )
+    expect(describeBatchLimit(162)).toBe(
+      '当前 162 / 上限 100，请减少工作流、槽位或尺寸档数',
     )
   })
 })
@@ -146,6 +164,7 @@ describe('caps 过滤：不发送用不上的尺寸参数', () => {
       portrait: [portrait('pt1')],
       costume: [],
       pose: [],
+      workflows: [],
       // 即使选了尺寸，caps 不支持也会折叠为「不发参数」
       qualities: ['2K', '4K'],
       ratios: ['1:1', '2:3'],
@@ -179,6 +198,7 @@ describe('caps 过滤：不发送用不上的尺寸参数', () => {
       portrait: [],
       costume: [costume('c1')],
       pose: [],
+      workflows: [],
       qualities: ['4K'],
       ratios: ['2:3'],
       qualityEnabled: true,
@@ -215,6 +235,7 @@ describe('base_seed + i 派生', () => {
       portrait: [portrait('pt1'), portrait('pt2')],
       costume: [],
       pose: [],
+      workflows: [],
       qualities: ['2K', '4K'],
       ratios: ['1:1', '2:3'],
       qualityEnabled: true,
@@ -239,6 +260,7 @@ describe('base_seed + i 派生', () => {
       portrait: [portrait('pt1')],
       costume: [],
       pose: [],
+      workflows: [],
       qualities: [],
       ratios: [],
       qualityEnabled: false,
@@ -308,5 +330,210 @@ describe('逐组提交并发上限', () => {
     expect(peak).toBeLessThanOrEqual(MAX_SUBMIT_CONCURRENCY)
     expect(peak).toBe(2)
     expect(results).toEqual([2, 4, 6, 8, 10])
+  })
+})
+// ---------------------------------------------------------------------------
+// C-REF-TOTAL@2：工作流作为笛卡尔积第四维
+// ---------------------------------------------------------------------------
+
+describe('四维笛卡尔积（槽位 × 工作流 × 画质 × 比例）', () => {
+  it('2 人像 × 2 工作流 × 2 画质 × 2 比例 = 16 组，index / seed 连续', () => {
+    const groups = buildBatchGroups({
+      portrait: [portrait('pt1'), portrait('pt2')],
+      costume: [],
+      pose: [],
+      workflows: ['/A.api.json', '/B.api.json'],
+      qualities: ['2K', '4K'],
+      ratios: ['1:1', '2:3'],
+      qualityEnabled: true,
+      orientationEnabled: true,
+      baseSeed: 900,
+    })
+
+    expect(groups).toHaveLength(16)
+    expect(groups.map((group) => group.index)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ])
+    expect(groups.map((group) => group.seed)).toEqual([
+      900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915,
+    ])
+    // 每个槽位组合内先轮完「工作流 → 画质 → 比例」
+    expect(groups[0]).toMatchObject({
+      workflow: '/A.api.json',
+      quality: '2K',
+      aspectRatio: '1:1',
+    })
+    expect(groups[0].slots.portrait?.id).toBe('pt1')
+    expect(groups[3].workflow).toBe('/A.api.json')
+    expect(groups[4].workflow).toBe('/B.api.json')
+    expect(groups[8].slots.portrait?.id).toBe('pt2')
+    expect(groups.map((group) => group.workflow).slice(0, 8)).toEqual([
+      '/A.api.json',
+      '/A.api.json',
+      '/A.api.json',
+      '/A.api.json',
+      '/B.api.json',
+      '/B.api.json',
+      '/B.api.json',
+      '/B.api.json',
+    ])
+  })
+
+  it('未选工作流时按 1 条默认工作流计，不把维度乘成 0', () => {
+    const groups = buildBatchGroups({
+      portrait: [portrait('pt1'), portrait('pt2')],
+      costume: [],
+      pose: [],
+      workflows: [],
+      qualities: ['4K'],
+      ratios: ['2:3'],
+      qualityEnabled: true,
+      orientationEnabled: true,
+      baseSeed: 100000,
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.every((group) => group.workflow === '')).toBe(true)
+    // 工作流维度传 0 也按 1 计（空选择回落默认项）
+    expect(countBatchTotal({ portrait: 2, costume: 0, pose: 0 }, 2, 2, 0)).toBe(8)
+  })
+
+  it('四维合计超限：100 允许、150 超限并给出可断言文案', () => {
+    const counts = { portrait: 5, costume: 0, pose: 0 }
+    expect(countBatchTotal(counts, 2, 2, 5)).toBe(100)
+    expect(exceedsBatchLimit(100)).toBe(false)
+    expect(countBatchTotal(counts, 2, 3, 5)).toBe(150)
+    expect(exceedsBatchLimit(150)).toBe(true)
+    expect(describeBatchLimit(150)).toBe('当前 150 / 上限 100，请减少工作流、槽位或尺寸档数')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// C-REF-WF-SLOTS@1：槽位角色适用性
+// ---------------------------------------------------------------------------
+
+describe('工作流角色适用性（slots 三态）', () => {
+  const withSlots = (path: string, slots: StudioWorkflowSlot[]): StudioWorkflowOption =>
+    workflow(path, 3, { slots })
+
+  it('parseWorkflowSlots 三态：undefined 宽松 / [] 不可识别 / 非数组脏数据按不可识别', () => {
+    // undefined = 字段缺失（旧后端）：保持 unknown，不做判定
+    expect(parseWorkflowSlots(undefined)).toBeUndefined()
+    // 空数组 = 角色不可识别（UI 格式工作流）
+    expect(parseWorkflowSlots([])).toEqual([])
+    // 非数组脏数据同样按不可识别（只有 undefined 宽松）
+    expect(parseWorkflowSlots(null)).toEqual([])
+    expect(parseWorkflowSlots('portrait')).toEqual([])
+    // 合法角色去重，非法项忽略
+    expect(parseWorkflowSlots(['portrait', 'bogus', 'portrait', 'extra'])).toEqual([
+      'portrait',
+      'extra',
+    ])
+    expect(parseWorkflowSlots([1, 'costume'])).toEqual(['costume'])
+    // 数组里全是非法值 → 不可识别
+    expect(parseWorkflowSlots(['bogus'])).toEqual([])
+  })
+
+  it('evaluate：undefined 不判定、[] 全部不适用、非空按角色匹配', () => {
+    const unknown = workflow('/unknown', 3)
+    expect(evaluateWorkflowApplicability(unknown, ['portrait', 'costume'])).toEqual({
+      kind: null,
+      role: null,
+    })
+
+    const unrecognized = withSlots('/ui-format', [])
+    expect(evaluateWorkflowApplicability(unrecognized, ['portrait', 'costume'])).toEqual({
+      kind: 'unrecognized',
+      role: 'portrait',
+    })
+    // 空槽位不参与判定：没有任何已选槽位时，不可识别工作流也不拦
+    expect(evaluateWorkflowApplicability(unrecognized, [])).toEqual({ kind: null, role: null })
+
+    const portraitAndPose = withSlots('/pp', ['portrait', 'pose'])
+    expect(evaluateWorkflowApplicability(portraitAndPose, ['portrait', 'pose'])).toEqual({
+      kind: null,
+      role: null,
+    })
+    expect(evaluateWorkflowApplicability(portraitAndPose, ['portrait', 'costume'])).toEqual({
+      kind: 'missing',
+      role: 'costume',
+    })
+    // 兼容入口与结构化结果一致
+    expect(workflowInapplicableRole(portraitAndPose, ['portrait', 'pose'])).toBeNull()
+    expect(workflowInapplicableRole(portraitAndPose, ['portrait', 'costume'])).toBe('costume')
+    expect(workflowInapplicableRole(portraitAndPose, [])).toBeNull()
+  })
+
+  it('不可识别与缺角色的原因文案逐字可断言（下拉 / 提交 / 预览共用）', () => {
+    expect(describeWorkflowInapplicable('portrait', '四输入.api.json')).toBe(
+      '工作流「四输入」缺少人像输入，不适用于当前已选人像',
+    )
+    expect(describeWorkflowUnavailable('unrecognized', 'portrait')).toBe(
+      '该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），不适用于当前已选人像',
+    )
+    expect(describeWorkflowUnavailableFor(withSlots('/ui', []), ['costume'])).toBe(
+      '该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），不适用于当前已选服装',
+    )
+    // undefined 不产生原因（旧后端不受影响）
+    expect(describeWorkflowUnavailableFor(workflow('/old', 3), ['costume'])).toBe('')
+
+    const missingSkip = describePreviewWorkflowSkip('costume', '无服装.api.json')
+    expect(missingSkip).toContain('提示词预览已跳过')
+    expect(missingSkip).toContain('缺少服装输入，不适用于当前已选服装')
+    expect(missingSkip).toContain('下一步：')
+
+    const unrecognizedSkip = describePreviewWorkflowSkip('portrait', '/ui', 'unrecognized')
+    expect(unrecognizedSkip).toContain('提示词预览已跳过')
+    expect(unrecognizedSkip).toContain('无法识别角色')
+    expect(unrecognizedSkip).toContain('下一步：')
+  })
+})
+
+describe('槽位变化只取消已不适用工作流（收紧点 2）', () => {
+  const onlyPortrait = workflow('/portrait-only', 3, { slots: ['portrait'] })
+  const portraitAndCostume = workflow('/portrait-costume', 3, {
+    slots: ['portrait', 'costume'],
+  })
+
+  it('选 2 个 → 换同槽位的另一张图：角色集合不变，2 个仍选中', () => {
+    const selection = ['/portrait-only', '/portrait-costume']
+    const before = pruneInapplicableWorkflowSelection(
+      selection,
+      [onlyPortrait, portraitAndCostume],
+      ['portrait'],
+    )
+    expect(before.kept).toEqual(selection)
+    expect(before.removed).toEqual([])
+
+    // 「人像槽换另一张图」不改变角色集合（仍只有 portrait），裁剪结果不变
+    const afterSwap = pruneInapplicableWorkflowSelection(
+      selection,
+      [onlyPortrait, portraitAndCostume],
+      ['portrait'],
+    )
+    expect(afterSwap.kept).toEqual(selection)
+    expect(afterSwap.removed).toEqual([])
+  })
+
+  it('选 2 个 → 新增服装槽：只取消不支持服装的那 1 个，另一个保持选中', () => {
+    const selection = ['/portrait-only', '/portrait-costume']
+    const result = pruneInapplicableWorkflowSelection(
+      selection,
+      [onlyPortrait, portraitAndCostume],
+      ['portrait', 'costume'],
+    )
+    expect(result.kept).toEqual(['/portrait-costume'])
+    expect(result.removed).toHaveLength(1)
+    expect(result.removed[0].path).toBe('/portrait-only')
+    expect(result.removed[0].reason).toContain('缺少服装输入')
+  })
+
+  it('目录中已消失的路径静默剔除（不产生误导性原因）', () => {
+    const result = pruneInapplicableWorkflowSelection(
+      ['/gone', '/portrait-only'],
+      [onlyPortrait],
+      ['portrait'],
+    )
+    expect(result.kept).toEqual(['/portrait-only'])
+    expect(result.removed).toEqual([{ path: '/gone', reason: '' }])
   })
 })

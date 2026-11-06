@@ -19,10 +19,11 @@
  * 见各子组件与下方 scoped CSS 的数值注释。
  */
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { isNsfwCostumeItem, isNsfwPoseItem } from '../../api/reference'
+import type { HistoryItem } from '../../api/types'
 import type { UploadedReference } from '../../api/upload'
 import { withReferenceTab } from './referenceDeepLink'
 import DropZone from '../../components/DropZone.vue'
@@ -30,16 +31,21 @@ import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import type { RecipeSlotKey } from '../../composables/useReferenceRecipeDraft'
 import {
+  flushReferenceStudioSettings,
+  readReferenceStudioSettings,
+  writeReferenceStudioSettings,
+} from '../../composables/useReferenceStudioSettings'
+import {
   MAX_BATCH_RECIPES,
   useReferenceRecipe,
   workflowDisplayName,
 } from '../../composables/useReferenceRecipe'
 import { useToast } from '../../composables/useToast'
-
-
+import Lightbox from '../../components/Lightbox.vue'
 import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vue'
 import ReferenceSlotCard from './components/reference/ReferenceSlotCard.vue'
 import ReferenceWorkflowSelect from './components/reference/ReferenceWorkflowSelect.vue'
+import { slotSelectedItemsToHistoryItems } from './components/reference/slotHistoryItem'
 import {
   costumeSlotItems,
   poseSlotItems,
@@ -67,6 +73,12 @@ const toast = useToast()
 
 const {
   workflows,
+  workflowDefaultPath,
+  workflowSelection,
+
+  usesDefaultWorkflow,
+  workflowSelectionNotice,
+  clearWorkflowSelectionNotice,
   workflowPath,
   workflowsLoading,
   workflowsError,
@@ -81,6 +93,7 @@ const {
   baseSeed,
   setBaseSeed,
   activeSlotCount,
+  filledSlotRoles,
   batchTotal,
   batchOverLimit,
   batchLimitMessage,
@@ -89,10 +102,14 @@ const {
   promptSuffix,
   extraPath,
   extraName,
+  bodyMode,
+  setBodyMode,
   previewPrompt,
   previewError,
   previewLoading,
   refreshPreviewPrompt,
+  previewWorkflow,
+
 
   progress,
   progressPercent,
@@ -115,6 +132,100 @@ const {
 } = useReferenceRecipe()
 
 const { poses, costumes, portraits, loadAll } = useStudioLibraries()
+
+// ---------------------------------------------------------------------------
+// 工作流多选提示 / 素体开关（C-REF-WF-SLOTS@1 / C-REF-BODY-MODE@1）
+// ---------------------------------------------------------------------------
+
+/** 工作流因槽位变化被自动取消时用 toast 明确告知（不静默移除）。 */
+watch(workflowSelectionNotice, (message) => {
+  if (!message) return
+  toast.info(message)
+  clearWorkflowSelectionNotice()
+})
+
+/**
+ * 素体开关受安全模式约束：安全模式下禁用；
+ * 若用户先打开素体再切回安全模式，则自动关闭并提示（不会在安全模式下自动打开）。
+ */
+watch(safeMode, (enabled) => {
+  if (!enabled || bodyMode.value !== 'bare') return
+  setBodyMode('costume')
+  toast.info('已切换到安全模式，素体展示（无服装）已关闭')
+})
+
+/** 切换素体开关：开启时由 composable 清空服装槽，这里只负责把影响告诉用户。 */
+function onToggleBodyMode(enabled: boolean): void {
+  if (safeMode.value) {
+    toast.info('安全模式下不可用，请先解锁 18+')
+    return
+  }
+  const hadCostume = draft.costumeCount.value > 0
+  setBodyMode(enabled ? 'bare' : 'costume')
+  if (enabled && hadCostume) {
+    toast.info('已清空服装槽：素体展示不提交服装，避免后端拒绝 bare + 服装的组合')
+  }
+}
+
+/** checkbox change 事件 → 布尔值。 */
+function onBodyModeChange(event: Event): void {
+  onToggleBodyMode((event.target as HTMLInputElement).checked)
+}
+
+// ---------------------------------------------------------------------------
+// 操作记忆（pb.reference_studio_v1，2026-11-05）
+// ---------------------------------------------------------------------------
+
+/**
+ * 读一次已存快照并回填「工作流 / 画风 / 基础种子」。
+ *
+ * 工作流是否仍然可用不在这里判断：`loadStudioWorkflows` 会在目录加载完成后
+ * 校验，失效时自动回落后端 default，避免恢复出一个磁盘上已删除的工作流。
+ */
+const storedSettings = readReferenceStudioSettings()
+if (storedSettings) {
+  if (storedSettings.workflow) workflowPath.value = storedSettings.workflow
+  style.value = storedSettings.style
+  baseSeed.value = storedSettings.baseSeed
+}
+
+/** 画风 / 工作流 / 种子 / 画质档 / 比例：任何变更都合并写入（300ms 防抖）。 */
+watch(
+  [workflowPath, style, baseSeed, qualitySelection, ratioSelection],
+  () => {
+    writeReferenceStudioSettings({
+      style: style.value,
+      workflow: workflowPath.value,
+      baseSeed: baseSeed.value,
+      qualities: [...qualitySelection.value],
+      ratios: [...ratioSelection.value],
+      sizesConfigured: true,
+    })
+  },
+  { deep: true },
+)
+
+/**
+ * 回填画质档 / 比例。
+ *
+ * 只恢复当前工作流 caps 仍然支持的项，避免把旧工作流的档位发出去；
+ * `sizesConfigured === false` 表示用户从未配置过尺寸，保留 caps reconcile
+ * 的工作流默认档，不把默认值误当作用户选择。
+ */
+function restoreSizeSelections(): void {
+  const stored = readReferenceStudioSettings()
+  if (!stored?.sizesConfigured) return
+
+  const qualityAvailable = new Set(qualityOptions.value.map((option) => option.value))
+  qualitySelection.value = caps.value.quality
+    ? stored.qualities.filter((value) => qualityAvailable.has(value))
+    : []
+
+  const ratioAvailable = new Set(aspectRatios.value)
+  ratioSelection.value = caps.value.orientation
+    ? stored.ratios.filter((value) => ratioAvailable.has(value))
+    : []
+}
 
 /** 失败后点「查看上一张结果」时切到上一次成功的图。 */
 const showingPrevious = ref(false)
@@ -199,6 +310,67 @@ const totalSelected = computed(() => draft.totalSelected.value)
 function changePoseDepth(useDepth: boolean): void {
   setPoseDepthMode(useDepth)
   draft.setPoseMode(useDepth)
+}
+
+// ---------------------------------------------------------------------------
+// 槽位灯箱：直接复用画廊 `components/Lightbox.vue`（只读）
+// ---------------------------------------------------------------------------
+
+interface SlotPreviewState {
+  slot: RecipeSlotKey
+  index: number
+}
+
+const slotPreview = ref<SlotPreviewState | null>(null)
+
+const previewCard = computed<SlotCardView | null>(() => {
+  const state = slotPreview.value
+  if (!state) return null
+  return slotCards.value.find((card) => card.key === state.slot) ?? null
+})
+
+const previewItems = computed<SlotSelectedItem[]>(() => previewCard.value?.items ?? [])
+
+/**
+ * 参考条目 → 画廊灯箱契约（`HistoryItem[]`）。
+ *
+ * 只做只读投影：收藏 / 删除 / 重出图 / 投喂等写操作由灯箱的 `readonly`
+ * 统一关掉；不传 `workflows`，参考条目本来也没有工作流。
+ */
+const previewHistoryItems = computed<HistoryItem[]>(() =>
+  slotSelectedItemsToHistoryItems(previewItems.value),
+)
+
+/** Lightbox 的 `index` 是必填 number；由模板 `v-if` 保证只在打开时求值。 */
+const previewIndex = computed<number>(() => slotPreview.value?.index ?? 0)
+
+function openSlotPreview(slot: RecipeSlotKey, index: number): void {
+  const card = slotCards.value.find((entry) => entry.key === slot)
+  if (!card || card.items.length === 0) return
+  slotPreview.value = {
+    slot,
+    index: Math.min(Math.max(index, 0), card.items.length - 1),
+  }
+}
+
+function closeSlotPreview(): void {
+  slotPreview.value = null
+}
+
+/**
+ * 灯箱内 ← / → 或左右按钮翻页：只更新传给 Lightbox 的 `index`。
+ *
+ * 翻页范围始终限制在当前槽位的已选条目内（顺序即加入顺序），不跨槽、
+ * 不触发增删；单张时灯箱自身会把左右按钮置灰，不会走到这里。
+ */
+function onPreviewIndexChange(index: number): void {
+  const state = slotPreview.value
+  const length = previewItems.value.length
+  if (!state || length === 0) return
+  slotPreview.value = {
+    ...state,
+    index: Math.min(Math.max(index, 0), length - 1),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,10 +545,41 @@ function reloadWorkflows(): void {
   void loadStudioWorkflows()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 先加载工作流：caps 决定画质档 / 比例，恢复尺寸前必须先知道当前工作流支持什么。
+  await loadStudioWorkflows()
 
-  void loadStudioWorkflows()
-  void loadAll()
+  const workflowsReady = !workflowsError.value && workflows.value.length > 0
+  if (workflowsReady) restoreSizeSelections()
+
+  await loadAll()
+
+  // 三库全部成功才 hydrate：任一库加载失败时「没数据」不等于「条目已删除」，
+  // 此时恢复会清空三槽并覆盖存储，等下次进入重试更安全。
+  const librariesReady =
+    !poses.error.value && !costumes.error.value && !portraits.error.value
+  if (librariesReady) {
+    draft.hydrate({
+      portrait: portraits.items.value,
+      costume: costumes.items.value,
+      pose: poses.items.value,
+    })
+  }
+
+  // 首次进入也落一份完整快照：把 reconcile 得到的工作流默认档一并记住，
+  // 之后用户显式清空（空数组）才能与「从未配置」区分开。
+  // 工作流目录读取失败时不写，避免用空列表覆盖已有记忆。
+  if (workflowsReady) {
+    writeReferenceStudioSettings({
+      style: style.value,
+      workflow: workflowPath.value,
+      baseSeed: baseSeed.value,
+      qualities: [...qualitySelection.value],
+      ratios: [...ratioSelection.value],
+      sizesConfigured: true,
+    })
+    flushReferenceStudioSettings()
+  }
 })
 </script>
 
@@ -387,7 +590,7 @@ onMounted(() => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：人像 / 服装 / 姿势三个库均可多选，按「槽位组合 × 画质档 × 比例」逐组提交；第 4 张为可选的上传附加图。
+        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交；第 4 张为可选的上传附加图。
       </p>
     </header>
 
@@ -411,6 +614,9 @@ onMounted(() => {
           <p class="studio-hint">
             提示词由后端按三槽自动生成，此处仅预览，不可编辑。
             <template v-if="totalSelected > 1">多选时按每槽第一张生成代表组合。</template>
+            <template v-if="workflowSelection.length > 1 && previewWorkflow">
+              多工作流时按第一条工作流预览：{{ workflowDisplayName(previewWorkflow.name) }}。
+            </template>
           </p>
 
           <div class="prompt-preview" data-testid="studio-prompt-preview">
@@ -473,6 +679,7 @@ onMounted(() => {
               @select="openSlot(slot.key)"
               @clear="clearSlot(slot.key)"
               @depth-change="changePoseDepth"
+              @preview="openSlotPreview(slot.key, $event)"
             />
           </div>
 
@@ -526,11 +733,13 @@ onMounted(() => {
           <!-- 工作流 2fr / 画风 1fr 并排；<768px 回落单列（见下方 media query） -->
           <div class="field-row">
             <div class="field">
-              <label class="field__label" for="studio-workflow">工作流（本机工作流目录）</label>
+              <label class="field__label" for="studio-workflow">工作流（可多选，每项一组任务）</label>
               <ReferenceWorkflowSelect
                 id="studio-workflow"
-                v-model="workflowPath"
+                v-model="workflowSelection"
                 :workflows="workflows"
+                :selected-roles="filledSlotRoles"
+                :default-path="workflowDefaultPath"
                 :loading="workflowsLoading"
               />
             </div>
@@ -544,6 +753,22 @@ onMounted(() => {
               </select>
             </div>
           </div>
+
+          <!-- 未勾选时回落默认项，必须在 UI 明示，避免用户误以为没选就不生效 -->
+          <p
+            v-if="usesDefaultWorkflow && previewWorkflow"
+            class="studio-hint"
+            data-testid="studio-workflow-default-note"
+          >
+            当前使用默认工作流：{{ workflowDisplayName(previewWorkflow.name) }}（未勾选任何工作流时按 1 条默认项计入全组合）
+          </p>
+          <p
+            v-else-if="workflowSelection.length > 1"
+            class="studio-hint"
+            data-testid="studio-workflow-multi-note"
+          >
+            已选 {{ workflowSelection.length }} 个工作流：全组合按每个工作流各展开一组任务。
+          </p>
 
           <p v-if="workflowsError" class="studio-error" role="alert">
             {{ workflowsError }}
@@ -603,6 +828,30 @@ onMounted(() => {
             输出尺寸跟随参考图（当前实际尺寸未知时不显示数值）
           </p>
 
+          <!-- 素体（无服装）开关：受 18+ 安全模式约束，不写 localStorage -->
+          <div class="field" data-testid="studio-body-mode-field">
+            <span class="field__label">体态模式</span>
+            <label class="switch-row" :class="{ 'is-disabled': safeMode }">
+              <input
+                type="checkbox"
+                class="switch-row__input"
+                data-testid="studio-body-mode-bare"
+                :checked="bodyMode === 'bare'"
+                :disabled="safeMode"
+                @change="onBodyModeChange"
+              />
+              <span class="switch-row__text">
+                <span class="switch-row__title">素体展示（无服装）</span>
+                <span class="switch-row__hint" data-testid="studio-body-mode-hint">
+                  {{
+                    safeMode
+                      ? '安全模式下不可用，请先解锁 18+'
+                      : '开启后会清空服装槽，提交体带 body_mode=bare'
+                  }}
+                </span>
+              </span>
+            </label>
+          </div>
 
           <!-- 常驻说明（D4 冻结） -->
           <p class="studio-note" data-testid="studio-node-note">
@@ -783,6 +1032,26 @@ onMounted(() => {
         </ReferenceSectionCard>
       </div>
     </div>
+
+    <!--
+      槽位灯箱：直接复用画廊 `components/Lightbox.vue`，只读打开。
+      - `readonly` 关掉收藏 / 删除 / 重出图 / 投喂等写操作；
+      - `can-open-gallery=false` 不显示「到画廊定位」；
+      - `file-actions=false` 隐藏下载 / 打开目录 / 出片档案 / 存储位置
+        （这些入口依赖 ComfyUI 媒体三目录里的 filename）；
+      - 不传 `workflows`：参考图条目没有工作流；
+      - 翻页只更新 `index`，范围由 `onPreviewIndexChange` 限制在当前槽位内。
+    -->
+    <Lightbox
+      v-if="slotPreview && previewHistoryItems.length"
+      :items="previewHistoryItems"
+      :index="previewIndex"
+      readonly
+      :can-open-gallery="false"
+      :file-actions="false"
+      @update:index="onPreviewIndexChange"
+      @close="closeSlotPreview"
+    />
 
     <!-- 工作流降级确认框：M（非空槽数）< N（input_count）时出现，取消则不提交 -->
     <div
@@ -1108,6 +1377,52 @@ onMounted(() => {
 .studio-textarea:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
+}
+
+/* 素体开关：用原生 checkbox 保持键盘 / 读屏可访问性，不手搓 switch */
+.switch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-code);
+  cursor: pointer;
+}
+
+.switch-row.is-disabled {
+  cursor: not-allowed;
+}
+
+.switch-row__input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+  cursor: inherit;
+}
+
+.switch-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.switch-row__title {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.switch-row__hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .studio-note {

@@ -2,13 +2,19 @@
  * 三槽位配方选择状态单测（多选版）。
  *
  * 覆盖：多选追加 / 去重 / 移除、非空槽数 n/3 与条目总数、已选判定
- * （姿势区分白模与深度图）、切换模式、清空；并显式断言「不做持久化」——
- * 操作后 localStorage / sessionStorage 不被写入。
+ * （姿势区分白模与深度图）、切换模式、清空；
+ * 以及 2026-11-05 新增的持久化（persist / hydrate）：三槽落盘、
+ * 按 id + library 匹配恢复、匹配不到的条目被丢弃。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
+import {
+  flushReferenceStudioSettings,
+  readReferenceStudioSettings,
+  REFERENCE_STUDIO_STORAGE_KEY,
+} from './useReferenceStudioSettings'
 
 /**
  * happy-dom / Node 25 的全局 localStorage 在当前运行方式下不是完整 Storage，
@@ -89,6 +95,8 @@ const draft = useReferenceRecipeDraft()
 
 beforeEach(() => {
   draft.clearDraft()
+  // 自动持久化会调度防抖写；立即冲刷并清空，避免跨用例污染。
+  flushReferenceStudioSettings()
   localStorage.clear()
   sessionStorage.clear()
 })
@@ -218,7 +226,26 @@ describe('加入 / 移除 / 去重', () => {
   })
 })
 
-describe('清空与不持久化', () => {
+describe('清空与持久化（2026-11-05 取代 M3 不持久化）', () => {
+  /** 直接写一份合法的存储快照（用于构造「库中已删除条目」等场景）。 */
+  function storeSnapshot(overrides: Record<string, unknown>): void {
+    localStorage.setItem(
+      REFERENCE_STUDIO_STORAGE_KEY,
+      JSON.stringify({
+        portrait: [],
+        costume: [],
+        pose: [],
+        style: 'realistic',
+        workflow: '',
+        baseSeed: 100000,
+        qualities: [],
+        ratios: [],
+        sizesConfigured: false,
+        ...overrides,
+      }),
+    )
+  }
+
   it('clearDraft 三槽同时清空', () => {
     draft.setPortrait(portrait('pt1'))
     draft.setCostume(costume('c1'))
@@ -233,12 +260,98 @@ describe('清空与不持久化', () => {
     expect(draft.pose.value).toEqual([])
   })
 
-  it('M3：不写 localStorage / sessionStorage', () => {
-    draft.addPortrait(portrait('pt1'))
-    draft.addCostume(costume('c1'))
-    draft.addPose(pose('p1'), true)
+  it('三槽变化自动写入最小记录（id + library + name + thumbnail）', () => {
+    draft.setPortrait(portrait('pt1'))
+    draft.addCostume({ ...costume('c1'), library: 'costume-anime' })
+    draft.setPose(pose('p1'), true)
 
-    expect(localStorage.length).toBe(0)
-    expect(sessionStorage.length).toBe(0)
+    flushReferenceStudioSettings()
+    const stored = readReferenceStudioSettings()
+
+    expect(stored?.portrait).toEqual([
+      { id: 'pt1', library: 'portrait', name: '发型', thumbnail: '' },
+    ])
+    expect(stored?.costume).toEqual([
+      { id: 'c1', library: 'costume-anime', name: '服装', thumbnail: '' },
+    ])
+    expect(stored?.pose).toEqual([
+      { id: 'p1', library: 'pose', name: '姿势', thumbnail: '', useDepth: true },
+    ])
+  })
+
+  it('hydrate：按 id 匹配库数据恢复三槽，顺序与姿势模式保持', () => {
+    draft.addPortrait(portrait('pt2'))
+    draft.addPortrait(portrait('pt1'))
+    draft.setCostume(costume('c1'))
+    draft.setPose(pose('p1'), true)
+    flushReferenceStudioSettings()
+    draft.clearDraft()
+
+    const restored = draft.hydrate({
+      portrait: [portrait('pt1'), portrait('pt2'), portrait('pt3')],
+      costume: [costume('c1'), costume('c2')],
+      pose: [pose('p1'), pose('p2')],
+    })
+
+    expect(restored).toBe(true)
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt2', 'pt1'])
+    expect(draft.costume.value.map((item) => item.id)).toEqual(['c1'])
+    expect(draft.pose.value.map((entry) => entry.item.id)).toEqual(['p1'])
+    expect(draft.pose.value[0].useDepth).toBe(true)
+  })
+
+  it('hydrate：匹配不到的 id 直接丢弃，不凭空造卡片', () => {
+    storeSnapshot({
+      portrait: [
+        { id: 'pt1', library: 'portrait', name: '发型', thumbnail: '' },
+        { id: 'deleted', library: 'portrait', name: '已删除', thumbnail: '' },
+      ],
+      costume: [{ id: 'gone', library: 'costume', name: '已删除', thumbnail: '' }],
+    })
+
+    const restored = draft.hydrate({
+      portrait: [portrait('pt1')],
+      costume: [],
+      pose: [],
+    })
+
+    expect(restored).toBe(true)
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
+    expect(draft.costume.value).toEqual([])
+    expect(draft.pose.value).toEqual([])
+  })
+
+  it('hydrate：library 不匹配的条目丢弃（同 id 不同库不互相串）', () => {
+    storeSnapshot({
+      costume: [
+        { id: 'same-id', library: 'costume-anime', name: '二次元', thumbnail: '' },
+        { id: 'real-id', library: 'costume', name: '现实', thumbnail: '' },
+      ],
+    })
+
+    draft.hydrate({
+      portrait: [],
+      // 库里只有现实库的 same-id，不应被「二次元库」的记录命中。
+      costume: [
+        { ...costume('same-id'), library: 'costume' },
+        { ...costume('real-id'), library: 'costume' },
+      ],
+      pose: [],
+    })
+
+    expect(draft.costume.value.map((item) => item.id)).toEqual(['real-id'])
+  })
+
+  it('无存储时 hydrate 返回 false，且不改变现有选择', () => {
+    draft.setPortrait(portrait('pt1'))
+
+    const restored = draft.hydrate({
+      portrait: [portrait('pt2')],
+      costume: [],
+      pose: [],
+    })
+
+    expect(restored).toBe(false)
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
   })
 })

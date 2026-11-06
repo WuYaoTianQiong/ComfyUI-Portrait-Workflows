@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { withReferenceTab } from './reference/referenceDeepLink'
+import {
+  readLastReferenceTab,
+  writeLastReferenceTab,
+} from '../composables/useReferenceStudioSettings'
 
 import ReferenceCostumesTab from './reference/ReferenceCostumesTab.vue'
 import ReferenceHomeTab from './reference/ReferenceHomeTab.vue'
@@ -80,8 +84,34 @@ function normalizeTab(value: unknown): ReferenceTabKey | null {
 /** 本次 URL 上的合法页签；缺失或非法为 null。 */
 const queryTab = computed(() => normalizeTab(route.query.tab))
 
+/**
+ * 最后访问的页签（挂载时读一次，之后随 activeTab 变更写回）。
+ *
+ * 优先级（2026-11-05 用户要求记忆操作）：
+ * 1. URL 里有合法 `?tab=` → 用它；
+ * 2. URL 无 tab → 用存储里的最后页签；
+ * 3. 存储值非法 / 不存在 → 回落 `home`（图库总览）。
+ *
+ * 只改 activeTab 的初始化来源，不改变页签条 / 面板结构与 `selectTab` 的 URL 规则。
+ */
+const storedTab = ref<string | null>(readLastReferenceTab())
+
 /** 实际生效页签。 */
-const activeTab = computed<ReferenceTabKey>(() => queryTab.value ?? DEFAULT_TAB)
+const activeTab = computed<ReferenceTabKey>(() => {
+  if (queryTab.value) return queryTab.value
+  const stored = storedTab.value
+  return stored !== null && isTabKey(stored) ? stored : DEFAULT_TAB
+})
+
+// 记住最后访问的页签；写失败（隐私模式）在 composable 内静默。
+watch(
+  activeTab,
+  (value) => {
+    storedTab.value = value
+    writeLastReferenceTab(value)
+  },
+  { immediate: true },
+)
 
 
 const TAB_COMPONENTS = {
@@ -94,6 +124,32 @@ const TAB_COMPONENTS = {
 } as const
 
 const activeComponent = computed(() => TAB_COMPONENTS[activeTab.value])
+
+/**
+ * 各页签的垂直滚动位置。
+ *
+ * `<KeepAlive>` 只保留组件状态，不保留“页面级”滚动容器（`.reference-page`）
+ * 的 scrollTop：切换页签时同一个容器继续滚动，切回原页签会停在别人留下的位置。
+ * 这里在页签变化前后记录/恢复，补齐「切回后滚动位置不变」的体验。
+ *
+ * 只在页签切换时读写，不干预 `activeTab` 的读取与写回逻辑。
+ */
+const pageElement = ref<HTMLElement | null>(null)
+const scrollPositions = new Map<ReferenceTabKey, number>()
+
+watch(activeTab, async (nextTab, previousTab) => {
+  const page = pageElement.value
+  if (!page) return
+
+  // 旧组件的 DOM 在 watcher（pre-flush）阶段仍然挂载，此时读到的就是用户切走前的位置。
+  scrollPositions.set(previousTab, page.scrollTop)
+
+  await nextTick()
+
+  // 目标页签首次进入时没有记录，回落到顶部；已缓存的页签恢复原位置。
+  const target = scrollPositions.get(nextTab) ?? 0
+  if (pageElement.value) pageElement.value.scrollTop = target
+})
 
 /**
  * 切换页签：覆盖 `tab` 并保留其它业务 query。
@@ -119,10 +175,13 @@ function selectTab(key: ReferenceTabKey): void {
 </script>
 
 <template>
-  <div class="reference-page">
+  <div ref="pageElement" class="reference-page">
     <div class="reference-page__main">
       <div class="reference-page__inner">
-        <!-- 二级导航：只在内容区顶部，全局导航由外层 App.vue 提供。 -->
+        <!--
+          二级导航：桌面（≥768px）是左栏竖排，窄屏回落为顶部横向滚动条。
+          全局导航由外层 App.vue 提供，这里不重复渲染。
+        -->
         <nav class="reference-tabs" aria-label="参考图库页签">
           <div class="reference-tabs__list" role="tablist">
             <button
@@ -148,7 +207,14 @@ function selectTab(key: ReferenceTabKey): void {
           role="tabpanel"
           :aria-labelledby="`reference-tab-${activeTab}`"
         >
-          <component :is="activeComponent" />
+          <!--
+            KeepAlive：切页签只停用/激活组件，不卸载重建。
+            库数据、筛选条件与组件内部状态随实例保留，切回时不重新请求四个库。
+            不给每个页签传不同 key，否则同一组件也会被强制重建、缓存失效。
+          -->
+          <KeepAlive :max="TABS.length">
+            <component :is="activeComponent" />
+          </KeepAlive>
         </section>
       </div>
     </div>
@@ -170,55 +236,72 @@ function selectTab(key: ReferenceTabKey): void {
 }
 
 /*
- * 与主站 `.content` 同宽：不设 max-width，避免 1920 视口下两侧大留白。
- * 左右留白只由外层 `.reference-page__main` 的内边距提供。
+ * 页面采用「左栏二级导航 + 右栏内容」两栏布局。
+ * 宽度不设 max-width，避免 1920 视口下两侧大留白；左右留白只由外层
+ * `.reference-page__main` 的内边距提供。
+ *
+ * `minmax(0, 1fr)` 是关键：右栏内容（卡片网格/长英文标签）默认按
+ * min-content 撑宽，会把 200px 的左栏压扁并产生横向滚动。
  */
 .reference-page__inner {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
   width: 100%;
   min-width: 0;
 }
 
 /*
- * 页签条：高度参照 §5 补充实测项的内层工具条 56px；
- * 仅内容区顶部的一条二级导航，不复制全局导航。
+ * 左栏导航：竖排、贴顶、可滚动。
+ *
+ * `top: 0` 相对页面自身滚动容器 `.reference-page`；`max-height` 扣掉全局顶栏
+ * 52px 与页面顶部内边距 16px，保证导航在视口内完整可见且内容过长时自己滚动。
+ * 六个页签远小于该高度，`overflow-y: auto` 只是兜底。
  */
 .reference-tabs {
-  display: flex;
-  align-items: center;
-  min-height: 56px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.reference-tabs::-webkit-scrollbar {
-  display: none;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 68px);
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
 
 .reference-tabs__list {
   display: flex;
-  align-items: center;
-  flex: none;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 0;
 }
 
-/* 药丸尺寸与双态配色对齐 §5「标签」行：32px 高、全圆、6px 14px、14px / 500。 */
+/*
+ * 导航项：整行可点、左对齐。
+ * 非选中态用 `--text-muted`（深色 #a1a1a1 / 浅色 #3f4a5a，两套均 ≥7:1），
+ * 选中态用主色浅底 + 主色左侧色条 + `--text-strong` 文字，避免「主色字压在
+ * 主色浅底上」只有 3.7:1 的低对比问题。
+ */
 .reference-tab {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  flex: none;
-  height: 32px;
-  padding: 6px 14px;
+  justify-content: flex-start;
+  width: 100%;
+  height: 36px;
+  padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 9999px;
-  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
+  text-align: left;
   white-space: nowrap;
   transition:
     background-color var(--dur-fast) var(--ease),
@@ -231,8 +314,10 @@ function selectTab(key: ReferenceTabKey): void {
 }
 
 .reference-tab.is-active {
-  background: var(--btn-inverse-bg);
-  color: var(--on-inverse);
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .reference-tab:focus-visible {
@@ -241,18 +326,72 @@ function selectTab(key: ReferenceTabKey): void {
 }
 
 .reference-panel {
+  min-width: 0;
   min-height: 0;
 }
 
-/* §5：640–767px 左右 24px。 */
+/*
+ * 窄屏（<768px）：两栏回落为单栏，导航复用原来的顶部横向滚动条。
+ *
+ * 这里显式恢复横向 flex + `overflow-x: auto`：既保持既有 390px 实测
+ * 「页签条可横向滚动」的契约，也让超宽的页签条自身消化溢出，而不是撑破页面。
+ */
 @media (max-width: 767px) {
   .reference-page__main {
     padding-left: 24px;
     padding-right: 24px;
   }
+
+  .reference-page__inner {
+    display: block;
+  }
+
+  .reference-tabs {
+    position: static;
+    display: flex;
+    align-items: center;
+    min-height: 56px;
+    max-height: none;
+    margin-bottom: 16px;
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .reference-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .reference-tabs__list {
+    flex-direction: row;
+    align-items: center;
+    flex: none;
+    gap: 8px;
+    width: auto;
+    padding: 0;
+  }
+
+  /* 药丸尺寸与双态配色对齐 §5「标签」行：32px 高、全圆、6px 14px。 */
+  .reference-tab {
+    flex: none;
+    width: auto;
+    height: 32px;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    background: var(--surface-inset);
+  }
+
+  .reference-tab.is-active {
+    background: var(--btn-inverse-bg);
+    box-shadow: none;
+    color: var(--on-inverse);
+  }
 }
 
-/* §5：<640px 左右 16px。 */
+/* §5：640–767px 左右 24px。 */
 @media (max-width: 639px) {
   .reference-page__main {
     padding-left: 16px;

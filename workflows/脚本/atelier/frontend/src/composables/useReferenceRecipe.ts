@@ -2,13 +2,17 @@
  * 合成台批量提交与轮询（契约 C-REF-RECIPES@2 / C-JOB-PROGRESS@1）。
  *
  * 与阶段 3 最薄版的差异（本次升级）：
- * - 三槽改为**多选**：每槽 N 张，前端按「槽位组合 × 画质档 × 比例」做笛卡尔积，
+ * - 三槽改为**多选**：每槽 N 张，前端按
+ *   「槽位组合 × 选中工作流 × 画质档 × 比例」做四维笛卡尔积，
  *   **每组独立 POST**（后端 `RecipeRequest` 的槽位仍是单值）；
+ * - 工作流也改为**受控多选**（契约 C-REF-WF-SLOTS@1 / C-REF-TOTAL@2）：
+ *   `slots` 声明工作流支持的业务角色，缺少当前已选槽位角色的项标为不可用并禁止勾选；
  * - 全组合上限 {@link MAX_BATCH_RECIPES}（100），超限时页面禁用提交；
  * - 提交并发上限 {@link MAX_SUBMIT_CONCURRENCY}（2），不一次打满后端；
  * - 种子按组派生：第 i 组 `seed = base_seed + i`、`seed_mode='fixed'`；
- * - 提交体透传 `workflow` / `quality` / `aspect_ratio` / `orientation`，
+ * - 提交体透传 `workflow` / `quality` / `aspect_ratio` / `orientation` / `body_mode`，
  *   但 `caps.quality` / `caps.orientation` 为 false 时**绝不发送**对应字段；
+ * - `body_mode='bare'`（素体展示）时绝不发送 `costume_id`（契约 C-REF-BODY-MODE@1）；
  * - 非空槽数 M < 所选工作流 input_count N 时，提交前弹出降级确认框
  *   （列出 `input_count <= M` 的候选），不做静默自动切换。
  *
@@ -73,6 +77,32 @@ export type RecipeStyle = 'none' | 'realistic'
 /** 服装槽可用的两个库。 */
 export type RecipeCostumeLibrary = 'costume' | 'costume-anime'
 
+/**
+ * 工作流支持的业务角色（后端 `slots` 字段，契约 C-REF-WF-SLOTS@1）。
+ *
+ * `extra` 对应合成台的第 4 张上传图；槽位为空时不参与适用性判定。
+ */
+export type StudioWorkflowSlot = 'portrait' | 'costume' | 'pose' | 'extra'
+
+/** 合法角色值（顺序即 UI 提示顺序）。 */
+export const STUDIO_WORKFLOW_SLOTS: readonly StudioWorkflowSlot[] = [
+  'portrait',
+  'costume',
+  'pose',
+  'extra',
+]
+
+/** 角色中文名（用于「缺少 X 输入，不适用于当前已选 X」文案）。 */
+const WORKFLOW_SLOT_LABELS: Readonly<Record<StudioWorkflowSlot, string>> = {
+  portrait: '人像',
+  costume: '服装',
+  pose: '姿势',
+  extra: '第 4 张',
+}
+
+/** 体态模式：`costume` 服装模式；`bare` 素体展示（无服装）。 */
+export type RecipeBodyMode = 'costume' | 'bare'
+
 // ---------------------------------------------------------------------------
 // 类型
 // ---------------------------------------------------------------------------
@@ -92,6 +122,8 @@ export interface RecipeSubmitRequest {
   aspect_ratio?: string
   /** 横竖方向（由比例推导）；`caps.orientation === false` 时不发送。 */
   orientation?: 'portrait' | 'landscape'
+  /** 体态模式；`bare` 时后端不接受服装（提交体不会带 `costume_id`）。 */
+  body_mode?: RecipeBodyMode
   style: RecipeStyle
   prompt_suffix: string
   seed: number
@@ -163,6 +195,16 @@ export interface StudioWorkflowOption {
   /** LoadImage 输入数；提交前能力预判用它和「非空槽数 M」比较。 */
   inputCount: number
   recommended: boolean
+  /**
+   * 该工作流支持的业务角色（后端 `slots`，契约 C-REF-WF-SLOTS@1）。
+   *
+   * 三态语义（旧后端 / 异常数据都不能放行"看起来能选、一提交就 400"的项）：
+   * - `undefined`：字段缺失（旧后端）→ 能力未知，**不做**适用性判定；
+   * - `[]`：字段存在但没有任何可识别角色（UI 格式工作流 / 解析失败）→
+   *   **角色不可识别**，对所有非空槽位都不适用，必须置灰禁止勾选；
+   * - 非空：按角色匹配，缺少已选槽位角色即不适用。
+   */
+  slots?: StudioWorkflowSlot[]
   /** 后端探测的注入能力；缺失时由 `useWorkflowCaps` 回落到乐观默认值。 */
   caps?: WorkflowCaps
   /** 画质 / 方向参数描述；用于生成真实档位与比例选项。 */
@@ -203,15 +245,24 @@ export interface RecipeRequestOptions {
   aspectRatio?: string
   /** 横竖方向；空串不发送。 */
   orientation?: 'portrait' | 'landscape' | ''
+  /** 体态模式；缺省 `costume`（与既有行为一致，总是随提交体发送）。 */
+  bodyMode?: RecipeBodyMode
   seed?: number
   seedMode?: 'fixed' | 'random'
 }
 
-/** 批量输入：三槽多选 + 尺寸档位多选。 */
+/** 批量输入：三槽多选 + 工作流多选 + 尺寸档位多选。 */
 export interface RecipeBatchInput {
   portrait: readonly PortraitItem[]
   costume: readonly CostumeItem[]
   pose: readonly PoseItem[]
+  /**
+   * 已选工作流路径（有序、去重）。
+   *
+   * 空数组按 **1 条默认工作流**计（不把维度乘成 0）；路径本身为空串时
+   * 提交体不发送 `workflow`，由后端使用默认工作流。
+   */
+  workflows: readonly string[]
   qualities: readonly string[]
   ratios: readonly string[]
   qualityEnabled: boolean
@@ -224,6 +275,8 @@ export interface RecipeBatchGroup {
   /** 组下标（从 0 开始），种子 = baseSeed + index。 */
   index: number
   slots: RecipeSlots
+  /** 本组要提交的工作流路径；空串表示本轮不发送 `workflow`（后端默认）。 */
+  workflow: string
   /** 空串表示本轮不发送 quality。 */
   quality: string
   /** 空串表示本轮不发送 aspect_ratio。 */
@@ -293,8 +346,10 @@ export function buildRecipeRequest(
   slots: RecipeSlots,
   options: RecipeRequestOptions,
 ): RecipeSubmitRequest {
+  const bodyMode: RecipeBodyMode = options.bodyMode === 'bare' ? 'bare' : 'costume'
   const request: RecipeSubmitRequest = {
     costume_library: costumeLibraryOf(slots.costume),
+    body_mode: bodyMode,
     style: normalizeRecipeStyle(options.style),
     prompt_suffix: options.promptSuffix.trim(),
     seed: options.seed ?? DEFAULT_RECIPE_SEED,
@@ -302,7 +357,8 @@ export function buildRecipeRequest(
   }
 
   if (slots.portrait) request.portrait_id = slots.portrait.id
-  if (slots.costume) request.costume_id = slots.costume.id
+  // 素体模式后端明确拒绝「同时带服装」：这里做最后一道防御，防止槽位清空竞态。
+  if (slots.costume && bodyMode !== 'bare') request.costume_id = slots.costume.id
   if (slots.pose) request.pose_id = slots.pose.id
 
   const extra = options.extraPath.trim()
@@ -323,6 +379,19 @@ export function buildRecipeRequest(
 }
 
 /**
+ * 素体模式下的服装组合维度：`bare` 一律为空。
+ *
+ * 后端规定 `body_mode='bare'` 与服装同时出现会 400；在组合阶段就裁掉服装维度，
+ * 不依赖「UI 已清空服装槽」的时序（契约 C-REF-BODY-MODE@1）。
+ */
+export function costumeDimensionForBodyMode(
+  costume: readonly CostumeItem[],
+  bodyMode: RecipeBodyMode,
+): readonly CostumeItem[] {
+  return bodyMode === 'bare' ? [] : costume
+}
+
+/**
  * 槽位组合数：三个维度各自「空 → 1 种，非空 → 条目数种」。
  *
  * 三槽都为空时返回 0 —— 这不是「1 种空组合」，而是后端会拒绝的 M==0。
@@ -334,18 +403,25 @@ export function countSlotCombinations(counts: RecipeSlotCounts): number {
 }
 
 /**
- * 全组合数 = 槽位组合数 × 画质档数 × 比例数。
+ * 全组合数 = 槽位组合数 × 选中工作流数 × 画质档数 × 比例数。
  *
- * 尺寸维度传 0 表示「该能力不可用 / 未选择」，按 1 计。
+ * 尺寸维度传 0 表示「该能力不可用 / 未选择」，按 1 计；工作流维度同样
+ * 至少按 1 计（未选工作流时回落默认项，不能把 total 乘成 0）。
  */
 export function countBatchTotal(
   counts: RecipeSlotCounts,
   qualityCount: number,
   ratioCount: number,
+  workflowCount = 1,
 ): number {
   const combos = countSlotCombinations(counts)
   if (combos === 0) return 0
-  return combos * Math.max(1, qualityCount) * Math.max(1, ratioCount)
+  return (
+    combos *
+    Math.max(1, workflowCount) *
+    Math.max(1, qualityCount) *
+    Math.max(1, ratioCount)
+  )
 }
 
 /** 是否超过全组合上限。 */
@@ -353,9 +429,13 @@ export function exceedsBatchLimit(total: number): boolean {
   return total > MAX_BATCH_RECIPES
 }
 
-/** 超限文案（与页面按钮禁用提示逐字一致）。 */
+/**
+ * 超限文案（页面按钮禁用提示，契约 C-REF-TOTAL@2）。
+ *
+ * 逐字含「当前 N / 上限 100」与「减少工作流、槽位或尺寸档数」，便于 E2E 断言。
+ */
 export function describeBatchLimit(total: number): string {
-  return `全组合共 ${total} 张，超过上限 ${MAX_BATCH_RECIPES} 张；请减少素材或尺寸档位`
+  return `当前 ${total} / 上限 ${MAX_BATCH_RECIPES}，请减少工作流、槽位或尺寸档数`
 }
 
 /** 比例 → 横竖；1:1 按竖版（与项目默认 `portrait` 一致）。 */
@@ -387,13 +467,15 @@ export function buildSlotCombinations(
 }
 
 /**
- * 生成笛卡尔积分组（= 前端要逐组 POST 的请求清单）。
+ * 生成四维笛卡尔积分组（= 前端要逐组 POST 的请求清单）。
  *
- * 顺序固定：槽位组合 → 画质 → 比例；第 i 组种子 = baseSeed + i。
- * caps 不支持时对应维度折叠为「不发参数」（空串），计数仍为 1。
+ * 顺序固定：槽位组合 → 工作流 → 画质 → 比例；第 i 组种子 = baseSeed + i。
+ * 工作流维度为空时折叠为 1 条空路径（后端默认工作流），绝不乘成 0；
+ * caps 不支持时尺寸维度折叠为「不发参数」（空串），计数仍为 1。
  */
 export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
   const slotCombos = buildSlotCombinations(input.portrait, input.costume, input.pose)
+  const workflowDim = input.workflows.length ? [...input.workflows] : ['']
   const qualityDim =
     input.qualityEnabled && input.qualities.length ? [...input.qualities] : ['']
   const ratioDim = input.orientationEnabled && input.ratios.length ? [...input.ratios] : ['']
@@ -402,21 +484,188 @@ export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
   const groups: RecipeBatchGroup[] = []
   let index = 0
   for (const slots of slotCombos) {
-    for (const quality of qualityDim) {
-      for (const ratio of ratioDim) {
-        groups.push({
-          index,
-          slots,
-          quality,
-          aspectRatio: ratio,
-          orientation: ratio ? orientationForRatio(ratio) : '',
-          seed: baseSeed + index,
-        })
-        index += 1
+    for (const workflow of workflowDim) {
+      for (const quality of qualityDim) {
+        for (const ratio of ratioDim) {
+          groups.push({
+            index,
+            slots,
+            workflow,
+            quality,
+            aspectRatio: ratio,
+            orientation: ratio ? orientationForRatio(ratio) : '',
+            seed: baseSeed + index,
+          })
+          index += 1
+        }
       }
     }
   }
   return groups
+}
+
+// ---------------------------------------------------------------------------
+// 工作流角色适用性（契约 C-REF-WF-SLOTS@1）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析后端 `slots` 字段（三态，见 {@link StudioWorkflowOption.slots}）。
+ *
+ * - `undefined` / 字段缺失：能力未知 → 返回 `undefined`，调用方不判定（旧后端宽松）；
+ * - 数组为空 / 全部非法：角色不可识别 → 返回 `[]`，调用方据此置灰禁用；
+ * - 非数组脏数据（null / 字符串 / 数字）：同样按不可识别返回 `[]`
+ *   —— **只有 `undefined` 才宽松**，异常数据不能放行。
+ *
+ * 合法角色只保留四个并去重。
+ */
+export function parseWorkflowSlots(raw: unknown): StudioWorkflowSlot[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) return []
+
+  const valid = new Set<string>(STUDIO_WORKFLOW_SLOTS)
+  const slots: StudioWorkflowSlot[] = []
+  for (const value of raw) {
+    if (typeof value !== 'string' || !valid.has(value)) continue
+    const slot = value as StudioWorkflowSlot
+    if (!slots.includes(slot)) slots.push(slot)
+  }
+  return slots
+}
+
+/** 工作流不适用原因类型：缺具体角色输入 / 角色整体不可识别。 */
+export type WorkflowUnavailableKind = 'missing' | 'unrecognized'
+
+/** 适用性评估结果；`kind` / `role` 同时为 null 表示可用。 */
+export interface WorkflowApplicability {
+  kind: WorkflowUnavailableKind | null
+  role: StudioWorkflowSlot | null
+}
+
+/**
+ * 评估工作流对当前已选槽位集合是否适用。
+ *
+ * - 空槽位不参与判定（调用方只传非空槽位角色）；
+ * - `slots === undefined`：字段缺失（旧后端）→ 适用，不误伤；
+ * - `slots === []`：角色不可识别 → 对所有非空槽位都不适用（返回第一个已选角色）；
+ * - 非空：缺少任一已选角色即不适用（返回第一个缺的角色）。
+ */
+export function evaluateWorkflowApplicability(
+  workflow: Pick<StudioWorkflowOption, 'slots'>,
+  selectedRoles: readonly StudioWorkflowSlot[],
+): WorkflowApplicability {
+  if (workflow.slots === undefined) return { kind: null, role: null }
+  if (!selectedRoles.length) return { kind: null, role: null }
+
+  const slots = workflow.slots
+  if (slots.length === 0) {
+    return { kind: 'unrecognized', role: selectedRoles[0] }
+  }
+  for (const role of selectedRoles) {
+    if (!slots.includes(role)) return { kind: 'missing', role }
+  }
+  return { kind: null, role: null }
+}
+
+/** 兼容入口：只取「第一个不适用的角色」，适用时返回 null。 */
+export function workflowInapplicableRole(
+  workflow: Pick<StudioWorkflowOption, 'slots'>,
+  selectedRoles: readonly StudioWorkflowSlot[],
+): StudioWorkflowSlot | null {
+  return evaluateWorkflowApplicability(workflow, selectedRoles).role
+}
+
+/** 缺角色文案（`missing` 场景）。 */
+export function describeWorkflowInapplicable(
+  role: StudioWorkflowSlot,
+  workflowName = '',
+): string {
+  const label = WORKFLOW_SLOT_LABELS[role] ?? role
+  const prefix = workflowName ? `工作流「${workflowDisplayName(workflowName)}」` : '当前工作流'
+  return `${prefix}缺少${label}输入，不适用于当前已选${label}`
+}
+
+/**
+ * 不可用原因文案（下拉 / toast / 提交错误共用）。
+ *
+ * - `missing`：`工作流「X」缺少人像输入，不适用于当前已选人像`
+ * - `unrecognized`：`该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），不适用于当前已选人像`
+ *   （此时不拼工作流名，按验收给定文案逐字输出）
+ */
+export function describeWorkflowUnavailable(
+  kind: WorkflowUnavailableKind,
+  role: StudioWorkflowSlot,
+  workflowName = '',
+): string {
+  if (kind === 'unrecognized') {
+    const label = WORKFLOW_SLOT_LABELS[role] ?? role
+    return `该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），不适用于当前已选${label}`
+  }
+  return describeWorkflowInapplicable(role, workflowName)
+}
+
+/** 下拉项原因：'' 表示适用（可直接勾选）。 */
+export function describeWorkflowUnavailableFor(
+  workflow: Pick<StudioWorkflowOption, 'slots' | 'name'>,
+  selectedRoles: readonly StudioWorkflowSlot[],
+): string {
+  const { kind, role } = evaluateWorkflowApplicability(workflow, selectedRoles)
+  if (!kind || !role) return ''
+  return describeWorkflowUnavailable(kind, role, workflow.name)
+}
+
+/**
+ * 预览前置校验的三句式文案（现象 / 原因 / 下一步）。
+ *
+ * 命中后前端**不发** dry-run 请求，直接展示这段文案，避免用户看到后端 400。
+ */
+export function describePreviewWorkflowSkip(
+  role: StudioWorkflowSlot,
+  workflowName = '',
+  kind: WorkflowUnavailableKind = 'missing',
+): string {
+  return (
+    `提示词预览已跳过。原因：${describeWorkflowUnavailable(kind, role, workflowName)}。` +
+    '下一步：改选支持该槽位的工作流，或清空对应槽位后重新预览。'
+  )
+}
+
+/**
+ * 按新的槽位角色集合裁剪已选工作流（收紧点 2）。
+ *
+ * - 仍然适用的工作流**必须保持选中**；"只换同一槽位的另一张图"时角色集合没变，
+ *   调用方根本不会产生取消；
+ * - 只移除**当前已不适用**的项，并带回中文原因，供页面 toast 提示（不静默）；
+ * - 目录中已不存在的路径直接剔除但不产生原因（目录失效由 `loadStudioWorkflows` 处理）。
+ */
+export interface WorkflowSelectionPrune {
+  kept: string[]
+  /** path + 中文原因；目录中已消失的项原因为空串。 */
+  removed: Array<{ path: string; reason: string }>
+}
+
+export function pruneInapplicableWorkflowSelection(
+  selection: readonly string[],
+  workflows: readonly StudioWorkflowOption[],
+  selectedRoles: readonly StudioWorkflowSlot[],
+): WorkflowSelectionPrune {
+  const kept: string[] = []
+  const removed: Array<{ path: string; reason: string }> = []
+
+  for (const path of selection) {
+    const workflow = workflows.find((item) => item.path === path)
+    if (!workflow) {
+      removed.push({ path, reason: '' })
+      continue
+    }
+    const reason = describeWorkflowUnavailableFor(workflow, selectedRoles)
+    if (!reason) {
+      kept.push(path)
+      continue
+    }
+    removed.push({ path, reason })
+  }
+
+  return { kept, removed }
 }
 
 /**
@@ -956,9 +1205,58 @@ export function useReferenceRecipe() {
 
   const workflows = ref<StudioWorkflowOption[]>([])
   const workflowDefault = ref('')
-  const workflowPath = ref('')
+  /**
+   * 已选工作流（有序、去重；契约 C-REF-WF-SLOTS@1 的 `workflows: string[]`）。
+   *
+   * 空数组表示「使用后端默认工作流」：计数按 1 条默认项，UI 另有明示。
+   */
+  const workflowSelection = ref<string[]>([])
   const workflowsLoading = ref(false)
   const workflowsError = ref('')
+
+  /** 默认工作流路径：后端 `default` 在列表内时用它，否则回落首条；空列表为 ''。 */
+  const workflowDefaultPath = computed(() =>
+    resolveInitialWorkflowPath(workflows.value, workflowDefault.value),
+  )
+
+  /**
+   * 代表工作流（首条；空选择时为默认项）。
+   *
+   * caps / 尺寸档位 / 持久化仍按首条工作流计算；写入时视为单选替换，
+   * 这样 `pb.reference_studio_v1.workflow` 的既有语义不变。
+   */
+  const workflowPath = computed<string>({
+    get: () => workflowSelection.value[0] ?? workflowDefaultPath.value,
+    set: (value: string) => {
+      workflowSelection.value = value ? [value] : []
+    },
+  })
+
+  /** 已选工作流对应的目录项（保序、过滤目录中已消失的路径）。 */
+  const selectedWorkflows = computed<StudioWorkflowOption[]>(() =>
+    workflowSelection.value
+      .map((path) => workflows.value.find((item) => item.path === path))
+      .filter((item): item is StudioWorkflowOption => Boolean(item)),
+  )
+
+  /**
+   * 实际参与笛卡尔积的工作流。
+   *
+   * 未勾选时回落后端默认项（1 条），保证「空选择 = 1 条默认工作流」的计数口径。
+   */
+  const effectiveWorkflows = computed<StudioWorkflowOption[]>(() => {
+    if (selectedWorkflows.value.length) return selectedWorkflows.value
+    const fallback = workflows.value.find((item) => item.path === workflowDefaultPath.value)
+    return fallback ? [fallback] : []
+  })
+
+  /** 是否正在使用后端默认工作流（UI 需要明示）。 */
+  const usesDefaultWorkflow = computed(
+    () => selectedWorkflows.value.length === 0 && effectiveWorkflows.value.length > 0,
+  )
+
+  /** 工作流维度：至少按 1 计，不能把 total 乘成 0。 */
+  const workflowDimension = computed(() => Math.max(1, effectiveWorkflows.value.length))
 
   const style = ref<RecipeStyle>('realistic')
   const promptSuffix = ref('')
@@ -984,6 +1282,8 @@ export function useReferenceRecipe() {
   const errorMessage = ref('')
   /** 非空时页面渲染降级确认框；用户确认切换后才继续提交。 */
   const workflowDowngrade = ref<WorkflowDowngradePrompt | null>(null)
+  /** 工作流因槽位变化被自动取消时的提示文案（页面转成 toast，绝不静默移除）。 */
+  const workflowSelectionNotice = ref('')
 
   // 工作流能力：复用主站唯一实现，避免合成台再写一份档位规则。
   const studioRows = computed<WorkflowRow[]>(() =>
@@ -999,11 +1299,24 @@ export function useReferenceRecipe() {
     studioRows,
   )
 
-  /** 当前工作流：input_count 用于提交前能力预判。 */
-  const currentWorkflow = computed(
-    () => workflows.value.find((item) => item.path === workflowPath.value) ?? null,
+  /** 当前代表工作流（首条）：caps / 预览 / 降级判定都用它。 */
+  const currentWorkflow = computed<StudioWorkflowOption | null>(
+    () => effectiveWorkflows.value[0] ?? null,
   )
-  const workflowInputCount = computed(() => currentWorkflow.value?.inputCount ?? 0)
+  /**
+   * 提交前输入数预判：取所有生效工作流里的最大 input_count。
+   *
+   * 多选时逐组提交，任何一组输入数不足都会 400；用最大值判定能提前拦住。
+   */
+  const workflowInputCount = computed(() =>
+    effectiveWorkflows.value.reduce(
+      (max, item) => Math.max(max, item.inputCount || 0),
+      0,
+    ),
+  )
+
+  /** 体态模式（素体开关）；不写 localStorage（本轮契约不要求记忆）。 */
+  const bodyMode = ref<RecipeBodyMode>('costume')
 
   const slotCounts = computed<RecipeSlotCounts>(() => ({
     portrait: draft.portraitCount.value,
@@ -1022,6 +1335,16 @@ export function useReferenceRecipe() {
   })
   const activeSlotCount = computed(() => filledSlotNames.value.length)
 
+  /** 非空槽位的**业务角色**（工作流 `slots` 适用性判定用；空槽不参与）。 */
+  const filledSlotRoles = computed<StudioWorkflowSlot[]>(() => {
+    const roles: StudioWorkflowSlot[] = []
+    if (draft.portraitCount.value > 0) roles.push('portrait')
+    if (draft.costumeCount.value > 0) roles.push('costume')
+    if (draft.poseCount.value > 0) roles.push('pose')
+    if (extraPath.value.trim()) roles.push('extra')
+    return roles
+  })
+
   /** 尺寸维度：caps 不支持时折叠为 1（页面也会隐藏控件）。 */
   const qualityDimension = computed(() =>
     caps.value.quality ? qualitySelection.value.length : 0,
@@ -1030,9 +1353,19 @@ export function useReferenceRecipe() {
     caps.value.orientation ? ratioSelection.value.length : 0,
   )
 
-  /** 全组合数（常驻展示 N/100，提交前也用它做上限判断）。 */
+  /**
+   * 全组合数（契约 C-REF-TOTAL@2）：
+   * `槽位组合数 × 选中工作流数 × 画质档数 × 比例数`。
+   *
+   * 常驻展示「当前 N / 上限 100」，提交前也用它做上限判断。
+   */
   const batchTotal = computed(() =>
-    countBatchTotal(slotCounts.value, qualityDimension.value, ratioDimension.value),
+    countBatchTotal(
+      slotCounts.value,
+      qualityDimension.value,
+      ratioDimension.value,
+      workflowDimension.value,
+    ),
   )
   const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
   const batchLimitMessage = computed(() =>
@@ -1056,7 +1389,7 @@ export function useReferenceRecipe() {
     () =>
       !busy.value &&
       !workflowsLoading.value &&
-      Boolean(workflowPath.value) &&
+      effectiveWorkflows.value.length > 0 &&
       activeSlotCount.value > 0 &&
       batchTotal.value > 0 &&
       !batchOverLimit.value,
@@ -1079,28 +1412,59 @@ export function useReferenceRecipe() {
    * 预览用请求：三槽各取**第一张**作为代表组合。
    *
    * 批量提交时每组提示词只在槽位条目名上不同，取首张即可反映组合结构与画风；
-   * 第 4 张按需求不参与预览。带上当前工作流，避免默认工作流输入数不匹配。
+   * 第 4 张按需求不参与预览。工作流取**第一条**（多选时预览卡会注明），
+   * 素体模式随 `body_mode` 一起下发，保证预览与提交口径一致。
    */
   function buildPreviewRequest(): RecipeSubmitRequest {
     return buildRecipeRequest(
       {
         portrait: draft.portrait.value[0] ?? null,
-        costume: draft.costume.value[0] ?? null,
+        costume: bodyMode.value === 'bare' ? null : (draft.costume.value[0] ?? null),
         pose: draft.pose.value[0]?.item ?? null,
       },
       {
         style: style.value,
         promptSuffix: promptSuffix.value,
         extraPath: '',
-        workflow: workflowPath.value,
+        workflow: previewWorkflow.value?.path ?? '',
+        bodyMode: bodyMode.value,
         seed: baseSeed.value,
         seedMode: 'fixed',
       },
     )
   }
 
+  /** 预览代表工作流：永远取第一条生效工作流。 */
+  const previewWorkflow = computed<StudioWorkflowOption | null>(
+    () => effectiveWorkflows.value[0] ?? null,
+  )
+
+  /**
+   * 预览前置校验：第一条工作流对当前已选槽位不适用时返回三句式文案。
+   *
+   * 命中后**不发送** dry-run 请求，避免用户再看到后端 400。
+   */
+  const previewWorkflowSkipReason = computed(() => {
+    const workflow = previewWorkflow.value
+    if (!workflow) return ''
+    const { kind, role } = evaluateWorkflowApplicability(workflow, filledSlotRoles.value)
+    if (!kind || !role) return ''
+    return describePreviewWorkflowSkip(role, workflow.name, kind)
+  })
+
   /** 立即刷新预览（按请求序号丢弃过期响应）；失败只写 `previewError`，不影响提交状态机。 */
   async function refreshPreviewPrompt(): Promise<void> {
+    const blocked = previewWorkflowSkipReason.value
+    if (blocked) {
+      // 前置校验命中：不发请求，直接展示现象 / 原因 / 下一步。
+      previewRequestSeq += 1
+      previewTimer = null
+      previewPrompt.value = ''
+      previewError.value = blocked
+      previewLoading.value = false
+      return
+    }
+
     const seq = ++previewRequestSeq
     previewLoading.value = true
     previewError.value = ''
@@ -1153,7 +1517,10 @@ export function useReferenceRecipe() {
       () => draft.pose.value,
       style,
       promptSuffix,
-      workflowPath,
+      workflowSelection,
+      // 工作流目录加载完成后 previewWorkflow 从 null 变为默认项，需要重新预览。
+      previewWorkflow,
+      bodyMode,
       baseSeed,
     ],
     () => schedulePreviewRefresh(),
@@ -1219,6 +1586,9 @@ export function useReferenceRecipe() {
           imageSlots: Number(item.image_slots) || 0,
           inputCount: Number(item.input_count) || 0,
           recommended: item.recommended === true,
+          // 三态解析：缺失=undefined（旧后端宽松）/ 空数组或脏数据=[]（不可识别，禁用）/
+          // 非空=按角色匹配。
+          slots: parseWorkflowSlots(item.slots),
           caps: parseStudioCaps(item.caps),
           params: parseStudioParams(item.params),
         })
@@ -1226,11 +1596,9 @@ export function useReferenceRecipe() {
 
       workflows.value = options
       workflowDefault.value = typeof body.default === 'string' ? body.default : ''
-      const stillUsable =
-        Boolean(workflowPath.value) && options.some((item) => item.path === workflowPath.value)
-      if (!stillUsable) {
-        workflowPath.value = resolveInitialWorkflowPath(options, workflowDefault.value)
-      }
+      // 保留仍存在于目录中的已选工作流（保序、去重）；全部失效时清空回落默认项。
+      const available = new Set(options.map((item) => item.path))
+      workflowSelection.value = workflowSelection.value.filter((path) => available.has(path))
       reconcileSizeSelections()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -1239,6 +1607,79 @@ export function useReferenceRecipe() {
       workflowsLoading.value = false
     }
   }
+
+  /** 工作流多选：点已选取消，否则追加（保持有序，天然去重）。 */
+  function toggleWorkflow(path: string): void {
+    workflowSelection.value = workflowSelection.value.includes(path)
+      ? workflowSelection.value.filter((item) => item !== path)
+      : [...workflowSelection.value, path]
+  }
+
+  /** 设置工作流多选（v-model 入口）：去空白、保序去重。 */
+  function setWorkflowSelection(paths: readonly string[]): void {
+    const seen = new Set<string>()
+    const next: string[] = []
+    for (const path of paths) {
+      const trimmed = typeof path === 'string' ? path.trim() : ''
+      if (!trimmed || seen.has(trimmed)) continue
+      seen.add(trimmed)
+      next.push(trimmed)
+    }
+    workflowSelection.value = next
+  }
+
+  /**
+   * 素体开关（契约 C-REF-BODY-MODE@1）。
+   *
+   * 开启时**同时清空服装槽**：后端规定 `body_mode='bare'` 与服装同时出现会 400。
+   * 关闭时只切回 `costume`，不影响其他槽位。
+   */
+  function setBodyMode(mode: RecipeBodyMode): void {
+    if (mode === 'bare') {
+      bodyMode.value = 'bare'
+      if (draft.costumeCount.value > 0) draft.removeCostume()
+      return
+    }
+    bodyMode.value = 'costume'
+  }
+
+  /** 消费后清空自动取消提示，避免同一条消息重复弹出。 */
+  function clearWorkflowSelectionNotice(): void {
+    workflowSelectionNotice.value = ''
+  }
+
+  /**
+   * 槽位变化后，已勾选但不再适用的工作流**自动取消并提示**（绝不静默）。
+   *
+   * 使用默认 flush（组件更新前）而非 sync：`loadStudioWorkflows` 会在赋值
+   * `workflows` 后同步过滤失效路径，这时不应再对「目录里已不存在的路径」告警；
+   * 回调只针对「目录中存在但 slots 不满足」的项。
+   */
+  watch(
+    [filledSlotRoles, workflows],
+    () => {
+      if (!workflowSelection.value.length) return
+      if (workflows.value.length === 0) return
+
+      // 只取消「对新槽位集合已不适用」的项；仍适用的工作流保持选中。
+      // 同一槽位换另一张图时角色集合不变，本 watch 不会触发，也不会取消任何工作流。
+      const { kept, removed } = pruneInapplicableWorkflowSelection(
+        workflowSelection.value,
+        workflows.value,
+        filledSlotRoles.value,
+      )
+      if (!removed.length) return
+
+      workflowSelection.value = kept
+      const reasons = removed.map((item) => item.reason).filter(Boolean)
+      // 目录中已消失的路径静默剔除（由 loadStudioWorkflows 负责），不产生误导性 toast。
+      if (!reasons.length) return
+
+      workflowSelectionNotice.value =
+        `已自动取消 ${reasons.length} 个工作流。原因：${reasons.join('；')}。` +
+        '下一步：改选支持这些槽位的工作流，或清空对应槽位后重新勾选。'
+    },
+  )
 
   /** 画质档多选：点已选取消，否则追加。 */
   function toggleQuality(value: string): void {
@@ -1306,10 +1747,12 @@ export function useReferenceRecipe() {
           style: style.value,
           promptSuffix: promptSuffix.value,
           extraPath: extraPath.value,
-          workflow: workflowPath.value,
+          // 每组提交自己的工作流（契约 C-REF-TOTAL@2）；空串由后端用默认工作流。
+          workflow: group.workflow,
           quality: group.quality,
           aspectRatio: group.aspectRatio,
           orientation: group.orientation,
+          bodyMode: bodyMode.value,
           seed: group.seed,
           seedMode: 'fixed',
         })
@@ -1447,8 +1890,10 @@ export function useReferenceRecipe() {
   function buildCurrentBatchGroups(): RecipeBatchGroup[] {
     return buildBatchGroups({
       portrait: draft.portrait.value,
-      costume: draft.costume.value,
+      // 素体模式：即使槽位有残留服装也绝不进入组合（后端 bare + 服装 = 400）。
+      costume: costumeDimensionForBodyMode(draft.costume.value, bodyMode.value),
       pose: draft.pose.value.map((entry) => entry.item),
+      workflows: effectiveWorkflows.value.map((item) => item.path),
       qualities: qualitySelection.value,
       ratios: ratioSelection.value,
       qualityEnabled: caps.value.quality,
@@ -1473,9 +1918,21 @@ export function useReferenceRecipe() {
     jobIds.value = []
     jobId.value = null
 
-    if (!workflowPath.value) {
+    if (effectiveWorkflows.value.length === 0) {
       errorMessage.value =
         '无法提交。原因：尚未选择出图工作流。下一步：在工作流下拉中选择一个可用工作流后重试。'
+      status.value = 'failed'
+      return false
+    }
+
+    // 工作流角色能力缺口的最后一道拦截（watch 已自动取消，这里防竞态）。
+    // 收紧点：slots === []（角色不可识别）也必须拦截，不再放行。
+    for (const workflow of effectiveWorkflows.value) {
+      const { kind, role } = evaluateWorkflowApplicability(workflow, filledSlotRoles.value)
+      if (!kind || !role) continue
+      errorMessage.value =
+        `无法提交。原因：${describeWorkflowUnavailable(kind, role, workflow.name)}。` +
+        '下一步：取消勾选该工作流，或清空对应槽位后重试。'
       status.value = 'failed'
       return false
     }
@@ -1500,10 +1957,14 @@ export function useReferenceRecipe() {
         message: describeWorkflowDowngrade(inputCount, activeSlotCount.value),
         slotCount: activeSlotCount.value,
         inputCount,
+        // 候选再按 slots 过滤：降级切换后也不应把用户带到「缺当前槽位输入」的工作流。
         candidates: buildWorkflowDowngradeCandidates(
           workflows.value,
           workflowPath.value,
           activeSlotCount.value,
+        ).filter(
+          (candidate) =>
+            workflowInapplicableRole(candidate, filledSlotRoles.value) === null,
         ),
       }
       return false
@@ -1549,15 +2010,30 @@ export function useReferenceRecipe() {
   }
 
   return {
-    // 工作流目录
+    // 工作流目录与多选（契约 C-REF-WF-SLOTS@1 / C-REF-TOTAL@2）
     workflows,
     workflowDefault,
+    workflowDefaultPath,
+    workflowSelection,
+    selectedWorkflows,
+    effectiveWorkflows,
+    usesDefaultWorkflow,
+    workflowDimension,
+    setWorkflowSelection,
+    toggleWorkflow,
+    workflowSelectionNotice,
+    clearWorkflowSelectionNotice,
     workflowPath,
     workflowsLoading,
     workflowsError,
     loadStudioWorkflows,
     currentWorkflow,
     workflowInputCount,
+    // 槽位角色（工作流适用性判定）
+    filledSlotRoles,
+    // 体态模式（素体开关，契约 C-REF-BODY-MODE@1）
+    bodyMode,
+    setBodyMode,
     // 能力与尺寸
     caps,
     qualityOptions,
@@ -1589,6 +2065,8 @@ export function useReferenceRecipe() {
     previewError,
     previewLoading,
     refreshPreviewPrompt,
+    previewWorkflow,
+    previewWorkflowSkipReason,
     // 降级确认
     workflowDowngrade,
     confirmWorkflowDowngrade,
