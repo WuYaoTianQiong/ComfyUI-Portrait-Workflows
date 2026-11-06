@@ -4,27 +4,36 @@ ComfyUI 写实人像工作流合集，专注于高质量人像生成与提示词
 
 ## 工作流列表
 
-> 以 `workflows/` 根目录磁盘为准（当前 **10 个 JSON**，2026-11-01）。
-> 另有 `workflows/历史工作流/`（归档）：Atelier 默认只扫根目录，归档/其他目录需要时
-> 在「分类与标签 → 工作流」手动上传 JSON。
+> 工作流按用途分四目录（2026-11-06 起 `workflows/` 根目录不再放 JSON）：
+> - `通用工作流/`：**11 个 JSON**，进 Atelier 通用工作流下拉（scope=all；自动扫描目录为
+>   `workflows/` 根 + `通用工作流/`）；
+> - `图库专用工作流/`：**7 个 JSON**，只进参考图库合成台（scope=studio）；
+> - `我的工作流/`：当前仅 `README.md`（0 个 JSON），留作自放编辑类工作流，只进合成台；
+> - `历史工作流/`：归档目录，不在通用列表的自动扫描路径内，需要时在
+>   「分类与标签 → 工作流」手动上传 JSON。根层 30 个 JSON；子目录 `画廊旧版/` 当前 0 个，
+>   `PornMaster_iamddtla/` 直接层 0 个（其下 4 个上游合集子目录内另有 14 个）。
+>
+> 合成台扫描目录：`图库专用工作流/`、`我的工作流/`、`<参考库>/src/workflows`、
+> `历史工作流/画廊旧版/`、`workflows/` 根（根目录仅在兜底时放编辑类工作流）。
 
 ### 文生图
-- **`MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json`** — Krea2 单程 8 步，画质优先
-- **`MoodyZIT_V13_Visual_文生图_双程采样_快速预览_文字渲染.json`** — Z-Image 双程采样，文字渲染
-- **`PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json`** — Krea2V25 单程 8 步 fp8
+- **`通用工作流/MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json`** — Krea2 V8SE 单程 8 步，1128x2008 竖构图，画质优先
+- **`通用工作流/MoodyZIT_V13_Visual_文生图_双程采样_快速预览_文字渲染.json`** — Z-Image（ZIT V13 Visual）双程采样，快速预览，文字渲染
+- **`通用工作流/PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json`** — Krea2 V25 单程 8 步 fp8，1192x2112 竖构图，画质优先
+- **`通用工作流/Qwen21_文生图_长中文提示词_2K优化_32步_12G.json`** — Qwen-Image 2.1 文生图，长中文提示词，2K 优化，32 步，12G 显存档
 
 ### 图像编辑（Flux.2 Klein）
-- **`PornMaster_Flux2Klein9B_单图编辑_可选遮罩.json`** — 单图编辑 + 可选遮罩
-- **`PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json`** — 双图参考换衣
-- **`PornMaster_Flux2Klein9B_三图参考编辑_自动尺寸.json`** — 三图参考编辑
+- **`通用工作流/PornMaster_Flux2Klein9B_单图编辑_可选遮罩.json`** — Flux.2 Klein 9B 单图编辑 + 可选遮罩
+- **`通用工作流/PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json`** — Flux.2 Klein 9B 双图参考换衣 + 可选遮罩
+- **`通用工作流/PornMaster_Flux2Klein9B_三图参考编辑_自动尺寸.json`** — Flux.2 Klein 9B 三图参考编辑，自动尺寸
 
 ### 辅助
-- **`Qwen3VL_API_图生中文提示词.json`** — VLM 图生中文提示词
-- **`图片超分_SeedVR2_7B_源图命名_最高4K实测.json`** — SeedVR2 7B 超分
+- **`通用工作流/Qwen3VL_API_图生中文提示词.json`** — Qwen3-VL API 图生中文提示词
+- **`通用工作流/图片超分_SeedVR2_7B_源图命名_最高4K实测.json`** — SeedVR2 7B 超分，源图命名，最高 4K 实测
 
 ### 视频（Atelier 不收录）
-- **`MiniMax_H3_文生视频_官方原版.json`**
-- **`MiniMax_H3_图生视频_官方原版.json`**
+- **`通用工作流/MiniMax_H3_文生视频_官方原版.json`** — MiniMax H3 文生视频，官方原版
+- **`通用工作流/MiniMax_H3_图生视频_官方原版.json`** — MiniMax H3 图生视频，官方原版
 
 > 这两个工作流含 `SaveVideo`，Atelier 的工作流下拉默认隐藏；请直接在 ComfyUI 里运行。
 > Atelier 的画廊/结果中心只处理图片，视频没有对应归档链路。
@@ -104,6 +113,7 @@ MIT
 
 ## 更新日志
 
+- 2026-11-06: 工作流改为四目录分层，根目录 2 个重复 api.json 移除；一次性报告归入 文档/归档/。
 - 2026-11-01: 工作流列表按磁盘实测同步（10 个在用 + 2 个视频工作流标记为 Atelier 不收录）；
   文档链接清理，补充资产清单与命名规范。
 - 2026-06-14: 初始版本，包含 4 个工作流

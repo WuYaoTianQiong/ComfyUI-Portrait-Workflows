@@ -21,7 +21,7 @@
 # 口径说明（2026-11-04 验收后收紧）：
 #   只统计 <style> 块。`<script>` 里的色值可能是写入数据库的「数据」
 #   （如 TaxonomyView 的分类配色板），不属于样式硬编码，按样式口径统计才不误伤。
-#   已下线死代码（ReferenceView / RefLightbox / api/reference.ts）同日已删除，不计入。
+#   已下线的只有 React 子应用 gallery-web/（2026-11-05 阶段 4.3 删除）；ReferenceView.vue / Lightbox.vue / frontend/src/api/reference.ts 仍在用，正常计入本守护。
 # 新增色值应改走 styles/tokens.css，不要在这里放水提高基线。
 #
 # E2E 需要 Playwright 与 Chromium；缺失时会自动 SKIP（不算失败），不阻断其它关卡。
