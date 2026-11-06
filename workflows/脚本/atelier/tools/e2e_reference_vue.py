@@ -69,7 +69,10 @@ except ImportError:  # pragma: no cover - 环境错误分支
     raise SystemExit(2)
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# 本脚本位于 脚本/atelier/tools/，PROJECT_ROOT 需上溯三级取到 workflows/ 根
+# （tools → atelier → 脚本 → workflows）；下文的 web/ 构建产物断言与
+# 文档/日志 截图目录都以它为基准解析，勿随脚本搬迁改动层级。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BASE = "http://127.0.0.1:8656"
 SCREENSHOT_DIR = PROJECT_ROOT / "文档" / "日志" / "refvue-e2e-20261105"
 
