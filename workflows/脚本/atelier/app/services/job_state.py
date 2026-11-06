@@ -45,6 +45,7 @@ from app.services.image_meta import (
     get_image_metadata,
 )
 from app.services.paths import build_view_url, resolve_image_path
+from app.services.thumbnail import prewarm_thumbnail
 
 logger = logging.getLogger("atelier.jobs")
 
@@ -748,6 +749,10 @@ def _insert_history_for_item(
                 if nh:
                     # 入库 + 继承分类同一事务：避免"图进了库、分类没继承"的半截状态
                     inherit_prompt_taxonomy(nh.id)
+                # 出图完成即铺缩略图：用户切到画廊时直接命中缓存，不在首屏现解码
+                prewarm_thumbnail(
+                    img["filename"], img.get("subfolder", ""), img.get("type", "output"), 600
+                )
         except Exception:
             logger.exception("写入历史失败: %s", img.get("filename"))
 

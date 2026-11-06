@@ -53,15 +53,20 @@ vi.mock('../api/client', () => ({
       page_size: 60,
     }
   }),
-  apiPost: vi.fn(async () => ({
-    success: true,
-    dry_run: true,
-    total: 2,
-    will_clean: 0,
-    samples: [],
-    guarded: false,
-    message: '',
-  })),
+  apiPost: vi.fn(async (path: string) => {
+    if (path.includes('/api/images/sync/light')) {
+      return { added: 0, total: 2, busy: false }
+    }
+    return {
+      success: true,
+      dry_run: true,
+      total: 2,
+      will_clean: 0,
+      samples: [],
+      guarded: false,
+      message: '',
+    }
+  }),
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
   thumbnailUrl: () => '/api/thumb?x.png',
@@ -85,6 +90,13 @@ function cleanupButton(wrapper: ReturnType<typeof mount>) {
   const btn = wrapper.findAll('button').find((b) => b.text().includes('清理失效'))
   if (!btn) throw new Error('没找到「清理失效」按钮')
   return btn
+}
+
+/** 页面挂载时会调用一次轻量同步；断言业务写操作时把它排除掉。 */
+function businessPostCalls() {
+  return vi.mocked(apiPost).mock.calls.filter(
+    ([path]) => String(path) !== '/api/images/sync/light',
+  )
 }
 describe('GalleryView 清理失效', () => {
   beforeEach(() => {
@@ -132,13 +144,32 @@ describe('GalleryView 清理失效', () => {
     expect(last?.[1]).toMatchObject({ category_id: 7, page: 1 })
   })
 
-  it('点「清理失效」先发 dry_run 预览，不直接写库', async () => {
+  it('挂载时先跑一次轻量增量同步', async () => {
+    await mountView()
+    const paths = vi.mocked(apiPost).mock.calls.map((c) => c[0])
+    expect(paths).toContain('/api/images/sync/light')
+  })
+
+  it('切排序会重新请求当前列表', async () => {
     const wrapper = await mountView()
+    await flushPromises()
+
+    await wrapper.find('select[title="排序"]').setValue('oldest')
+    await flushPromises()
+
+    const historyCalls = vi
+      .mocked(apiGet)
+      .mock.calls.filter((c) => String(c[0]).includes('/api/images') && !String(c[0]).includes('facets'))
+    const last = historyCalls[historyCalls.length - 1]
+    expect((last[1] as Record<string, unknown>)?.sort).toBe('oldest')
+  })
+
+  it('点「清理失效」先发 dry_run 预览，不直接写库', async () => {    const wrapper = await mountView()
     await cleanupButton(wrapper).trigger('click')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledTimes(1)
-    const [path, body, params] = vi.mocked(apiPost).mock.calls[0]
+    expect(businessPostCalls()).toHaveLength(1)
+    const [path, body, params] = businessPostCalls()[0]
     expect(path).toBe('/api/images/cleanup_missing')
     expect(body).toBeUndefined()
     expect(params).toMatchObject({ dry_run: true })
@@ -150,7 +181,7 @@ describe('GalleryView 清理失效', () => {
     await cleanupButton(wrapper).trigger('click')
     await flushPromises()
 
-    const params = vi.mocked(apiPost).mock.calls[0][2] as Record<string, unknown>
+    const params = businessPostCalls()[0][2] as Record<string, unknown>
     expect(params).not.toHaveProperty('missing')
   })
 
@@ -256,7 +287,7 @@ describe('GalleryView 清理失效', () => {
     await flushPromises()
     await deleteBtn().trigger('click')
     await flushPromises()
-    expect(vi.mocked(apiPost).mock.calls[0][1]).toMatchObject({ ids: [1], delete_files: false })
+    expect(businessPostCalls()[0][1]).toMatchObject({ ids: [1], delete_files: false })
 
     // 勾上之后必须落到 localStorage，下次进页面还认
     settings.deleteFiles.value = true
@@ -268,7 +299,7 @@ describe('GalleryView 清理失效', () => {
     await flushPromises()
     await deleteBtn().trigger('click')
     await flushPromises()
-    expect(vi.mocked(apiPost).mock.calls[1][1]).toMatchObject({ ids: [1], delete_files: true })
+    expect(businessPostCalls()[1][1]).toMatchObject({ ids: [1], delete_files: true })
 
     confirmSpy.mockRestore()
   })

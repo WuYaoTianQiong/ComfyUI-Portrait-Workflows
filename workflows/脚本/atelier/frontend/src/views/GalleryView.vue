@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -156,6 +156,7 @@ const historyKey = computed(() => [
   'history',
   page.value,
   pageSize,
+  sortBy.value,
   categoryId.value,
   selectedTags.value.slice().sort((a, b) => a - b).join(','),
   tagMatch.value,
@@ -166,6 +167,11 @@ const historyKey = computed(() => [
   model.value,
   orientation.value,
 ])
+
+/** 排序变了要回到第 1 页：停在第 3 页看新顺序没有意义。 */
+watch(sortBy, () => {
+  if (page.value !== 1) page.value = 1
+})
 
 /** 列表与「全选全部」共用的筛选参数（后者不需要分页参数）。 */
 function historyFilterParams() {
@@ -683,6 +689,47 @@ function toggleMissing() {
 
 const toast = useToast()
 
+interface LightSyncResult {
+  added: number
+  total: number
+  busy: boolean
+}
+
+const syncing = ref(false)
+
+/**
+ * 扫描本地 output 目录，把新图补进库。
+ *
+ * 页面加载/点刷新时各跑一次增量扫描：新图不再需要等后台每 30 秒的定时同步。
+ * 只有确实新增了记录才重拉列表，避免每次进画廊都多一次请求。
+ */
+async function syncNewImages(showToast = false) {
+  if (syncing.value) return
+  syncing.value = true
+  try {
+    const result = await apiPost<LightSyncResult>('/api/images/sync/light')
+    if (result.added > 0) {
+      // 手动刷新发现新图时回到第 1 页，否则用户停在旧页码看不到它们
+      if (showToast && page.value !== 1) page.value = 1
+      queryClient.invalidateQueries({ queryKey: ['history'] })
+      queryClient.invalidateQueries({ queryKey: ['facets'] })
+      if (showToast) toast.success(`发现 ${result.added} 张新图`)
+    } else if (showToast) {
+      toast.info(result.busy ? '后台正在扫描，请稍后再试' : '没有发现新图')
+    }
+  } catch (e) {
+    if (showToast) {
+      toast.error(`刷新失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  } finally {
+    syncing.value = false
+  }
+}
+
+onMounted(() => {
+  void syncNewImages(false)
+})
+
 /** 图片文件名点击复制。 */
 async function copyFilename(name: string) {
   try {
@@ -958,6 +1005,14 @@ function clearFilters() {
             标准
           </button>
         </div>
+        <button
+          class="btn btn-sm"
+          :disabled="syncing"
+          title="扫描本地 output 目录，加载新图"
+          @click="syncNewImages(true)"
+        >
+          {{ syncing ? '刷新中…' : '刷新' }}
+        </button>
         <select v-model="sortBy" class="mini-select" title="排序">
           <option value="newest">最新优先</option>
           <option value="oldest">最旧优先</option>

@@ -25,6 +25,9 @@ os.environ["ATELIER_THUMBNAIL_DIR"] = str(_TMP / "thumbs")
 _COMFY_ROOT = _TMP / "comfyui"
 (_COMFY_ROOT / "output").mkdir(parents=True, exist_ok=True)
 os.environ["ATELIER_COMFYUI_ROOT_ENV"] = str(_COMFY_ROOT)
+# 测试里创建的假图（b"x"）会被预热线程短暂打开，随后用例 unlink 在 Windows 上
+# 会撞到共享冲突；预热只是优化项，测试环境统一关闭。
+os.environ["ATELIER_THUMBNAIL_PREWARM"] = "0"
 # 指向一个必然拒绝连接的端口：任何意外外呼都会立刻失败，不会挂住测试
 os.environ["ATELIER_COMFYUI_API"] = "http://127.0.0.1:9"
 

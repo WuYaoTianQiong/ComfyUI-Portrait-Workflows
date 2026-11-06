@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
-from app.services.comfyui_client import get_history_for_prompt
+from app.services.comfyui_client import get_history_for_prompt, get_sync_client
 from app.services.image_meta import (
     compute_orientation,
     extract_model_from_comfy_prompt,
@@ -41,7 +41,7 @@ from app.services.output_location import (
     apply_output_subfolder,
     expand_subfolder,
 )
-from app.services.thumbnail import _get_image_path, clear_thumbnails_for
+from app.services.thumbnail import _get_image_path, clear_thumbnails_for, prewarm_thumbnail
 
 router = APIRouter(tags=["图片"])
 
@@ -54,6 +54,12 @@ _sync_lock = threading.Lock()
 _dir_mtimes: dict[str, float] = {}
 _last_full_scan = -1e9
 _FULL_SCAN_INTERVAL = 600.0
+# 一次性尺寸回填：旧磁盘扫描记录把 width/height 写成 0，列表接口会逐页回退到
+# PIL 解码。启动后第一次 sync 补一次即可；新记录在入库时已经写真实宽高。
+_dimensions_backfilled = False
+_DIM_BACKFILL_LIMIT = 2000
+# 回填时只预热最近 120 张（画廊最大每页 120）；其余按需生成，避免启动后长时间铺图
+_DIM_BACKFILL_PREWARM = 120
 
 
 # ---------------------------------------------------------------------------
@@ -163,10 +169,9 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
 
 def _sync_comfyui_history() -> int:
     try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.get(f"{COMFYUI_API}/history")
-            resp.raise_for_status()
-            hist = resp.json()
+        resp = get_sync_client().get(f"{COMFYUI_API}/history", timeout=10)
+        resp.raise_for_status()
+        hist = resp.json()
     except httpx.ConnectError:
         return 0
     except Exception:
@@ -248,6 +253,7 @@ def _sync_comfyui_history() -> int:
                         )
                         if nr:
                             inherit_prompt_taxonomy(nr.id)
+                            prewarm_thumbnail(filename, subfolder, img_type, 600)
                     except Exception:
                         pass
                 except Exception:
@@ -413,6 +419,15 @@ def _sync_disk_orphans(force: bool = False) -> int:
                     job_id, prompt_id, prompt_text = match
 
                 pp_fields = {"width": 0, "height": 0, "file_size": sz, "source": "disk_scan"}
+                # 入库时就把真实宽高写进 prompt_params：否则画廊列表每页都要回退
+                # 到 PIL 重读这些图（旧实现统一写 0，列表接口每次都替它补课）。
+                meta = get_image_metadata(fname, subfolder, "output")
+                if meta.get("width") and meta.get("height"):
+                    pp_fields["width"] = meta["width"]
+                    pp_fields["height"] = meta["height"]
+                    orientation = compute_orientation(meta["width"], meta["height"])
+                    if orientation:
+                        pp_fields["orientation"] = orientation
                 if prompt_text:
                     pp_fields["prompt"] = prompt_text
                 pp = json.dumps(pp_fields)
@@ -439,6 +454,7 @@ def _sync_disk_orphans(force: bool = False) -> int:
                 ).execute()
                 existing.add((fname, subfolder, "output"))
                 added += 1
+                prewarm_thumbnail(fname, subfolder, "output", 600)
             except Exception:
                 pass
     except Exception:
@@ -448,25 +464,89 @@ def _sync_disk_orphans(force: bool = False) -> int:
     return added
 
 
+def _backfill_missing_dimensions(limit: int = _DIM_BACKFILL_LIMIT) -> int:
+    """把旧记录里 width/height 为 0 的图片补成真实尺寸（进程生命周期内跑一次）。
+
+    只补最近 `limit` 条：画廊默认按最新排序，先把用户最常看到的那一屏补齐；
+    更老的记录仍走 list_history 的 PIL 回退，不影响正确性。
+    """
+    global _dimensions_backfilled
+    if _dimensions_backfilled:
+        return 0
+    _dimensions_backfilled = True
+
+    updated = 0
+    prewarmed = 0
+    rows = (
+        Image.select(
+            Image.id, Image.filename, Image.subfolder, Image.img_type,
+            Image.prompt_params,
+        )
+        .where(Image.is_deleted == False)  # noqa: E712
+        .order_by(Image.id.desc())
+        .limit(limit)
+    )
+    for r in rows:
+        try:
+            pp = json.loads(r.prompt_params) if r.prompt_params else {}
+        except (TypeError, ValueError):
+            pp = {}
+        if not isinstance(pp, dict):
+            pp = {}
+        if pp.get("width") and pp.get("height"):
+            continue
+
+        meta = get_image_metadata(r.filename or "", r.subfolder or "", r.img_type or "output")
+        if not meta.get("width") or not meta.get("height"):
+            continue
+        pp.update(meta)
+        orientation = compute_orientation(meta["width"], meta["height"])
+        if orientation:
+            pp["orientation"] = orientation
+        try:
+            Image.update(
+                prompt_params=json.dumps(pp, ensure_ascii=False)
+            ).where(Image.id == r.id).execute()
+            updated += 1
+            if prewarmed < _DIM_BACKFILL_PREWARM:
+                prewarm_thumbnail(
+                    r.filename or "", r.subfolder or "", r.img_type or "output", 600
+                )
+                prewarmed += 1
+        except Exception:
+            continue
+
+    if updated:
+        print(f"[sync] 回填 {updated} 条旧图的宽高/方向")
+    return updated
+
+
+def _sync_all(force: bool = False) -> tuple[int, bool]:
+    """执行一次同步，返回 (新增/更新计数, 是否因已有扫描而跳过)。"""
+    global _last_full_scan
+    now = time.monotonic()
+    force = force or (now - _last_full_scan >= _FULL_SCAN_INTERVAL)
+    if not _sync_lock.acquire(blocking=False):
+        return 0, True
+    try:
+        added = _sync_comfyui_history()
+        added += _sync_disk_orphans(force=force)
+        _backfill_missing_dimensions()
+        if force:
+            _last_full_scan = now
+        return added, False
+    finally:
+        _sync_lock.release()
+
+
 def sync_all(force: bool = False) -> int:
     """同步 ComfyUI 历史 + 磁盘兜底；同一时刻只允许一个执行者。
 
     HTTP 手动同步与 writer 定时同步共用此入口；拿不到锁说明已有扫描在跑，
     本次直接返回 0，避免重复入库与 `_job_index` 半成品。
     """
-    global _last_full_scan
-    now = time.monotonic()
-    force = force or (now - _last_full_scan >= _FULL_SCAN_INTERVAL)
-    if not _sync_lock.acquire(blocking=False):
-        return 0
-    try:
-        added = _sync_comfyui_history()
-        added += _sync_disk_orphans(force=force)
-        if force:
-            _last_full_scan = now
-        return added
-    finally:
-        _sync_lock.release()
+    added, _busy = _sync_all(force=force)
+    return added
 
 
 def _build_prompt_params_from_comfy(data: dict, filename: str = "", subfolder: str = "", img_type: str = "output") -> str | None:
@@ -805,6 +885,24 @@ def sync_history(page_size: int = Query(500)):
         missing=None, tag_match="all",
     )
     return {"added": added, "items": data["items"], "total": data["total"]}
+
+
+@router.post("/images/sync/light")
+def sync_history_light():
+    """轻量增量同步：画廊刷新/挂载时调用，只返回新增条数，不拉列表。
+
+    刷新页面本身不触发任何扫描，旧实现只能等 writer 每 30 秒扫一次盘，外部
+    ComfyUI 出的图最多要等半分钟才出现。这里让刷新动作显式跑一次增量扫描
+    （目录 mtime 缓存命中时很快），前端再按 `added` 决定是否重拉列表。
+
+    不复用 `/images/sync`：那条是强制全量扫描并返回 500 条列表（实测约 1s），
+    挂在每次页面加载上太重，也会让前端多做一次无意义的列表解析。
+    """
+    visible = Image.is_deleted == False  # noqa: E712
+    before = Image.select().where(visible).count()
+    _added, busy = _sync_all(force=False)
+    after = Image.select().where(visible).count()
+    return {"added": max(0, after - before), "total": after, "busy": busy}
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 """ComfyUI API 客户端 —— 所有与 ComfyUI 的 HTTP 交互"""
+import atexit
 import json
 import logging
+import threading
 import time
 
 import httpx
@@ -10,6 +12,40 @@ from app.config import settings
 logger = logging.getLogger("atelier.comfy")
 
 COMFYUI_API = settings.comfyui_api
+
+# 同步 HTTP 客户端复用。
+# 旧实现每次请求都 `with httpx.Client(...)`，而 httpx 在 __init__ 里会同步构建
+# SSLContext（Windows 证书库实测约 1.0–1.5s），缩略图缺图回退、每 30 秒的同步、
+# 每 10 秒的状态轮询都要各付一次。这里只建一次，线程间共享（httpx.Client 可并发）。
+# trust_env=False：目标固定是本机 ComfyUI；同时避开 Windows 上 NO_PROXY 含 `[::1]`
+# 时 httpx 0.28 抛 "Invalid port: ':1]'" 的问题。
+_sync_client: httpx.Client | None = None
+_sync_client_lock = threading.Lock()
+
+
+def get_sync_client() -> httpx.Client:
+    """返回进程内共享的同步 httpx 客户端；调用方不要 close。"""
+    global _sync_client
+    with _sync_client_lock:
+        if _sync_client is None or _sync_client.is_closed:
+            _sync_client = httpx.Client(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+                follow_redirects=True,
+                trust_env=False,
+            )
+        return _sync_client
+
+
+def close_sync_client() -> None:
+    global _sync_client
+    with _sync_client_lock:
+        if _sync_client is not None and not _sync_client.is_closed:
+            _sync_client.close()
+        _sync_client = None
+
+
+atexit.register(close_sync_client)
 
 # object_info 缓存：成功缓存 5 分钟，失败缓存 30 秒。
 # 失败也要缓存，否则 ComfyUI 无响应时每个节点类型都要各等一次超时。
@@ -45,10 +81,9 @@ def get_object_info(force: bool = False) -> dict:
             return {}
 
     try:
-        with httpx.Client(timeout=_OBJECT_INFO_TIMEOUT) as client:
-            resp = client.get(f"{COMFYUI_API}/object_info")
-            resp.raise_for_status()
-            data = resp.json()
+        resp = get_sync_client().get(f"{COMFYUI_API}/object_info", timeout=_OBJECT_INFO_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
         _object_info = data if isinstance(data, dict) else {}
         _object_info_at = now
         _object_info_fail_until = 0.0
@@ -64,10 +99,9 @@ def get_object_info(force: bool = False) -> dict:
 def fetch_json(url: str, timeout: int = 5) -> dict | None:
     """GET 请求 ComfyUI 并返回 JSON"""
     try:
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        resp = get_sync_client().get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
     except Exception:
         return None
 
@@ -77,8 +111,9 @@ def post_comfyui(path: str, data: dict | None = None, timeout: int = 5) -> httpx
     try:
         body = json.dumps(data).encode("utf-8") if data is not None else b""
         headers = {"Content-Type": "application/json"} if data is not None else {}
-        with httpx.Client(timeout=timeout) as client:
-            return client.post(f"{COMFYUI_API}{path}", content=body, headers=headers)
+        return get_sync_client().post(
+            f"{COMFYUI_API}{path}", content=body, headers=headers, timeout=timeout
+        )
     except Exception:
         return None
 
@@ -89,16 +124,16 @@ def push_prompt(api_workflow: dict) -> dict:
     logger.debug("提交 ComfyUI：nodes=%d first=%s", len(api_workflow), list(api_workflow.keys())[:10])
 
     try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                f"{COMFYUI_API}/prompt",
-                content=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            if resp.status_code != 200:
-                logger.error("ComfyUI 拒绝任务：HTTP %s %s", resp.status_code, resp.text[:500])
-            resp.raise_for_status()
-            return resp.json()
+        resp = get_sync_client().post(
+            f"{COMFYUI_API}/prompt",
+            content=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            logger.error("ComfyUI 拒绝任务：HTTP %s %s", resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPStatusError as e:
         logger.error("ComfyUI 返回错误：%s %s", e.response.status_code, e.response.text[:500])
         raise RuntimeError(f"ComfyUI 连接失败: {e}")
@@ -136,10 +171,9 @@ def _probe_online(timeout: float, retries: int) -> bool:
     """
     for attempt in range(max(1, retries)):
         try:
-            with httpx.Client(timeout=timeout) as client:
-                resp = client.get(f"{COMFYUI_API}/queue")
-                if resp.status_code < 500:
-                    return True
+            resp = get_sync_client().get(f"{COMFYUI_API}/queue", timeout=timeout)
+            if resp.status_code < 500:
+                return True
                 # 5xx：ComfyUI 或它前面的反代明确报上游不可用，再试也不会变好
                 return False
         except httpx.TimeoutException:

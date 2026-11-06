@@ -81,6 +81,9 @@ async def lifespan(app: FastAPI):
     stop_submit_worker()
     stop_event.set()
     writer.join(timeout=5)
+    from app.services.comfyui_client import close_sync_client
+
+    close_sync_client()
     if _comfy_http is not None and not _comfy_http.is_closed:
         await _comfy_http.aclose()
     db.close()

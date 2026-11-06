@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image as PILImage, ImageOps
 
 from app.config import settings
+from app.services.comfyui_client import get_sync_client
 from app.services.image_formats import is_heif
 from app.services.paths import (
     IMAGE_EXTENSIONS,
@@ -78,14 +79,13 @@ def proxy_image(
         f"&type={quote(type)}"
     )
     try:
-        with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(url)
-            if resp.status_code in (400, 404):
-                # 本地没有 + ComfyUI 也没有 = 文件真的没了 → 给占位图，不再刷 404
-                return missing_image_response()
-            resp.raise_for_status()
-            content = resp.content
-            media_type = resp.headers.get("Content-Type", "image/png")
+        resp = get_sync_client().get(url, timeout=15)
+        if resp.status_code in (400, 404):
+            # 本地没有 + ComfyUI 也没有 = 文件真的没了 → 给占位图，不再刷 404
+            return missing_image_response()
+        resp.raise_for_status()
+        content = resp.content
+        media_type = resp.headers.get("Content-Type", "image/png")
     except httpx.ConnectError:
         # ComfyUI 没开，本地也没有这个文件 → 同样属于"取不到图"
         return missing_image_response()
@@ -126,12 +126,11 @@ def _fetch_remote_image(filename: str, subfolder: str, img_type: str) -> bytes |
         f"&type={quote(img_type)}"
     )
     try:
-        with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(url)
-            if resp.status_code in (404, 400):
-                return None
-            resp.raise_for_status()
-            return resp.content
+        resp = get_sync_client().get(url, timeout=15)
+        if resp.status_code in (404, 400):
+            return None
+        resp.raise_for_status()
+        return resp.content
     except (httpx.ConnectError, httpx.TimeoutException):
         return None
     except Exception:

@@ -7,6 +7,8 @@ export interface ViewerCallbacks {
   onPanStart?: () => void
   /** 点击 stage 空白处；灯箱用它关闭。 */
   onStageClick?: () => void
+  /** 「适应窗口」时四周预留的总边距（px），默认 48；对比弹层用更小的值。 */
+  fitPadding?: number
 }
 
 interface ViewState {
@@ -69,8 +71,9 @@ export function useViewerTransform(options: ViewerCallbacks = {}) {
     const el = stageEl.value
     const eff = effectiveSize()
     if (!el || !eff.w || !eff.h) return 1
-    const availW = Math.max(80, el.clientWidth - 48)
-    const availH = Math.max(80, el.clientHeight - 48)
+    const pad = options.fitPadding ?? 48
+    const availW = Math.max(80, el.clientWidth - pad)
+    const availH = Math.max(80, el.clientHeight - pad)
     return Math.min(availW / eff.w, availH / eff.h)
   }
 

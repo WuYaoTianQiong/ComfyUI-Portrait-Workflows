@@ -1,4 +1,6 @@
 """缩略图生成与缓存"""
+import queue
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -67,3 +69,50 @@ def generate_thumbnail(
         return thumb_path
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# 缩略图预热：同步/出图入库后后台生成 600px 缩略图。
+#
+# 画廊首屏按需生成时，一页 60 张冷缓存实测约 1.2s（6 并发），而且会跟列表请求
+# 抢 PIL/磁盘。入库时提前铺好，用户切到画廊时直接命中文件缓存。
+# 单守护线程 + 有界队列：不阻塞同步线程，文件再多也只按顺序慢慢铺。
+# ---------------------------------------------------------------------------
+
+_PREWARM_QUEUE: queue.Queue[tuple[str, str, str, int]] = queue.Queue(maxsize=500)
+_PREWARM_LOCK = threading.Lock()
+_PREWARM_WORKER: threading.Thread | None = None
+
+
+def prewarm_thumbnail(
+    filename: str,
+    subfolder: str = "",
+    img_type: str = "output",
+    size: int = 600,
+) -> None:
+    """把一张图排进缩略图预热队列；不等待、不抛异常。"""
+    global _PREWARM_WORKER
+    if not filename or not settings.thumbnail_prewarm:
+        return
+    with _PREWARM_LOCK:
+        if _PREWARM_WORKER is None or not _PREWARM_WORKER.is_alive():
+            _PREWARM_WORKER = threading.Thread(
+                target=_prewarm_loop, daemon=True, name="thumb-prewarm"
+            )
+            _PREWARM_WORKER.start()
+    try:
+        _PREWARM_QUEUE.put_nowait((filename, subfolder or "", img_type or "output", size))
+    except queue.Full:
+        # 预热是优化项，队列满了就放弃这一张，等下次同步再补
+        pass
+
+
+def _prewarm_loop() -> None:
+    while True:
+        filename, subfolder, img_type, size = _PREWARM_QUEUE.get()
+        try:
+            generate_thumbnail(filename, subfolder, img_type, size)
+        except Exception:
+            pass
+        finally:
+            _PREWARM_QUEUE.task_done()
