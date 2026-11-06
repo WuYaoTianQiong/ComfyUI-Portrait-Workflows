@@ -31,7 +31,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
-import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 import {
   useWorkflowCaps,
   type QualityOption,
@@ -129,6 +129,10 @@ export interface RecipeSubmitRequest {
   portrait_id?: string
   costume_id?: string
   pose_id?: string
+  /** 本地上传图路径（与对应 `*_id` 二选一；后端校验必须在 uploads 内）。 */
+  portrait_path?: string
+  costume_path?: string
+  pose_path?: string
   costume_library?: RecipeCostumeLibrary
   extra_path?: string
   /** 合成台工作流文件名 / 库内路径；空 = 后端默认 Qwen21+VNCCS。 */
@@ -405,10 +409,23 @@ export function buildRecipeRequest(
     seed_mode: options.seedMode ?? 'fixed',
   }
 
-  if (slots.portrait) request.portrait_id = slots.portrait.id
+  // 本地上传图（`upload:` 伪条目）发 `*_path`，库条目发 `*_id`：后端二选一。
+  const portraitUpload = uploadPathOf(slots.portrait)
+  if (slots.portrait) {
+    if (portraitUpload) request.portrait_path = portraitUpload
+    else request.portrait_id = slots.portrait.id
+  }
   // 素体模式后端明确拒绝「同时带服装」：这里做最后一道防御，防止槽位清空竞态。
-  if (slots.costume && bodyMode !== 'bare') request.costume_id = slots.costume.id
-  if (slots.pose) request.pose_id = slots.pose.id
+  if (slots.costume && bodyMode !== 'bare') {
+    const costumeUpload = uploadPathOf(slots.costume)
+    if (costumeUpload) request.costume_path = costumeUpload
+    else request.costume_id = slots.costume.id
+  }
+  const poseUpload = uploadPathOf(slots.pose)
+  if (slots.pose) {
+    if (poseUpload) request.pose_path = poseUpload
+    else request.pose_id = slots.pose.id
+  }
 
   const extra = options.extraPath.trim()
   if (extra) request.extra_path = extra
@@ -1725,6 +1742,30 @@ export function useReferenceRecipe() {
 
   /** 体态模式（素体开关）；不写 localStorage（本轮契约不要求记忆）。 */
   const bodyMode = ref<RecipeBodyMode>('costume')
+  /**
+   * 当前生效工作流里是否有能接第 4 张（`extra`）的。
+   *
+   * 没有时页面直接隐藏上传入口（`extra` 槽一并清空）：合成台现有工作流都只有 3 个
+   * LoadImage，上传第 4 张只会让所有工作流因 `slots` 不含 extra 被判「不适用」，
+   * 用户看到的是一排置灰项。`slots` 缺失（旧后端）按「支持」处理，避免误伤。
+   */
+  const supportsExtraSlot = computed(() =>
+    effectiveWorkflows.value.some((item) =>
+      item.slots === undefined ? true : item.slots.includes('extra'),
+    ),
+  )
+  /** 缺服装自动切换素体展示时的提示文案（页面转成 toast，不拦提交）。 */
+  const bodyModeNotice = ref('')
+  /**
+   * 实际生效的体态模式：`costume` 但服装槽为空 → 按 `bare`（中性素体展示）。
+   *
+   * 后端 `create_reference_recipe` 用同一条规则兜底（2026-11-06 实测：缺服装且不声明
+   * 素体时，Qwen 系会自由发挥出裸体）。组合裁剪、预览与提交体都用这个生效值，
+   * 保证「预览给出的提示词 = 真正提交的提示词」。
+   */
+  const effectiveBodyMode = computed<RecipeBodyMode>(() =>
+    bodyMode.value === 'bare' || draft.costumeCount.value === 0 ? 'bare' : 'costume',
+  )
 
   const slotCounts = computed<RecipeSlotCounts>(() => ({
     portrait: draft.portraitCount.value,
@@ -1887,7 +1928,8 @@ export function useReferenceRecipe() {
     return buildRecipeRequest(
       {
         portrait: draft.portrait.value[0] ?? null,
-        costume: bodyMode.value === 'bare' ? null : (draft.costume.value[0] ?? null),
+        costume:
+          effectiveBodyMode.value === 'bare' ? null : (draft.costume.value[0] ?? null),
         pose: draft.pose.value[0]?.item ?? null,
       },
       {
@@ -1895,7 +1937,7 @@ export function useReferenceRecipe() {
         promptSuffix: promptSuffix.value,
         extraPath: '',
         workflow: previewWorkflow.value?.path ?? '',
-        bodyMode: bodyMode.value,
+        bodyMode: effectiveBodyMode.value,
         seed: baseSeed.value,
         seedMode: 'fixed',
       },
@@ -2123,6 +2165,11 @@ export function useReferenceRecipe() {
     workflowTrimNotice.value = ''
   }
 
+  /** 消费后清空「缺服装 → 素体展示」提示，避免重复弹出。 */
+  function clearBodyModeNotice(): void {
+    bodyModeNotice.value = ''
+  }
+
   /**
    * 槽位变化后，已勾选但不再适用的工作流**自动取消并提示**（绝不静默）。
    *
@@ -2267,7 +2314,8 @@ export function useReferenceRecipe() {
           quality: group.quality,
           aspectRatio: group.aspectRatio,
           orientation: group.orientation,
-          bodyMode: bodyMode.value,
+          // 缺服装时按素体展示提交（与后端兜底同一规则），否则会出裸体
+          bodyMode: effectiveBodyMode.value,
           seed: group.seed,
           seedMode: 'fixed',
         })
@@ -2453,7 +2501,7 @@ export function useReferenceRecipe() {
     return buildBatchGroups({
       portrait: draft.portrait.value,
       // 素体模式：即使槽位有残留服装也绝不进入组合（后端 bare + 服装 = 400）。
-      costume: costumeDimensionForBodyMode(draft.costume.value, bodyMode.value),
+      costume: costumeDimensionForBodyMode(draft.costume.value, effectiveBodyMode.value),
       pose: draft.pose.value.map((entry) => entry.item),
       workflows: effectiveWorkflows.value.map((item) => item.path),
       qualities: qualitySelection.value,
@@ -2505,6 +2553,7 @@ export function useReferenceRecipe() {
     if (submitting.value) return null
     workflowDowngrade.value = null
     workflowTrimNotice.value = ''
+    bodyModeNotice.value = ''
     formError.value = ''
     errorMessage.value = ''
 
@@ -2533,7 +2582,8 @@ export function useReferenceRecipe() {
 
     if (activeSlotCount.value === 0) {
       return rejectBeforeSubmit(
-        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。',
+        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图' +
+          (supportsExtraSlot.value ? '，或上传第 4 张后再提交。' : '后再提交。'),
       )
     }
 
@@ -2541,6 +2591,13 @@ export function useReferenceRecipe() {
       return rejectBeforeSubmit(
         `无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`,
       )
+    }
+
+    // 缺服装会自动按素体展示提交（后端同规则兜底）：必须明确告知，不静默改变语义。
+    // 放在能力预判之前：自动裁剪分支会直接 return，提示不能因此漏掉。
+    if (bodyMode.value === 'costume' && effectiveBodyMode.value === 'bare') {
+      bodyModeNotice.value =
+        '未选择服装参考图，已按素体展示（无服装）提交；要穿衣服请先选择服装再提交'
     }
 
     // 能力预判：M（非空槽数）< N（工作流输入数）。
@@ -2685,6 +2742,13 @@ export function useReferenceRecipe() {
     // 体态模式（素体开关，契约 C-REF-BODY-MODE@1）
     bodyMode,
     setBodyMode,
+    /** 实际生效的体态模式（缺服装 → bare）；预览/提交/组合都按它走。 */
+    effectiveBodyMode,
+    /** 缺服装自动切素体展示时的提示文案（页面转 toast）。 */
+    bodyModeNotice,
+    clearBodyModeNotice,
+    /** 当前生效工作流是否支持第 4 张（extra）；false 时页面隐藏上传入口。 */
+    supportsExtraSlot,
     // 能力与尺寸
     caps,
     qualityOptions,

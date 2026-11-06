@@ -7,8 +7,10 @@
  * - 全组合 = 槽位组合 × 画质档 × 比例，常驻显示「当前 N / 上限 100」；
  * - 每组独立 POST、并发上限 2；种子第 i 组 = base_seed + i；
  * - 工作流下拉（`/api/workflows?scope=studio`，自动选中 `default`，展示 input_count）；
- * - M（非空槽数）< N（input_count）时提交前弹降级确认框，不做静默切换；
+ * - M（非空槽数）< N（input_count）时先问 `/api/reference/trim-check`：
+ *   可裁剪 → 直接提交 + toast 说明；不可裁剪 → 才弹降级确认框（不做静默切换）；
  * - 尺寸档位 / 比例按 `caps` 渲染；Qwen 系隐藏并显示「跟随参考图」说明；
+ * - 服装槽为空时自动按素体展示（`bare`）提交并 toast 说明（否则模型会自由发挥出裸体）；
  * - 画风预设（`none` / `realistic`）+ `prompt_suffix`；
  * - `POST /api/reference/recipes` → 轮询 1500ms / 30min → 结果图 / 任务中心；
  * - 提示词只读预览（后端 `dry_run` 组合，只读、不可编辑、与正式提交独立）。
@@ -24,6 +26,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { isNsfwCostumeItem, isNsfwPoseItem } from '../../api/reference'
 import type { HistoryItem } from '../../api/types'
+import { uploadReferenceImages } from '../../api/upload'
 import type { UploadedReference } from '../../api/upload'
 import { withReferenceTab } from './referenceDeepLink'
 import DropZone from '../../components/DropZone.vue'
@@ -119,6 +122,9 @@ const {
   extraName,
   bodyMode,
   setBodyMode,
+  bodyModeNotice,
+  clearBodyModeNotice,
+  supportsExtraSlot,
   previewPrompt,
   previewError,
   previewLoading,
@@ -162,6 +168,13 @@ watch(workflowTrimNotice, (message) => {
   if (!message) return
   toast.info(message)
   clearWorkflowTrimNotice()
+})
+
+/** 缺服装时自动按素体展示提交（否则 Qwen 系会出裸体），必须让用户知道语义被改了。 */
+watch(bodyModeNotice, (message) => {
+  if (!message) return
+  toast.info(message)
+  clearBodyModeNotice()
 })
 
 /**
@@ -282,6 +295,60 @@ function clearSlot(slot: RecipeSlotKey): void {
   if (slot === 'portrait') draft.removePortrait()
   else if (slot === 'costume') draft.removeCostume()
   else draft.removePose()
+}
+
+// ---------------------------------------------------------------------------
+// 三槽本地上传图（与库条目同数组，一起参与笛卡尔积）
+// ---------------------------------------------------------------------------
+
+/** 隐藏的 file input：三个槽共用一个，点击时记住目标槽。 */
+const slotUploadInput = ref<HTMLInputElement | null>(null)
+const slotUploadTarget = ref<RecipeSlotKey>('portrait')
+const slotUploading = ref(false)
+
+/** 点「上传本地图」：记住目标槽并触发文件选择。 */
+function pickSlotUpload(slot: RecipeSlotKey): void {
+  slotUploadTarget.value = slot
+  slotUploadInput.value?.click()
+}
+
+/** 文件选择完成：并发上传，成功后按目标槽加入对应数组。 */
+async function onSlotUploadChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  const slot = slotUploadTarget.value
+  input.value = ''
+  if (!files.length) return
+
+  slotUploading.value = true
+  try {
+    const result = await uploadReferenceImages(files)
+    for (const item of result.items) {
+      const payload = {
+        path: item.path,
+        name: item.name,
+        width: item.width,
+        height: item.height,
+      }
+      if (slot === 'portrait') draft.addPortraitUpload(payload)
+      else if (slot === 'costume') draft.addCostumeUpload(payload)
+      else draft.addPoseUpload(payload)
+    }
+    if (result.items.length) {
+      toast.success(`已加入 ${result.items.length} 张本地图到${SLOT_LABELS[slot]}槽`)
+    }
+    if (result.failures.length) {
+      toast.error(
+        `${result.failures.length} 张上传失败。原因：${result.failures[0].error}。下一步：换一张图片后重试。`,
+      )
+    }
+  } catch (cause) {
+    toast.error(
+      `上传失败。原因：${cause instanceof Error ? cause.message : String(cause)}。下一步：确认文件是图片且不超过 25MB。`,
+    )
+  } finally {
+    slotUploading.value = false
+  }
 }
 
 /** 槽位名（删除 toast 用）。 */
@@ -593,6 +660,16 @@ function onExtraError(message: string): void {
   toast.error(`第 4 张参考图上传失败。原因：${message}。下一步：换一张图片，或确认文件不超过 25MB 后重试。`)
 }
 
+/**
+ * 工作流都不支持第 4 张时，入口直接隐藏：
+ * 会话恢复的草稿里若还留着 extra，必须清掉，否则它会算进非空槽位、把所有工作流判成不适用。
+ */
+watch(supportsExtraSlot, (enabled) => {
+  if (enabled || !extraPath.value) return
+  clearExtra()
+  toast.info('当前工作流都不支持第 4 张参考图，已清空该槽位')
+})
+
 // ---------------------------------------------------------------------------
 // 提交 / 结果
 // ---------------------------------------------------------------------------
@@ -637,7 +714,8 @@ async function onGenerate(): Promise<void> {
   showingPrevious.value = false
   if (activeSlotCount.value === 0) {
     toast.error(
-      '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。',
+      '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图' +
+        (supportsExtraSlot.value ? '，或上传第 4 张后再提交。' : '后再提交。'),
     )
     return
   }
@@ -764,7 +842,7 @@ onMounted(async () => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交；第 4 张为可选的上传附加图。
+        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张为可选的上传附加图</template>。
       </p>
     </header>
 
@@ -774,26 +852,46 @@ onMounted(async () => {
         <span class="studio-count" data-testid="studio-recipe-count">{{ countLabel }}</span>
       </template>
 
-      <!-- 素材区 4 列：三槽（图墙版）+ 第 4 张上传块（P1 M2 / §10-2） -->
-      <div class="slot-grid">
-        <StudioSlotPanel
-          v-for="slot in slotCards"
-          :key="slot.key"
-          :label="slot.label"
-          :slot-key="slot.key"
-          :items="slot.items"
-          :hint="slot.hint"
-          :show-depth-toggle="slot.showDepthToggle"
-          :use-depth="slot.useDepth"
-          @select="openSlot(slot.key)"
-          @clear="clearSlot(slot.key)"
-          @depth-change="changePoseDepth"
-          @preview="openSlotPreview(slot.key, $event)"
-          @remove="removeSlotItem(slot.key, $event)"
+      <!-- 素材区：三槽（图墙版）+ 第 4 张上传块；没有工作流支持 extra 时只留三槽 -->
+      <div class="slot-grid" :class="{ 'slot-grid--compact': !supportsExtraSlot }">
+        <div v-for="slot in slotCards" :key="slot.key" class="slot-column">
+          <StudioSlotPanel
+            :label="slot.label"
+            :slot-key="slot.key"
+            :items="slot.items"
+            :hint="slot.hint"
+            :show-depth-toggle="slot.showDepthToggle"
+            :use-depth="slot.useDepth"
+            @select="openSlot(slot.key)"
+            @clear="clearSlot(slot.key)"
+            @depth-change="changePoseDepth"
+            @preview="openSlotPreview(slot.key, $event)"
+            @remove="removeSlotItem(slot.key, $event)"
+          />
+          <!-- 本地上传：与库条目同数组、同组合维度，可多张 -->
+          <button
+            type="button"
+            class="slot-upload"
+            :data-testid="`studio-slot-upload-${slot.key}`"
+            :disabled="slotUploading"
+            @click="pickSlotUpload(slot.key)"
+          >
+            {{ slotUploading ? '上传中…' : '＋ 上传本地图' }}
+          </button>
+        </div>
+
+        <input
+          ref="slotUploadInput"
+          class="slot-upload-input"
+          type="file"
+          accept="image/*"
+          multiple
+          data-testid="studio-slot-upload-input"
+          @change="onSlotUploadChange"
         />
 
-        <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads -->
-        <div class="extra-block">
+        <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads；没有工作流接 extra 时整块不渲染 -->
+        <div v-if="supportsExtraSlot" class="extra-block">
           <div v-if="extraPath" class="extra-item" data-testid="studio-extra-selected">
             <span class="extra-item__mark" aria-hidden="true">
               <svg viewBox="0 0 16 16">
@@ -820,35 +918,41 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 生成清单（M3）：逐组行 + 常驻计数；batch-* testid 保留给既有 e2e -->
-      <div class="matrix-head" data-testid="studio-batch-summary">
-        <span class="matrix-head__title">生成清单</span>
-        <span data-testid="studio-batch-total">{{ batchTotal }}</span>
-        <span data-testid="studio-selected-total">已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}</span>
-      </div>
-      <p v-if="batchOverLimit" class="studio-error studio-error--inline" role="alert" data-testid="studio-batch-limit">
-        {{ batchLimitMessage }}
-      </p>
-      <StudioMatrix
-        :groups="previewGroups"
-        :total="batchTotal"
-        :limit="MAX_BATCH_RECIPES"
-        :over-limit="batchOverLimit"
-        :limit-message="batchLimitMessage"
-        :slot-counts="slotCounts"
-        :workflow-count="workflowDimension"
-        :quality-count="qualityCountForBar"
-        :ratio-count="ratioCountForBar"
-        :workflows="workflows"
-        :pose-use-depth="poseUseDepth"
-        :active-slot-count="activeSlotCount"
-      />
     </ReferenceSectionCard>
 
     <div class="studio-grid">
-      <!-- 左栏：提示词预览、参数、补充要求、操作条 -->
-      <div class="studio-column studio-column--left">
+      <!--
+        行 B 左（8/12）：生成清单。
+        矩阵自带「生成清单 + N / 上限 100」标题，这里只保留一行槽位摘要，
+        batch-* testid 仍挂在原位置，兼容既有 e2e。
+      -->
+      <section class="studio-cell studio-cell--8 matrix-cell">
+        <div class="matrix-head" data-testid="studio-batch-summary">
+          <span data-testid="studio-selected-total">已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}</span>
+          <span class="matrix-head__sep" aria-hidden="true">·</span>
+          <span data-testid="studio-batch-total">共 {{ batchTotal }} 组</span>
+        </div>
+        <p v-if="batchOverLimit" class="studio-error studio-error--inline" role="alert" data-testid="studio-batch-limit">
+          {{ batchLimitMessage }}
+        </p>
+        <StudioMatrix
+          :groups="previewGroups"
+          :total="batchTotal"
+          :limit="MAX_BATCH_RECIPES"
+          :over-limit="batchOverLimit"
+          :limit-message="batchLimitMessage"
+          :slot-counts="slotCounts"
+          :workflow-count="workflowDimension"
+          :quality-count="qualityCountForBar"
+          :ratio-count="ratioCountForBar"
+          :workflows="workflows"
+          :pose-use-depth="poseUseDepth"
+          :active-slot-count="activeSlotCount"
+        />
+      </section>
 
+      <!-- 行 B 右（4/12）：参数（用分区卡包一层，和左侧清单同底色） -->
+      <ReferenceSectionCard class="studio-cell studio-cell--4" title="参数">
         <StudioParamsCard
           :workflow-selection="workflowSelection"
           :workflows="workflows"
@@ -876,47 +980,10 @@ onMounted(async () => {
           @update:body-mode="onParamsBodyMode"
           @reload-workflows="reloadWorkflows"
         />
+      </ReferenceSectionCard>
 
-        <ReferenceSectionCard title="补充要求">
-          <label class="field__label" for="studio-prompt-suffix">补充要求（可选）</label>
-          <textarea
-            id="studio-prompt-suffix"
-            v-model="promptSuffix"
-            class="studio-textarea"
-            rows="3"
-            placeholder="例如：暖色灯光、浅景深；作为 prompt_suffix 提交"
-            data-testid="studio-prompt-suffix"
-          />
-          <p class="studio-hint">
-            补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，下方预览只读、不可编辑。
-          </p>
-
-        </ReferenceSectionCard>
-
-        <!-- 操作条（M6）：sticky；确认弹窗在组件内，取消不发 submit -->
-        <StudioActionBar
-          :total="batchTotal"
-          :portrait-count="slotCounts.portrait"
-          :costume-count="slotCounts.costume"
-          :pose-count="slotCounts.pose"
-          :workflow-count="workflowDimension"
-          :quality-count="qualityCountForBar"
-          :ratio-count="ratioCountForBar"
-          :over-limit="batchOverLimit"
-          :limit-message="batchLimitMessage"
-          :can-submit="canSubmit"
-          :submitting="submitting"
-          :library-loading="libraryLoading"
-          @randomize="randomize"
-          @submit="onGenerate"
-        />
-
-      </div>
-
-      <!-- 右栏：提示词预览 + 全宽结果区（结果卡由 display:contents 跨满 12 栏） -->
-      <div class="studio-column studio-column--right">
-        <!-- 提示词只读预览：后端 dry_run 组合，与正式提交完全独立 -->
-        <ReferenceSectionCard title="提示词预览">
+      <!-- 行 C 左（7/12）：提示词只读预览（后端 dry_run 组合，与正式提交完全独立） -->
+      <ReferenceSectionCard class="studio-cell studio-cell--7" title="提示词预览">
           <template #actions>
             <button
               type="button"
@@ -960,9 +1027,26 @@ onMounted(async () => {
           >
             重试
           </button>
-        </ReferenceSectionCard>
+      </ReferenceSectionCard>
 
-        <ReferenceSectionCard title="生成结果">
+      <!-- 行 C 右（5/12）：补充要求（与提示词预览并排，避免两块各占整行） -->
+      <ReferenceSectionCard class="studio-cell studio-cell--5" title="补充要求">
+        <label class="field__label" for="studio-prompt-suffix">补充要求（可选）</label>
+        <textarea
+          id="studio-prompt-suffix"
+          v-model="promptSuffix"
+          class="studio-textarea"
+          rows="4"
+          placeholder="例如：暖色灯光、浅景深；作为 prompt_suffix 提交"
+          data-testid="studio-prompt-suffix"
+        />
+        <p class="studio-hint">
+          补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，上方预览只读、不可编辑。
+        </p>
+      </ReferenceSectionCard>
+
+      <!-- 行 D（12/12）：生成结果 -->
+      <ReferenceSectionCard class="studio-cell studio-cell--12" title="生成结果">
           <template #actions>
             <a
               v-if="previewUrl"
@@ -1034,9 +1118,26 @@ onMounted(async () => {
               查看上一张结果
             </button>
           </div>
-        </ReferenceSectionCard>
-      </div>
+      </ReferenceSectionCard>
     </div>
+
+    <!-- 操作条（M6）：fixed 吸底，确认弹窗在组件内，取消不发 submit -->
+    <StudioActionBar
+      :total="batchTotal"
+      :portrait-count="slotCounts.portrait"
+      :costume-count="slotCounts.costume"
+      :pose-count="slotCounts.pose"
+      :workflow-count="workflowDimension"
+      :quality-count="qualityCountForBar"
+      :ratio-count="ratioCountForBar"
+      :over-limit="batchOverLimit"
+      :limit-message="batchLimitMessage"
+      :can-submit="canSubmit"
+      :submitting="submitting"
+      :library-loading="libraryLoading"
+      @randomize="randomize"
+      @submit="onGenerate"
+    />
 
     <!--
       槽位灯箱：直接复用画廊 `components/Lightbox.vue`，只读打开。
@@ -1192,38 +1293,63 @@ onMounted(async () => {
  * 用 12 列而不是 `7fr / 5fr`：12 列的 gap 也参与列宽换算，1920 视口下
  * 左栏 = 736.67、右栏 = 519.33，与 §5 的槽位卡 224.22 / 预览区 471.33 对得上。
  */
+/*
+ * 12 栏网格：每个区块直接是 grid 子项，用 `.studio-cell--N` 指定跨栏。
+ *
+ * 2026-11-06 空间利用率优化（此前所有区块都是 `1 / -1` 全宽单列）：
+ *   行 A：素材 12
+ *   行 B：清单 8 + 参数 4
+ *   行 C：提示词预览 7 + 补充要求 5
+ *   行 D：结果 12
+ * <1200 全部回落整行（参数卡在 4 栏时只剩 300 出头，两列网格会挤）。
+ */
 .studio-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 24px;
+  gap: 16px;
   align-items: start;
   /* 全宽素材卡与下方两栏之间留 16px（header 自带 margin-bottom，不再叠加） */
   margin-top: 16px;
 }
 
-.studio-column {
+.studio-cell {
+  min-width: 0;
+}
+
+.studio-cell--8 {
+  grid-column: span 8;
+}
+
+.studio-cell--7 {
+  grid-column: span 7;
+}
+
+.studio-cell--5 {
+  grid-column: span 5;
+}
+
+.studio-cell--4 {
+  grid-column: span 4;
+}
+
+.studio-cell--12 {
+  grid-column: 1 / -1;
+}
+
+/* 清单列：摘要行 + 矩阵，两者都由矩阵自身提供卡片外观 */
+.matrix-cell {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+  gap: 8px;
 }
 
-.studio-column--left {
-  grid-column: 1 / -1;
-}
-
-/* 结果卡不再占右栏：右栏容器让位，子节点直接成为 12 栏 grid 的全宽行。 */
-.studio-column--right {
-  display: contents;
-}
-
-.studio-column--right > * {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
-.studio-column--right {
-  grid-column: span 5;
+@media (max-width: 1199px) {
+  .studio-cell--8,
+  .studio-cell--7,
+  .studio-cell--5,
+  .studio-cell--4 {
+    grid-column: 1 / -1;
+  }
 }
 
 
@@ -1235,7 +1361,56 @@ onMounted(async () => {
   align-items: stretch;
 }
 
-@media (max-width: 767px) {
+/* 没有工作流接第 4 张时收成 3 列，避免右侧留一个空洞 */
+.slot-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 槽位列：面板 + 「上传本地图」按钮（上传图与库条目同数组，一起参与组合） */
+.slot-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slot-upload {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-body-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.slot-upload:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-strong);
+}
+
+.slot-upload:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.slot-upload-input {
+  display: none;
+}
+
+/*
+ * 断点收紧：780px 左右若还保持 4 列，单卡只有约 170px，图墙会退化成
+ * 1 列大图（3 张就把卡片撑到 500px 高）。这里按可用宽度逐级减列。
+ */
+@media (max-width: 1023px) {
+  .slot-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 899px) {
   .slot-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1252,17 +1427,14 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px 12px;
-  margin-top: 4px;
+  gap: 6px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
-.matrix-head__title {
-  color: var(--text-strong);
-  font-size: 13px;
-  font-weight: 600;
+.matrix-head__sep {
+  color: var(--text-faint);
 }
 
 .studio-count {
@@ -1649,21 +1821,9 @@ onMounted(async () => {
 }
 
 
-/* 1024px 以下单列（React lg 断点） */
+/* 1024px 以下整行堆叠（栅格子项已在 1200 断点统一回落 1 / -1） */
 @media (max-width: 1023px) {
   .studio-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .studio-column--left,
-  .studio-column--right {
-    grid-column: auto;
-  }
-}
-
-/* <768px：工作流与画风回落单列 */
-@media (max-width: 767px) {
-  .field-row {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -822,3 +822,332 @@ describe('多批次并发（轮询期间可继续提交）', () => {
     expect(recipe.resultUrls.value).toEqual(batchTwo.results)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 提交前可裁剪探测（2026-11-06）
+//
+// M（非空槽数）< N（input_count）时先问后端「空槽能不能裁」：
+// - 能裁 → 直接提交 + toast（不再拦一次确认框）；
+// - 裁不掉 → 弹原确认框，且带后端给出的 exact 原因（不再给「仍用当前工作流提交」）；
+// - 探测本身失败 → 退回确认框，绝不因探测失败放行。
+// ---------------------------------------------------------------------------
+
+describe('提交前可裁剪探测（trim-check）', () => {
+  const draft = useReferenceRecipeDraft()
+  let scopes: EffectScope[] = []
+  let submittedBodies: RecipeSubmitRequest[] = []
+  let trimRequests: Array<{ workflows?: string[]; roles?: string[] }> = []
+  let trimReply: unknown = null
+  let trimStatus = 200
+  let jobState: Map<number, { status: string; total: number; done_count: number; items: unknown[] }>
+  let jobSequence = 0
+
+  const WORKFLOW = '/wf3.api.json'
+  /** 声明支持第 4 张（extra）的工作流；用来验证上传入口的显隐条件。 */
+  const EXTRA_WORKFLOW = '/wf4.api.json'
+
+  function jsonResponse(data: unknown, status = 200): {
+    ok: boolean
+    status: number
+    json: () => Promise<unknown>
+  } {
+    return { ok: status >= 200 && status < 300, status, json: async () => data }
+  }
+
+  function installFetchMock(): void {
+    jobSequence = 0
+    submittedBodies = []
+    trimRequests = []
+    jobState = new Map()
+
+    const fetchMock = vi.fn(
+      async (input: unknown, init?: { method?: string; body?: unknown }) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : String((input as { url?: string } | null)?.url ?? '')
+
+        if (url.startsWith('/api/workflows')) {
+          return jsonResponse({
+            workflows: [
+              {
+                path: WORKFLOW,
+                name: 'wf3.api.json',
+                source: '图库专用',
+                rel_path: WORKFLOW,
+                image_slots: 3,
+                input_count: 3,
+                recommended: true,
+                slots: ['portrait', 'costume', 'pose'],
+              },
+              {
+                path: EXTRA_WORKFLOW,
+                name: 'wf4.api.json',
+                source: '图库专用',
+                rel_path: EXTRA_WORKFLOW,
+                image_slots: 4,
+                input_count: 4,
+                recommended: false,
+                slots: ['portrait', 'costume', 'pose', 'extra'],
+              },
+            ],
+            default: WORKFLOW,
+          })
+        }
+
+        if (url === '/api/reference/trim-check' && (init?.method ?? 'GET') === 'POST') {
+          trimRequests.push(
+            JSON.parse(String(init?.body ?? '{}')) as { workflows?: string[]; roles?: string[] },
+          )
+          return jsonResponse(trimReply, trimStatus)
+        }
+
+        if (url === '/api/reference/recipes' && (init?.method ?? 'GET') === 'POST') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as RecipeSubmitRequest & {
+            dry_run?: boolean
+          }
+          if (body.dry_run) return jsonResponse({ success: true, dry_run: true, prompt: '预览' })
+          submittedBodies.push(body)
+          const id = ++jobSequence
+          jobState.set(id, { status: 'running', total: 1, done_count: 0, items: [] })
+          return jsonResponse({ success: true, job_id: id, total: 1, submitted: 1, queued: 1, errors: [] })
+        }
+
+        const match = /^\/api\/jobs\/(\d+)$/.exec(url)
+        if (match) {
+          const id = Number(match[1])
+          const state = jobState.get(id) ?? {
+            status: 'running',
+            total: 1,
+            done_count: 0,
+            items: [],
+          }
+          return jsonResponse({ id, ...state })
+        }
+
+        throw new Error(`未预期的请求：${url}`)
+      },
+    )
+    vi.stubGlobal('fetch', fetchMock)
+  }
+
+  async function flushMicrotasks(rounds = 20): Promise<void> {
+    for (let round = 0; round < rounds; round += 1) await Promise.resolve()
+  }
+
+  async function prepareRecipe(): Promise<ReturnType<typeof useReferenceRecipe>> {
+    const scope = effectScope()
+    const recipe = scope.run(() => useReferenceRecipe())
+    if (!recipe) throw new Error('无法创建 useReferenceRecipe')
+    scopes.push(scope)
+    await recipe.loadStudioWorkflows()
+    // 只放 1 张人像：M=1 < N=3，必然触发探测
+    draft.addPortrait(portrait('pt1'))
+    recipe.setWorkflowSelection([WORKFLOW])
+    await flushMicrotasks()
+    return recipe
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    draft.clearDraft()
+    trimStatus = 200
+    trimReply = { workflows: [], all_trimmable: true }
+    installFetchMock()
+  })
+
+  afterEach(() => {
+    for (const scope of scopes) scope.stop()
+    scopes = []
+    draft.clearDraft()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('可裁剪时直接提交并给出裁剪提示，不弹确认框', async () => {
+    trimReply = {
+      workflows: [
+        { name: 'wf3.api.json', path: WORKFLOW, input_count: 3, slot_count: 1, trimmable: true, reason: '' },
+      ],
+      all_trimmable: true,
+    }
+    const recipe = await prepareRecipe()
+
+    const pending = recipe.submit()
+    await flushMicrotasks()
+
+    // 探测请求带的是「工作流 + 已填角色」，不是具体素材
+    expect(trimRequests).toEqual([{ workflows: [WORKFLOW], roles: ['portrait'] }])
+    expect(recipe.workflowDowngrade.value).toBeNull()
+    expect(recipe.workflowTrimNotice.value).toContain('需要 3 个输入')
+    expect(recipe.workflowTrimNotice.value).toContain('已按 1 图自动裁剪空槽后提交')
+    // 真的提交了（不是只提示不提交）
+    expect(submittedBodies).toHaveLength(1)
+    expect(submittedBodies[0].workflow).toBe(WORKFLOW)
+
+    jobState.set(1, { status: 'done', total: 1, done_count: 1, items: [{ images: [{ filename: 'a.png' }] }] })
+    await vi.advanceTimersByTimeAsync(RECIPE_POLL_INTERVAL_MS)
+    await flushMicrotasks()
+    await pending
+  })
+
+  it('后端确认裁不掉时弹确认框，并带上 exact 原因', async () => {
+    const reason = '该工作流有 3 个输入且无法裁剪到 1 个；请至少提供 3 张参考图'
+    trimReply = {
+      workflows: [
+        { name: 'wf3.api.json', path: WORKFLOW, input_count: 3, slot_count: 1, trimmable: false, reason },
+      ],
+      all_trimmable: false,
+    }
+    const recipe = await prepareRecipe()
+
+    expect(await recipe.submit()).toBeNull()
+
+    expect(submittedBodies).toHaveLength(0)
+    const prompt = recipe.workflowDowngrade.value
+    expect(prompt).not.toBeNull()
+    expect(prompt?.blockedReason).toBe(reason)
+    expect(prompt?.slotCount).toBe(1)
+    expect(prompt?.inputCount).toBe(3)
+  })
+
+  it('探测失败（旧后端 / 网络）退回确认框，不静默放行', async () => {
+    trimStatus = 500
+    trimReply = { detail: 'Not Found' }
+    const recipe = await prepareRecipe()
+
+    expect(await recipe.submit()).toBeNull()
+
+    expect(submittedBodies).toHaveLength(0)
+    expect(recipe.workflowDowngrade.value).not.toBeNull()
+    // 没有结论：仍保留「仍用当前工作流提交」的兜底路径
+    expect(recipe.workflowDowngrade.value?.blockedReason).toBe('')
+  })
+
+  it('缺服装时按素体展示提交并 toast 说明（可与裁剪提示叠加）', async () => {
+    trimReply = {
+      workflows: [
+        { name: 'wf3.api.json', path: WORKFLOW, input_count: 3, slot_count: 1, trimmable: true, reason: '' },
+      ],
+      all_trimmable: true,
+    }
+    // prepareRecipe 只放了人像：服装槽为空 → 必须自动切素体展示，否则模型自由发挥出裸体
+    const recipe = await prepareRecipe()
+
+    const pending = recipe.submit()
+    await flushMicrotasks()
+
+    expect(submittedBodies[0].body_mode).toBe('bare')
+    expect(recipe.bodyModeNotice.value).toContain('素体展示')
+    expect(recipe.workflowTrimNotice.value).toContain('自动裁剪空槽后提交')
+
+    jobState.set(1, { status: 'done', total: 1, done_count: 1, items: [{ images: [{ filename: 'a.png' }] }] })
+    await vi.advanceTimersByTimeAsync(RECIPE_POLL_INTERVAL_MS)
+    await flushMicrotasks()
+    await pending
+  })
+
+  it('有服装时保持 costume 模式，不触发素体提示', async () => {
+    trimReply = {
+      workflows: [
+        { name: 'wf3.api.json', path: WORKFLOW, input_count: 3, slot_count: 2, trimmable: true, reason: '' },
+      ],
+      all_trimmable: true,
+    }
+    const recipe = await prepareRecipe()
+    draft.addCostume(costume('c1'))
+    await flushMicrotasks()
+
+    const pending = recipe.submit()
+    await flushMicrotasks()
+
+    expect(submittedBodies[0].body_mode).toBe('costume')
+    expect(recipe.bodyModeNotice.value).toBe('')
+
+    jobState.set(1, { status: 'done', total: 1, done_count: 1, items: [{ images: [{ filename: 'b.png' }] }] })
+    await vi.advanceTimersByTimeAsync(RECIPE_POLL_INTERVAL_MS)
+    await flushMicrotasks()
+    await pending
+  })
+
+  it('工作流都不支持 extra 时隐藏第 4 张入口，声明支持时恢复', async () => {
+    const recipe = await prepareRecipe()
+
+    // 现行 3 槽工作流：`supportsExtraSlot` 必须为 false（页面据此不渲染上传块）
+    expect(recipe.supportsExtraSlot.value).toBe(false)
+
+    recipe.setWorkflowSelection([EXTRA_WORKFLOW])
+    await flushMicrotasks()
+    expect(recipe.supportsExtraSlot.value).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 三槽本地上传图（2026-11-06）：上传图发 `*_path`，库条目发 `*_id`
+// ---------------------------------------------------------------------------
+
+describe('本地上传图的提交体', () => {
+  const baseOptions = {
+    style: 'realistic' as const,
+    promptSuffix: '',
+    extraPath: '',
+    seed: 1,
+    seedMode: 'fixed' as const,
+  }
+
+  it('人像上传图走 portrait_path，不再发 portrait_id', () => {
+    const uploaded = {
+      ...portrait('upload:/up/a.png'),
+      id: 'upload:/up/a.png',
+      uploadPath: '/up/a.png',
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: uploaded, costume: null, pose: null },
+      { ...baseOptions, bodyMode: 'bare' },
+    )
+
+    expect(request.portrait_path).toBe('/up/a.png')
+    expect(request.portrait_id).toBeUndefined()
+  })
+
+  it('服装上传图走 costume_path，素体模式下不发', () => {
+    const uploaded = {
+      ...costume('upload:/up/c.png'),
+      id: 'upload:/up/c.png',
+      uploadPath: '/up/c.png',
+    }
+
+    const withCostume = buildRecipeRequest(
+      { portrait: null, costume: uploaded, pose: null },
+      { ...baseOptions, bodyMode: 'costume' },
+    )
+    expect(withCostume.costume_path).toBe('/up/c.png')
+    expect(withCostume.costume_id).toBeUndefined()
+
+    const bare = buildRecipeRequest(
+      { portrait: null, costume: uploaded, pose: null },
+      { ...baseOptions, bodyMode: 'bare' },
+    )
+    expect(bare.costume_path).toBeUndefined()
+    expect(bare.costume_id).toBeUndefined()
+  })
+
+  it('姿势上传图走 pose_path', () => {
+    const uploaded = {
+      ...pose('upload:/up/p.png'),
+      id: 'upload:/up/p.png',
+      uploadPath: '/up/p.png',
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: null, costume: null, pose: uploaded },
+      { ...baseOptions, bodyMode: 'bare' },
+    )
+
+    expect(request.pose_path).toBe('/up/p.png')
+    expect(request.pose_id).toBeUndefined()
+  })
+})

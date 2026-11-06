@@ -440,6 +440,15 @@ _temp_dir = _resolve_if_reparse(settings.temp_dir)
 if _temp_dir.exists():
     app.mount("/temp", StaticFiles(directory=str(_temp_dir)), name="temp")
     print(f"  [mount] /temp -> {_temp_dir}")
+# 上传的本地参考图（data_dir/uploads）：前端三个槽的「本地上传图」要显示缩略图
+_uploads_dir = settings.data_dir / "uploads"
+try:
+    _uploads_dir.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+if _uploads_dir.is_dir():
+    app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+    print(f"  [mount] /uploads -> {_uploads_dir}")
 
 # 静态文件挂载 + SPA Fallback 中间件
 #

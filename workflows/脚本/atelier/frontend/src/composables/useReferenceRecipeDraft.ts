@@ -46,6 +46,33 @@ export type RecipeSlotKey = 'portrait' | 'costume' | 'pose'
 /** 槽位总数（固定三槽）。 */
 export const RECIPE_SLOT_TOTAL = 3
 
+/** 本地上传图的 id 前缀：用绝对路径保证唯一，便于去重与移除。 */
+export const UPLOAD_ID_PREFIX = 'upload:'
+
+/** 上传参数（来自 `POST /api/reference/uploads`）。 */
+export interface UploadSlotInput {
+  path: string
+  name: string
+  width?: number
+  height?: number
+}
+
+/** 从槽位条目里取本地上传图路径；库条目返回 null。 */
+export function uploadPathOf(entry: unknown): string | null {
+  if (!entry || typeof entry !== 'object') return null
+  const value = (entry as { uploadPath?: unknown }).uploadPath
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+/** 上传图 → 浏览器可访问地址（后端把 `data_dir/uploads` 挂到 `/uploads`）。 */
+export function uploadUrlOf(path: string): string {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? ''
+  return name ? `/uploads/${encodeURIComponent(name)}` : ''
+}
+
+/** 带 `uploadPath` 的槽位条目（上传图伪装成库条目，参与既有组合逻辑）。 */
+export type UploadableSlotItem<T> = T & { uploadPath?: string }
+
 const portrait = ref<PortraitItem[]>([])
 const costume = ref<CostumeItem[]>([])
 const pose = ref<PoseSlotSelection[]>([])
@@ -198,6 +225,89 @@ function setPoseMode(useDepth: boolean): void {
 }
 
 // ---------------------------------------------------------------------------
+// 本地上传图（三槽都支持；与库条目同一个数组，一起参与笛卡尔积）
+// ---------------------------------------------------------------------------
+
+/** 上传图 → 人像槽条目（只填展示与提交需要的字段）。 */
+function portraitUploadItem(input: UploadSlotInput): UploadableSlotItem<PortraitItem> {
+  const url = uploadUrlOf(input.path)
+  return {
+    id: `${UPLOAD_ID_PREFIX}${input.path}`,
+    分区: '本地上传',
+    发长: '',
+    发型名称: input.name,
+    标题: input.name,
+    宽: input.width ?? 0,
+    高: input.height ?? 0,
+    字节数: 0,
+    精选: false,
+    热门: false,
+    缩略图: url,
+    原图: url,
+    检索: '',
+    uploadPath: input.path,
+  }
+}
+
+/** 上传图 → 服装槽条目；`library` 固定现实库（上传图不属于外链库）。 */
+function costumeUploadItem(input: UploadSlotInput): UploadableSlotItem<CostumeItem> {
+  const url = uploadUrlOf(input.path)
+  return {
+    id: `${UPLOAD_ID_PREFIX}${input.path}`,
+    分类: '本地上传',
+    服装名称: input.name,
+    标签: [],
+    关键词: '',
+    缩略图: url,
+    预览图: url,
+    原图: url,
+    检索: '',
+    library: 'costume',
+    uploadPath: input.path,
+  }
+}
+
+/** 上传图 → 姿势槽条目（上传图没有深度图变体，`useDepth` 恒为 false）。 */
+function poseUploadSelection(input: UploadSlotInput): PoseSlotSelection {
+  const url = uploadUrlOf(input.path)
+  const item: UploadableSlotItem<PoseItem> = {
+    id: `${UPLOAD_ID_PREFIX}${input.path}`,
+    体系: '本地上传',
+    姿势编号: input.name,
+    分类: '本地上传',
+    姿势名称: input.name,
+    角度: '',
+    缩略图: url,
+    原图: url,
+    检索: '',
+    nsfw: false,
+    uploadPath: input.path,
+  }
+  return { item, useDepth: false }
+}
+
+/** 人像槽：加入一张本地图；同路径不重复。 */
+function addPortraitUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (portrait.value.some((entry) => entry.id === id)) return
+  portrait.value = [...portrait.value, portraitUploadItem(input)]
+}
+
+/** 服装槽：加入一张本地图；同路径不重复。 */
+function addCostumeUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (costume.value.some((entry) => entry.id === id)) return
+  costume.value = [...costume.value, costumeUploadItem(input)]
+}
+
+/** 姿势槽：加入一张本地图；同路径不重复。 */
+function addPoseUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (pose.value.some((entry) => entry.item.id === id)) return
+  pose.value = [...pose.value, poseUploadSelection(input)]
+}
+
+// ---------------------------------------------------------------------------
 // 通用
 // ---------------------------------------------------------------------------
 
@@ -219,35 +329,44 @@ export interface ReferenceDraftLibraries {
   pose: readonly PoseItem[]
 }
 
-/** 人像条目 → 最小持久化记录。 */
+/** 人像条目 → 最小持久化记录；本地上传图额外记 `path`，恢复时不查库。 */
 function storedPortrait(item: PortraitItem): StoredReferenceSlotEntry {
-  return {
+  const entry: StoredReferenceSlotEntry = {
     id: item.id,
     library: item.library ?? 'portrait',
     name: item.发型名称 || item.标题,
     thumbnail: item.缩略图,
   }
+  const uploaded = uploadPathOf(item)
+  if (uploaded) entry.path = uploaded
+  return entry
 }
 
 /** 服装条目 → 最小持久化记录；现实库与外链库靠 `library` 区分。 */
 function storedCostume(item: CostumeItem): StoredReferenceSlotEntry {
-  return {
+  const entry: StoredReferenceSlotEntry = {
     id: item.id,
     library: item.library ?? 'costume',
     name: item.服装名称,
     thumbnail: item.缩略图,
   }
+  const uploaded = uploadPathOf(item)
+  if (uploaded) entry.path = uploaded
+  return entry
 }
 
 /** 姿势槽记录 → 最小持久化记录（带上白模 / 深度图模式）。 */
 function storedPose(entry: PoseSlotSelection): StoredReferenceSlotEntry {
-  return {
+  const stored: StoredReferenceSlotEntry = {
     id: entry.item.id,
     library: entry.item.library ?? 'pose',
     name: entry.item.姿势名称,
     thumbnail: entry.item.缩略图,
     useDepth: entry.useDepth,
   }
+  const uploaded = uploadPathOf(entry.item)
+  if (uploaded) stored.path = uploaded
+  return stored
 }
 
 /**
@@ -299,6 +418,13 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   const seenPortrait = new Set<string>()
   const nextPortrait: PortraitItem[] = []
   for (const entry of stored.portrait) {
+    // 本地上传图不查库：文件路径即可重建卡片（文件被删时提交会 400）
+    if (entry.path) {
+      if (seenPortrait.has(entry.id)) continue
+      seenPortrait.add(entry.id)
+      nextPortrait.push(portraitUploadItem({ path: entry.path, name: entry.name }))
+      continue
+    }
     if (entry.library !== 'portrait' || seenPortrait.has(entry.id)) continue
     const item = portraitByKey.get(slotKey('portrait', entry.id))
     if (!item) continue
@@ -309,6 +435,13 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   const seenCostume = new Set<string>()
   const nextCostume: CostumeItem[] = []
   for (const entry of stored.costume) {
+    if (entry.path) {
+      const key = slotKey('upload', entry.id)
+      if (seenCostume.has(key)) continue
+      seenCostume.add(key)
+      nextCostume.push(costumeUploadItem({ path: entry.path, name: entry.name }))
+      continue
+    }
     if (entry.library !== 'costume' && entry.library !== 'costume-anime') continue
     const key = slotKey(entry.library, entry.id)
     if (seenCostume.has(key)) continue
@@ -321,6 +454,12 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   const seenPose = new Set<string>()
   const nextPose: PoseSlotSelection[] = []
   for (const entry of stored.pose) {
+    if (entry.path) {
+      if (seenPose.has(entry.id)) continue
+      seenPose.add(entry.id)
+      nextPose.push(poseUploadSelection({ path: entry.path, name: entry.name }))
+      continue
+    }
     if (entry.library !== 'pose' || seenPose.has(entry.id)) continue
     const item = poseByKey.get(slotKey('pose', entry.id))
     if (!item) continue
@@ -409,6 +548,10 @@ export function useReferenceRecipeDraft() {
     togglePose,
     removePose,
     setPoseMode,
+    // 本地上传图（三槽通用；与库条目共用一个数组，一起参与笛卡尔积）
+    addPortraitUpload,
+    addCostumeUpload,
+    addPoseUpload,
     clearDraft,
     persist,
     hydrate,

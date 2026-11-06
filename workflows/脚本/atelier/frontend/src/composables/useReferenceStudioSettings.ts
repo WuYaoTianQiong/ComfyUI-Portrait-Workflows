@@ -43,7 +43,7 @@ export type ReferenceStudioSlotKey = 'portrait' | 'costume' | 'pose'
 
 /** 已选条目的最小持久化形状：只存恢复与展示必需的信息。 */
 export interface StoredReferenceSlotEntry {
-  /** 库条目 id；恢复时按它回查库数据。 */
+  /** 库条目 id；恢复时按它回查库数据。本地上传图为 `upload:<path>`。 */
   id: string
   /** 条目所属库；同一 id 在不同库可能重复，必须一起匹配。 */
   library: ReferenceLibraryId
@@ -53,6 +53,13 @@ export interface StoredReferenceSlotEntry {
   thumbnail: string
   /** 仅姿势槽：加入时是白模还是深度图。 */
   useDepth?: boolean
+  /**
+   * 本地上传图的绝对路径（`data_dir/uploads/...`）。
+   *
+   * 有该字段时**不走库匹配**：直接按它重建一张「上传图」卡片。
+   * 文件被删时提交会 400（后端校验存在性），与库条目被删同口径。
+   */
+  path?: string
 }
 
 /** `pb.reference_studio_v1` 的完整结构。 */
@@ -111,11 +118,12 @@ function parseStringArray(value: unknown): string[] | null {
 /** 单条已选记录校验；失败返回 null，由调用方整体丢弃。 */
 function parseSlotEntry(value: unknown): StoredReferenceSlotEntry | null {
   if (!isRecord(value)) return null
-  const { id, library, name, thumbnail, useDepth } = value
+  const { id, library, name, thumbnail, useDepth, path } = value
   if (typeof id !== 'string' || id.length === 0) return null
   if (typeof library !== 'string' || !LIBRARY_IDS.has(library)) return null
   if (typeof name !== 'string' || typeof thumbnail !== 'string') return null
   if (useDepth !== undefined && typeof useDepth !== 'boolean') return null
+  if (path !== undefined && (typeof path !== 'string' || path.length === 0)) return null
 
   const entry: StoredReferenceSlotEntry = {
     id,
@@ -124,6 +132,7 @@ function parseSlotEntry(value: unknown): StoredReferenceSlotEntry | null {
     thumbnail,
   }
   if (typeof useDepth === 'boolean') entry.useDepth = useDepth
+  if (typeof path === 'string') entry.path = path
   return entry
 }
 

@@ -42,7 +42,11 @@ vi.stubGlobal('sessionStorage', {
   clear: () => sessionValues.clear(),
 })
 
-import { RECIPE_SLOT_TOTAL, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import {
+  RECIPE_SLOT_TOTAL,
+  uploadPathOf,
+  useReferenceRecipeDraft,
+} from './useReferenceRecipeDraft'
 
 function pose(id: string, name = '姿势'): PoseItem {
   return {
@@ -353,5 +357,54 @@ describe('清空与持久化（2026-11-05 取代 M3 不持久化）', () => {
 
     expect(restored).toBe(false)
     expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 本地上传图（2026-11-06）：三槽都支持，与库条目同数组、一起参与笛卡尔积
+// ---------------------------------------------------------------------------
+
+describe('本地上传图', () => {
+  const upload = (name: string) => ({
+    path: `F:/ComfyUI_Migration/ComfyUI-Portrait-Workflows/workflows/脚本/atelier/data/uploads/${name}`,
+    name,
+  })
+
+  it('人像槽：加入、同路径去重、缩略图走 /uploads', () => {
+    draft.addPortraitUpload(upload('a.png'))
+    draft.addPortraitUpload(upload('a.png'))
+    draft.addPortraitUpload(upload('b.png'))
+
+    expect(draft.portraitCount.value).toBe(2)
+    expect(draft.count.value).toBe(1)
+    const first = draft.portrait.value[0]
+    expect(first.id.startsWith('upload:')).toBe(true)
+    expect(first.缩略图).toBe('/uploads/a.png')
+    expect(uploadPathOf(first)).toContain('a.png')
+  })
+
+  it('服装 / 姿势槽：上传图同样进入数组并带 uploadPath', () => {
+    draft.addCostumeUpload(upload('c.png'))
+    draft.addPoseUpload(upload('p.png'))
+
+    expect(draft.costumeCount.value).toBe(1)
+    expect(draft.poseCount.value).toBe(1)
+    expect(uploadPathOf(draft.costume.value[0])).toContain('c.png')
+    expect(uploadPathOf(draft.pose.value[0]?.item)).toContain('p.png')
+    // 上传图没有深度图变体
+    expect(draft.pose.value[0]?.useDepth).toBe(false)
+  })
+
+  it('持久化后 hydrate：按 path 重建上传图（不需要库里有这条）', () => {
+    draft.addPortraitUpload(upload('keep.png'))
+    flushReferenceStudioSettings()
+    draft.clearDraft()
+
+    const restored = draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(restored).toBe(true)
+    expect(draft.portraitCount.value).toBe(1)
+    expect(uploadPathOf(draft.portrait.value[0])).toContain('keep.png')
+    expect(draft.portrait.value[0].缩略图).toBe('/uploads/keep.png')
   })
 })
