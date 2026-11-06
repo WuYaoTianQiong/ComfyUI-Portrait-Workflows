@@ -16,7 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, reactive } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '@/api/reference'
 
@@ -36,6 +36,7 @@ import {
   describePreviewFailure,
   describeSubmitFailure,
   describeWorkflowSelectionRestoreNotice,
+  groupResultKeyOf,
   hasWorkflowSelectionSession,
   isJobSucceeded,
   isJobTerminal,
@@ -54,6 +55,7 @@ import {
   writeWorkflowSelectionSession,
 } from './useReferenceRecipe'
 import type {
+  RecipeBatchGroup,
   RecipeJobSnapshot,
   RecipeSubmitRequest,
   StudioWorkflowOption,
@@ -390,6 +392,16 @@ describe('三句式中文错误', () => {
 })
 
 describe('submitRecipe / pollRecipeJob', () => {
+  it('groupResultKeyOf 不受 reactive Proxy 包装影响（P2 结果图对配方回归）', () => {
+    const group = { index: 7 } as RecipeBatchGroup
+    const batch = reactive({ groups: [group] })
+
+    // 引用被 Proxy 包装后不再相等，这正是不能用对象做 Map 键的原因。
+    expect(batch.groups[0]).not.toBe(group)
+    expect(groupResultKeyOf(batch.groups[0]!)).toBe(7)
+    expect(groupResultKeyOf(group)).toBe(7)
+  })
+
   it('非 2xx 抛 RecipeSubmitError 并保留后端 detail', async () => {
     vi.stubGlobal(
       'fetch',

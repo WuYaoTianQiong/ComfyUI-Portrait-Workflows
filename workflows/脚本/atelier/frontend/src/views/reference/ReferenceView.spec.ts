@@ -228,3 +228,63 @@ describe('最后访问页签恢复（URL > 存储 > home）', () => {
     expect(localStorage.getItem(REFERENCE_TAB_STORAGE_KEY)).toBe('settings')
   })
 })
+describe('左导航折叠（图标 rail）契约', () => {
+  /** 与 ReferenceView.vue 中 NAV_COLLAPSED_STORAGE_KEY 保持一致（带版本后缀）。 */
+  const NAV_COLLAPSED_STORAGE_KEY = 'pb.reference_nav_collapsed_v1'
+  const ALL_TAB_LABELS = TABS.map((item) => item.label)
+
+  function railToggle(wrapper: ReturnType<typeof mount>) {
+    return wrapper.get('[data-testid="studio-rail-toggle"]')
+  }
+
+  it('点折叠按钮后进入折叠态，页签语义与当前选中态保持不变', async () => {
+    const { wrapper } = await mountAt('/reference?tab=pose')
+
+    expect(railToggle(wrapper).attributes('aria-expanded')).toBe('true')
+
+    await railToggle(wrapper).trigger('click')
+    await flushPromises()
+
+    // 折叠 class + aria 状态 + 记忆写入
+    expect(wrapper.get('.reference-page__inner').classes()).toContain('is-rail-collapsed')
+    expect(railToggle(wrapper).attributes('aria-expanded')).toBe('false')
+    expect(localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY)).toBe('1')
+
+    // 折叠只影响视觉，不破坏 tablist / aria-selected 语义
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
+    expect(activeTabLabel(wrapper)).toBe('姿势')
+  })
+
+  it('预置折叠记忆后挂载即为折叠态，六个页签文本仍留在 DOM', async () => {
+    localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, '1')
+
+    const { wrapper } = await mountAt('/reference?tab=costume')
+
+    expect(wrapper.get('.reference-page__inner').classes()).toContain('is-rail-collapsed')
+    expect(railToggle(wrapper).attributes('aria-expanded')).toBe('false')
+
+    // 折叠态标签用 display:none 隐藏但节点不删，text() 仍能读到全部标签
+    const labels = wrapper.findAll('.reference-tab').map((item) => item.text())
+    expect(labels).toHaveLength(6)
+    expect(labels).toEqual(ALL_TAB_LABELS)
+    expect(activeTabLabel(wrapper)).toBe('服装')
+  })
+
+  it('折叠后再展开写回 0，且全程不触发路由导航', async () => {
+    localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, '1')
+
+    const { wrapper, replaceSpy, pushSpy } = await mountAt('/reference?tab=pose')
+    expect(wrapper.get('.reference-page__inner').classes()).toContain('is-rail-collapsed')
+
+    await railToggle(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.reference-page__inner').classes()).not.toContain('is-rail-collapsed')
+    expect(railToggle(wrapper).attributes('aria-expanded')).toBe('true')
+    expect(localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY)).toBe('0')
+
+    // 折叠/展开是纯 UI 状态，不得产生 replace / push 导航
+    expect(replaceSpy).not.toHaveBeenCalled()
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
+})

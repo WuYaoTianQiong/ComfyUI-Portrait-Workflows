@@ -37,19 +37,25 @@ import {
 } from '../../composables/useReferenceStudioSettings'
 import {
   MAX_BATCH_RECIPES,
-  describeRecipeBatchStatus,
-  isRecipeBatchRunning,
-  recipeBatchPercent,
+  buildBatchGroups,
+  costumeDimensionForBodyMode,
+
   useReferenceRecipe,
   workflowDisplayName,
 } from '../../composables/useReferenceRecipe'
-import type { RecipeBatch } from '../../composables/useReferenceRecipe'
+import type { RecipeBatch, RecipeBodyMode } from '../../composables/useReferenceRecipe'
 import { useToast } from '../../composables/useToast'
 import Lightbox from '../../components/Lightbox.vue'
 import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vue'
-import ReferenceSlotCard from './components/reference/ReferenceSlotCard.vue'
-import ReferenceWorkflowSelect from './components/reference/ReferenceWorkflowSelect.vue'
-import { slotSelectedItemsToHistoryItems } from './components/reference/slotHistoryItem'
+import StudioActionBar from './components/reference/StudioActionBar.vue'
+import StudioMatrix from './components/reference/StudioMatrix.vue'
+import StudioParamsCard from './components/reference/StudioParamsCard.vue'
+import StudioResultBoard from './components/reference/StudioResultBoard.vue'
+import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
+import {
+  slotSelectedItemToHistoryItem,
+  slotSelectedItemsToHistoryItems,
+} from './components/reference/slotHistoryItem'
 import {
   costumeSlotItems,
   poseSlotItems,
@@ -80,7 +86,7 @@ const {
   workflowDefaultPath,
   workflowSelection,
 
-  usesDefaultWorkflow,
+
   workflowSelectionNotice,
   clearWorkflowSelectionNotice,
   workflowPath,
@@ -98,10 +104,15 @@ const {
   setBaseSeed,
   activeSlotCount,
   filledSlotRoles,
+  effectiveWorkflows,
+  workflowDimension,
+
   batchTotal,
   batchOverLimit,
   batchLimitMessage,
   workflowDowngrade,
+  workflowTrimNotice,
+  clearWorkflowTrimNotice,
   style,
   promptSuffix,
   extraPath,
@@ -112,17 +123,14 @@ const {
   previewError,
   previewLoading,
   refreshPreviewPrompt,
-  previewWorkflow,
-
-
-
-  jobId,
-  jobIds,
+previewWorkflow,
   primaryResultUrl,
   previousResultUrl,
 
   batches,
-  submitting,
+    reuseBatchParams,
+    clearFinishedBatches,
+    submitting,
   polling,
   formError,
   canSubmit,
@@ -149,6 +157,13 @@ watch(workflowSelectionNotice, (message) => {
   clearWorkflowSelectionNotice()
 })
 
+/** 空槽能被裁剪时直接提交，用 toast 说明「这不是三图全参」的降级（不静默裁剪）。 */
+watch(workflowTrimNotice, (message) => {
+  if (!message) return
+  toast.info(message)
+  clearWorkflowTrimNotice()
+})
+
 /**
  * 素体开关受安全模式约束：安全模式下禁用；
  * 若用户先打开素体再切回安全模式，则自动关闭并提示（不会在安全模式下自动打开）。
@@ -172,9 +187,14 @@ function onToggleBodyMode(enabled: boolean): void {
   }
 }
 
-/** checkbox change 事件 → 布尔值。 */
-function onBodyModeChange(event: Event): void {
-  onToggleBodyMode((event.target as HTMLInputElement).checked)
+/** ParamsCard 的体态 emit（RecipeBodyMode）→ 复用清空服装槽 / toast 逻辑。 */
+function onParamsBodyMode(mode: RecipeBodyMode): void {
+  onToggleBodyMode(mode === 'bare')
+}
+
+/** ParamsCard 的画风 emit（string）→ 收敛到后端认可的两种值。 */
+function onParamsStyleChange(value: string): void {
+  style.value = value === 'realistic' ? 'realistic' : 'none'
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +284,33 @@ function clearSlot(slot: RecipeSlotKey): void {
   else draft.removePose()
 }
 
+/** 槽位名（删除 toast 用）。 */
+const SLOT_LABELS: Readonly<Record<RecipeSlotKey, string>> = {
+  portrait: '人像',
+  costume: '服装',
+  pose: '姿势',
+}
+
+/**
+ * 单项删除：`key` 即 `SlotSelectedItem.key`（= 条目 id）。
+ *
+ * 不传 id 才是清空整槽，所以这里必须把 id 传下去；删完用 toast 明确剩余数量，
+ * 避免用户连点 × 时不知道删到了哪一张。
+ */
+function removeSlotItem(slot: RecipeSlotKey, key: string): void {
+  if (slot === 'portrait') draft.removePortrait(key)
+  else if (slot === 'costume') draft.removeCostume(key)
+  else draft.removePose(key)
+
+  const remaining =
+    slot === 'portrait'
+      ? draft.portraitCount.value
+      : slot === 'costume'
+        ? draft.costumeCount.value
+        : draft.poseCount.value
+  toast.success(`已从${SLOT_LABELS[slot]}槽移除 1 张（剩 ${remaining} 张）`)
+}
+
 // ---------------------------------------------------------------------------
 // 槽位视图
 // ---------------------------------------------------------------------------
@@ -307,6 +354,43 @@ const slotCards = computed<SlotCardView[]>(() => {
     },
   ]
 })
+
+/** 三槽当前是否按深度图取姿势缩略图（图墙与清单共用同一模式）。 */
+const poseUseDepth = computed(() => draft.pose.value[0]?.useDepth ?? poseDepthMode.value)
+
+/** 清单 / 操作条用的三槽条目数。 */
+const slotCounts = computed(() => ({
+  portrait: draft.portraitCount.value,
+  costume: draft.costumeCount.value,
+  pose: draft.poseCount.value,
+}))
+
+/** 操作条 / 清单用的尺寸维数：能力不支持或未选择时按 1 计（与 countBatchTotal 同口径）。 */
+const qualityCountForBar = computed(() =>
+  Math.max(1, caps.value.quality ? qualitySelection.value.length : 0),
+)
+const ratioCountForBar = computed(() =>
+  Math.max(1, caps.value.orientation ? ratioSelection.value.length : 0),
+)
+
+/**
+ * 生成清单：前端纯函数展开，与提交口径逐字一致（素体模式裁掉服装维度）。
+ *
+ * 不请求后端；上限由 `batchTotal` 判定，清单只负责「把每一张要生成的图列出来」。
+ */
+const previewGroups = computed(() =>
+  buildBatchGroups({
+    portrait: draft.portrait.value,
+    costume: costumeDimensionForBodyMode(draft.costume.value, bodyMode.value),
+    pose: draft.pose.value.map((entry) => entry.item),
+    workflows: effectiveWorkflows.value.map((item) => item.path),
+    qualities: qualitySelection.value,
+    ratios: ratioSelection.value,
+    qualityEnabled: caps.value.quality,
+    orientationEnabled: caps.value.orientation,
+    baseSeed: baseSeed.value,
+  }),
+)
 
 const countLabel = computed(() => draft.countLabel.value)
 const totalSelected = computed(() => draft.totalSelected.value)
@@ -375,6 +459,59 @@ function onPreviewIndexChange(index: number): void {
   slotPreview.value = {
     ...state,
     index: Math.min(Math.max(index, 0), length - 1),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 结果灯箱（A1）：结果图点击开只读灯箱，翻页范围限于该批次
+// ---------------------------------------------------------------------------
+
+interface ResultPreviewState {
+  urls: string[]
+  index: number
+}
+
+const resultPreview = ref<ResultPreviewState | null>(null)
+
+/**
+ * 结果 URL → 画廊灯箱契约（`HistoryItem[]`）。
+ *
+ * 与槽位灯箱共用同一投影：`key` 用 URL 保证同批次翻页时 id 稳定；
+ * 结果图没有真实历史记录字段，宽高 / 时间 / 体积按 0 / 空串 / null 回落。
+ */
+const resultPreviewHistoryItems = computed<HistoryItem[]>(() => {
+  const state = resultPreview.value
+  if (!state) return []
+  return state.urls.map((url) =>
+    slotSelectedItemToHistoryItem({
+      key: url,
+      name: '生成结果',
+      thumb: url,
+      image: url,
+    }),
+  )
+})
+
+const resultPreviewIndex = computed<number>(() => resultPreview.value?.index ?? 0)
+
+function openResultPreview(urls: readonly string[], index: number): void {
+  if (!urls.length) return
+  resultPreview.value = {
+    urls: [...urls],
+    index: Math.min(Math.max(index, 0), urls.length - 1),
+  }
+}
+
+function closeResultPreview(): void {
+  resultPreview.value = null
+}
+
+function onResultPreviewIndexChange(index: number): void {
+  const state = resultPreview.value
+  if (!state) return
+  resultPreview.value = {
+    ...state,
+    index: Math.min(Math.max(index, 0), state.urls.length - 1),
   }
 }
 
@@ -470,41 +607,8 @@ const previewUrl = computed(() => {
 // 多批次结果：按批分组展示（各批结果互不串批）
 // ---------------------------------------------------------------------------
 
-/** 折叠的批次 id；运行中的批次始终展开，完成批次可手动折叠。 */
-const collapsedBatchIds = ref<string[]>([])
-
-/** 展示顺序：最新批次在最上方，批号仍按创建顺序（最早的为批次 1）。 */
+/** 展示顺序：最新批次在最上方；批号由 StudioResultBoard 按创建顺序计算。 */
 const displayedBatches = computed<RecipeBatch[]>(() => [...batches.value].reverse())
-
-/** 批次展示号：按创建顺序计数，不受展示顺序影响。 */
-function batchNumber(displayIndex: number): number {
-  return batches.value.length - displayIndex
-}
-
-function isBatchCollapsed(batch: RecipeBatch): boolean {
-  return collapsedBatchIds.value.includes(batch.id)
-}
-
-/** 运行中的批次不允许折叠，避免用户误以为任务已结束。 */
-function toggleBatchCollapse(batch: RecipeBatch): void {
-  if (isRecipeBatchRunning(batch)) return
-  collapsedBatchIds.value = isBatchCollapsed(batch)
-    ? collapsedBatchIds.value.filter((id) => id !== batch.id)
-    : [...collapsedBatchIds.value, batch.id]
-}
-
-/** 只有**最新批次**的第一张结果图保留稳定 data-testid，避免同页多图出现重复选择器。 */
-function batchResultTestId(batch: RecipeBatch, index: number): string | undefined {
-  const latest = batches.value[batches.value.length - 1]
-  return latest?.id === batch.id && index === 0 ? 'studio-result-image' : undefined
-}
-
-/** 批次时间（HH:MM:SS）。 */
-function formatBatchTime(createdAt: number): string {
-  const date = new Date(createdAt)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
 
 /**
  * 提交结束后统一处理提示。
@@ -562,10 +666,6 @@ function onCancelDowngrade(): void {
   toast.info('已取消提交：当前工作流输入数与所选参考图不匹配')
 }
 
-/** 基础种子输入：非负整数；非法值由 composable 回落默认种子。 */
-function onBaseSeedInput(event: Event): void {
-  setBaseSeed((event.target as HTMLInputElement).value)
-}
 
 /** 复制只读预览文本；剪贴板不可用时退化为手动复制提示。 */
 async function copyPromptPreview(): Promise<void> {
@@ -583,6 +683,22 @@ async function copyPromptPreview(): Promise<void> {
 async function onRetry(): Promise<void> {
   showingPrevious.value = false
   afterSubmit(await retry())
+}
+
+/** 是否存在失败批次（决定结果区是否显示重试入口）。 */
+const hasFailedBatch = computed(() => batches.value.some((batch) => batch.status === 'failed'))
+
+/** 结果区「复用参数」：全量回填该批槽位 + 工作流 / 尺寸，清单应还原到提交前组数。 */
+function onReuseBatch(batch: RecipeBatch): void {
+  if (!reuseBatchParams(batch)) return
+  const number = batches.value.findIndex((item) => item.id === batch.id) + 1
+  toast.success(`已回填批次 ${number} 的配方`)
+}
+
+/** 结果区「清理已结束」：只保留运行中批次。 */
+function onClearFinishedBatches(): void {
+  const removed = clearFinishedBatches()
+  if (removed > 0) toast.success(`已清理 ${removed} 个已结束批次`)
 }
 
 function showPreviousResult(): void {
@@ -652,9 +768,153 @@ onMounted(async () => {
       </p>
     </header>
 
+    <!-- 素材区 + 生成清单：全宽（P1 重排，4 列每列约 280px） -->
+    <ReferenceSectionCard title="参考图组合">
+      <template #actions>
+        <span class="studio-count" data-testid="studio-recipe-count">{{ countLabel }}</span>
+      </template>
+
+      <!-- 素材区 4 列：三槽（图墙版）+ 第 4 张上传块（P1 M2 / §10-2） -->
+      <div class="slot-grid">
+        <StudioSlotPanel
+          v-for="slot in slotCards"
+          :key="slot.key"
+          :label="slot.label"
+          :slot-key="slot.key"
+          :items="slot.items"
+          :hint="slot.hint"
+          :show-depth-toggle="slot.showDepthToggle"
+          :use-depth="slot.useDepth"
+          @select="openSlot(slot.key)"
+          @clear="clearSlot(slot.key)"
+          @depth-change="changePoseDepth"
+          @preview="openSlotPreview(slot.key, $event)"
+          @remove="removeSlotItem(slot.key, $event)"
+        />
+
+        <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads -->
+        <div class="extra-block">
+          <div v-if="extraPath" class="extra-item" data-testid="studio-extra-selected">
+            <span class="extra-item__mark" aria-hidden="true">
+              <svg viewBox="0 0 16 16">
+                <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+                <circle cx="8" cy="8.8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2" />
+              </svg>
+            </span>
+            <span class="extra-item__body">
+              <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
+              <span class="extra-item__meta">来自 uploads · 提交时作为第 4 张</span>
+            </span>
+            <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
+          </div>
+
+          <DropZone
+            v-else
+            variant="tile"
+            :multiple="false"
+            label="＋ 上传第 4 张"
+            hint="PNG/JPG/WebP/HEIC ≤ 25MB"
+            @uploaded="onExtraUploaded"
+            @error="onExtraError"
+          />
+        </div>
+      </div>
+
+      <!-- 生成清单（M3）：逐组行 + 常驻计数；batch-* testid 保留给既有 e2e -->
+      <div class="matrix-head" data-testid="studio-batch-summary">
+        <span class="matrix-head__title">生成清单</span>
+        <span data-testid="studio-batch-total">{{ batchTotal }}</span>
+        <span data-testid="studio-selected-total">已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}</span>
+      </div>
+      <p v-if="batchOverLimit" class="studio-error studio-error--inline" role="alert" data-testid="studio-batch-limit">
+        {{ batchLimitMessage }}
+      </p>
+      <StudioMatrix
+        :groups="previewGroups"
+        :total="batchTotal"
+        :limit="MAX_BATCH_RECIPES"
+        :over-limit="batchOverLimit"
+        :limit-message="batchLimitMessage"
+        :slot-counts="slotCounts"
+        :workflow-count="workflowDimension"
+        :quality-count="qualityCountForBar"
+        :ratio-count="ratioCountForBar"
+        :workflows="workflows"
+        :pose-use-depth="poseUseDepth"
+        :active-slot-count="activeSlotCount"
+      />
+    </ReferenceSectionCard>
+
     <div class="studio-grid">
-      <!-- 左栏：提示词预览、参考图组合、工作流与画风、补充要求 -->
+      <!-- 左栏：提示词预览、参数、补充要求、操作条 -->
       <div class="studio-column studio-column--left">
+
+        <StudioParamsCard
+          :workflow-selection="workflowSelection"
+          :workflows="workflows"
+          :selected-roles="filledSlotRoles"
+          :workflow-default-path="workflowDefaultPath"
+          :workflows-loading="workflowsLoading"
+          :workflows-error="workflowsError"
+          :style="style"
+          :style-options="STYLE_OPTIONS"
+          :quality-enabled="caps.quality"
+          :quality-options="qualityOptions"
+          :quality-selection="qualitySelection"
+          :orientation-enabled="caps.orientation"
+          :aspect-ratios="aspectRatios"
+          :ratio-selection="ratioSelection"
+          :follows-reference-size="followsReferenceSize"
+          :body-mode="bodyMode"
+          :safe-mode="safeMode"
+          :base-seed="baseSeed"
+          @update:workflow-selection="workflowSelection = $event"
+          @update:style="onParamsStyleChange"
+          @toggle-quality="toggleQuality"
+          @toggle-ratio="toggleRatio"
+          @update:base-seed="setBaseSeed"
+          @update:body-mode="onParamsBodyMode"
+          @reload-workflows="reloadWorkflows"
+        />
+
+        <ReferenceSectionCard title="补充要求">
+          <label class="field__label" for="studio-prompt-suffix">补充要求（可选）</label>
+          <textarea
+            id="studio-prompt-suffix"
+            v-model="promptSuffix"
+            class="studio-textarea"
+            rows="3"
+            placeholder="例如：暖色灯光、浅景深；作为 prompt_suffix 提交"
+            data-testid="studio-prompt-suffix"
+          />
+          <p class="studio-hint">
+            补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，下方预览只读、不可编辑。
+          </p>
+
+        </ReferenceSectionCard>
+
+        <!-- 操作条（M6）：sticky；确认弹窗在组件内，取消不发 submit -->
+        <StudioActionBar
+          :total="batchTotal"
+          :portrait-count="slotCounts.portrait"
+          :costume-count="slotCounts.costume"
+          :pose-count="slotCounts.pose"
+          :workflow-count="workflowDimension"
+          :quality-count="qualityCountForBar"
+          :ratio-count="ratioCountForBar"
+          :over-limit="batchOverLimit"
+          :limit-message="batchLimitMessage"
+          :can-submit="canSubmit"
+          :submitting="submitting"
+          :library-loading="libraryLoading"
+          @randomize="randomize"
+          @submit="onGenerate"
+        />
+
+      </div>
+
+      <!-- 右栏：提示词预览 + 全宽结果区（结果卡由 display:contents 跨满 12 栏） -->
+      <div class="studio-column studio-column--right">
         <!-- 提示词只读预览：后端 dry_run 组合，与正式提交完全独立 -->
         <ReferenceSectionCard title="提示词预览">
           <template #actions>
@@ -701,279 +961,6 @@ onMounted(async () => {
             重试
           </button>
         </ReferenceSectionCard>
-
-        <ReferenceSectionCard title="参考图组合" :subtitle="`已选 ${countLabel}`" :min-height="226.5">
-          <template #actions>
-            <span class="studio-count" data-testid="studio-recipe-count">{{ countLabel }}</span>
-            <button
-              type="button"
-              class="studio-btn studio-btn--ghost"
-              data-testid="studio-random"
-              :disabled="libraryLoading"
-              :title="libraryLoading ? '图库加载中，请稍候' : '从三个库中各随机抽取一条'"
-              @click="randomize"
-            >
-              <svg class="studio-btn__icon" viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.3" />
-                <circle cx="5.8" cy="5.8" r="0.9" fill="currentColor" />
-                <circle cx="10.2" cy="10.2" r="0.9" fill="currentColor" />
-                <circle cx="10.2" cy="5.8" r="0.9" fill="currentColor" />
-                <circle cx="5.8" cy="10.2" r="0.9" fill="currentColor" />
-              </svg>
-              随机捏人
-            </button>
-          </template>
-
-          <!-- 三槽位：多选；展示已选数量与前 3 张缩略图 -->
-          <div class="slot-grid">
-            <ReferenceSlotCard
-              v-for="slot in slotCards"
-              :key="slot.key"
-              :label="slot.label"
-              :items="slot.items"
-              :hint="slot.hint"
-              :show-depth-toggle="slot.showDepthToggle"
-              :use-depth="slot.useDepth"
-              @select="openSlot(slot.key)"
-              @clear="clearSlot(slot.key)"
-              @depth-change="changePoseDepth"
-              @preview="openSlotPreview(slot.key, $event)"
-            />
-          </div>
-
-          <!-- 批量预览：常驻显示「当前 N / 上限 100」与基础种子 -->
-          <div class="batch-summary" data-testid="studio-batch-summary">
-            <div class="batch-summary__row">
-              <span class="batch-summary__label">全组合预览</span>
-              <span class="batch-summary__total" data-testid="studio-batch-total">
-                当前 {{ batchTotal }} / 上限 {{ MAX_BATCH_RECIPES }}
-              </span>
-              <span class="batch-summary__selected" data-testid="studio-selected-total">
-                已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}
-              </span>
-            </div>
-            <p v-if="batchOverLimit" class="batch-summary__limit" role="alert" data-testid="studio-batch-limit">
-              {{ batchLimitMessage }}
-            </p>
-            <p v-else class="batch-summary__hint">
-              {{ activeSlotCount === 0 ? '三槽与第 4 张都为空：请至少选择一张参考图。' : `共 ${batchTotal} 个独立任务，每组一个 job。` }}
-            </p>
-          </div>
-
-          <!-- 第 4 张：只提交 1 张，仅 uploads；说明并入上传框 label/hint 以对齐 §5 卡高 -->
-          <div class="extra-block">
-            <div v-if="extraPath" class="extra-item" data-testid="studio-extra-selected">
-              <span class="extra-item__mark" aria-hidden="true">
-                <svg viewBox="0 0 16 16">
-                  <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
-                  <circle cx="8" cy="8.8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2" />
-                </svg>
-              </span>
-              <span class="extra-item__body">
-                <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
-                <span class="extra-item__meta">来自 uploads · 提交时作为第 4 张</span>
-              </span>
-              <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
-            </div>
-
-            <DropZone
-              v-else
-              :multiple="false"
-              label="第 4 张（可选）：点击上传 / 拖拽 / 粘贴"
-              hint="仅 uploads 内图片，只提交 1 张；PNG/JPG/WebP/HEIC ≤ 25MB"
-              @uploaded="onExtraUploaded"
-              @error="onExtraError"
-            />
-          </div>
-        </ReferenceSectionCard>
-
-        <ReferenceSectionCard title="工作流与画风">
-          <!-- 工作流 2fr / 画风 1fr 并排；<768px 回落单列（见下方 media query） -->
-          <div class="field-row">
-            <div class="field">
-              <label class="field__label" for="studio-workflow">工作流（可多选，每项一组任务）</label>
-              <ReferenceWorkflowSelect
-                id="studio-workflow"
-                v-model="workflowSelection"
-                :workflows="workflows"
-                :selected-roles="filledSlotRoles"
-                :default-path="workflowDefaultPath"
-                :loading="workflowsLoading"
-              />
-            </div>
-
-            <div class="field">
-              <label class="field__label" for="studio-style">画风预设</label>
-              <select id="studio-style" v-model="style" class="studio-select" data-testid="studio-style">
-                <option v-for="option in STYLE_OPTIONS" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <!-- 未勾选时回落默认项，必须在 UI 明示，避免用户误以为没选就不生效 -->
-          <p
-            v-if="usesDefaultWorkflow && previewWorkflow"
-            class="studio-hint"
-            data-testid="studio-workflow-default-note"
-          >
-            当前使用默认工作流：{{ workflowDisplayName(previewWorkflow.name) }}（未勾选任何工作流时按 1 条默认项计入全组合）
-          </p>
-          <p
-            v-else-if="workflowSelection.length > 1"
-            class="studio-hint"
-            data-testid="studio-workflow-multi-note"
-          >
-            已选 {{ workflowSelection.length }} 个工作流：全组合按每个工作流各展开一组任务。
-          </p>
-
-          <p v-if="workflowsError" class="studio-error" role="alert">
-            {{ workflowsError }}
-            <button type="button" class="studio-btn studio-btn--ghost studio-btn--sm" @click="reloadWorkflows">
-              重试
-            </button>
-          </p>
-
-          <div v-if="workflows.length === 0 && !workflowsLoading && !workflowsError" class="studio-hint">
-            本机库目录中没有可用工作流，请先放入出图工作流 JSON 后刷新本页。
-          </div>
-
-          <!-- 尺寸能力：按 caps 渲染；不支持时整块隐藏，提交体也不带对应字段 -->
-          <div v-if="caps.quality && qualityOptions.length" class="field" data-testid="studio-quality-field">
-            <span class="field__label">画质档位（可多选，每档一组任务）</span>
-            <div class="chip-group" data-testid="studio-quality-options">
-              <button
-                v-for="option in qualityOptions"
-                :key="option.value"
-                type="button"
-                class="chip"
-                :class="{ 'is-active': qualitySelection.includes(option.value) }"
-                :aria-pressed="qualitySelection.includes(option.value)"
-                :data-quality="option.value"
-                @click="toggleQuality(option.value)"
-              >
-                {{ option.label }}
-              </button>
-            </div>
-            <p v-if="qualitySelection.length === 0" class="studio-hint">
-              未选择画质档位：本轮不发送 quality，沿用工作流原生尺寸。
-            </p>
-          </div>
-
-          <div v-if="caps.orientation && aspectRatios.length" class="field" data-testid="studio-ratio-field">
-            <span class="field__label">输出比例（可多选，每档一组任务）</span>
-            <div class="chip-group" data-testid="studio-ratio-options">
-              <button
-                v-for="ratio in aspectRatios"
-                :key="ratio"
-                type="button"
-                class="chip"
-                :class="{ 'is-active': ratioSelection.includes(ratio) }"
-                :aria-pressed="ratioSelection.includes(ratio)"
-                :data-ratio="ratio"
-                @click="toggleRatio(ratio)"
-              >
-                {{ ratio }}
-              </button>
-            </div>
-            <p v-if="ratioSelection.length === 0" class="studio-hint">
-              未选择比例：本轮不发送 aspect_ratio / orientation。
-            </p>
-          </div>
-
-          <p v-if="followsReferenceSize" class="studio-note" data-testid="studio-size-follow-note">
-            输出尺寸跟随参考图（当前实际尺寸未知时不显示数值）
-          </p>
-
-          <!-- 素体（无服装）开关：受 18+ 安全模式约束，不写 localStorage -->
-          <div class="field" data-testid="studio-body-mode-field">
-            <span class="field__label">体态模式</span>
-            <label class="switch-row" :class="{ 'is-disabled': safeMode }">
-              <input
-                type="checkbox"
-                class="switch-row__input"
-                data-testid="studio-body-mode-bare"
-                :checked="bodyMode === 'bare'"
-                :disabled="safeMode"
-                @change="onBodyModeChange"
-              />
-              <span class="switch-row__text">
-                <span class="switch-row__title">素体展示（无服装）</span>
-                <span class="switch-row__hint" data-testid="studio-body-mode-hint">
-                  {{
-                    safeMode
-                      ? '安全模式下不可用，请先解锁 18+'
-                      : '开启后会清空服装槽，提交体带 body_mode=bare'
-                  }}
-                </span>
-              </span>
-            </label>
-          </div>
-
-          <!-- 常驻说明（D4 冻结） -->
-          <p class="studio-note" data-testid="studio-node-note">
-            节点映射由后端固定，参数面板不改变出图节点与工作流。
-          </p>
-        </ReferenceSectionCard>
-
-        <ReferenceSectionCard title="补充要求">
-          <label class="field__label" for="studio-prompt-suffix">补充要求（可选）</label>
-          <textarea
-            id="studio-prompt-suffix"
-            v-model="promptSuffix"
-            class="studio-textarea"
-            rows="3"
-            placeholder="例如：暖色灯光、浅景深；作为 prompt_suffix 提交"
-            data-testid="studio-prompt-suffix"
-          />
-          <p class="studio-hint">
-            补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，下方预览只读、不可编辑。
-          </p>
-
-          <!-- 基础种子：第 i 组 seed = base_seed + i（fixed），便于按固定种子复现 -->
-          <div class="field">
-            <label class="field__label" for="studio-base-seed">基础种子（第 i 组 = 基础种子 + i）</label>
-            <input
-              id="studio-base-seed"
-              class="studio-select studio-select--number"
-              type="number"
-              min="0"
-              step="1"
-              :value="baseSeed"
-              data-testid="studio-base-seed"
-              @input="onBaseSeedInput"
-            />
-            <p class="studio-hint" data-testid="studio-seed-hint">
-              基础种子 {{ baseSeed }} · 提交时固定为 seed_mode=fixed，第 i 组使用 {{ baseSeed }}+i。
-            </p>
-          </div>
-        </ReferenceSectionCard>
-
-      </div>
-
-      <!-- 右栏：生成按钮（结果卡上方）+ 生成结果 -->
-      <div class="studio-column studio-column--right">
-        <!-- 主按钮 44px 高、圆角 8、14px / 600、底 #e5e5e5 / 字 #171717；宽度撑满右栏 -->
-        <div class="generate-block">
-          <button
-            type="button"
-            class="generate-btn"
-            data-testid="studio-generate"
-            :disabled="!canSubmit"
-            @click="onGenerate"
-          >
-            <span v-if="submitting" class="generate-btn__spinner" aria-hidden="true" />
-            {{ submitting ? '提交中…' : '生成角色图' }}
-          </button>
-          <p
-            v-if="batchOverLimit"
-            class="studio-error studio-error--inline"
-            data-testid="studio-generate-blocked"
-          >
-            {{ batchLimitMessage }}
-          </p>
-        </div>
 
         <ReferenceSectionCard title="生成结果">
           <template #actions>
@@ -1023,152 +1010,28 @@ onMounted(async () => {
             </button>
           </div>
 
-          <!-- 尚未提交：空态占位（保留 460 高度视觉基线） -->
-          <div v-if="!batches.length" class="preview-box" data-testid="studio-preview">
-            <div class="preview-state">
-              <span class="preview-state__mark" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <path
-                    d="M10 2.6 11.7 7.4 16.5 9.1 11.7 10.8 10 15.6 8.3 10.8 3.5 9.1 8.3 7.4Z"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>
-              <p class="preview-state__message">点击「生成角色图」后在此处展示生成结果</p>
-              <p class="preview-state__tip">新批次会立即入队，无需等待上一批完成</p>
-            </div>
-          </div>
+          <StudioResultBoard
+            :batches="displayedBatches"
+            :pose-use-depth="poseUseDepth"
+            :workflows="workflows"
+            @preview="openResultPreview"
+            @reuse="onReuseBatch"
+            @clear-finished="onClearFinishedBatches"
+            @job-center="goJobCenter"
+          />
 
-          <!-- 多批次结果：每批一块，结果缩略图只归属自己的批次 -->
-          <div v-else class="batch-list" data-testid="studio-batch-list">
-            <article
-              v-for="(batch, displayIndex) in displayedBatches"
-              :key="batch.id"
-              class="batch-card"
-              :data-testid="`studio-batch-${batchNumber(displayIndex)}`"
+          <!-- 失败批次操作：沿用既有重试 / 查看上一张 -->
+          <div v-if="hasFailedBatch" class="result-actions">
+            <button type="button" class="studio-btn studio-btn--ghost studio-btn--sm" @click="onRetry">
+              重试
+            </button>
+            <button
+              v-if="previousResultUrl"
+              type="button"
+              class="studio-btn studio-btn--ghost studio-btn--sm"
+              @click="showPreviousResult"
             >
-              <header class="batch-card__head">
-                <button
-                  type="button"
-                  class="batch-card__toggle"
-                  :disabled="isRecipeBatchRunning(batch)"
-                  :aria-expanded="!isBatchCollapsed(batch)"
-                  @click="toggleBatchCollapse(batch)"
-                >
-                  <span
-                    class="batch-card__caret"
-                    :class="{ 'batch-card__caret--collapsed': isBatchCollapsed(batch) }"
-                    aria-hidden="true"
-                  />
-                  <span class="batch-card__title">
-                    批次 {{ batchNumber(displayIndex) }} · {{ formatBatchTime(batch.createdAt) }} ·
-                    {{ batch.groups.length }} 组
-                  </span>
-                </button>
-                <span
-                  class="batch-card__status"
-                  :data-status="batch.status"
-                  :data-testid="`studio-batch-status-${batchNumber(displayIndex)}`"
-                >
-                  {{ describeRecipeBatchStatus(batch) }}
-                </span>
-              </header>
-
-              <!-- 运行中批次：进度条 + 任务号；完成批次不显示进度条 -->
-              <div v-if="isRecipeBatchRunning(batch)" class="batch-card__running">
-                <div v-if="recipeBatchPercent(batch) !== null" class="progress">
-                  <div
-                    class="progress__track"
-                    role="progressbar"
-                    aria-label="生成进度"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    :aria-valuenow="recipeBatchPercent(batch) ?? 0"
-                  >
-                    <div
-                      class="progress__fill"
-                      :style="{ width: `${recipeBatchPercent(batch) ?? 0}%` }"
-                    />
-                  </div>
-                  <span class="progress__pct">{{ recipeBatchPercent(batch) }}%</span>
-                </div>
-                <p v-if="batch.jobIds.length" class="batch-card__jobs">
-                  任务 {{ batch.jobIds.map((id) => `#${id}`).join('、') }}
-                </p>
-                <p class="preview-state__tip">
-                  切换页签不会中断后端任务；可继续提交新批次，GPU 会按队列逐个执行
-                </p>
-              </div>
-
-              <div v-if="!isBatchCollapsed(batch)" class="batch-card__body">
-                <!-- 多张：网格；单张：大图。每张图只来自本批 results -->
-                <div
-                  v-if="batch.results.length > 1"
-                  class="preview-grid"
-                  data-testid="studio-result-grid"
-                >
-                  <a
-                    v-for="(url, index) in batch.results"
-                    :key="url"
-                    class="preview-grid__cell"
-                    :href="url"
-                    download="image.png"
-                  >
-                    <img
-                      :src="url"
-                      :alt="`批次 ${batchNumber(displayIndex)} 结果 ${index + 1}`"
-                      class="preview-grid__image"
-                      loading="lazy"
-                      :data-testid="batchResultTestId(batch, index)"
-                    />
-                  </a>
-                </div>
-                <img
-                  v-else-if="batch.results.length === 1"
-                  :src="batch.results[0]"
-                  :alt="`批次 ${batchNumber(displayIndex)} 结果`"
-                  class="preview-image"
-                  :data-testid="batchResultTestId(batch, 0)"
-                />
-
-                <p
-                  v-if="batch.errorMessage"
-                  class="studio-error studio-error--inline"
-                  role="alert"
-                >
-                  {{ batch.errorMessage }}
-                </p>
-
-                <div v-if="batch.status === 'failed'" class="preview-error__actions">
-                  <button
-                    type="button"
-                    class="studio-btn studio-btn--ghost studio-btn--sm"
-                    @click="onRetry"
-                  >
-                    重试
-                  </button>
-                  <button
-                    v-if="previousResultUrl"
-                    type="button"
-                    class="studio-btn studio-btn--ghost studio-btn--sm"
-                    @click="showPreviousResult"
-                  >
-                    查看上一张结果
-                  </button>
-                </div>
-              </div>
-            </article>
-          </div>
-
-          <div class="result-footer">
-            <span>
-              {{ jobIds.length > 1 ? `共 ${jobIds.length} 个任务（首个 #${jobIds[0]}）` : jobId ? `当前任务 #${jobId}` : '任务由 atelier 后端排队执行' }}
-            </span>
-            <button type="button" class="result-footer__link" data-testid="studio-job-center" @click="goJobCenter">
-              任务中心
+              查看上一张结果
             </button>
           </div>
         </ReferenceSectionCard>
@@ -1195,6 +1058,22 @@ onMounted(async () => {
       @close="closeSlotPreview"
     />
 
+    <!--
+      结果灯箱：只读打开，翻页范围限于当前批次。
+      与槽位灯箱的唯一差异是**不传 `file-actions=false`** —— 灯箱里的「下载原图」
+      受 `showFileActions` 控制，关掉它等于连下载一起关掉；用户 2026-11-06 已拍板
+      「下载只留在灯箱内」，因此保留 fileActions 默认值。
+    -->
+    <Lightbox
+      v-if="resultPreview && resultPreviewHistoryItems.length"
+      :items="resultPreviewHistoryItems"
+      :index="resultPreviewIndex"
+      readonly
+      :can-open-gallery="false"
+      @update:index="onResultPreviewIndexChange"
+      @close="closeResultPreview"
+    />
+
     <!-- 工作流降级确认框：M（非空槽数）< N（input_count）时出现，取消则不提交 -->
     <div
       v-if="workflowDowngrade"
@@ -1214,6 +1093,15 @@ onMounted(async () => {
           非空槽 {{ workflowDowngrade.slotCount }} 个 · 当前工作流需要 {{ workflowDowngrade.inputCount }} 个输入
         </p>
 
+        <!-- 后端已确认裁不掉（blockedReason 非空）时不再提供「仍用当前工作流提交」：必然 400 -->
+        <p
+          v-if="workflowDowngrade.blockedReason"
+          class="studio-modal__message studio-modal__message--blocked"
+          data-testid="studio-downgrade-blocked"
+        >
+          后端确认空槽无法裁剪：{{ workflowDowngrade.blockedReason }}
+        </p>
+
         <div v-if="workflowDowngrade.candidates.length" class="downgrade-list">
           <p class="downgrade-list__head">可切换的候选工作流（input_count ≤ {{ workflowDowngrade.slotCount }}）</p>
           <button
@@ -1229,11 +1117,17 @@ onMounted(async () => {
           </button>
         </div>
         <p v-else class="studio-modal__message">
-          当前没有 input_count ≤ {{ workflowDowngrade.slotCount }} 的候选工作流。可取消后补齐参考图再提交，或仍用当前工作流尝试（后端会裁掉空槽，无法裁剪时返回 400）。
+          <template v-if="workflowDowngrade.blockedReason">
+            当前没有 input_count ≤ {{ workflowDowngrade.slotCount }} 的候选工作流。可取消后补齐参考图再提交。
+          </template>
+          <template v-else>
+            当前没有 input_count ≤ {{ workflowDowngrade.slotCount }} 的候选工作流。可取消后补齐参考图再提交，或仍用当前工作流尝试（后端会裁掉空槽，无法裁剪时返回 400）。
+          </template>
         </p>
 
         <div class="studio-modal__actions">
           <button
+            v-if="!workflowDowngrade.blockedReason"
             type="button"
             class="studio-btn studio-btn--ghost"
             data-testid="studio-downgrade-current"
@@ -1261,6 +1155,14 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* fixed 操作条常驻：页面末尾留出条高，避免遮住结果区最后一行 */
+  padding-bottom: 80px;
+}
+
+@media (max-width: 1023px) {
+  .ref-studio {
+    padding-bottom: 96px;
+  }
 }
 
 .ref-studio__head {
@@ -1295,6 +1197,8 @@ onMounted(async () => {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 24px;
   align-items: start;
+  /* 全宽素材卡与下方两栏之间留 16px（header 自带 margin-bottom，不再叠加） */
+  margin-top: 16px;
 }
 
 .studio-column {
@@ -1305,7 +1209,17 @@ onMounted(async () => {
 }
 
 .studio-column--left {
-  grid-column: span 7;
+  grid-column: 1 / -1;
+}
+
+/* 结果卡不再占右栏：右栏容器让位，子节点直接成为 12 栏 grid 的全宽行。 */
+.studio-column--right {
+  display: contents;
+}
+
+.studio-column--right > * {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 .studio-column--right {
@@ -1313,11 +1227,42 @@ onMounted(async () => {
 }
 
 
-/* 三槽：736.66 内容区 - gap 16 → 单卡 224.22px */
+/* 素材区 4 列：三槽 + 第 4 张；全宽下每列约 280px，窄屏回落 2 列 / 1 列 */
 .slot-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+  align-items: stretch;
+}
+
+@media (max-width: 767px) {
+  .slot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .slot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 生成清单头部：标题 + 计数（batch-* testid 兼容层） */
+.matrix-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.matrix-head__title {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .studio-count {
@@ -1325,7 +1270,7 @@ onMounted(async () => {
   border-radius: 9999px;
   background: var(--fill-soft);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 16px;
 }
@@ -1350,7 +1295,7 @@ onMounted(async () => {
 .studio-btn--sm {
   height: 26px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .studio-btn--ghost {
@@ -1432,7 +1377,7 @@ onMounted(async () => {
 
 .extra-item__meta {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -1445,7 +1390,7 @@ onMounted(async () => {
   border-radius: 6px;
   background: transparent;
   color: var(--text-strong);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1463,7 +1408,7 @@ onMounted(async () => {
 
 .field__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -1563,21 +1508,21 @@ onMounted(async () => {
 
 .switch-row__hint {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .studio-note {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .studio-hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -1596,13 +1541,6 @@ onMounted(async () => {
   line-height: 1.6;
 }
 
-/* 生成按钮块：位于右栏「生成结果」卡上方，宽度撑满该列 */
-.generate-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
 
 /* 提示词只读预览：等宽字体、保留换行、长词可断 */
 .prompt-preview {
@@ -1629,7 +1567,7 @@ onMounted(async () => {
 .prompt-preview__state {
   display: block;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -1642,50 +1580,8 @@ onMounted(async () => {
   word-break: break-word;
 }
 
-/* 主按钮：44px 高、圆角 8px、14px / 600、底 #e5e5e5 / 字 #171717 */
-.generate-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-sizing: border-box;
-  width: 100%;
-  height: 44px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--btn-inverse-bg);
-  color: var(--on-inverse);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-}
 
-.generate-btn:hover:not(:disabled) {
-  background: var(--btn-inverse-bg-hover-strong);
-}
-
-.generate-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.generate-btn:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-.generate-btn__spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--spinner-track-inverse);
-  border-top-color: var(--on-inverse);
-  border-radius: 50%;
-  animation: studio-spin 0.8s linear infinite;
-}
-
-/* 结果预览区：min-height 460、内边距 16、圆角 18、底 #0a0a0a */
+/* 结果预览区：min-height 460、内边距 16、圆角 18；浅色下补 1px 边框避免与卡片同色 */
 .preview-box {
   display: flex;
   align-items: center;
@@ -1695,108 +1591,12 @@ onMounted(async () => {
   min-height: 460px;
   padding: 16px;
   overflow: hidden;
+  border: 1px solid var(--border);
   border-radius: 18px;
-  background: var(--surface-code);
+  background: var(--surface-result);
 }
 
-.preview-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  max-width: 320px;
-  text-align: center;
-}
-
-.preview-state__mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: var(--fill-subtle);
-  color: var(--text-muted);
-}
-
-.preview-state__mark svg {
-  width: 22px;
-  height: 22px;
-}
-
-.preview-state__spinner {
-  width: 48px;
-  height: 48px;
-  border: 3px solid var(--border-soft);
-  border-top-color: var(--btn-inverse-bg);
-  border-radius: 16px;
-  animation: studio-spin 1s linear infinite;
-}
-
-@keyframes studio-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.preview-state__title {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.preview-state__message {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.preview-state__job {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.preview-state__tip {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-/* 进度条：1.5px 高、全圆角 */
-.progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  max-width: 240px;
-}
-
-.progress__track {
-  flex: 1;
-  height: 1.5px;
-  overflow: hidden;
-  border-radius: 9999px;
-  background: var(--surface-inset);
-}
-
-.progress__fill {
-  height: 100%;
-  border-radius: 9999px;
-  background: var(--btn-inverse-bg);
-  transition: width 0.2s var(--ease);
-}
-
-.progress__pct {
-  flex: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1;
-}
+/* 进度条 / 预览态骨架已迁入 StudioResultBoard，这里不再保留 */
 
 .preview-error {
   display: flex;
@@ -1837,13 +1637,6 @@ onMounted(async () => {
   word-break: break-word;
 }
 
-.preview-error__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  padding-top: 4px;
-}
 
 .preview-image {
   display: block;
@@ -1855,36 +1648,6 @@ onMounted(async () => {
   object-fit: contain;
 }
 
-.result-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.result-footer__link {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--primary);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.result-footer__link:hover {
-  text-decoration: underline;
-}
-
-.result-footer__link:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
 
 /* 1024px 以下单列（React lg 断点） */
 @media (max-width: 1023px) {
@@ -1920,64 +1683,6 @@ onMounted(async () => {
  * 批量预览 / 尺寸多选 / 降级确认框（多选升级新增）
  * ------------------------------------------------------------------------- */
 
-/* 批量摘要：常驻 N/100，放在槽位卡下方 */
-.batch-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--surface-code);
-}
-
-.batch-summary__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.batch-summary__label {
-  flex: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.batch-summary__total {
-  flex: none;
-  padding: 1px 8px;
-  border-radius: 9999px;
-  background: var(--fill-medium);
-  color: var(--text-strong);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.batch-summary__selected {
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.batch-summary__hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.batch-summary__limit {
-  margin: 0;
-  color: var(--danger-text-soft);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.6;
-}
 
 /* 尺寸多选 chip：可换行、选中深色底 */
 .chip-group {
@@ -1995,7 +1700,7 @@ onMounted(async () => {
   border-radius: 9999px;
   background: transparent;
   color: var(--text-strong);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
   white-space: nowrap;
@@ -2030,33 +1735,10 @@ onMounted(async () => {
   border: 0;
   background: transparent;
   color: var(--danger-text-soft);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
-/* 批量结果网格：两列，单格保持 3:4 */
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  width: 100%;
-  max-height: 560px;
-  overflow-y: auto;
-}
-
-.preview-grid__cell {
-  display: block;
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--surface-raised);
-}
-
-.preview-grid__image {
-  display: block;
-  width: 100%;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-}
 
 /* 降级确认框：全屏遮罩 + 居中面板 */
 .studio-modal {
@@ -2100,10 +1782,15 @@ onMounted(async () => {
   word-break: break-word;
 }
 
+/* 后端确认裁不掉：用错误色与前两段说明区分开，避免用户误以为是可尝试项 */
+.studio-modal__message--blocked {
+  color: var(--danger, #d9534f);
+}
+
 .studio-modal__meta {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -2124,7 +1811,7 @@ onMounted(async () => {
 .downgrade-list__head {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -2166,18 +1853,10 @@ onMounted(async () => {
 .downgrade-list__count {
   flex: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
-@media (max-width: 639px) {
-  .preview-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* ---------------------------------------------------------------------------
- * 多批次结果分组（2026-11-06：允许轮询期间继续提交）
- * ------------------------------------------------------------------------- */
+/* 结果区（多批次分组 / 网格 / 空态）已迁入 StudioResultBoard.vue */
 
 /* 常驻说明：新任务入队即可，不必等上一批出图 */
 .studio-queue-note {
@@ -2195,112 +1874,5 @@ onMounted(async () => {
   margin-bottom: 10px;
 }
 
-/* 批次列表：最新批次在最上方 */
-.batch-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 
-.batch-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-sizing: border-box;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface-code);
-}
-
-.batch-card__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.batch-card__toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-strong);
-  text-align: left;
-  cursor: pointer;
-}
-
-.batch-card__toggle:disabled {
-  cursor: default;
-}
-
-.batch-card__title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-strong);
-  line-height: 1.5;
-}
-
-.batch-card__caret {
-  flex: none;
-  width: 0;
-  height: 0;
-  border-top: 5px solid var(--text-muted);
-  border-right: 4px solid transparent;
-  border-left: 4px solid transparent;
-  transition: transform 0.15s var(--ease);
-}
-
-.batch-card__caret--collapsed {
-  transform: rotate(-90deg);
-}
-
-/* 状态标签：彩色文字 + 浅底，替代灰色难读文本 */
-.batch-card__status {
-  flex: none;
-  padding: 1px 8px;
-  border-radius: 9999px;
-  background: var(--fill-subtle);
-  color: var(--text-body-soft);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 18px;
-}
-
-.batch-card__status[data-status='submitting'],
-.batch-card__status[data-status='polling'] {
-  color: var(--warn);
-}
-
-.batch-card__status[data-status='success'] {
-  color: var(--success);
-}
-
-.batch-card__status[data-status='failed'] {
-  color: var(--danger-text-soft);
-}
-
-.batch-card__running {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.batch-card__jobs {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.5;
-  word-break: break-all;
-}
-
-.batch-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 </style>

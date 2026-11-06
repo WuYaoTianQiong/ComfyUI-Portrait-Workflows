@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { withReferenceTab } from './reference/referenceDeepLink'
@@ -50,6 +50,43 @@ const TABS: readonly TabDefinition[] = [
   { key: 'studio', label: '合成台' },
   { key: 'settings', label: '设置' },
 ]
+
+/**
+ * 六个页签的图标路径（16×16，stroke-width 1.3、fill none、currentColor）。
+ *
+ * 全部用 `<path>` 表达，模板只写一次 `<svg>` + `v-for`，避免六个分支模板；
+ * 折叠态图标是唯一的身份标识，因此图标必须与页签语义一一对应。
+ */
+const TAB_ICONS: Record<ReferenceTabKey, readonly string[]> = {
+  home: [
+    'M3.5 3.5h3.5v3.5H3.5z',
+    'M9 3.5h3.5v3.5H9z',
+    'M3.5 9h3.5v3.5H3.5z',
+    'M9 9h3.5v3.5H9z',
+  ],
+  pose: [
+    'M8 1.9a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z',
+    'M8 5.5v4.2',
+    'M8 6.5 5.7 8.3',
+    'M8 6.5 10.3 8.3',
+    'M8 9.7 6 13.4',
+    'M8 9.7 10 13.4',
+  ],
+  costume: ['M8 2.5a1.2 1.2 0 1 1 .9 2l4.7 4.9v2.2H2.4v-2.2l4.7-4.9'],
+  portrait: [
+    'M8 2.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z',
+    'M3.4 13.3c.5-2.3 2.3-3.9 4.6-3.9s4.1 1.6 4.6 3.9',
+  ],
+  studio: [
+    'M8 2.4 13.4 5.6 8 8.8 2.6 5.6 8 2.4z',
+    'M2.6 8.4 8 11.6l5.4-3.2',
+    'M2.6 11.2 8 14.4l5.4-3.2',
+  ],
+  settings: [
+    'M8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2z',
+    'M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M4 4l1.1 1.1M10.9 10.9 12 12M12 4l-1.1 1.1M5.1 10.9 4 12',
+  ],
+}
 
 /**
  * 缺省 / 非法值的统一归宿。
@@ -172,17 +209,108 @@ function selectTab(key: ReferenceTabKey): void {
     hash: route.hash,
   })
 }
+
+// ---------------------------------------------------------------------------
+// 左导航折叠（M1）：展开 180px / 折叠 64px 图标 rail
+// ---------------------------------------------------------------------------
+
+/** 折叠记忆键：带版本后缀，后续改结构时不会误读旧值。 */
+const NAV_COLLAPSED_STORAGE_KEY = 'pb.reference_nav_collapsed_v1'
+
+/** 读取折叠记忆；隐私模式 / 存储不可用时静默回落「展开」。 */
+function readStoredNavCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** 用户手动折叠状态（仅 ≥1024 生效；768–1023 由媒体查询强制折叠）。 */
+const userCollapsed = ref(
+  typeof window === 'undefined' ? false : readStoredNavCollapsed(),
+)
+
+/**
+ * 768–1023 强制折叠。
+ *
+ * 该区间若保持 180px 展开态，内容区会被压到不可用宽度，因此由媒体查询接管；
+ * 折叠按钮在该区间隐藏，不允许手动展开。
+ */
+const forceCollapsed = ref(false)
+
+let compactQuery: MediaQueryList | null = null
+
+function syncForceCollapsed(): void {
+  forceCollapsed.value = compactQuery?.matches ?? false
+}
+
+/** 实际折叠态：强制折叠优先，其次看用户记忆。 */
+const navCollapsed = computed(() => forceCollapsed.value || userCollapsed.value)
+
+function toggleNavCollapsed(): void {
+  if (forceCollapsed.value) return
+  userCollapsed.value = !userCollapsed.value
+  try {
+    window.localStorage.setItem(
+      NAV_COLLAPSED_STORAGE_KEY,
+      userCollapsed.value ? '1' : '0',
+    )
+  } catch {
+    // 写不进去不影响本次会话的视觉状态，只是刷新后回到展开。
+  }
+}
+
+onMounted(() => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  compactQuery = window.matchMedia('(min-width: 768px) and (max-width: 1023px)')
+  syncForceCollapsed()
+  if (typeof compactQuery.addEventListener === 'function') {
+    compactQuery.addEventListener('change', syncForceCollapsed)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (compactQuery && typeof compactQuery.removeEventListener === 'function') {
+    compactQuery.removeEventListener('change', syncForceCollapsed)
+  }
+  compactQuery = null
+})
 </script>
 
 <template>
   <div ref="pageElement" class="reference-page">
     <div class="reference-page__main">
-      <div class="reference-page__inner">
+      <div class="reference-page__inner" :class="{ 'is-rail-collapsed': navCollapsed }">
         <!--
           二级导航：桌面（≥768px）是左栏竖排，窄屏回落为顶部横向滚动条。
           全局导航由外层 App.vue 提供，这里不重复渲染。
         -->
         <nav class="reference-tabs" aria-label="参考图库页签">
+          <!-- 折叠按钮：rail 顶部右缘（展开态）/ 居中（折叠态）；<768 隐藏 -->
+          <div class="reference-tabs__head">
+            <button
+              type="button"
+              class="reference-tabs__toggle"
+              data-testid="studio-rail-toggle"
+              :aria-expanded="!navCollapsed"
+              :aria-label="navCollapsed ? '展开参考图库导航' : '折叠参考图库导航'"
+              :title="navCollapsed ? '展开导航' : '折叠导航'"
+              @click="toggleNavCollapsed"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  :d="navCollapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+
           <div class="reference-tabs__list" role="tablist">
             <button
               v-for="tab in TABS"
@@ -194,9 +322,24 @@ function selectTab(key: ReferenceTabKey): void {
               role="tab"
               aria-controls="reference-tab-panel"
               :aria-selected="tab.key === activeTab"
+              :title="navCollapsed ? tab.label : undefined"
               @click="selectTab(tab.key)"
             >
-              {{ tab.label }}
+              <span class="reference-tab__icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16">
+                  <path
+                    v-for="(d, index) in TAB_ICONS[tab.key]"
+                    :key="index"
+                    :d="d"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+              <span class="reference-tab__label">{{ tab.label }}</span>
             </button>
           </div>
         </nav>
@@ -232,7 +375,9 @@ function selectTab(key: ReferenceTabKey): void {
 
 /* 外层负责 §5 的 main 内边距：≥768px = 左右 32px / 上 16px / 下 40px。 */
 .reference-page__main {
-  padding: 16px 32px 40px;
+  /* 合成台吸底操作条用：fixed 的左右偏移必须与页面留白对齐。 */
+  --page-gutter: 32px;
+  padding: 16px var(--page-gutter) 40px;
 }
 
 /*
@@ -240,16 +385,26 @@ function selectTab(key: ReferenceTabKey): void {
  * 宽度不设 max-width，避免 1920 视口下两侧大留白；左右留白只由外层
  * `.reference-page__main` 的内边距提供。
  *
+ * 左栏宽度走 `--rail-w`（展开 180）/ `--rail-w-collapsed`（折叠 64）：
+ * 折叠后内容区多出 116px，槽位卡与库卡片网格同步变宽。
+ *
  * `minmax(0, 1fr)` 是关键：右栏内容（卡片网格/长英文标签）默认按
- * min-content 撑宽，会把 200px 的左栏压扁并产生横向滚动。
+ * min-content 撑宽，会把左栏压扁并产生横向滚动。
  */
 .reference-page__inner {
+  /* 合成台吸底操作条用：折叠时左偏移同步收窄（26px gap: 24 + 2 边框余量）。 */
+  --rail-effective-w: var(--rail-w);
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
   width: 100%;
   min-width: 0;
+}
+
+.reference-page__inner.is-rail-collapsed {
+  --rail-effective-w: var(--rail-w-collapsed);
+  grid-template-columns: var(--rail-w-collapsed) minmax(0, 1fr);
 }
 
 /*
@@ -281,9 +436,48 @@ function selectTab(key: ReferenceTabKey): void {
   padding: 2px 0;
 }
 
+/* 折叠按钮：36×36 点击区，展开态贴 nav 右缘 */
+.reference-tabs__head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.reference-tabs__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rail-hit);
+  height: var(--rail-hit);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.reference-tabs__toggle:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
+}
+
+.reference-tabs__toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.reference-tabs__toggle svg {
+  width: var(--rail-icon);
+  height: var(--rail-icon);
+}
+
 /*
  * 导航项：整行可点、左对齐。
- * 非选中态用 `--text-muted`（深色 #a1a1a1 / 浅色 #3f4a5a，两套均 ≥7:1），
+ * 非选中态用 `--text-muted`（深/浅两套主题均 ≥7:1），
  * 选中态用主色浅底 + 主色左侧色条 + `--text-strong` 文字，避免「主色字压在
  * 主色浅底上」只有 3.7:1 的低对比问题。
  */
@@ -291,6 +485,7 @@ function selectTab(key: ReferenceTabKey): void {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 8px;
   width: 100%;
   height: 36px;
   padding: 0 14px;
@@ -325,9 +520,87 @@ function selectTab(key: ReferenceTabKey): void {
   outline-offset: 2px;
 }
 
+/* 页签图标：16×16、stroke 1.3（折叠态唯一身份标识） */
+.reference-tab__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--rail-icon);
+  height: var(--rail-icon);
+}
+
+.reference-tab__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * 折叠态：nav 只剩图标。
+ * 标签文字只用 `display: none` 隐藏，**不删 DOM 节点** —— 读屏、title
+ * 提示与既有 `.reference-tab` 文本断言都依赖它仍然存在。
+ */
+.is-rail-collapsed .reference-tabs {
+  padding-right: 0;
+}
+
+.is-rail-collapsed .reference-tabs__head {
+  justify-content: center;
+}
+
+.is-rail-collapsed .reference-tabs__list {
+  align-items: center;
+}
+
+.is-rail-collapsed .reference-tab {
+  justify-content: center;
+  width: var(--rail-hit);
+  padding: 0;
+  margin: 0 auto;
+}
+
+.is-rail-collapsed .reference-tab__label {
+  display: none;
+}
+
 .reference-panel {
   min-width: 0;
   min-height: 0;
+}
+
+/*
+ * 平板（768–1023px）：强制折叠为图标 rail。
+ *
+ * 该区间展开态 180px + 24px gap 会把内容区压到不可用宽度；JS 侧
+ * `forceCollapsed` 负责 aria 状态，这里用 CSS 兜底首帧并隐藏折叠按钮。
+ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .reference-page__inner {
+    grid-template-columns: var(--rail-w-collapsed) minmax(0, 1fr);
+  }
+
+  .reference-tabs {
+    padding-right: 0;
+  }
+
+  .reference-tabs__head {
+    display: none;
+  }
+
+  .reference-tabs__list {
+    align-items: center;
+  }
+
+  .reference-tab {
+    justify-content: center;
+    width: var(--rail-hit);
+    padding: 0;
+    margin: 0 auto;
+  }
+
+  .reference-tab__label {
+    display: none;
+  }
 }
 
 /*
@@ -338,8 +611,9 @@ function selectTab(key: ReferenceTabKey): void {
  */
 @media (max-width: 767px) {
   .reference-page__main {
-    padding-left: 24px;
-    padding-right: 24px;
+    --page-gutter: 24px;
+    padding-left: var(--page-gutter);
+    padding-right: var(--page-gutter);
   }
 
   .reference-page__inner {
@@ -388,6 +662,25 @@ function selectTab(key: ReferenceTabKey): void {
     background: var(--btn-inverse-bg);
     box-shadow: none;
     color: var(--on-inverse);
+  }
+
+  /* 窄屏回退药丸条：只显示文字，折叠态 class 在本区间不生效 */
+  .reference-tabs__head {
+    display: none;
+  }
+
+  .reference-tab__icon {
+    display: none;
+  }
+
+  .reference-page__inner.is-rail-collapsed .reference-tab {
+    width: auto;
+    padding: 6px 14px;
+    margin: 0;
+  }
+
+  .reference-page__inner.is-rail-collapsed .reference-tab__label {
+    display: inline;
   }
 }
 

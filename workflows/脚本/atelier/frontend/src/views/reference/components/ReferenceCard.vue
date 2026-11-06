@@ -224,7 +224,7 @@ const imageAlt = computed(() => props.alt || props.title)
   padding: 2px 6px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.7);
-  color: #ffffff;
+  color: var(--on-solid);
   font-size: 10px;
   font-weight: 700;
   line-height: 15px;
@@ -241,7 +241,7 @@ const imageAlt = computed(() => props.alt || props.title)
   padding: 2px 6px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
-  color: #18181b;
+  color: var(--text-on-chip);
   font-size: 10px;
   font-weight: 600;
   line-height: 15px;
@@ -263,7 +263,7 @@ const imageAlt = computed(() => props.alt || props.title)
   border: 0;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.75);
-  color: #ffffff;
+  color: var(--on-solid);
   font-size: 11px;
   font-weight: 600;
   line-height: 16.5px;
@@ -308,7 +308,7 @@ const imageAlt = computed(() => props.alt || props.title)
   line-height: 16.5px;
 }
 
-/* 辅助行：11px / 400 / #a1a1a1 */
+/* 辅助行：11px / 400 / 弱化色 */
 .ref-card__meta {
   display: flex;
   align-items: center;

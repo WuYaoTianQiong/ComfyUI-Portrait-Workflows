@@ -16,6 +16,14 @@ export interface ToastMessage {
  * 旧前端靠 `window.showToast()` —— 一个全局函数 + 一个全局容器，跨模块靠约定串联。
  * 这里做成模块级单例 + 显式 composable：调用点看得出来源，也不依赖加载顺序。
  */
+/**
+ * 同屏最多保留的提示条数量。
+ *
+ * 连续选图时每张都会弹一条，「已加入 A」「已加入 B」「已加入 C」三连会盖住页头；
+ * 只保留最近 2 条，更早的提示直接出队（不是缩短 duration，避免一闪而过）。
+ */
+const MAX_VISIBLE_TOASTS = 2
+
 const toasts = ref<ToastMessage[]>([])
 let seq = 0
 
@@ -31,7 +39,7 @@ export function useToast() {
       return
     }
     const id = ++seq
-    toasts.value = [...toasts.value, { id, text, kind }]
+    toasts.value = [...toasts.value, { id, text, kind }].slice(-MAX_VISIBLE_TOASTS)
     setTimeout(() => {
       toasts.value = toasts.value.filter((t) => t.id !== id)
     }, ttl)

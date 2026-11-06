@@ -2676,13 +2676,13 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 浅色主题：分类色来自用户数据，可能是 #f59e0b / #22c55e 这类高亮度色，
+ * 浅色主题：分类色来自用户数据，可能是高亮度色，
  * 白字只有 2.15:1。把底色调暗 40%（保留色相）后，8 个默认色板上的白字
  * 均回到 5.4:1 以上。深色主题不命中此规则，外观不变。
  */
 :root[data-theme='light'] .cat-chip.on {
-  background: color-mix(in srgb, var(--c, var(--primary)) 60%, #000000);
-  border-color: color-mix(in srgb, var(--c, var(--primary)) 60%, #000000);
+  background: color-mix(in srgb, var(--c, var(--primary)) 60%, var(--mix-base-black));
+  border-color: color-mix(in srgb, var(--c, var(--primary)) 60%, var(--mix-base-black));
 }
 
 .shot-grid {

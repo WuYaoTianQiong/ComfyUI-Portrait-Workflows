@@ -35,6 +35,15 @@ export function setupNaive() {
         },
       },
     },
+    /**
+     * 提示条口径（2026-11-06 合成台 UX 重构 A8）：
+     * 最多同屏 2 条、右下角堆叠。连续选图时不再出现 3 条盖住页头，
+     * 也与测试环境 `ToastHost` 的右下角位置保持一致。
+     */
+    messageProviderProps: {
+      max: 2,
+      placement: 'bottom-right',
+    },
   })
   messageApi = message
   dialogApi = dialog

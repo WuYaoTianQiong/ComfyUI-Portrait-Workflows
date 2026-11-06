@@ -50,6 +50,34 @@
   --surface-image: rgba(38, 38, 38, 0.6);
   --surface-overlay: rgba(23, 23, 23, 0.94);
   --scrim: rgba(0, 0, 0, 0.1);
+  /* 结果区 / 清单行底：浅色主题下需与 --surface-raised 区分（实测两者同色会消失）。 */
+  --surface-result: #0a0a0a;
+
+  /* 参考图库左导航 rail（M1）：展开 180 / 折叠 64，图标 16、点击区 36。 */
+  --rail-w: 180px;
+  --rail-w-collapsed: 64px;
+  --rail-icon: 16px;
+  --rail-hit: 36px;
+
+  /* 生成清单（P1 M3）：行高与三联缩略图尺寸，密度调整只改这里。 */
+  --matrix-row-h: 44px;
+  --matrix-thumb-w: 24px;
+  --matrix-thumb-h: 32px;
+  /* 素材图墙（P1 M2）：缩略图最小宽度与最大可视行数。 */
+  --panel-thumb-min: 72px;
+  --panel-thumb-rows: 3;
+
+  /* 结果区（P2 M5）：网格最小列宽与空态高度（460 → 180）。 */
+  --result-card-min: 180px;
+  --result-empty-min: 180px;
+
+  /* 门槛修复（2026-11-06）：既有页面里的十六进制收敛为令牌，取值与原值完全一致。 */
+  --mix-base-black: #000000;
+  --tone-green: #10b981;
+  --tone-blue: #0ea5e9;
+  --tone-violet: #8b5cf6;
+  --on-solid: #ffffff;
+  --text-on-chip: #18181b;
 
   --text-strong: #fafafa;
   --text-body: #e5e5e5;
@@ -248,6 +276,14 @@
   --surface-image: #eef0f3;
   --surface-overlay: rgba(255, 255, 255, 0.97);
   --scrim: rgba(15, 23, 42, 0.28);
+  /* 浅色下 --surface-code 与 --surface-raised 同为 #f6f7f9，结果区会与卡片融为一体。 */
+  --surface-result: #f3f4f6;
+  --mix-base-black: #000000;
+  --tone-green: #10b981;
+  --tone-blue: #0ea5e9;
+  --tone-violet: #8b5cf6;
+  --on-solid: #ffffff;
+  --text-on-chip: #18181b;
 
   --text-strong: #111111;
   --text-body: #1a1a1a;

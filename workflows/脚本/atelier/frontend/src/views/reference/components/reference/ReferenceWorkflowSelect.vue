@@ -32,19 +32,27 @@ const props = withDefaults(
   defineProps<{
     /** 多选值：有序、去重；空数组 = 使用后端默认工作流。 */
     modelValue: string[]
-    workflows: StudioWorkflowOption[]
+    /** 只读即可：本组件只遍历目录，不会就地修改（放宽后兼容 readonly 调用方）。 */
+    workflows: readonly StudioWorkflowOption[]
     /** 当前已选**非空**槽位的业务角色；空槽不传。 */
-    selectedRoles?: StudioWorkflowSlot[]
+    selectedRoles?: readonly StudioWorkflowSlot[]
     /** 后端默认工作流路径（空选择时 UI 明示）。 */
     defaultPath?: string
     loading?: boolean
     disabled?: boolean
+    /**
+     * 外观形态：
+     * - `select`（默认）：原有下拉触发器，渲染与行为对旧调用方完全不变；
+     * - `chips`：触发器固定「＋ 添加工作流」，已选项以 chips 平铺在触发器下方。
+     */
+    variant?: 'select' | 'chips'
   }>(),
   {
     selectedRoles: () => [],
     defaultPath: '',
     loading: false,
     disabled: false,
+    variant: 'select',
   },
 )
 
@@ -67,6 +75,33 @@ const selectedItems = computed(() =>
 const defaultItem = computed(
   () => props.workflows.find((item) => item.path === props.defaultPath) ?? null,
 )
+
+/** 是否 chips 形态：默认 `select` 时下面所有 chips 相关分支都不渲染。 */
+const isChips = computed(() => props.variant === 'chips')
+
+/** chips 短名：> 20 字截断补省略号，避免平铺区被长名撑爆。 */
+function chipName(item: StudioWorkflowOption): string {
+  const name = workflowDisplayName(item.name)
+  return name.length > 20 ? `${name.slice(0, 20)}…` : name
+}
+
+/** chips 图数徽章：优先后端 `input_count`，旧响应回退 `image_slots`。 */
+function chipInputCount(item: StudioWorkflowOption): string {
+  return `${item.inputCount || item.imageSlots} 图`
+}
+
+/**
+ * 移除已选工作流（chips 上的 `×`）。
+ *
+ * 只过滤该 path，顺序保持不变；过滤后为空数组即回落后端默认工作流。
+ */
+function removeChip(path: string): void {
+  if (props.disabled || props.loading) return
+  emit(
+    'update:modelValue',
+    props.modelValue.filter((value) => value !== path),
+  )
+}
 
 /** 触发器文案：空选择明示「使用默认工作流」，而不是留空白。 */
 const triggerLabel = computed(() => {
@@ -172,7 +207,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="wf-select" data-testid="studio-workflow-select">
+  <div
+    ref="root"
+    class="wf-select"
+    :class="{ 'wf-select--chips': isChips }"
+    data-testid="studio-workflow-select"
+  >
     <button
       type="button"
       class="wf-trigger"
@@ -183,14 +223,44 @@ onBeforeUnmount(() => {
       data-testid="studio-workflow-trigger"
       @click="toggle"
     >
-      <span class="wf-trigger__label">{{ triggerLabel }}</span>
+      <span class="wf-trigger__label">{{ isChips ? '＋ 添加工作流' : triggerLabel }}</span>
       <span
-        v-if="selectedItems.length === 1 && selectedItems[0].recommended"
+        v-if="!isChips && selectedItems.length === 1 && selectedItems[0].recommended"
         class="wf-badge"
         data-testid="studio-workflow-recommended"
       >推荐</span>
       <span class="wf-trigger__caret" aria-hidden="true">▾</span>
     </button>
+
+    <!-- chips 形态：已选项平铺在触发器下方；下拉只承担「添加」 -->
+    <div v-if="isChips" class="wf-chips" data-testid="studio-workflow-chips">
+      <span
+        v-if="!modelValue.length && defaultItem"
+        class="wf-chip wf-chip--default"
+        data-testid="studio-workflow-chip-default"
+        title="未勾选时按 1 条默认工作流计入组合"
+      >默认 · {{ chipName(defaultItem) }}</span>
+
+      <span
+        v-for="item in selectedItems"
+        :key="item.path"
+        class="wf-chip"
+        :class="{ 'is-unavailable': Boolean(reasonFor(item)) }"
+        :title="reasonFor(item) || item.path"
+        :data-path="item.path"
+        data-testid="studio-workflow-chip"
+      >
+        <span class="wf-chip__name">{{ chipName(item) }}</span>
+        <span class="wf-chip__count">{{ chipInputCount(item) }}</span>
+        <button
+          type="button"
+          class="wf-chip__remove"
+          :aria-label="`移除工作流 ${chipName(item)}`"
+          data-testid="studio-workflow-chip-remove"
+          @click="removeChip(item.path)"
+        >×</button>
+      </span>
+    </div>
 
     <div v-if="open" class="wf-menu">
       <!-- 未选时明示默认工作流；已选时明示多选数量 -->
@@ -255,6 +325,103 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 336.33px;
   min-width: 0;
+}
+
+/* chips 形态需要平铺多行，放开 336.33 上限（默认 select 形态不受影响） */
+.wf-select--chips {
+  max-width: none;
+}
+
+/* 已选 chips 区：可换行，每 chip = 短名 + 图数徽章 + × */
+.wf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.wf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.wf-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「N 图」徽章：11px 元信息，不抢主名 */
+.wf-chip__count {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: var(--fill-soft);
+  color: var(--text-body-soft);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.wf-chip__remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wf-chip__remove:hover {
+  background: var(--fill-medium);
+  color: var(--text-strong);
+}
+
+.wf-chip__remove:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* 不可用项：红色边框 / 文字 + title 原因（不整体降透明度） */
+.wf-chip.is-unavailable {
+  border-color: var(--danger);
+  color: var(--danger-text-soft);
+}
+
+.wf-chip.is-unavailable .wf-chip__count,
+.wf-chip.is-unavailable .wf-chip__remove {
+  color: var(--danger-text-soft);
+}
+
+/* 未选时的隐式默认项：虚线 + 「默认」前缀，明确它会计入组合 */
+.wf-chip--default {
+  padding-right: 10px;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
 }
 
 /* 触发器 336.33 × 36、圆角 8、字号 12 */

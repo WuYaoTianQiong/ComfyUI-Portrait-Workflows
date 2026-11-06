@@ -652,15 +652,15 @@ onMounted(() => {
 }
 
 .home-card__dot.is-emerald {
-  background: #10b981;
+  background: var(--tone-green);
 }
 
 .home-card__dot.is-sky {
-  background: #0ea5e9;
+  background: var(--tone-blue);
 }
 
 .home-card__dot.is-violet {
-  background: #8b5cf6;
+  background: var(--tone-violet);
 }
 
 /* 数量 Badge：次要徽标，12px / 500、全圆 */
@@ -726,7 +726,7 @@ onMounted(() => {
   cursor: pointer;
 }
 
-/* 配方摘要：圆角 20px、内边距 16px、底 #262626 */
+/* 配方摘要：圆角 20px、内边距 16px、深色底 */
 .home-recipe {
   margin-top: 16px;
   padding: 16px;

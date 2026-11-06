@@ -26,9 +26,15 @@ const props = withDefaults(
     multiple?: boolean
     disabled?: boolean
     accept?: string
+    /**
+     * 形态：`bar` 是既有横条（默认，`/editor` 等调用方零变化）；
+     * `tile` 是合成台第 4 张的竖向虚线块（圆角 14、居中图标 + 主副文案）。
+     */
+    variant?: 'bar' | 'tile'
   }>(),
   {
     label: '拖拽 / 粘贴 / 点击添加图片',
+    variant: 'bar',
     hint: 'PNG / JPG / WebP / HEIC，单张 ≤ 25MB',
     multiple: true,
     disabled: false,
@@ -178,7 +184,7 @@ onBeforeUnmount(() => {
   <div
     ref="rootEl"
     class="dropzone"
-    :class="{ dragging, busy, active, disabled }"
+    :class="{ dragging, busy, active, disabled, 'dropzone--tile': variant === 'tile' }"
     role="button"
     tabindex="0"
     :aria-disabled="disabled"
@@ -202,16 +208,34 @@ onBeforeUnmount(() => {
       :disabled="disabled"
       @change="onInputChange"
     />
-    <div class="dz-text">
-      <span class="dz-title">{{ busy ? '上传中…' : label }}</span>
-      <span class="dz-hint" :class="{ error: !!localError }">
-        {{ localError || hint }}
+    <template v-if="variant === 'tile'">
+      <span class="dz-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20">
+          <path d="M3 15.5V5.5h4l1.2-2h3.6l1.2 2h4v10Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+          <circle cx="10" cy="10.4" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3" />
+        </svg>
       </span>
-    </div>
-    <span v-if="active && !busy" class="dz-paste">Ctrl+V</span>
-    <button type="button" class="dz-btn" :disabled="disabled || busy" @click.stop="pickFiles">
-      选择文件
-    </button>
+      <span class="dz-text dz-text--tile">
+        <span class="dz-title">{{ busy ? '上传中…' : label }}</span>
+        <span class="dz-hint" :class="{ error: !!localError }">
+          {{ localError || hint }}
+        </span>
+      </span>
+      <span class="dz-btn dz-btn--tile">选择文件</span>
+    </template>
+
+    <template v-else>
+      <div class="dz-text">
+        <span class="dz-title">{{ busy ? '上传中…' : label }}</span>
+        <span class="dz-hint" :class="{ error: !!localError }">
+          {{ localError || hint }}
+        </span>
+      </div>
+      <span v-if="active && !busy" class="dz-paste">Ctrl+V</span>
+      <button type="button" class="dz-btn" :disabled="disabled || busy" @click.stop="pickFiles">
+        选择文件
+      </button>
+    </template>
   </div>
 </template>
 
@@ -318,5 +342,63 @@ onBeforeUnmount(() => {
 .dz-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* --------------------------------------------------------------------------
+ * tile 变体：合成台第 4 张（竖向虚线块）
+ * 默认 bar 分支不受影响：以下样式全部挂在 `.dropzone--tile` 下。
+ * -------------------------------------------------------------------------- */
+.dropzone--tile {
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 16px 12px;
+  border-radius: 14px;
+  background: var(--surface-deep);
+  text-align: center;
+}
+
+.dropzone--tile .dz-text {
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.dropzone--tile .dz-title {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: normal;
+}
+
+.dropzone--tile .dz-hint {
+  font-size: 12px;
+  white-space: normal;
+}
+
+.dz-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+}
+
+.dz-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * 纯视觉提示，不渲染内层 <button>：整卡已是 role="button"，
+ * 再套一个真按钮会形成无效嵌套（与 A9 同类问题）。
+ */
+.dz-btn--tile {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 </style>

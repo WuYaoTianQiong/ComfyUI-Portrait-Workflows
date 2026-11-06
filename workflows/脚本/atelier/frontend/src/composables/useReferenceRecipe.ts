@@ -46,6 +46,8 @@ import type { WorkflowRow } from './useWorkflows'
 
 /** 提交端点（后端 `reference_library.create_reference_recipe`）。 */
 export const RECIPE_ENDPOINT = '/api/reference/recipes'
+/** 提交前可裁剪探测端点（后端 `reference_library.check_reference_trim`）。 */
+export const TRIM_CHECK_ENDPOINT = '/api/reference/trim-check'
 /** 任务快照端点前缀。 */
 export const RECIPE_JOB_ENDPOINT = '/api/jobs'
 /** 工作流目录（合成台只看能塞参考图的工作流）。 */
@@ -163,6 +165,32 @@ export interface RecipePreviewResponse {
   dry_run?: boolean
   /** 后端按三槽自动组合出的提示词。 */
   prompt?: string
+}
+
+/** `POST /api/reference/trim-check` 请求：只报「哪几个槽有图」，不传具体素材。 */
+export interface RecipeTrimCheckRequest {
+  /** 待探测的工作流路径；空数组 = 后端默认工作流。 */
+  workflows: string[]
+  /** 已填槽位角色（与后端 `SLOT_ROLES` 同名字符串）。 */
+  roles: StudioWorkflowSlot[]
+}
+
+/** 单个工作流的探测结果。 */
+export interface RecipeTrimCheckItem {
+  name: string
+  path: string
+  input_count: number
+  slot_count: number
+  trimmable: boolean
+  /** 不可提交时的原因（与提交端点 400 文案同源）。 */
+  reason: string
+}
+
+/** `POST /api/reference/trim-check` 响应。 */
+export interface RecipeTrimCheckResponse {
+  workflows: RecipeTrimCheckItem[]
+  /** 全部工作流都能按当前非空槽提交。 */
+  all_trimmable: boolean
 }
 
 /** 任务条目里的单张图片（后端 `JobImage`）。 */
@@ -310,6 +338,12 @@ export interface WorkflowDowngradePrompt {
   inputCount: number
   /** `input_count <= M` 的候选工作流（不含当前项）。 */
   candidates: StudioWorkflowOption[]
+  /**
+   * 不可提交的具体原因（后端探测给出，例如「该工作流有 3 个输入且无法裁剪到 2 个」）。
+   *
+   * 空串 = 探测本身没结论（网络失败 / 旧后端），此时框内保留「仍用当前工作流提交」。
+   */
+  blockedReason: string
 }
 
 /** 提交阶段的错误：保留 HTTP 状态码与后端 `detail`。 */
@@ -1177,6 +1211,49 @@ export async function previewRecipePrompt(
   }
 }
 
+/**
+ * 提交前可裁剪探测：把「已填哪些槽」交给后端，问它空槽能不能裁掉。
+ *
+ * 与正式提交共用后端同一判定（`_resolve_trim_plan`），因此 `all_trimmable`
+ * 为 true 时提交不会再因输入数 400。网络异常 / 非 2xx / 结构异常统一抛出，
+ * 由调用方退回原来的确认框 —— 探测失败**绝不**当作可提交放行。
+ */
+export async function checkRecipeTrim(
+  request: RecipeTrimCheckRequest,
+): Promise<RecipeTrimCheckResponse> {
+  let response: Response
+  try {
+    response = await fetch(TRIM_CHECK_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  } catch {
+    throw new RecipeSubmitError('探测工作流输入数失败', 0, '网络请求失败')
+  }
+
+  if (!response.ok) {
+    throw new RecipeSubmitError(
+      '探测工作流输入数失败',
+      response.status,
+      await readErrorDetail(response),
+    )
+  }
+
+  try {
+    const body = (await response.json()) as RecipeTrimCheckResponse
+    if (!body || !Array.isArray(body.workflows)) throw new Error('响应结构异常')
+    return body
+  } catch (cause) {
+    if (cause instanceof RecipeSubmitError) throw cause
+    throw new RecipeSubmitError(
+      '探测工作流输入数失败',
+      response.status,
+      '响应不是有效的 JSON，或缺少 workflows 字段',
+    )
+  }
+}
+
 /** 查询一次任务快照；失败抛可读错误。 */
 export async function fetchRecipeJob(jobId: number): Promise<RecipeJobSnapshot> {
   let response: Response
@@ -1359,6 +1436,22 @@ export type RecipeBatchStatus = 'submitting' | 'polling' | 'success' | 'failed'
  * - `total` / `done` 是**本批**任务快照的汇总（轮询进度）；
  * - `submitted` / `failed` 是组数口径（提交进度 / 失败组数）。
  */
+/**
+ * 单组结果：结果图与配方组的对应关系（P2 M5）。
+ *
+ * `groups` 是提交时的完整组合清单，这一层只补「哪张图来自哪一组」；
+ * 失败组同样保留一行，`urls` 为空、`error` 写明原因，网格里可以显示灰块。
+ */
+export interface RecipeGroupResult {
+  group: RecipeBatchGroup
+  /** 提交成功时的 job id；提交失败为 0。 */
+  jobId: number
+  /** 该组产出的结果图（可能多张）；失败组为空。 */
+  urls: string[]
+  /** 失败原因；成功为空串。 */
+  error: string
+}
+
 export interface RecipeBatch {
   id: string
   createdAt: number
@@ -1374,6 +1467,11 @@ export interface RecipeBatch {
   /** 失败组数（提交失败 + 任务失败 + 轮询失败）。 */
   failed: number
   results: string[]
+  /**
+   * 逐组结果（P2 M5）：组 → job → urls。
+   * `results` 仍是扁平数组，保持既有 UI 与测试兼容。
+   */
+  groupResults: RecipeGroupResult[]
   errorMessage: string
   /** 提交阶段结束（全部组已 POST）的时间；未结束为 null。 */
   submittedAt: number | null
@@ -1393,6 +1491,16 @@ interface PollOutcome {
   outcome: SubmitOutcome & { response: RecipeSubmitResponse }
   snapshot: RecipeJobSnapshot | null
   error: unknown
+}
+
+/**
+ * `groupResults` 的稳定键（P2 M5）。
+ *
+ * 不能用 group 对象本身：批次是 reactive，`batch.groups` 里的元素会被 Proxy 包装，
+ * 与轮询回传的原始 group 引用不相等，对象键会全部查不到。
+ */
+export function groupResultKeyOf(group: RecipeBatchGroup): number {
+  return group.index
 }
 
 /** 批次是否仍在运行（提交中或轮询中）。 */
@@ -1582,6 +1690,8 @@ export function useReferenceRecipe() {
   const workflowDowngrade = ref<WorkflowDowngradePrompt | null>(null)
   /** 工作流因槽位变化被自动取消时的提示文案（页面转成 toast，绝不静默移除）。 */
   const workflowSelectionNotice = ref('')
+  /** 空槽被自动裁剪后提交时的提示文案（页面转成 toast；已提交，不需要用户确认）。 */
+  const workflowTrimNotice = ref('')
 
   // 工作流能力：复用主站唯一实现，避免合成台再写一份档位规则。
   const studioRows = computed<WorkflowRow[]>(() =>
@@ -2008,6 +2118,11 @@ export function useReferenceRecipe() {
     workflowSelectionNotice.value = ''
   }
 
+  /** 消费后清空自动裁剪提示，避免同一条消息重复弹出。 */
+  function clearWorkflowTrimNotice(): void {
+    workflowTrimNotice.value = ''
+  }
+
   /**
    * 槽位变化后，已勾选但不再适用的工作流**自动取消并提示**（绝不静默）。
    *
@@ -2131,6 +2246,7 @@ export function useReferenceRecipe() {
       submitted: 0,
       failed: 0,
       results: [],
+      groupResults: [],
       errorMessage: '',
       submittedAt: null,
       finishedAt: null,
@@ -2179,6 +2295,25 @@ export function useReferenceRecipe() {
 
     batch.jobIds = submitted.map((outcome) => outcome.response.job_id)
     batch.failed = submitFailures.length
+
+    // P2 M5：先按批次原始组顺序建槽，保证清单 #组号与提交前一致；
+    // 提交失败组也保留一行并写 error，网格里显示灰块 + 原因。
+    //
+    // 键必须用稳定的数值 `index`：`batch` 是 reactive，`batch.groups` 里的 group
+    // 已被 Proxy 包装，与 `result.outcome.group`（原始对象）引用不相等；
+    // 用对象做键会导致轮询结果全部查不到，网格退化成 3 个「该组未返回图片」灰块。
+    const groupResults = new Map<number, RecipeGroupResult>()
+    for (const group of batch.groups) {
+      groupResults.set(groupResultKeyOf(group), { group, jobId: 0, urls: [], error: '' })
+    }
+    for (const outcome of submitFailures) {
+      const entry = groupResults.get(groupResultKeyOf(outcome.group))
+      if (!entry) continue
+      entry.error = describeSubmitFailure(
+        outcome.error ?? new RecipeSubmitError('提交出图任务失败', 0, '提交分组为空'),
+      )
+    }
+    batch.groupResults = [...groupResults.values()]
 
     if (!submitted.length) {
       const first = submitFailures[0]
@@ -2242,16 +2377,30 @@ export function useReferenceRecipe() {
 
     for (const result of pollOutcomes) {
       lastSnapshot = result.snapshot ?? lastSnapshot
+      const entry = groupResults.get(groupResultKeyOf(result.outcome.group))
       if (result.snapshot && isJobSucceeded(result.snapshot)) {
-        urls.push(...recipeJobResultUrls(result.snapshot))
+        const groupUrls = recipeJobResultUrls(result.snapshot)
+        urls.push(...groupUrls)
+        if (entry) {
+          entry.jobId = result.outcome.response.job_id
+          entry.urls = groupUrls
+        }
       } else if (result.snapshot) {
         batch.failed += 1
-        failureMessages.push(describeJobFailure(result.snapshot))
+        const message = describeJobFailure(result.snapshot)
+        failureMessages.push(message)
+        if (entry) {
+          entry.jobId = result.outcome.response.job_id
+          entry.error = message
+        }
       } else {
         batch.failed += 1
-        failureMessages.push(
-          describePollFailure(result.error, result.outcome.response.job_id),
-        )
+        const message = describePollFailure(result.error, result.outcome.response.job_id)
+        failureMessages.push(message)
+        if (entry) {
+          entry.jobId = result.outcome.response.job_id
+          entry.error = message
+        }
       }
     }
     if (submitFailures.length) {
@@ -2264,6 +2413,8 @@ export function useReferenceRecipe() {
     }
 
     batch.results = [...new Set(urls)]
+    // 逐组结果同步落盘：网格按 groupResults 渲染「#组号 · 工作流 · 尺寸」。
+    batch.groupResults = [...groupResults.values()]
     if (failureMessages.length) {
       batch.status = 'failed'
       batch.errorMessage = failureMessages.slice(0, 3).join('\n')
@@ -2314,6 +2465,34 @@ export function useReferenceRecipe() {
   }
 
   /**
+   * 提交前可裁剪探测（M < N 时才调用）。
+   *
+   * - `{ allTrimmable: true }`：后端确认空槽能被安全裁掉 → 直接提交；
+   * - `{ allTrimmable: false, blockedReason }`：至少一个工作流裁不掉 → 弹确认框；
+   * - `null`：探测本身失败（网络 / 旧后端）→ 退回原确认框，绝不因探测失败放行。
+   */
+  async function probeWorkflowTrim(): Promise<{
+    allTrimmable: boolean
+    blockedReason: string
+  } | null> {
+    try {
+      const response = await checkRecipeTrim({
+        workflows: effectiveWorkflows.value.map((item) => item.path),
+        roles: filledSlotRoles.value,
+      })
+      const blocked = response.workflows.find((item) => !item.trimmable)
+      if (response.all_trimmable === true && !blocked) {
+        return { allTrimmable: true, blockedReason: '' }
+      }
+      const reason = response.workflows.find((item) => !item.trimmable && item.reason)?.reason
+      return { allTrimmable: false, blockedReason: reason ?? '' }
+    } catch {
+      // 探测失败不阻断提交：退回「确认后再提交」，旧后端 / 瞬时网络问题不会卡死。
+      return null
+    }
+  }
+
+  /**
    * 提交入口。
    *
    * **只拦截“正在提交中”的重复点击**（防抖 / 防连点）；轮询期间允许再次提交，
@@ -2325,6 +2504,7 @@ export function useReferenceRecipe() {
   async function submit(): Promise<RecipeBatch | null> {
     if (submitting.value) return null
     workflowDowngrade.value = null
+    workflowTrimNotice.value = ''
     formError.value = ''
     errorMessage.value = ''
 
@@ -2363,9 +2543,16 @@ export function useReferenceRecipe() {
       )
     }
 
-    // 能力预判：M（非空槽数）< N（工作流输入数）时先确认，不做静默自动切换。
+    // 能力预判：M（非空槽数）< N（工作流输入数）。
+    // 先问后端「空槽能不能裁」：能裁就直接提交并用 toast 告知，裁不掉才弹确认框。
     const inputCount = workflowInputCount.value
     if (inputCount > 0 && activeSlotCount.value < inputCount) {
+      const plan = await probeWorkflowTrim()
+      if (plan?.allTrimmable) {
+        workflowTrimNotice.value =
+          `当前工作流需要 ${inputCount} 个输入，已按 ${activeSlotCount.value} 图自动裁剪空槽后提交`
+        return runBatch(buildCurrentBatchGroups())
+      }
       workflowDowngrade.value = {
         message: describeWorkflowDowngrade(inputCount, activeSlotCount.value),
         slotCount: activeSlotCount.value,
@@ -2379,6 +2566,7 @@ export function useReferenceRecipe() {
           (candidate) =>
             workflowInapplicableRole(candidate, filledSlotRoles.value) === null,
         ),
+        blockedReason: plan?.blockedReason ?? '',
       }
       return null
     }
@@ -2415,6 +2603,55 @@ export function useReferenceRecipe() {
     formError.value = ''
     errorMessage.value = ''
     status.value = 'idle'
+  }
+
+  /**
+   * 复用某批参数（P2 M5）。
+   *
+   * 只回填 `groups[0]` 会丢掉槽位组合维度，导致「复用后清单只剩 1 组」；
+   * 因此按该批**全部** group 去重收集槽位条目、工作流、画质档与比例，
+   * 使清单组数能还原到提交前。
+   */
+  function reuseBatchParams(batch: RecipeBatch): boolean {
+    if (!batch.groups.length) return false
+
+    const portraits = new Map<string, PortraitItem>()
+    const costumes = new Map<string, CostumeItem>()
+    const poses = new Map<string, PoseItem>()
+    for (const group of batch.groups) {
+      if (group.slots.portrait) portraits.set(group.slots.portrait.id, group.slots.portrait)
+      if (group.slots.costume) costumes.set(group.slots.costume.id, group.slots.costume)
+      if (group.slots.pose) poses.set(group.slots.pose.id, group.slots.pose)
+    }
+
+    draft.portrait.value = [...portraits.values()]
+    draft.costume.value = [...costumes.values()]
+    draft.pose.value = [...poses.values()].map((item) => ({ item, useDepth: false }))
+
+    const workflows = [
+      ...new Set(batch.groups.map((group) => group.workflow).filter((path) => !!path)),
+    ]
+    setWorkflowSelection(workflows)
+    qualitySelection.value = [
+      ...new Set(batch.groups.map((group) => group.quality).filter((quality) => !!quality)),
+    ]
+    ratioSelection.value = [
+      ...new Set(batch.groups.map((group) => group.aspectRatio).filter((ratio) => !!ratio)),
+    ]
+    return true
+  }
+
+  /** 清理已结束批次（只保留运行中批次），返回移除数量。 */
+  function clearFinishedBatches(): number {
+    const kept = batches.value.filter(isRecipeBatchRunning)
+    const removed = batches.value.length - kept.length
+    if (!removed) return 0
+
+    batches.value = kept
+    const latest = kept[kept.length - 1]
+    if (latest) syncLatestView(latest)
+    else clearRunState()
+    return removed
   }
 
   /** 重试：清掉表单错误后重新提交（沿用当前槽位与设置，产生一个独立新批次）。 */
@@ -2486,6 +2723,9 @@ export function useReferenceRecipe() {
     confirmWorkflowDowngrade,
     confirmCurrentWorkflowDowngrade,
     cancelWorkflowDowngrade,
+    // 空槽自动裁剪提示（可裁剪时直接提交，用 toast 告知）
+    workflowTrimNotice,
+    clearWorkflowTrimNotice,
     // 运行状态
     status,
     progress,
@@ -2499,6 +2739,8 @@ export function useReferenceRecipe() {
     busy,
     // 多批次真源：页面按批展示结果，各批状态 / 结果互不覆盖。
     batches,
+    reuseBatchParams,
+    clearFinishedBatches,
     submitting,
     polling,
     formError,

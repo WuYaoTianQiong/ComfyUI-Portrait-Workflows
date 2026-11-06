@@ -932,7 +932,7 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-/* 筛选面板：1280 × 68 / 圆角 22 / 内边距 16 / gap 12 / 底 #262626 */
+/* 筛选面板：1280 × 68 / 圆角 22 / 内边距 16 / gap 12 / 深色底 */
 .pose-filters {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 200px minmax(0, auto) auto;

@@ -18,6 +18,8 @@ export const CONFIRM_PROMPTS = {
   editorSubmit: { key: 'editor.submit', label: '图像编辑提交' },
   autoClassify: { key: 'taxonomy.autoClassify', label: '一键自动分类' },
   backfillTaxonomy: { key: 'gallery.backfillTaxonomy', label: '补齐图片分类/标签' },
+  /** 合成台批量提交（P1 M6）：全组合 > 1 时二次确认。 */
+  studioBatchSubmit: { key: 'prompt.studioBatchSubmit', label: '合成台批量提交' },
 } as const satisfies Record<string, ConfirmPromptMeta>
 
 /** 当前已经记住「不再提示」的那些确认框，用于分类与标签页的恢复入口。 */
