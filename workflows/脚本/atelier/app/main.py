@@ -192,10 +192,6 @@ if settings.reference_enabled:
     app.include_router(reference_sheet_router, prefix="/api")
     app.include_router(reference_fragments_router, prefix="/api")
 
-# 旧路径 308 别名必须最后注册：注册在前面会抢走新路径的请求。
-from app.routers.legacy import router as legacy_router
-
-app.include_router(legacy_router, prefix="/api")
 
 # 参考图库旧前缀。阶段 4.3 删除 React 子应用与 `/ref-web` 静态挂载后，
 # 该前缀只用于把旧书签重定向到 `/reference`（施工手册 §6）。
