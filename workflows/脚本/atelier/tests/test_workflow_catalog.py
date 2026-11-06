@@ -10,6 +10,31 @@ def _write(path: Path, class_type: str):
     )
 
 
+def _write_studio_ready(path: Path, role_title: str = "图1：人像参考 (Portrait)"):
+    """写一份最小可用参考合成工作流：能识别角色的 LoadImage + 文本编码节点。
+
+    `_studio_slots()` 要求 slots >= 1、有文本编码、且标题能映射到业务角色，
+    三者齐全才会被判成 `ready=True`。
+    """
+    path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "class_type": "LoadImage",
+                    "inputs": {"image": "portrait.png"},
+                    "_meta": {"title": role_title},
+                },
+                "2": {
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {"clip": ["1", 0], "text": ""},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_is_video_workflow_detects_save_video_nodes():
     from app.services.workflow_parser import is_video_workflow
 
@@ -51,7 +76,11 @@ def test_archive_is_known_but_not_scanned():
     from app.services import workflow_catalog
 
     assert workflow_catalog.ARCHIVE_DIR.name == "历史工作流"
-    assert workflow_catalog.search_dirs() == [settings.library_root]
+    # 通用工作流列表 = 库根 + `通用工作流/`；`历史工作流/` 仍不自动扫描
+    assert workflow_catalog.search_dirs() == [
+        settings.library_root,
+        settings.library_root / "通用工作流",
+    ]
 
 def test_studio_slots_skip_unrecognized_loadimage_titles(api, tmp_path, monkeypatch):
     """C-REF-WF-SLOTS@1：认不出角色的 LoadImage 不进 slots，但仍计入 input_count。"""
@@ -183,3 +212,106 @@ def test_scope_all_still_sees_unroleable_ui_workflows():
 
     names = {row["name"] for row in list_valid_workflows()}
     assert UNROLEABLE_UI_WORKFLOWS <= names
+
+def test_studio_dedup_prefers_higher_priority_directory(tmp_path, monkeypatch):
+    """a) 同名文件同时存在专用目录与库根 → studio 只出现一次，且取专用目录那份。
+
+    「部分共用」工作流复制进 `图库专用工作流/` 后原件仍留在库根，下拉不能出现两遍；
+    保留先扫描到的那份（目录优先级高），`path` / `rel_path` / `source` 都跟着它。
+    """
+    from app.config import settings
+    from app.services import workflow_catalog
+
+    studio = tmp_path / "图库专用工作流"
+    studio.mkdir()
+    shared_name = "PornMaster_共用_三图角色合成.api.json"
+    studio_copy = studio / shared_name
+    _write_studio_ready(studio_copy)
+    _write_studio_ready(tmp_path / shared_name)
+
+    monkeypatch.setattr(settings, "library_root", tmp_path)
+    monkeypatch.setattr(workflow_catalog, "studio_dirs", lambda: [studio, tmp_path])
+
+    rows = [
+        row
+        for row in workflow_catalog.list_valid_workflows(scope="studio")
+        if row["name"] == shared_name
+    ]
+    assert len(rows) == 1, "同名工作流在 studio 下拉里只能出现一次"
+    row = rows[0]
+    assert row["path"] == str(studio_copy)
+    assert "图库专用工作流" in row["path"]
+    assert row["rel_path"] == f"图库专用工作流/{shared_name}"
+    assert row["source"] == "图库专用"
+
+
+def test_studio_dedup_keeps_studio_copy_when_root_copy_unusable(tmp_path, monkeypatch):
+    """b) 库根同名那条不可用时，专用目录那份仍出现、不被挤掉。
+
+    库根这份是有效 JSON（能通过 `is_valid_workflow`）但做不了参考合成
+    （SaveImage-only，没有 LoadImage / 文本编码），会被 `_studio_slots` 的 ready 判掉。
+    """
+    from app.config import settings
+    from app.services import workflow_catalog
+
+    studio = tmp_path / "图库专用工作流"
+    studio.mkdir()
+    shared_name = "PornMaster_共用_三图角色合成.api.json"
+    studio_copy = studio / shared_name
+    _write_studio_ready(studio_copy)
+    _write(tmp_path / shared_name, "SaveImage")
+
+    monkeypatch.setattr(settings, "library_root", tmp_path)
+    monkeypatch.setattr(workflow_catalog, "studio_dirs", lambda: [studio, tmp_path])
+
+    rows = [
+        row
+        for row in workflow_catalog.list_valid_workflows(scope="studio")
+        if row["name"] == shared_name
+    ]
+    assert [row["path"] for row in rows] == [str(studio_copy)]
+
+
+def test_studio_dedup_falls_back_to_root_copy_when_studio_copy_unusable(tmp_path, monkeypatch):
+    """去重必须在 ready 过滤之后：专用目录那份不可用时，库根可用那份不能被挤掉。"""
+    from app.config import settings
+    from app.services import workflow_catalog
+
+    studio = tmp_path / "图库专用工作流"
+    studio.mkdir()
+    shared_name = "PornMaster_共用_三图角色合成.api.json"
+    _write(studio / shared_name, "SaveImage")
+    root_copy = tmp_path / shared_name
+    _write_studio_ready(root_copy)
+
+    monkeypatch.setattr(settings, "library_root", tmp_path)
+    monkeypatch.setattr(workflow_catalog, "studio_dirs", lambda: [studio, tmp_path])
+
+    rows = [
+        row
+        for row in workflow_catalog.list_valid_workflows(scope="studio")
+        if row["name"] == shared_name
+    ]
+    assert [row["path"] for row in rows] == [str(root_copy)]
+    assert rows[0]["source"] == "库根"
+
+
+def test_scope_all_dedupes_same_name_case_insensitive(tmp_path, monkeypatch):
+    """c) scope="all" 同样按文件名去重，保留先扫描到的目录；大小写不敏感。"""
+    from app.config import settings
+    from app.services import workflow_catalog
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    _write(first / "Shared_Workflow.json", "SaveImage")
+    _write(second / "shared_workflow.json", "SaveImage")
+
+    monkeypatch.setattr(settings, "library_root", tmp_path)
+    monkeypatch.setattr(workflow_catalog, "search_dirs", lambda: [first, second])
+
+    rows = workflow_catalog.list_valid_workflows(scope="all")
+    same = [row for row in rows if row["name"].casefold() == "shared_workflow.json"]
+    assert len(same) == 1, "scope=all 也不能出现同名重复项"
+    assert same[0]["path"] == str(first / "Shared_Workflow.json")

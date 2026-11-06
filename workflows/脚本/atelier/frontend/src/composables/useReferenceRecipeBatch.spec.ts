@@ -16,13 +16,16 @@
  *   同一槽位换另一张图（角色集合不变）不取消任何工作流。
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope } from 'vue'
+import type { EffectScope } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '@/api/reference'
 
 import {
   MAX_BATCH_RECIPES,
   MAX_SUBMIT_CONCURRENCY,
+  RECIPE_POLL_INTERVAL_MS,
   buildBatchGroups,
   buildRecipeRequest,
   buildSlotCombinations,
@@ -43,9 +46,15 @@ import {
   reconcileQualitySelection,
   reconcileRatioSelection,
   runWithConcurrency,
+  useReferenceRecipe,
   workflowInapplicableRole,
 } from './useReferenceRecipe'
-import type { StudioWorkflowOption, StudioWorkflowSlot } from './useReferenceRecipe'
+import type {
+  RecipeSubmitRequest,
+  StudioWorkflowOption,
+  StudioWorkflowSlot,
+} from './useReferenceRecipe'
+import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 
 function portrait(id: string): PortraitItem {
   return {
@@ -535,5 +544,281 @@ describe('槽位变化只取消已不适用工作流（收紧点 2）', () => {
     )
     expect(result.kept).toEqual(['/portrait-only'])
     expect(result.removed).toEqual([{ path: '/gone', reason: '' }])
+  })
+})
+// ---------------------------------------------------------------------------
+// 多批次并发：轮询期间可继续提交、各批状态 / 结果互不覆盖
+// ---------------------------------------------------------------------------
+
+interface MockJobState {
+  status: string
+  total: number
+  done_count: number
+  items: Array<{
+    images: Array<{ filename: string; subfolder?: string; type?: string }>
+    error?: string
+  }>
+}
+
+/**
+ * 用最小 fetch mock 驱动真实 composable：
+ * - `/api/workflows?scope=studio` 返回 1 条支持 portrait 的工作流；
+ * - `POST /api/reference/recipes` 每次分配新的递增 job_id（dry_run 直接返回预览）；
+ * - `GET /api/jobs/{id}` 读测试可改写的 `jobState`。
+ */
+describe('多批次并发（轮询期间可继续提交）', () => {
+  const draft = useReferenceRecipeDraft()
+  let scopes: EffectScope[] = []
+  let submittedBodies: RecipeSubmitRequest[] = []
+  let jobState: Map<number, MockJobState>
+  let jobSequence = 0
+
+  function jsonResponse(data: unknown): { ok: boolean; status: number; json: () => Promise<unknown> } {
+    return { ok: true, status: 200, json: async () => data }
+  }
+
+  function installFetchMock(): void {
+    jobSequence = 0
+    submittedBodies = []
+    jobState = new Map()
+
+    const fetchMock = vi.fn(
+      async (input: unknown, init?: { method?: string; body?: unknown }) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : String((input as { url?: string } | null)?.url ?? '')
+
+        if (url.startsWith('/api/workflows')) {
+          return jsonResponse({
+            workflows: [
+              {
+                path: '/wf.api.json',
+                name: 'wf.api.json',
+                source: '图库专用',
+                rel_path: '/wf.api.json',
+                image_slots: 1,
+                input_count: 1,
+                recommended: false,
+                slots: ['portrait'],
+              },
+            ],
+            default: '/wf.api.json',
+          })
+        }
+
+        if (url === '/api/reference/recipes' && (init?.method ?? 'GET') === 'POST') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as RecipeSubmitRequest & {
+            dry_run?: boolean
+          }
+          if (body.dry_run) {
+            return jsonResponse({ success: true, dry_run: true, prompt: '预览提示词' })
+          }
+          submittedBodies.push(body)
+          const id = ++jobSequence
+          jobState.set(id, { status: 'running', total: 1, done_count: 0, items: [] })
+          return jsonResponse({
+            success: true,
+            job_id: id,
+            total: 1,
+            submitted: 1,
+            queued: 1,
+            errors: [],
+          })
+        }
+
+        const match = /^\/api\/jobs\/(\d+)$/.exec(url)
+        if (match) {
+          const id = Number(match[1])
+          const state = jobState.get(id) ?? {
+            status: 'running',
+            total: 1,
+            done_count: 0,
+            items: [],
+          }
+          return jsonResponse({ id, ...state })
+        }
+
+        throw new Error(`未预期的请求：${url}`)
+      },
+    )
+    vi.stubGlobal('fetch', fetchMock)
+  }
+
+  function completeJob(id: number, filenames: string[]): void {
+    jobState.set(id, {
+      status: 'done',
+      total: 1,
+      done_count: 1,
+      items: [
+        {
+          images: filenames.map((filename) => ({ filename, subfolder: '', type: 'output' })),
+        },
+      ],
+    })
+  }
+
+  function failJob(id: number, detail = '模型缺失'): void {
+    jobState.set(id, {
+      status: 'failed',
+      total: 1,
+      done_count: 0,
+      items: [{ images: [], error: detail }],
+    })
+  }
+
+  async function flushMicrotasks(rounds = 20): Promise<void> {
+    for (let round = 0; round < rounds; round += 1) await Promise.resolve()
+  }
+
+  /** 推进一轮轮询（默认 1500ms），并让所有挂起的 promise 结算。 */
+  async function advancePoll(ms = RECIPE_POLL_INTERVAL_MS): Promise<void> {
+    await vi.advanceTimersByTimeAsync(ms)
+    await flushMicrotasks()
+  }
+
+  function createRecipe() {
+    const scope = effectScope()
+    const recipe = scope.run(() => useReferenceRecipe())
+    if (!recipe) throw new Error('无法创建 useReferenceRecipe')
+    scopes.push(scope)
+    return recipe
+  }
+
+  /** 载入工作流目录 + 选中 1 张人像，保证 canSubmit 的前置校验全部通过。 */
+  async function prepareRecipe() {
+    const recipe = createRecipe()
+    await recipe.loadStudioWorkflows()
+    draft.addPortrait(portrait('pt1'))
+    recipe.setWorkflowSelection(['/wf.api.json'])
+    await flushMicrotasks()
+    return recipe
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    draft.clearDraft()
+    installFetchMock()
+  })
+
+  afterEach(() => {
+    for (const scope of scopes) scope.stop()
+    scopes = []
+    draft.clearDraft()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('轮询期间 canSubmit 仍为 true，第二批立即提交且各自拥有独立 job', async () => {
+    const recipe = await prepareRecipe()
+
+    const first = recipe.submit()
+    // 提交阶段的短暂窗口：按钮禁用、submit 拦截重复点击
+    expect(recipe.submitting.value).toBe(true)
+    expect(recipe.canSubmit.value).toBe(false)
+    expect(await recipe.submit()).toBeNull()
+    await flushMicrotasks()
+
+    expect(recipe.batches.value).toHaveLength(1)
+    expect(recipe.batches.value[0].status).toBe('polling')
+    expect(recipe.submitting.value).toBe(false)
+    expect(recipe.polling.value).toBe(true)
+    // 关键：轮询期间不再禁用提交
+    expect(recipe.canSubmit.value).toBe(true)
+
+    const second = recipe.submit()
+    await flushMicrotasks()
+
+    expect(recipe.batches.value).toHaveLength(2)
+    expect(recipe.batches.value[1].status).toBe('polling')
+    // 两次 POST 都真实发出，分别拿到 job 1 / job 2
+    expect(submittedBodies).toHaveLength(2)
+    expect(recipe.batches.value[0].jobIds).toEqual([1])
+    expect(recipe.batches.value[1].jobIds).toEqual([2])
+
+    completeJob(1, ['first.png'])
+    completeJob(2, ['second.png'])
+    await advancePoll()
+    await Promise.all([first, second])
+  })
+
+  it('两批同时存在时状态独立：第一批完成只更新第一批，第二批继续轮询', async () => {
+    const recipe = await prepareRecipe()
+
+    const first = recipe.submit()
+    await flushMicrotasks()
+    const second = recipe.submit()
+    await flushMicrotasks()
+
+    // 只完成 job 1（第一批）
+    completeJob(1, ['first.png'])
+    await advancePoll()
+
+    expect(recipe.batches.value[0].status).toBe('success')
+    expect(recipe.batches.value[0].results).toEqual([
+      '/api/media/image?filename=first.png&subfolder=&type=output',
+    ])
+    expect(recipe.batches.value[1].status).toBe('polling')
+    expect(recipe.batches.value[1].results).toEqual([])
+    // 兼容视图跟随“最新一批”，不应被旧批次完成覆盖
+    expect(recipe.resultUrls.value).toEqual([])
+
+    completeJob(2, ['second.png'])
+    await advancePoll()
+    await Promise.all([first, second])
+
+    expect(recipe.batches.value[1].status).toBe('success')
+  })
+
+  it('一批失败不影响另一批：失败批次只写自己的错误，成功批次照常完成', async () => {
+    const recipe = await prepareRecipe()
+
+    const first = recipe.submit()
+    await flushMicrotasks()
+    const second = recipe.submit()
+    await flushMicrotasks()
+
+    failJob(1, 'GPU 显存不足')
+    completeJob(2, ['second.png'])
+    await advancePoll()
+
+    await Promise.all([first, second])
+
+    expect(recipe.batches.value[0].status).toBe('failed')
+    expect(recipe.batches.value[0].errorMessage).toContain('GPU 显存不足')
+    expect(recipe.batches.value[0].results).toEqual([])
+
+    expect(recipe.batches.value[1].status).toBe('success')
+    expect(recipe.batches.value[1].errorMessage).toBe('')
+    expect(recipe.batches.value[1].results).toEqual([
+      '/api/media/image?filename=second.png&subfolder=&type=output',
+    ])
+  })
+
+  it('批次结果不串：每批只包含自己 job 的结果图', async () => {
+    const recipe = await prepareRecipe()
+
+    const first = recipe.submit()
+    await flushMicrotasks()
+    const second = recipe.submit()
+    await flushMicrotasks()
+
+    completeJob(1, ['batch-one.png'])
+    completeJob(2, ['batch-two-a.png', 'batch-two-b.png'])
+    await advancePoll()
+    await Promise.all([first, second])
+
+    const [batchOne, batchTwo] = recipe.batches.value
+    expect(batchOne.results).toEqual([
+      '/api/media/image?filename=batch-one.png&subfolder=&type=output',
+    ])
+    expect(batchTwo.results).toEqual([
+      '/api/media/image?filename=batch-two-a.png&subfolder=&type=output',
+      '/api/media/image?filename=batch-two-b.png&subfolder=&type=output',
+    ])
+    // 兼容视图 = 最近一批（第二批）的结果，绝不混入第一批
+    expect(recipe.resultUrls.value).toEqual(batchTwo.results)
   })
 })

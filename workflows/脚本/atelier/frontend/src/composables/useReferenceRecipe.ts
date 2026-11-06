@@ -17,10 +17,17 @@
  *   （列出 `input_count <= M` 的候选），不做静默自动切换。
  *
  * 明确不迁（施工手册 §7 冻结）：配方草稿持久化、未决任务恢复追踪、
- * 通用参数面板、提示词只读预览。本文件不读写 localStorage / IndexedDB。
+ * 通用参数面板、提示词只读预览。
+ *
+ * 持久化边界（2026-11-06 用户拍板）：**工作流多选只做会话级记忆** ——
+ * 仅写 `sessionStorage['pb.reference_studio_workflows_session_v1']`
+ * （值为 `{ workflows: string[] }`），同一会话内切页签 / 刷新 / 从库页返回
+ * 都保留多选，关闭标签页后由浏览器自然清空。本文件**不**读写 localStorage /
+ * IndexedDB，也不把多选塞进 `pb.reference_studio_v1`（那里 `workflow` 仍是
+ * 首条单选语义）。
  */
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
@@ -43,6 +50,14 @@ export const RECIPE_ENDPOINT = '/api/reference/recipes'
 export const RECIPE_JOB_ENDPOINT = '/api/jobs'
 /** 工作流目录（合成台只看能塞参考图的工作流）。 */
 export const STUDIO_WORKFLOWS_ENDPOINT = '/api/workflows?scope=studio'
+/**
+ * 工作流多选的**会话级**记忆键（sessionStorage）。
+ *
+ * 只在本会话内有效：切页签（SPA）、刷新、从库页返回合成台都会恢复；
+ * 关闭标签页后浏览器自然清空，无需额外清理代码。
+ * **绝不**混入 `pb.reference_studio_v1`（那里 `workflow` 仍表示首条单选）。
+ */
+export const WORKFLOW_SELECTION_SESSION_KEY = 'pb.reference_studio_workflows_session_v1'
 /** 轮询间隔与上限，与 React `recipeClient` 一致。 */
 export const RECIPE_POLL_INTERVAL_MS = 1500
 export const RECIPE_POLL_TIMEOUT_MS = 30 * 60 * 1000
@@ -668,6 +683,144 @@ export function pruneInapplicableWorkflowSelection(
   return { kept, removed }
 }
 
+// ---------------------------------------------------------------------------
+// 工作流多选的会话级记忆（sessionStorage，契约 C-REF-WF-SLOTS@1 的本地补充）
+// ---------------------------------------------------------------------------
+
+/** `sessionStorage[WORKFLOW_SELECTION_SESSION_KEY]` 里的数据结构。 */
+export interface WorkflowSelectionSessionSnapshot {
+  workflows: string[]
+}
+
+/**
+ * 工作流路径归一：去首尾空白、丢弃空串、保序去重。
+ *
+ * 初始化、写入与恢复共用同一口径，避免 sessionStorage 里出现脏数据或重复项。
+ */
+export function normalizeWorkflowSelectionPaths(paths: readonly unknown[]): string[] {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const value of paths) {
+    if (typeof value !== 'string') continue
+    const path = value.trim()
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    normalized.push(path)
+  }
+  return normalized
+}
+
+/** 安全获取 sessionStorage：隐私模式 / 非浏览器环境下访问本身也可能抛错。 */
+function getSessionStorage(): Storage | null {
+  try {
+    if (typeof globalThis.sessionStorage === 'undefined') return null
+    return globalThis.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 解析 sessionStorage 原文。
+ *
+ * 非法 JSON / 非对象 / `workflows` 非数组一律回落空数组（绝不把脏数据带进
+ * 工作流多选）；数组内的非字符串项、空白项与重复项按同一口径归一。
+ */
+export function parseWorkflowSelectionSession(raw: string | null | undefined): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return []
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return []
+  const workflows = (parsed as { workflows?: unknown }).workflows
+  if (!Array.isArray(workflows)) return []
+  return normalizeWorkflowSelectionPaths(workflows)
+}
+
+/**
+ * 读取会话级已选工作流。
+ *
+ * 缺失 / 损坏 / 存储不可用一律回落空数组。取回后调用方还会用目录存在性与
+ * `slots` 三态再校验一次（见 {@link pruneInapplicableWorkflowSelection}），
+ * 这里只负责取回路径原文。
+ *
+ * `storage` 可注入，便于单测断言读写行为（默认取 `globalThis.sessionStorage`）。
+ */
+export function readWorkflowSelectionSession(
+  storage: Storage | null = getSessionStorage(),
+): string[] {
+  if (!storage) return []
+  try {
+    return parseWorkflowSelectionSession(storage.getItem(WORKFLOW_SELECTION_SESSION_KEY))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 是否存在**有效**的会话记忆。
+ *
+ * 与 `readWorkflowSelectionSession` 分开：`{ workflows: [] }`（用户本会话主动
+ * 清空多选）也算「存在」，初始化时不能被 `pb.reference_studio_v1.workflow`
+ * 的单选回填覆盖成一条。非法 JSON / 结构不符则视为不存在。
+ */
+export function hasWorkflowSelectionSession(
+  storage: Storage | null = getSessionStorage(),
+): boolean {
+  if (!storage) return false
+  try {
+    const raw = storage.getItem(WORKFLOW_SELECTION_SESSION_KEY)
+    if (typeof raw !== 'string' || !raw.trim()) return false
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false
+    return Array.isArray((parsed as { workflows?: unknown }).workflows)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 写入会话级已选工作流（去重、保序）。
+ *
+ * 空选择也写 `{ workflows: [] }`：让「本会话主动清空多选」也能被记住，
+ * 不需要额外的清理代码；关闭标签页后由浏览器自然回收。
+ * 写失败（隐私模式 / 配额不足）静默降级，本次会话仍按内存值工作。
+ */
+export function writeWorkflowSelectionSession(
+  paths: readonly string[],
+  storage: Storage | null = getSessionStorage(),
+): void {
+  if (!storage) return
+
+  const snapshot: WorkflowSelectionSessionSnapshot = {
+    workflows: normalizeWorkflowSelectionPaths(paths),
+  }
+  try {
+    storage.setItem(WORKFLOW_SELECTION_SESSION_KEY, JSON.stringify(snapshot))
+  } catch {
+    /* 隐私模式 / 配额不足：静默降级 */
+  }
+}
+
+/**
+ * 会话恢复时「被跳过项」的三句式文案。
+ *
+ * 用词刻意避免「取消」：这不是用户刚做了取消操作，而是恢复会话记忆时发现
+ * 目录已删除 / 与当前槽位不匹配，因此用「已跳过」描述。
+ */
+export function describeWorkflowSelectionRestoreNotice(reasons: readonly string[]): string {
+  return (
+    `本次会话恢复的已选工作流中有 ${reasons.length} 个与当前槽位不匹配，已跳过。` +
+    `原因：${reasons.join('；')}。` +
+    '下一步：改选支持这些槽位的工作流，或清空对应槽位后重新勾选。'
+  )
+}
+
 /**
  * 切换工作流后重建画质选择：
  * - 新工作流不支持画质（options 为空）→ 清空，绝不把旧参数发出去；
@@ -1048,6 +1201,41 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * 全局请求闸门（多批次轮询共用）。
+ *
+ * 每个批次内部仍用 `runWithConcurrency` 限流，但多批同时轮询时真正发出的
+ * `GET /api/jobs/{id}` 总数仍必须收敛到 {@link MAX_SUBMIT_CONCURRENCY}，
+ * 否则「20 批 × 每组 1 个请求」会把后端打满。
+ *
+ * 释放时直接把槽位转交给排队者（`active` 保持不变），避免并发计数短暂回落
+ * 导致新请求插队、总并发超过上限。
+ */
+function createRequestGate(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+  const max = Math.max(1, Math.trunc(limit) || 1)
+  let active = 0
+  const waiting: Array<() => void> = []
+
+  return async function runWithGate<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= max) {
+      await new Promise<void>((resolve) => waiting.push(resolve))
+    } else {
+      active += 1
+    }
+
+    try {
+      return await task()
+    } finally {
+      const next = waiting.shift()
+      if (next) next()
+      else active -= 1
+    }
+  }
+}
+
+/** 轮询 GET 的全局并发闸门（上限与提交并发一致）。 */
+const pollRequestGate = createRequestGate(MAX_SUBMIT_CONCURRENCY)
+
+/**
  * 轮询任务直到终态。
  *
  * - 默认间隔 1.5s、上限 30 分钟；
@@ -1077,7 +1265,8 @@ export async function pollRecipeJob(
 
     let snapshot: RecipeJobSnapshot
     try {
-      snapshot = await fetchRecipeJob(jobId)
+      // 多批次同时轮询时，真正发出的 GET 仍受全局闸门限制。
+      snapshot = await pollRequestGate(() => fetchRecipeJob(jobId))
     } catch (error) {
       consecutiveErrors += 1
       if (consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) throw error
@@ -1156,8 +1345,41 @@ function parseStudioParams(raw: unknown): WorkflowParams | undefined {
 // Composable
 // ---------------------------------------------------------------------------
 
-/** 提交状态机。 */
+/** 提交状态机（“最近一批”兼容视图用）。 */
 export type RecipeRunStatus = 'idle' | 'submitting' | 'polling' | 'success' | 'failed'
+
+/** 单个批次的独立状态；每次 `submit()` 产生一批，各批互不覆盖。 */
+export type RecipeBatchStatus = 'submitting' | 'polling' | 'success' | 'failed'
+
+/**
+ * 一次提交对应的独立批次。
+ *
+ * - `groups` 是本批全部组合（含后来提交失败的组）；
+ * - `jobIds` / `results` 只属于本批，绝不与其他批合并；
+ * - `total` / `done` 是**本批**任务快照的汇总（轮询进度）；
+ * - `submitted` / `failed` 是组数口径（提交进度 / 失败组数）。
+ */
+export interface RecipeBatch {
+  id: string
+  createdAt: number
+  groups: RecipeBatchGroup[]
+  jobIds: number[]
+  status: RecipeBatchStatus
+  /** 轮询口径的图片总数（后端各 job total 之和；提交阶段为组数）。 */
+  total: number
+  /** 轮询口径的已完成数。 */
+  done: number
+  /** 已成功提交的组数（提交阶段进度用）。 */
+  submitted: number
+  /** 失败组数（提交失败 + 任务失败 + 轮询失败）。 */
+  failed: number
+  results: string[]
+  errorMessage: string
+  /** 提交阶段结束（全部组已 POST）的时间；未结束为 null。 */
+  submittedAt: number | null
+  /** 批次进入终态的时间；未结束为 null。 */
+  finishedAt: number | null
+}
 
 /** 单组提交结果（内部聚合用）。 */
 interface SubmitOutcome {
@@ -1173,25 +1395,85 @@ interface PollOutcome {
   error: unknown
 }
 
-/** 批量进度聚合：按 job 记录各组的 total / done。 */
-function describeBatchProgress(
-  aggregates: ReadonlyMap<number, { total: number; done: number }>,
-): RecipeProgress {
-  let total = 0
-  let done = 0
-  for (const value of aggregates.values()) {
-    total += Math.max(0, value.total)
-    done += Math.max(0, value.done)
+/** 批次是否仍在运行（提交中或轮询中）。 */
+export function isRecipeBatchRunning(batch: RecipeBatch): boolean {
+  return batch.status === 'submitting' || batch.status === 'polling'
+}
+
+/** 批次进度百分比：提交阶段按组数、轮询阶段按图片数；无法计算时返回 null。 */
+export function recipeBatchPercent(batch: RecipeBatch): number | null {
+  if (batch.status === 'submitting') {
+    if (batch.groups.length <= 0) return 0
+    return Math.min(
+      100,
+      Math.max(0, Math.round((batch.submitted / batch.groups.length) * 100)),
+    )
   }
-  if (total <= 0) {
-    return { stage: 'running', message: '正在出图…', percent: null }
+  if (batch.total <= 0) return batch.status === 'success' ? 100 : null
+  return Math.min(100, Math.max(0, Math.round((batch.done / batch.total) * 100)))
+}
+
+/**
+ * 批次状态文案（页面头部展示）。
+ *
+ * 语义顺序：提交中 → 排队中 → 出图中 N/M → 已完成 / 部分失败 / 失败。
+ */
+export function describeRecipeBatchStatus(batch: RecipeBatch): string {
+  switch (batch.status) {
+    case 'submitting':
+      return `提交中（${batch.submitted}/${batch.groups.length} 组）`
+    case 'polling':
+      if (batch.total <= 0) return '排队中'
+      return batch.done <= 0 ? '排队中' : `出图中 ${batch.done}/${batch.total}`
+    case 'success':
+      return `已完成（${batch.results.length} 张）`
+    case 'failed':
+      return batch.results.length
+        ? `部分失败（成功 ${batch.results.length} 张）`
+        : '失败'
   }
-  const percent = Math.min(100, Math.max(0, Math.round((done / total) * 100)))
+}
+
+/** 批次进度 → 兼容视图用的 {@link RecipeProgress}。 */
+function describeBatchProgressView(batch: RecipeBatch): RecipeProgress {
+  if (batch.status === 'submitting') {
+    return {
+      stage: 'submit',
+      message: `正在提交 ${batch.submitted}/${batch.groups.length} 组…`,
+      percent: recipeBatchPercent(batch),
+    }
+  }
+  if (batch.status === 'polling') {
+    const percent = recipeBatchPercent(batch)
+    if (batch.done <= 0) {
+      return {
+        stage: 'queued',
+        message: `已提交 ${batch.jobIds.length} 个任务，正在排队…`,
+        percent,
+      }
+    }
+    return {
+      stage: 'running',
+      message: `正在出图…（已完成 ${batch.done}/${batch.total}）`,
+      percent,
+    }
+  }
+  if (batch.status === 'success') {
+    return { stage: 'done', message: `已完成 ${batch.results.length} 张`, percent: 100 }
+  }
   return {
-    stage: 'running',
-    message: `正在出图…（已完成 ${done}/${total}）`,
-    percent,
+    stage: 'done',
+    message: batch.results.length
+      ? `部分任务失败（成功 ${batch.results.length} 张）`
+      : '生成失败',
+    percent: percentOfCompleted(batch),
   }
+}
+
+/** 失败批次在兼容视图里的百分比：有 total 就用 done/total，否则沿用已有值。 */
+function percentOfCompleted(batch: RecipeBatch): number | null {
+  if (batch.total <= 0) return null
+  return Math.min(100, Math.max(0, Math.round((batch.done / batch.total) * 100)))
 }
 
 /**
@@ -1209,10 +1491,34 @@ export function useReferenceRecipe() {
    * 已选工作流（有序、去重；契约 C-REF-WF-SLOTS@1 的 `workflows: string[]`）。
    *
    * 空数组表示「使用后端默认工作流」：计数按 1 条默认项，UI 另有明示。
+   *
+   * 初始化从 **sessionStorage** 恢复：同一会话内切页签（SPA）、刷新、从库页
+   * 返回合成台都保留多选；关闭标签页后浏览器自然清空。恢复出来的路径随后
+   * 必须再走目录存在性 + `slots` 三态校验（见 `loadStudioWorkflows` 与
+   * `filledSlotRoles` 的 watch）。
    */
-  const workflowSelection = ref<string[]>([])
+  const restoredSessionWorkflows = readWorkflowSelectionSession()
+  /** 会话里是否有有效记忆（含 `{ workflows: [] }` 的主动清空）。 */
+  const hasSessionWorkflowRestore = hasWorkflowSelectionSession()
+  const workflowSelection = ref<string[]>(
+    hasSessionWorkflowRestore ? restoredSessionWorkflows : [],
+  )
   const workflowsLoading = ref(false)
   const workflowsError = ref('')
+  /**
+   * 会话恢复尚未完成：期间忽略 `pb.reference_studio_v1.workflow` 的单选回填，
+   * 否则页面用「上次的代表工作流」会把刚恢复的多选（含空选择）压成单条。
+   */
+  let pendingSessionWorkflowRestore = hasSessionWorkflowRestore
+  /** 恢复校验尚未给出提示：用于把「恢复」文案与用户操作导致的取消文案区分开。 */
+  let sessionRestoreNoticePending = restoredSessionWorkflows.length > 0
+
+  /** 工作流多选变化即写会话记忆（去重、保序）；只碰 sessionStorage。 */
+  watch(
+    workflowSelection,
+    (selection) => writeWorkflowSelectionSession(selection),
+    { deep: true, flush: 'sync' },
+  )
 
   /** 默认工作流路径：后端 `default` 在列表内时用它，否则回落首条；空列表为 ''。 */
   const workflowDefaultPath = computed(() =>
@@ -1228,6 +1534,9 @@ export function useReferenceRecipe() {
   const workflowPath = computed<string>({
     get: () => workflowSelection.value[0] ?? workflowDefaultPath.value,
     set: (value: string) => {
+      // 会话多选恢复期间忽略单选回填：页面会在 setup 阶段用 localStorage 的
+      // `pb.reference_studio_v1.workflow`（首条）做恢复，不能让它覆盖会话多选。
+      if (pendingSessionWorkflowRestore) return
       workflowSelection.value = value ? [value] : []
     },
   })
@@ -1269,17 +1578,6 @@ export function useReferenceRecipe() {
   /** 基础种子；第 i 组 = baseSeed + i。 */
   const baseSeed = ref<number>(DEFAULT_RECIPE_SEED)
 
-  const status = ref<RecipeRunStatus>('idle')
-  const progress = ref<RecipeProgress>({
-    stage: 'submit',
-    message: '',
-    percent: null,
-  })
-  const jobId = ref<number | null>(null)
-  const jobIds = ref<number[]>([])
-  const resultUrls = ref<string[]>([])
-  const previousResultUrl = ref('')
-  const errorMessage = ref('')
   /** 非空时页面渲染降级确认框；用户确认切换后才继续提交。 */
   const workflowDowngrade = ref<WorkflowDowngradePrompt | null>(null)
   /** 工作流因槽位变化被自动取消时的提示文案（页面转成 toast，绝不静默移除）。 */
@@ -1377,7 +1675,61 @@ export function useReferenceRecipe() {
     () => !caps.value.quality && !caps.value.orientation,
   )
 
-  const busy = computed(() => status.value === 'submitting' || status.value === 'polling')
+  const status = ref<RecipeRunStatus>('idle')
+  const progress = ref<RecipeProgress>({
+    stage: 'submit',
+    message: '',
+    percent: null,
+  })
+  const jobId = ref<number | null>(null)
+  const jobIds = ref<number[]>([])
+  const resultUrls = ref<string[]>([])
+  const previousResultUrl = ref('')
+  const errorMessage = ref('')
+
+  // -------------------------------------------------------------------------
+  // 多批次真源（每次 submit 一批，各批独立轮询、互不覆盖）
+  // -------------------------------------------------------------------------
+
+  /** 批次列表（创建顺序）；页面按批分组展示结果。 */
+  const batches = ref<RecipeBatch[]>([])
+  /** 批次 id 序号（仅内存，不持久化）。 */
+  let batchSequence = 0
+  /** 提交前校验错误（尚未创建批次）；与批次内错误分开，避免误挂到上一批。 */
+  const formError = ref('')
+
+  /** 是否**有任意批次处于提交阶段**（submit 只拦这类重复点击）。 */
+  const submitting = computed(() =>
+    batches.value.some((batch) => batch.status === 'submitting'),
+  )
+  /** 是否**有任意批次处于轮询阶段**（不阻止再次提交）。 */
+  const polling = computed(() =>
+    batches.value.some((batch) => batch.status === 'polling'),
+  )
+  /** 整体忙碌语义（仅用于“停止 / 生成中”类提示，不参与 canSubmit）。 */
+  const busy = computed(() => submitting.value || polling.value)
+
+  /** 最近创建的批次（兼容视图 / 状态文案都看它）。 */
+  function latestBatch(): RecipeBatch | null {
+    return batches.value[batches.value.length - 1] ?? null
+  }
+
+  /**
+   * 把批次状态同步到“最近一批”兼容视图。
+   *
+   * 只有**最新批次**可以写单值视图：旧批次完成时绝不能覆盖用户刚提交的新批次，
+   * 否则进度 / 结果 / 错误会串批。
+   */
+  function syncLatestView(batch: RecipeBatch): void {
+    if (latestBatch()?.id !== batch.id) return
+    status.value = batch.status
+    progress.value = describeBatchProgressView(batch)
+    jobIds.value = [...batch.jobIds]
+    jobId.value = batch.jobIds[0] ?? null
+    resultUrls.value = [...batch.results]
+    errorMessage.value = batch.errorMessage
+  }
+
   const progressPercent = computed<number | null>(() => {
     const value = progress.value.percent
     if (typeof value !== 'number' || !Number.isFinite(value)) return null
@@ -1385,9 +1737,15 @@ export function useReferenceRecipe() {
   })
   const primaryResultUrl = computed(() => resultUrls.value[0] ?? '')
   const selectedCount = computed(() => draft.totalSelected.value)
+  /**
+   * 可否提交：只拦「正在提交中」的重复点击。
+   *
+   * 轮询期间 `polling === true` **不再**禁用按钮——ComfyUI 支持随时入队，
+   * 新任务会进入 `queue_pending` 并 GPU 串行执行。
+   */
   const canSubmit = computed(
     () =>
-      !busy.value &&
+      !submitting.value &&
       !workflowsLoading.value &&
       effectiveWorkflows.value.length > 0 &&
       activeSlotCount.value > 0 &&
@@ -1605,6 +1963,8 @@ export function useReferenceRecipe() {
       workflowsError.value = `读取工作流列表失败。原因：${message}。下一步：点击「重试」重新读取，或确认后端服务在线。`
     } finally {
       workflowsLoading.value = false
+      // 目录已给出结论：此后 `workflowPath` 的单选写入都来自用户操作 / 降级确认。
+      pendingSessionWorkflowRestore = false
     }
   }
 
@@ -1651,6 +2011,10 @@ export function useReferenceRecipe() {
   /**
    * 槽位变化后，已勾选但不再适用的工作流**自动取消并提示**（绝不静默）。
    *
+   * 该 watch 同时承担**会话恢复后的两级校验**：目录里已不存在的路径静默剔除；
+   * 对当前已选槽位不适用（三态）的项丢弃并 toast。刷新场景下 draft 三槽要等库
+   * 加载完成后才 hydrate，所以首次校验可能在这里（槽位角色可见时）才真正生效。
+   *
    * 使用默认 flush（组件更新前）而非 sync：`loadStudioWorkflows` 会在赋值
    * `workflows` 后同步过滤失效路径，这时不应再对「目录里已不存在的路径」告警；
    * 回调只针对「目录中存在但 slots 不满足」的项。
@@ -1658,7 +2022,11 @@ export function useReferenceRecipe() {
   watch(
     [filledSlotRoles, workflows],
     () => {
-      if (!workflowSelection.value.length) return
+      if (!workflowSelection.value.length) {
+        // 恢复出的选择已被目录过滤清空：恢复流程结束，避免下次误用恢复文案。
+        sessionRestoreNoticePending = false
+        return
+      }
       if (workflows.value.length === 0) return
 
       // 只取消「对新槽位集合已不适用」的项；仍适用的工作流保持选中。
@@ -1668,16 +2036,23 @@ export function useReferenceRecipe() {
         workflows.value,
         filledSlotRoles.value,
       )
-      if (!removed.length) return
-
-      workflowSelection.value = kept
       const reasons = removed.map((item) => item.reason).filter(Boolean)
-      // 目录中已消失的路径静默剔除（由 loadStudioWorkflows 负责），不产生误导性 toast。
-      if (!reasons.length) return
+      const restoring = sessionRestoreNoticePending
+      if (removed.length) workflowSelection.value = kept
 
-      workflowSelectionNotice.value =
-        `已自动取消 ${reasons.length} 个工作流。原因：${reasons.join('；')}。` +
-        '下一步：改选支持这些槽位的工作流，或清空对应槽位后重新勾选。'
+      if (!reasons.length) {
+        // 目录中已消失的路径静默剔除（由 loadStudioWorkflows 负责），不产生误导性 toast。
+        // draft 已就绪（当前确实有槽位）时，可认为本次恢复校验已经完成。
+        if (draft.totalSelected.value > 0) sessionRestoreNoticePending = false
+        return
+      }
+
+      sessionRestoreNoticePending = false
+      // 恢复阶段被丢弃的项用「已跳过」文案，避免被误读成用户刚取消。
+      workflowSelectionNotice.value = restoring
+        ? describeWorkflowSelectionRestoreNotice(reasons)
+        : `已自动取消 ${reasons.length} 个工作流。原因：${reasons.join('；')}。` +
+          '下一步：改选支持这些槽位的工作流，或清空对应槽位后重新勾选。'
     },
   )
 
@@ -1714,31 +2089,55 @@ export function useReferenceRecipe() {
   }
 
   /** 清空上一次的运行结果（重试前调用）。 */
+  /**
+   * 清空「最近一批」兼容视图（重试前调用）。
+   *
+   * **不**清空 `batches`：批次是真源，其他仍在跑的批次不能被重试抹掉。
+   */
   function clearRunState(): void {
+    formError.value = ''
     status.value = 'idle'
     progress.value = { stage: 'submit', message: '', percent: null }
     errorMessage.value = ''
-    resultUrls.value = []
-    jobIds.value = []
-    jobId.value = null
     workflowDowngrade.value = null
   }
 
-  /**
-   * 逐组提交 + 聚合轮询。
-   *
-   * 提交并发上限 2；每组独立 job，种子已在分组阶段派生。
-   * 返回 true 表示全部组成功且至少有一张结果图。
-   */
-  async function runBatch(groups: RecipeBatchGroup[]): Promise<boolean> {
-    status.value = 'submitting'
-    progress.value = {
-      stage: 'submit',
-      message: `正在提交 0/${groups.length} 组…`,
-      percent: 0,
-    }
+  /** 提交前校验失败：不创建批次，只记录表单错误（页面单独展示）。 */
+  function rejectBeforeSubmit(message: string): null {
+    formError.value = message
+    errorMessage.value = message
+    status.value = 'failed'
+    return null
+  }
 
-    let submittedCount = 0
+  /**
+   * 执行**一个独立批次**：逐组提交 + 聚合轮询。
+   *
+   * - 提交并发上限 2；同一时刻只会有一个批次处于提交阶段（`submit()` 拦截），
+   *   因此全局 POST 并发同样不会超过 2；
+   * - 每个批次有自己的 `jobIds` / `results` / 进度聚合，**绝不与其他批合并**；
+   * - 轮询阶段的 GET 由模块级 `pollRequestGate` 做全局并发上限（最多 2 个请求）；
+   * - 返回批次对象（含终态），页面据此给本批 toast，不依赖“最近一批”视图。
+   */
+  async function runBatch(groups: RecipeBatchGroup[]): Promise<RecipeBatch> {
+    const batch = reactive<RecipeBatch>({
+      id: `batch-${++batchSequence}`,
+      createdAt: Date.now(),
+      groups: [...groups],
+      jobIds: [],
+      status: 'submitting',
+      total: groups.length,
+      done: 0,
+      submitted: 0,
+      failed: 0,
+      results: [],
+      errorMessage: '',
+      submittedAt: null,
+      finishedAt: null,
+    })
+    batches.value.push(batch)
+    syncLatestView(batch)
+
     const outcomes = await runWithConcurrency(
       groups,
       MAX_SUBMIT_CONCURRENCY,
@@ -1763,12 +2162,8 @@ export function useReferenceRecipe() {
               response?.errors?.filter(Boolean).join('；') || '后端未返回任务编号'
             throw new RecipeSubmitError('提交出图任务失败', 0, detail)
           }
-          submittedCount += 1
-          progress.value = {
-            stage: 'submit',
-            message: `正在提交 ${submittedCount}/${groups.length} 组…`,
-            percent: Math.round((submittedCount / groups.length) * 100),
-          }
+          batch.submitted += 1
+          syncLatestView(batch)
           return { group, response, error: null }
         } catch (error) {
           return { group, response: null, error }
@@ -1782,26 +2177,40 @@ export function useReferenceRecipe() {
     )
     const submitFailures = outcomes.filter((outcome) => outcome.response === null)
 
+    batch.jobIds = submitted.map((outcome) => outcome.response.job_id)
+    batch.failed = submitFailures.length
+
     if (!submitted.length) {
       const first = submitFailures[0]
-      errorMessage.value = describeSubmitFailure(
+      batch.status = 'failed'
+      batch.errorMessage = describeSubmitFailure(
         first?.error ?? new RecipeSubmitError('提交出图任务失败', 0, '提交分组为空'),
       )
-      status.value = 'failed'
-      progress.value = { stage: 'done', message: '提交失败', percent: null }
-      return false
+      batch.finishedAt = Date.now()
+      syncLatestView(batch)
+      return batch
     }
 
-    jobIds.value = submitted.map((outcome) => outcome.response.job_id)
-    jobId.value = jobIds.value[0] ?? null
-    status.value = 'polling'
+    batch.status = 'polling'
+    batch.total = submitted.length
+    batch.done = 0
+    batch.submittedAt = Date.now()
+    syncLatestView(batch)
 
+    // 本批 job 的进度聚合（独立 map，旧批次不会写进这里）。
     const aggregates = new Map<number, { total: number; done: number }>()
-    for (const id of jobIds.value) aggregates.set(id, { total: 1, done: 0 })
-    progress.value = {
-      stage: 'queued',
-      message: `已提交 ${jobIds.value.length} 个任务，正在排队…`,
-      percent: 0,
+    for (const id of batch.jobIds) aggregates.set(id, { total: 1, done: 0 })
+
+    /** 只汇总**本批** job 的 total / done。 */
+    function updateBatchAggregates(): void {
+      let total = 0
+      let done = 0
+      for (const value of aggregates.values()) {
+        total += Math.max(0, value.total)
+        done += Math.max(0, value.done)
+      }
+      batch.total = Math.max(0, total)
+      batch.done = Math.max(0, done)
     }
 
     const pollOutcomes = await runWithConcurrency(
@@ -1816,7 +2225,8 @@ export function useReferenceRecipe() {
                 total: Number(next.total) || 1,
                 done: Number(next.done_count) || 0,
               })
-              progress.value = describeBatchProgress(aggregates)
+              updateBatchAggregates()
+              syncLatestView(batch)
             },
           })
           return { outcome, snapshot, error: null }
@@ -1835,8 +2245,10 @@ export function useReferenceRecipe() {
       if (result.snapshot && isJobSucceeded(result.snapshot)) {
         urls.push(...recipeJobResultUrls(result.snapshot))
       } else if (result.snapshot) {
+        batch.failed += 1
         failureMessages.push(describeJobFailure(result.snapshot))
       } else {
+        batch.failed += 1
         failureMessages.push(
           describePollFailure(result.error, result.outcome.response.job_id),
         )
@@ -1851,39 +2263,38 @@ export function useReferenceRecipe() {
       )
     }
 
-    resultUrls.value = [...new Set(urls)]
+    batch.results = [...new Set(urls)]
     if (failureMessages.length) {
-      errorMessage.value = failureMessages.slice(0, 3).join('\n')
-      status.value = 'failed'
-      progress.value = {
-        stage: 'done',
-        message: `部分任务失败（成功 ${resultUrls.value.length} 张）`,
-        percent: progressPercent.value,
-      }
-      return false
+      batch.status = 'failed'
+      batch.errorMessage = failureMessages.slice(0, 3).join('\n')
+      batch.finishedAt = Date.now()
+      syncLatestView(batch)
+      return batch
     }
 
-    if (!resultUrls.value.length) {
-      errorMessage.value = describeMissingResult(
-        lastSnapshot ?? { id: jobId.value ?? 0, status: 'done', total: 0, done_count: 0, error_count: 0, items: [] },
+    if (!batch.results.length) {
+      batch.status = 'failed'
+      batch.errorMessage = describeMissingResult(
+        lastSnapshot ?? {
+          id: batch.jobIds[0] ?? 0,
+          status: 'done',
+          total: 0,
+          done_count: 0,
+          error_count: 0,
+          items: [],
+        },
       )
-      status.value = 'failed'
-      progress.value = {
-        stage: 'done',
-        message: '任务已完成，但没有可展示的结果图',
-        percent: 100,
-      }
-      return false
+      batch.finishedAt = Date.now()
+      syncLatestView(batch)
+      return batch
     }
 
-    previousResultUrl.value = resultUrls.value[0]
-    status.value = 'success'
-    progress.value = {
-      stage: 'done',
-      message: `已完成 ${resultUrls.value.length} 张`,
-      percent: 100,
-    }
-    return true
+    batch.done = batch.total
+    batch.status = 'success'
+    batch.finishedAt = Date.now()
+    previousResultUrl.value = batch.results[0]
+    syncLatestView(batch)
+    return batch
   }
 
   /** 用当前工作流与当前选择构造分组（提交前 / 强制提交共用）。 */
@@ -1905,24 +2316,28 @@ export function useReferenceRecipe() {
   /**
    * 提交入口。
    *
-   * 返回 false 有两种含义：真的失败（`errorMessage` 已写好三句式文案），或
-   * 需要先过降级确认框（`workflowDowngrade` 非空，页面据此弹窗）。
+   * **只拦截“正在提交中”的重复点击**（防抖 / 防连点）；轮询期间允许再次提交，
+   * 新批次会立刻入队（ComfyUI 串行执行，无需等上一批出图）。
+   *
+   * 返回 `null` 表示没有创建批次：校验失败（`formError` 已写好三句式文案）或
+   * 需要先过降级确认框（`workflowDowngrade` 非空）。成功创建批次时返回该批次对象。
    */
-  async function submit(): Promise<boolean> {
-    if (busy.value) return false
+  async function submit(): Promise<RecipeBatch | null> {
+    if (submitting.value) return null
     workflowDowngrade.value = null
+    formError.value = ''
     errorMessage.value = ''
-    // 先记住上一次成功的结果，再清空本次结果：失败区「查看上一张结果」依赖它。
-    if (resultUrls.value[0]) previousResultUrl.value = resultUrls.value[0]
-    resultUrls.value = []
-    jobIds.value = []
-    jobId.value = null
+
+    // 先记住上一次展示过的结果，再开始新批：失败区「查看上一张结果」依赖它。
+    const lastResultUrl =
+      [...batches.value].reverse().flatMap((batch) => batch.results)[0] ??
+      resultUrls.value[0]
+    if (lastResultUrl) previousResultUrl.value = lastResultUrl
 
     if (effectiveWorkflows.value.length === 0) {
-      errorMessage.value =
-        '无法提交。原因：尚未选择出图工作流。下一步：在工作流下拉中选择一个可用工作流后重试。'
-      status.value = 'failed'
-      return false
+      return rejectBeforeSubmit(
+        '无法提交。原因：尚未选择出图工作流。下一步：在工作流下拉中选择一个可用工作流后重试。',
+      )
     }
 
     // 工作流角色能力缺口的最后一道拦截（watch 已自动取消，这里防竞态）。
@@ -1930,24 +2345,22 @@ export function useReferenceRecipe() {
     for (const workflow of effectiveWorkflows.value) {
       const { kind, role } = evaluateWorkflowApplicability(workflow, filledSlotRoles.value)
       if (!kind || !role) continue
-      errorMessage.value =
+      return rejectBeforeSubmit(
         `无法提交。原因：${describeWorkflowUnavailable(kind, role, workflow.name)}。` +
-        '下一步：取消勾选该工作流，或清空对应槽位后重试。'
-      status.value = 'failed'
-      return false
+          '下一步：取消勾选该工作流，或清空对应槽位后重试。',
+      )
     }
 
     if (activeSlotCount.value === 0) {
-      errorMessage.value =
-        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。'
-      status.value = 'failed'
-      return false
+      return rejectBeforeSubmit(
+        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图，或上传第 4 张后再提交。',
+      )
     }
 
     if (batchOverLimit.value) {
-      errorMessage.value = `无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`
-      status.value = 'failed'
-      return false
+      return rejectBeforeSubmit(
+        `无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`,
+      )
     }
 
     // 能力预判：M（非空槽数）< N（工作流输入数）时先确认，不做静默自动切换。
@@ -1967,7 +2380,7 @@ export function useReferenceRecipe() {
             workflowInapplicableRole(candidate, filledSlotRoles.value) === null,
         ),
       }
-      return false
+      return null
     }
 
     const groups = buildCurrentBatchGroups()
@@ -1975,8 +2388,8 @@ export function useReferenceRecipe() {
   }
 
   /** 降级确认：切到候选工作流（按新 caps 重建尺寸）后继续提交。 */
-  async function confirmWorkflowDowngrade(path: string): Promise<boolean> {
-    if (!workflowDowngrade.value) return false
+  async function confirmWorkflowDowngrade(path: string): Promise<RecipeBatch | null> {
+    if (!workflowDowngrade.value) return null
     workflowDowngrade.value = null
     workflowPath.value = path
     // watch 是 sync，但显式再对齐一次，保证提交体不会带旧工作流的尺寸参数。
@@ -1990,8 +2403,8 @@ export function useReferenceRecipe() {
    * 空槽允许提交是硬要求；后端会尝试裁剪工作流副本，成功则照常出图，
    * 无法裁剪时返回 400（原文由 `describeSubmitFailure` 展示给用户）。
    */
-  async function confirmCurrentWorkflowDowngrade(): Promise<boolean> {
-    if (!workflowDowngrade.value) return false
+  async function confirmCurrentWorkflowDowngrade(): Promise<RecipeBatch | null> {
+    if (!workflowDowngrade.value) return null
     workflowDowngrade.value = null
     return runBatch(buildCurrentBatchGroups())
   }
@@ -1999,12 +2412,13 @@ export function useReferenceRecipe() {
   /** 取消降级：不提交，保持当前工作流与选择。 */
   function cancelWorkflowDowngrade(): void {
     workflowDowngrade.value = null
+    formError.value = ''
     errorMessage.value = ''
     status.value = 'idle'
   }
 
-  /** 重试：清空失败态后重新提交（沿用当前槽位与设置）。 */
-  async function retry(): Promise<boolean> {
+  /** 重试：清掉表单错误后重新提交（沿用当前槽位与设置，产生一个独立新批次）。 */
+  async function retry(): Promise<RecipeBatch | null> {
     clearRunState()
     return submit()
   }
@@ -2083,6 +2497,11 @@ export function useReferenceRecipe() {
     previousResultUrl,
     errorMessage,
     busy,
+    // 多批次真源：页面按批展示结果，各批状态 / 结果互不覆盖。
+    batches,
+    submitting,
+    polling,
+    formError,
     selectedCount,
     canSubmit,
     submit,

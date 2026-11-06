@@ -14,7 +14,9 @@
  * 的用例见 `useReferenceRecipeBatch.spec.ts`。
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '@/api/reference'
 
@@ -23,6 +25,7 @@ import {
   MAX_CONSECUTIVE_POLL_ERRORS,
   RecipeSubmitError,
   RecipeTimeoutError,
+  WORKFLOW_SELECTION_SESSION_KEY,
   buildRecipeRequest,
   costumeDimensionForBodyMode,
   costumeLibraryOf,
@@ -32,15 +35,23 @@ import {
   describePollFailure,
   describePreviewFailure,
   describeSubmitFailure,
+  describeWorkflowSelectionRestoreNotice,
+  hasWorkflowSelectionSession,
   isJobSucceeded,
   isJobTerminal,
   normalizeRecipeStyle,
+  normalizeWorkflowSelectionPaths,
+  parseWorkflowSelectionSession,
   pollRecipeJob,
   previewRecipePrompt,
+  pruneInapplicableWorkflowSelection,
+  readWorkflowSelectionSession,
   recipeJobResultUrls,
   resolveInitialWorkflowPath,
   submitRecipe,
+  useReferenceRecipe,
   workflowDisplayName,
+  writeWorkflowSelectionSession,
 } from './useReferenceRecipe'
 import type {
   RecipeJobSnapshot,
@@ -532,5 +543,270 @@ describe('提示词 dry-run 预览', () => {
       new RecipeSubmitError('获取提示词预览失败', 200, '响应不是有效的 JSON，或缺少 prompt 字段'),
     )
     expect(message).toContain('下一步：')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 工作流多选的会话级记忆（sessionStorage 键
+// pb.reference_studio_workflows_session_v1；2026-11-06 用户拍板）
+// ---------------------------------------------------------------------------
+
+/** 内存版 Storage：用于断言只写会话记忆键、值与容错行为。 */
+function memoryStorage(options: { throwOnWrite?: boolean; throwOnRead?: boolean } = {}): {
+  storage: Storage
+  values: Map<string, string>
+  writes: string[]
+} {
+  const values = new Map<string, string>()
+  const writes: string[] = []
+  const storage: Storage = {
+    get length(): number {
+      return values.size
+    },
+    clear(): void {
+      values.clear()
+    },
+    getItem(key: string): string | null {
+      if (options.throwOnRead) throw new Error('SecurityError')
+      return values.has(key) ? (values.get(key) as string) : null
+    },
+    key(index: number): string | null {
+      return [...values.keys()][index] ?? null
+    },
+    removeItem(key: string): void {
+      values.delete(key)
+    },
+    setItem(key: string, value: string): void {
+      if (options.throwOnWrite) throw new Error('QuotaExceededError')
+      writes.push(key)
+      values.set(key, value)
+    },
+  }
+  return { storage, values, writes }
+}
+
+describe('工作流多选的会话级记忆（sessionStorage）', () => {
+  it('键名带版本后缀，写入只碰这一个键（不混入 pb.reference_studio_v1）', () => {
+    expect(WORKFLOW_SELECTION_SESSION_KEY).toBe(
+      'pb.reference_studio_workflows_session_v1',
+    )
+
+    const { storage, values, writes } = memoryStorage()
+    writeWorkflowSelectionSession(['/A.api.json', '/B.api.json'], storage)
+
+    expect(writes).toEqual([WORKFLOW_SELECTION_SESSION_KEY])
+    expect([...values.keys()]).toEqual([WORKFLOW_SELECTION_SESSION_KEY])
+    expect([...values.keys()]).not.toContain('pb.reference_studio_v1')
+    expect(JSON.parse(values.get(WORKFLOW_SELECTION_SESSION_KEY) as string)).toEqual({
+      workflows: ['/A.api.json', '/B.api.json'],
+    })
+  })
+
+  it('normalize 去首尾空白、丢弃空串与非字符串、保序去重', () => {
+    expect(
+      normalizeWorkflowSelectionPaths([
+        '  /A.api.json  ',
+        '',
+        '   ',
+        '/A.api.json',
+        '/B.api.json',
+        42,
+        null,
+        '/B.api.json',
+      ]),
+    ).toEqual(['/A.api.json', '/B.api.json'])
+  })
+
+  it('parse 容错：非法 JSON / 非对象 / workflows 非数组一律回落空数组', () => {
+    expect(parseWorkflowSelectionSession(null)).toEqual([])
+    expect(parseWorkflowSelectionSession('')).toEqual([])
+    expect(parseWorkflowSelectionSession('   ')).toEqual([])
+    expect(parseWorkflowSelectionSession('not-json')).toEqual([])
+    expect(parseWorkflowSelectionSession('[]')).toEqual([])
+    expect(parseWorkflowSelectionSession('"text"')).toEqual([])
+    expect(parseWorkflowSelectionSession('null')).toEqual([])
+    expect(parseWorkflowSelectionSession('{"workflows":"/A"}')).toEqual([])
+    expect(parseWorkflowSelectionSession('{"workflows":null}')).toEqual([])
+    // 结构正确时按同一口径归一（脏项忽略、重复项只留首次）
+    expect(
+      parseWorkflowSelectionSession(
+        JSON.stringify({ workflows: [' /B.api.json ', '/A.api.json', '/B.api.json', 1] }),
+      ),
+    ).toEqual(['/B.api.json', '/A.api.json'])
+  })
+
+  it('write → read 往返；空选择写成 workflows: []（关闭标签页由浏览器清空）', () => {
+    const { storage, values } = memoryStorage()
+
+    writeWorkflowSelectionSession(['/B.api.json', '/A.api.json', '/B.api.json'], storage)
+    expect(readWorkflowSelectionSession(storage)).toEqual(['/B.api.json', '/A.api.json'])
+
+    writeWorkflowSelectionSession([], storage)
+    expect(JSON.parse(values.get(WORKFLOW_SELECTION_SESSION_KEY) as string)).toEqual({
+      workflows: [],
+    })
+    expect(readWorkflowSelectionSession(storage)).toEqual([])
+  })
+
+  it('存储不可用 / 读写抛错时静默降级，不阻塞页面', () => {
+    expect(readWorkflowSelectionSession(null)).toEqual([])
+    expect(() => writeWorkflowSelectionSession(['/A.api.json'], null)).not.toThrow()
+
+    const broken = memoryStorage({ throwOnRead: true, throwOnWrite: true })
+    expect(readWorkflowSelectionSession(broken.storage)).toEqual([])
+    expect(() => writeWorkflowSelectionSession(['/A.api.json'], broken.storage)).not.toThrow()
+    expect(broken.writes).toEqual([])
+  })
+
+  it('has：有效多选与「主动清空」都算存在；非法 JSON / 结构不符算不存在', () => {
+    const { storage } = memoryStorage()
+    expect(hasWorkflowSelectionSession(storage)).toBe(false)
+    expect(hasWorkflowSelectionSession(null)).toBe(false)
+
+    writeWorkflowSelectionSession(['/A.api.json'], storage)
+    expect(hasWorkflowSelectionSession(storage)).toBe(true)
+
+    // 用户本会话主动清空多选：也要算「存在」，否则刷新后会被 localStorage 单选回填。
+    writeWorkflowSelectionSession([], storage)
+    expect(hasWorkflowSelectionSession(storage)).toBe(true)
+
+    storage.setItem(WORKFLOW_SELECTION_SESSION_KEY, 'not-json')
+    expect(hasWorkflowSelectionSession(storage)).toBe(false)
+
+    storage.setItem(WORKFLOW_SELECTION_SESSION_KEY, JSON.stringify({ workflows: '/A' }))
+    expect(hasWorkflowSelectionSession(storage)).toBe(false)
+  })
+
+  it('恢复提示文案明确是「恢复 / 已跳过」，不写成用户刚取消', () => {
+    const message = describeWorkflowSelectionRestoreNotice([
+      '工作流「四输入」缺少服装输入，不适用于当前已选服装',
+    ])
+
+    expect(message).toContain('本次会话恢复')
+    expect(message).toContain('已跳过')
+    expect(message).toContain('原因：')
+    expect(message).toContain('下一步：')
+    expect(message).not.toContain('取消')
+  })
+})
+
+describe('会话恢复的两级校验（目录存在性 + slots 三态）', () => {
+  it('目录缺失静默丢弃；不适用项带原因；undefined 保留；结果保序', () => {
+    const unknownSlots = workflow('/unknown-slots') // slots === undefined：不判定
+    const uiFormat = workflow('/ui-format', { slots: [] }) // []：角色不可识别
+    const portraitOnly = workflow('/portrait-only', { slots: ['portrait'] })
+    const portraitAndCostume = workflow('/portrait-costume', {
+      slots: ['portrait', 'costume'],
+    })
+
+    // 会话恢复出来的顺序：先是一条目录里已删除的路径，再是各类三态样本。
+    const restored = [
+      '/deleted',
+      '/unknown-slots',
+      '/ui-format',
+      '/portrait-only',
+      '/portrait-costume',
+    ]
+    const result = pruneInapplicableWorkflowSelection(
+      restored,
+      [unknownSlots, uiFormat, portraitOnly, portraitAndCostume],
+      ['portrait', 'costume'],
+    )
+
+    // 目录缺失项只有空原因（调用方静默，不 toast）；其余保留或给出原因。
+    expect(result.removed.filter((item) => !item.reason)).toEqual([
+      { path: '/deleted', reason: '' },
+    ])
+    expect(result.kept).toEqual(['/unknown-slots', '/portrait-costume'])
+    expect(result.removed.filter((item) => item.reason)).toEqual([
+      expect.objectContaining({
+        path: '/ui-format',
+        reason: expect.stringContaining('无法识别角色'),
+      }),
+      expect.objectContaining({
+        path: '/portrait-only',
+        reason: expect.stringContaining('缺少服装输入'),
+      }),
+    ])
+  })
+
+  it('槽位全空时恢复的多选不因适用性被丢弃（三态判定只在有非空槽位时生效）', () => {
+    const uiFormat = workflow('/ui-format', { slots: [] })
+    const restored = ['/deleted', '/ui-format']
+    const result = pruneInapplicableWorkflowSelection(restored, [uiFormat], [])
+
+    expect(result.kept).toEqual(['/ui-format'])
+    // 目录缺失仍然剔除（静默），但「不可识别」在无槽位时不做判定。
+    expect(result.removed).toEqual([{ path: '/deleted', reason: '' }])
+  })
+})
+
+describe('useReferenceRecipe 的会话恢复入口', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    sessionStorage.clear()
+  })
+
+  /**
+   * 在真实组件 setup 中运行 composable。
+   *
+   * composable 内部注册了 `onBeforeUnmount`，直接在测试体调用会触发
+   * 「no active component instance」告警；这里挂载 / 卸载一个空组件，
+   * 让生命周期与页面一致。
+   */
+  function runWithRecipe<T>(fn: (recipe: ReturnType<typeof useReferenceRecipe>) => T): T {
+    let result!: T
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          result = fn(useReferenceRecipe())
+          return () => h('div')
+        },
+      }),
+    )
+    wrapper.unmount()
+    return result
+  }
+
+  it('workflowSelection 初始化从 sessionStorage 读取（去重保序）', () => {
+    sessionStorage.setItem(
+      WORKFLOW_SELECTION_SESSION_KEY,
+      JSON.stringify({ workflows: ['/B.api.json', ' /A.api.json ', '/B.api.json'] }),
+    )
+
+    const selection = runWithRecipe((recipe) => recipe.workflowSelection.value)
+    expect(selection).toEqual(['/B.api.json', '/A.api.json'])
+  })
+
+  it('恢复期间 localStorage 的单选回填（workflowPath）不覆盖多选', () => {
+    sessionStorage.setItem(
+      WORKFLOW_SELECTION_SESSION_KEY,
+      JSON.stringify({ workflows: ['/A.api.json', '/B.api.json'] }),
+    )
+
+    const selection = runWithRecipe((recipe) => {
+      // 页面 setup 会用 pb.reference_studio_v1.workflow（首条）回填 workflowPath。
+      recipe.workflowPath.value = '/A.api.json'
+      return recipe.workflowSelection.value
+    })
+
+    expect(selection).toEqual(['/A.api.json', '/B.api.json'])
+  })
+
+  it('本会话主动清空多选后刷新：保持空选择，不被单选回填成一条', () => {
+    sessionStorage.setItem(
+      WORKFLOW_SELECTION_SESSION_KEY,
+      JSON.stringify({ workflows: [] }),
+    )
+
+    const selection = runWithRecipe((recipe) => {
+      recipe.workflowPath.value = '/A.api.json'
+      return recipe.workflowSelection.value
+    })
+
+    expect(selection).toEqual([])
   })
 })

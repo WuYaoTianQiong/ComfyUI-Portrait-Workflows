@@ -37,9 +37,13 @@ import {
 } from '../../composables/useReferenceStudioSettings'
 import {
   MAX_BATCH_RECIPES,
+  describeRecipeBatchStatus,
+  isRecipeBatchRunning,
+  recipeBatchPercent,
   useReferenceRecipe,
   workflowDisplayName,
 } from '../../composables/useReferenceRecipe'
+import type { RecipeBatch } from '../../composables/useReferenceRecipe'
 import { useToast } from '../../composables/useToast'
 import Lightbox from '../../components/Lightbox.vue'
 import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vue'
@@ -111,15 +115,16 @@ const {
   previewWorkflow,
 
 
-  progress,
-  progressPercent,
+
   jobId,
   jobIds,
-  resultUrls,
   primaryResultUrl,
   previousResultUrl,
-  errorMessage,
-  busy,
+
+  batches,
+  submitting,
+  polling,
+  formError,
   canSubmit,
   loadStudioWorkflows,
   setExtra,
@@ -461,19 +466,67 @@ const previewUrl = computed(() => {
   return primaryResultUrl.value
 })
 
-/** 提交结束后统一处理提示；降级确认框打开时不弹错误 toast。 */
-function afterSubmit(ok: boolean): void {
-  if (ok) {
-    const count = resultUrls.value.length
-    toast.success(
-      jobIds.value.length > 1
-        ? `已完成 ${jobIds.value.length} 个任务，共 ${count} 张`
-        : `角色图已完成（任务 #${jobId.value}）`,
-    )
+// ---------------------------------------------------------------------------
+// 多批次结果：按批分组展示（各批结果互不串批）
+// ---------------------------------------------------------------------------
+
+/** 折叠的批次 id；运行中的批次始终展开，完成批次可手动折叠。 */
+const collapsedBatchIds = ref<string[]>([])
+
+/** 展示顺序：最新批次在最上方，批号仍按创建顺序（最早的为批次 1）。 */
+const displayedBatches = computed<RecipeBatch[]>(() => [...batches.value].reverse())
+
+/** 批次展示号：按创建顺序计数，不受展示顺序影响。 */
+function batchNumber(displayIndex: number): number {
+  return batches.value.length - displayIndex
+}
+
+function isBatchCollapsed(batch: RecipeBatch): boolean {
+  return collapsedBatchIds.value.includes(batch.id)
+}
+
+/** 运行中的批次不允许折叠，避免用户误以为任务已结束。 */
+function toggleBatchCollapse(batch: RecipeBatch): void {
+  if (isRecipeBatchRunning(batch)) return
+  collapsedBatchIds.value = isBatchCollapsed(batch)
+    ? collapsedBatchIds.value.filter((id) => id !== batch.id)
+    : [...collapsedBatchIds.value, batch.id]
+}
+
+/** 只有**最新批次**的第一张结果图保留稳定 data-testid，避免同页多图出现重复选择器。 */
+function batchResultTestId(batch: RecipeBatch, index: number): string | undefined {
+  const latest = batches.value[batches.value.length - 1]
+  return latest?.id === batch.id && index === 0 ? 'studio-result-image' : undefined
+}
+
+/** 批次时间（HH:MM:SS）。 */
+function formatBatchTime(createdAt: number): string {
+  const date = new Date(createdAt)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * 提交结束后统一处理提示。
+ *
+ * 以**本次提交返回的批次**为准（不读“最近一批”兼容视图），
+ * 这样并发批次各自的完成 toast 不会互相串。
+ */
+function afterSubmit(batch: RecipeBatch | null): void {
+  if (batch) {
+    if (batch.status === 'success') {
+      toast.success(
+        batch.jobIds.length > 1
+          ? `已完成 ${batch.jobIds.length} 个任务，共 ${batch.results.length} 张`
+          : `角色图已完成（任务 #${batch.jobIds[0]}）`,
+      )
+    } else if (batch.errorMessage) {
+      toast.error(batch.errorMessage)
+    }
     return
   }
   if (workflowDowngrade.value) return
-  if (errorMessage.value) toast.error(errorMessage.value)
+  if (formError.value) toast.error(formError.value)
 }
 
 async function onGenerate(): Promise<void> {
@@ -535,6 +588,11 @@ async function onRetry(): Promise<void> {
 function showPreviousResult(): void {
   if (!previousResultUrl.value) return
   showingPrevious.value = true
+}
+
+/** 从「上一张结果」回到最新批次结果。 */
+function returnToLatestResult(): void {
+  showingPrevious.value = false
 }
 
 function goJobCenter(): void {
@@ -905,8 +963,8 @@ onMounted(async () => {
             :disabled="!canSubmit"
             @click="onGenerate"
           >
-            <span v-if="busy" class="generate-btn__spinner" aria-hidden="true" />
-            {{ busy ? '生成中…' : '生成角色图' }}
+            <span v-if="submitting" class="generate-btn__spinner" aria-hidden="true" />
+            {{ submitting ? '提交中…' : '生成角色图' }}
           </button>
           <p
             v-if="batchOverLimit"
@@ -929,78 +987,45 @@ onMounted(async () => {
             </a>
           </template>
 
-          <!-- 预览区：471.33 × 511.97（min-height 460）、内边距 16、圆角 18 -->
-          <div class="preview-box" data-testid="studio-preview">
-            <div v-if="busy" class="preview-state">
-              <span class="preview-state__spinner" aria-hidden="true" />
-              <p class="preview-state__title">正在生成角色图…</p>
-              <p class="preview-state__message">{{ progress.message || '正在提交任务…' }}</p>
+          <!-- 常驻说明：ComfyUI 队列串行执行，新任务立即入队 -->
+          <p
+            class="studio-queue-note"
+            data-testid="studio-queue-note"
+            :data-polling="polling ? 'true' : 'false'"
+          >
+            GPU 串行执行：新任务会立即入队，无需等上一批出图
+          </p>
 
-              <div v-if="progressPercent !== null" class="progress">
-                <div
-                  class="progress__track"
-                  role="progressbar"
-                  aria-label="生成进度"
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                  :aria-valuenow="progressPercent"
-                >
-                  <div class="progress__fill" :style="{ width: `${progressPercent}%` }" />
-                </div>
-                <span class="progress__pct">{{ progressPercent }}%</span>
-              </div>
+          <!-- 提交前校验错误（尚未创建批次） -->
+          <p
+            v-if="formError"
+            class="studio-error studio-error--inline"
+            role="alert"
+            data-testid="studio-form-error"
+          >
+            {{ formError }}
+          </p>
 
-              <p v-if="jobId" class="preview-state__job">任务 #{{ jobId }}</p>
-              <p class="preview-state__tip">切换页签不会中断后端任务</p>
-            </div>
-
-            <div v-else-if="errorMessage && !showingPrevious && resultUrls.length === 0" class="preview-error" role="alert">
-              <span class="preview-error__mark" aria-hidden="true">!</span>
-              <p class="preview-error__title">生成失败</p>
-              <p class="preview-error__text">{{ errorMessage }}</p>
-              <div class="preview-error__actions">
-                <button type="button" class="studio-btn studio-btn--ghost studio-btn--sm" @click="onRetry">
-                  重试
-                </button>
-                <button
-                  v-if="previousResultUrl"
-                  type="button"
-                  class="studio-btn studio-btn--ghost studio-btn--sm"
-                  @click="showPreviousResult"
-                >
-                  查看上一张结果
-                </button>
-              </div>
-            </div>
-
-            <!-- 批量结果：多张时网格展示，单张保持大图 -->
-            <div v-else-if="resultUrls.length > 1 && !showingPrevious" class="preview-grid" data-testid="studio-result-grid">
-              <a
-                v-for="(url, index) in resultUrls"
-                :key="url"
-                class="preview-grid__cell"
-                :href="url"
-                download="image.png"
-              >
-                <img
-                  :src="url"
-                  :alt="`生成结果 ${index + 1}`"
-                  class="preview-grid__image"
-                  loading="lazy"
-                  :data-testid="index === 0 ? 'studio-result-image' : undefined"
-                />
-              </a>
-            </div>
-
+          <!-- 上一张结果（失败区手动查看） -->
+          <div v-if="showingPrevious && previousResultUrl" class="preview-box preview-box--previous">
             <img
-              v-else-if="previewUrl"
-              :src="previewUrl"
-              alt="生成结果"
+              :src="previousResultUrl"
+              alt="上一张生成结果"
               class="preview-image"
-              data-testid="studio-result-image"
+              data-testid="studio-previous-image"
             />
+            <button
+              type="button"
+              class="studio-btn studio-btn--ghost studio-btn--sm"
+              @click="returnToLatestResult"
+            >
+              返回最新结果
+            </button>
+          </div>
 
-            <div v-else class="preview-state">
+          <!-- 尚未提交：空态占位（保留 460 高度视觉基线） -->
+          <div v-if="!batches.length" class="preview-box" data-testid="studio-preview">
+            <div class="preview-state">
               <span class="preview-state__mark" aria-hidden="true">
                 <svg viewBox="0 0 20 20">
                   <path
@@ -1013,13 +1038,130 @@ onMounted(async () => {
                 </svg>
               </span>
               <p class="preview-state__message">点击「生成角色图」后在此处展示生成结果</p>
+              <p class="preview-state__tip">新批次会立即入队，无需等待上一批完成</p>
             </div>
           </div>
 
-          <!-- 部分任务失败但有结果图：结果照常展示，错误集中在下方说明 -->
-          <p v-if="errorMessage && resultUrls.length" class="studio-error studio-error--inline" role="alert">
-            {{ errorMessage }}
-          </p>
+          <!-- 多批次结果：每批一块，结果缩略图只归属自己的批次 -->
+          <div v-else class="batch-list" data-testid="studio-batch-list">
+            <article
+              v-for="(batch, displayIndex) in displayedBatches"
+              :key="batch.id"
+              class="batch-card"
+              :data-testid="`studio-batch-${batchNumber(displayIndex)}`"
+            >
+              <header class="batch-card__head">
+                <button
+                  type="button"
+                  class="batch-card__toggle"
+                  :disabled="isRecipeBatchRunning(batch)"
+                  :aria-expanded="!isBatchCollapsed(batch)"
+                  @click="toggleBatchCollapse(batch)"
+                >
+                  <span
+                    class="batch-card__caret"
+                    :class="{ 'batch-card__caret--collapsed': isBatchCollapsed(batch) }"
+                    aria-hidden="true"
+                  />
+                  <span class="batch-card__title">
+                    批次 {{ batchNumber(displayIndex) }} · {{ formatBatchTime(batch.createdAt) }} ·
+                    {{ batch.groups.length }} 组
+                  </span>
+                </button>
+                <span
+                  class="batch-card__status"
+                  :data-status="batch.status"
+                  :data-testid="`studio-batch-status-${batchNumber(displayIndex)}`"
+                >
+                  {{ describeRecipeBatchStatus(batch) }}
+                </span>
+              </header>
+
+              <!-- 运行中批次：进度条 + 任务号；完成批次不显示进度条 -->
+              <div v-if="isRecipeBatchRunning(batch)" class="batch-card__running">
+                <div v-if="recipeBatchPercent(batch) !== null" class="progress">
+                  <div
+                    class="progress__track"
+                    role="progressbar"
+                    aria-label="生成进度"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-valuenow="recipeBatchPercent(batch) ?? 0"
+                  >
+                    <div
+                      class="progress__fill"
+                      :style="{ width: `${recipeBatchPercent(batch) ?? 0}%` }"
+                    />
+                  </div>
+                  <span class="progress__pct">{{ recipeBatchPercent(batch) }}%</span>
+                </div>
+                <p v-if="batch.jobIds.length" class="batch-card__jobs">
+                  任务 {{ batch.jobIds.map((id) => `#${id}`).join('、') }}
+                </p>
+                <p class="preview-state__tip">
+                  切换页签不会中断后端任务；可继续提交新批次，GPU 会按队列逐个执行
+                </p>
+              </div>
+
+              <div v-if="!isBatchCollapsed(batch)" class="batch-card__body">
+                <!-- 多张：网格；单张：大图。每张图只来自本批 results -->
+                <div
+                  v-if="batch.results.length > 1"
+                  class="preview-grid"
+                  data-testid="studio-result-grid"
+                >
+                  <a
+                    v-for="(url, index) in batch.results"
+                    :key="url"
+                    class="preview-grid__cell"
+                    :href="url"
+                    download="image.png"
+                  >
+                    <img
+                      :src="url"
+                      :alt="`批次 ${batchNumber(displayIndex)} 结果 ${index + 1}`"
+                      class="preview-grid__image"
+                      loading="lazy"
+                      :data-testid="batchResultTestId(batch, index)"
+                    />
+                  </a>
+                </div>
+                <img
+                  v-else-if="batch.results.length === 1"
+                  :src="batch.results[0]"
+                  :alt="`批次 ${batchNumber(displayIndex)} 结果`"
+                  class="preview-image"
+                  :data-testid="batchResultTestId(batch, 0)"
+                />
+
+                <p
+                  v-if="batch.errorMessage"
+                  class="studio-error studio-error--inline"
+                  role="alert"
+                >
+                  {{ batch.errorMessage }}
+                </p>
+
+                <div v-if="batch.status === 'failed'" class="preview-error__actions">
+                  <button
+                    type="button"
+                    class="studio-btn studio-btn--ghost studio-btn--sm"
+                    @click="onRetry"
+                  >
+                    重试
+                  </button>
+                  <button
+                    v-if="previousResultUrl"
+                    type="button"
+                    class="studio-btn studio-btn--ghost studio-btn--sm"
+                    @click="showPreviousResult"
+                  >
+                    查看上一张结果
+                  </button>
+                </div>
+              </div>
+            </article>
+          </div>
 
           <div class="result-footer">
             <span>
@@ -2031,5 +2173,134 @@ onMounted(async () => {
   .preview-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * 多批次结果分组（2026-11-06：允许轮询期间继续提交）
+ * ------------------------------------------------------------------------- */
+
+/* 常驻说明：新任务入队即可，不必等上一批出图 */
+.studio-queue-note {
+  margin: 0 0 10px;
+  color: var(--text-body-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 「上一张结果」块不占 460 基础高度 */
+.preview-box--previous {
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  margin-bottom: 10px;
+}
+
+/* 批次列表：最新批次在最上方 */
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.batch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-code);
+}
+
+.batch-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.batch-card__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  text-align: left;
+  cursor: pointer;
+}
+
+.batch-card__toggle:disabled {
+  cursor: default;
+}
+
+.batch-card__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.5;
+}
+
+.batch-card__caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 5px solid var(--text-muted);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  transition: transform 0.15s var(--ease);
+}
+
+.batch-card__caret--collapsed {
+  transform: rotate(-90deg);
+}
+
+/* 状态标签：彩色文字 + 浅底，替代灰色难读文本 */
+.batch-card__status {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: var(--fill-subtle);
+  color: var(--text-body-soft);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.batch-card__status[data-status='submitting'],
+.batch-card__status[data-status='polling'] {
+  color: var(--warn);
+}
+
+.batch-card__status[data-status='success'] {
+  color: var(--success);
+}
+
+.batch-card__status[data-status='failed'] {
+  color: var(--danger-text-soft);
+}
+
+.batch-card__running {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.batch-card__jobs {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.batch-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>
