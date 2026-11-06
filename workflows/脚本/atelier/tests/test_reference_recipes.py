@@ -776,3 +776,203 @@ def test_qwen21_ignores_size_params_when_caps_unsupported(api, recipe_env, monke
     job = api.get(f"/api/jobs/{resp.json()['job_id']}").json()
     assert job["quality"] == "1.0x"      # 1.5x 被忽略，回旧默认 4K→1.0x
     assert job["orientation"] == "portrait"
+
+# ---------------------------------------------------------------------------
+# 提示词修正 + 素体模式（C-REF-BODY-MODE@1）
+# ---------------------------------------------------------------------------
+
+PAIR_ITEM = {
+    "id": "pair-P900",
+    "体系": "双人",
+    "姿势编号": "P900",
+    "分类": "双人站姿",
+    "姿势名称": "双人并肩",
+    "角度": "正面",
+    "缩略图": "thumbs/P900.png",
+    "原图": "img/P900.png",
+    "检索": "pair-P900 双人 并肩",
+}
+
+
+def _seed_pair_pose(recipe_env) -> None:
+    """给姿势库补一条 `pair*` 条目（双人分支按 id 前缀判定）。"""
+    _write_json(recipe_env["root"] / "data" / "pose-zh.json", POSE_ITEMS + [PAIR_ITEM])
+    _write_bytes(recipe_env["root"] / "img/P900.png")
+    _write_bytes(recipe_env["root"] / "thumbs/P900.png")
+    rl.clear_cache()
+
+
+def test_no_costume_prompt_drops_original_outfit_hint(api, recipe_env):
+    """未选服装时不能写「保留图1人物原有可见服装」——否则模型会补全/捏造衣服。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"portrait_id": "p1", "pose_id": "P001_front", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "保留图1人物原有可见服装" not in prompt
+    assert "服装：让人物穿上" not in prompt
+    # Qwen21 的真实图位是人像=图2；人像段本身必须保留
+    assert "• 人物：图2中的人物" in prompt
+
+
+def test_no_costume_pair_prompt_drops_forced_outfit(api, recipe_env):
+    """双人姿势未选服装时不能写「两人各自都有完整服装」。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"portrait_id": "p1", "pose_id": PAIR_ITEM["id"], "dry_run": True},
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "两人各自都有完整服装" not in prompt
+    assert "两人都要完整入镜" in prompt
+
+
+def test_body_mode_validation_errors(api, recipe_env, captured):
+    """C-REF-BODY-MODE@1：非法 body_mode 与「bare + 服装」都必须 400。"""
+    bad_mode = api.post(
+        "/api/reference/recipes",
+        json={"pose_id": "P001_front", "body_mode": "nude", "dry_run": True},
+    )
+    assert bad_mode.status_code == 400
+    detail = bad_mode.json()["detail"]
+    assert "不支持的素体模式" in detail
+    assert "costume" in detail and "bare" in detail
+
+    with_costume_id = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "P001_front",
+            "costume_id": "SPR-0001",
+            "body_mode": "bare",
+            "dry_run": True,
+        },
+    )
+    assert with_costume_id.status_code == 400
+    assert with_costume_id.json()["detail"] == "素体模式不能同时选择服装"
+
+    # 上传图路径同样算「选了服装」：校验必须发生在解析文件之前（文件不存在也先报冲突）
+    with_costume_path = api.post(
+        "/api/reference/recipes",
+        json={
+            "pose_id": "P001_front",
+            "costume_path": str(recipe_env["uploads"] / "costume.png"),
+            "body_mode": "bare",
+            "dry_run": True,
+        },
+    )
+    assert with_costume_path.status_code == 400
+    assert with_costume_path.json()["detail"] == "素体模式不能同时选择服装"
+
+    assert not captured, "校验失败不应进入提交"
+
+
+def test_bare_mode_prompt_is_neutral_body_display(api, recipe_env):
+    """bare 模式：只写中性素体展示，不写服装段，也不出现裸露/性感等词。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "P001_front",
+            "body_mode": "bare",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "素体展示" in prompt
+    assert "不穿任何服装与配饰" in prompt
+    assert "服装：让人物穿上" not in prompt
+    assert "保留图1人物原有可见服装" not in prompt
+    for word in ("裸露", "性感", "裸体"):
+        assert word not in prompt, f"素体提示词不应出现「{word}」"
+
+
+def test_bare_pair_prompt_uses_neutral_two_person_wording(api, recipe_env):
+    """双人 + bare：写两位成年女性的素体展示，不再声明「各自都有完整服装」。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"pose_id": PAIR_ITEM["id"], "body_mode": "bare", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "两位成年女性的素体展示" in prompt
+    assert "两人各自都有完整服装" not in prompt
+    assert "不允许裸露" not in prompt
+
+def test_recipe_400_separates_unrecognized_roles_from_missing_slot(
+    api, recipe_env, captured, monkeypatch,
+):
+    """两种 400 必须可区分，且都带工作流文件名：
+
+    ① 整条工作流一个角色都认不出（典型：UI 格式 .json）→ 提示换用 .api.json；
+    ② 角色可识别但本次要用的槽不存在 → 「该工作流没有{label}输入」。
+    """
+    studio = recipe_env["library_root"] / "图库专用工作流"
+
+    # ① 两个 LoadImage 的标题都是「主体」/「参考图」→ role_nodes 为空
+    unroleable = studio / "角色不可识别.api.json"
+    _write_json(
+        unroleable,
+        {
+            "1": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "a.png"},
+                "_meta": {"title": "主体参考"},
+            },
+            "2": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "b.png"},
+                "_meta": {"title": "参考图"},
+            },
+            "8": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"clip": ["9", 0], "text": ""},
+            },
+        },
+    )
+    monkeypatch.setattr(ref_router, "_resolve_studio_workflow", lambda requested: unroleable)
+    bad_roles = api.post(
+        "/api/reference/recipes", json={"portrait_id": "p1", "dry_run": True},
+    )
+    assert bad_roles.status_code == 400
+    detail = bad_roles.json()["detail"]
+    assert "无法识别角色" in detail
+    assert "请换用 .api.json 工作流" in detail
+    assert "角色不可识别.api.json" in detail
+
+    # ② 角色可识别（人像 + 姿势），但没有服装槽
+    no_costume = studio / "只有人像和姿势.api.json"
+    _write_json(
+        no_costume,
+        {
+            "1": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "a.png"},
+                "_meta": {"title": "图1：人像参考 (Portrait)"},
+            },
+            "2": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "b.png"},
+                "_meta": {"title": "图2：姿势参考 (Pose)"},
+            },
+            "8": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"clip": ["9", 0], "text": ""},
+            },
+        },
+    )
+    monkeypatch.setattr(ref_router, "_resolve_studio_workflow", lambda requested: no_costume)
+    missing = api.post(
+        "/api/reference/recipes",
+        json={"portrait_id": "p1", "costume_id": "SPR-0001", "dry_run": True},
+    )
+    assert missing.status_code == 400
+    missing_detail = missing.json()["detail"]
+    assert missing_detail == "该工作流没有服装输入：只有人像和姿势.api.json"
+    assert "无法识别角色" not in missing_detail
+
+    assert not captured, "校验失败不应进入提交"

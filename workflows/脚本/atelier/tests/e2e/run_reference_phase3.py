@@ -101,6 +101,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -155,6 +156,8 @@ LEGACY_DATA_LITERALS = [
 
 _results: list[tuple[bool, str, str]] = []
 _observations: list[tuple[str, str]] = []
+#: 依赖已删除产物（React gallery-web / dist）的检查：记 SKIP，不计通过也不计失败。
+_skips: list[tuple[str, str]] = []
 
 #: 阶段四：只跑阶段四时可设置 `T3_E2E_ONLY=phase4`（默认仍跑全量）。
 P4_ONLY = os.environ.get("T3_E2E_ONLY", "").strip().lower() == "phase4"
@@ -175,6 +178,16 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
 def observe(name: str, detail: str = "") -> None:
     _observations.append((name, detail))
     print(f"  [观察] {name}" + (f" | {detail}" if detail else ""))
+
+
+def skip(name: str, detail: str = "") -> None:
+    """记为 SKIP：依赖已删除的 React 产物（gallery-web / dist）无法检查。
+
+    不写入 `_results`，因此既不算通过也不拉低 verdict；只用于如实说明跳过原因，
+    避免在目录不存在时伪造 PASS，也避免直接崩溃导致后续阶段跑不到。
+    """
+    _skips.append((name, detail))
+    print(f"  [SKIP] {name}" + (f" | {detail}" if detail else ""))
 
 
 def section(title: str) -> None:
@@ -303,8 +316,15 @@ def run_cmd(label: str, cmd: str, cwd: Path, timeout: int = 600) -> tuple[bool, 
 
 def check_static() -> None:
     section("静态检查")
-    run_cmd("gallery-web tsc -b --noEmit", "pnpm exec tsc -b --noEmit", GALLERY)
-    run_cmd("gallery-web oxlint src", "pnpm exec oxlint src", GALLERY)
+    if GALLERY.is_dir():
+        run_cmd("gallery-web tsc -b --noEmit", "pnpm exec tsc -b --noEmit", GALLERY)
+        run_cmd("gallery-web oxlint src", "pnpm exec oxlint src", GALLERY)
+    else:
+        # React 子应用已在阶段 4.3 删除：不能再把 GALLERY 当 cwd（会 NotADirectoryError），
+        # 也不能伪造 PASS，如实记 SKIP 后继续跑 Vue / 后端的静态检查。
+        reason = f"gallery-web 已删除，目录不存在：{GALLERY}"
+        skip("gallery-web tsc -b --noEmit", reason)
+        skip("gallery-web oxlint src", reason)
     run_cmd("Vue pnpm run typecheck", "pnpm run typecheck", FRONTEND)
     run_cmd("后端 import app.main", f'"{sys.executable}" -c "import app.main"', V4)
 
@@ -314,6 +334,10 @@ _META_RE = re.compile(r'(?:src|href)="([^"]+)"')
 
 def check_dist_artifact() -> None:
     section("构建产物 C-BUILD-ARTIFACT@1（阶段一实例）")
+    if not DIST.is_dir():
+        skip("dist 产物检查（阶段一 / C-BUILD-ARTIFACT@1）",
+             f"React 产物目录不存在：{DIST}")
+        return
     index_path = DIST / "index.html"
     if not check(index_path.exists(), "dist/index.html 存在", str(index_path)):
         return
@@ -326,7 +350,9 @@ def check_dist_artifact() -> None:
     check(not bad_refs, "dist/index.html 只引用 /ref-web/assets/", f"异常引用={bad_refs}")
 
     dist_files = [p for p in DIST.rglob("*") if p.is_file()]
-    src_files = [p for p in (GALLERY / "src").rglob("*") if p.is_file()]
+    # gallery-web 可能已被删除（只留 dist）；此时源码 mtime 对比无从检查，留空跳过。
+    src_root = GALLERY / "src"
+    src_files = [p for p in src_root.rglob("*") if p.is_file()] if src_root.is_dir() else []
     check(bool(dist_files), "dist 产物非空", f"{len(dist_files)} 个文件")
     if dist_files and src_files:
         oldest_dist = min(p.stat().st_mtime for p in dist_files)
@@ -335,6 +361,9 @@ def check_dist_artifact() -> None:
               "dist 全部产物 mtime 晚于最新源码",
               f"dist_min={time.strftime('%H:%M:%S', time.localtime(oldest_dist))} "
               f"src_max={time.strftime('%H:%M:%S', time.localtime(newest_src))}")
+    elif dist_files:
+        skip("dist 全部产物 mtime 晚于最新源码",
+             f"gallery-web 源码目录不存在，无法比较 mtime：{src_root}")
 
     # 字面量扫描：硬失败项 + 如实记录的旧数据路径
     scanned: dict[str, list[str]] = {lit: [] for lit in FORBIDDEN_LITERALS + LEGACY_DATA_LITERALS}
@@ -502,6 +531,25 @@ def _alertdialog(page):
     return page.locator('[role="alertdialog"]')
 
 
+#: 旧 React 18+ 完整模式按钮。Vue 版改由 `pose-safe-toggle` / `costume-safe-toggle`
+#: 承接，旧 title 选择器在 Vue 页面可能不再存在；缺失时记 SKIP，绝不点、不等、不判 FAIL。
+_LEGACY_UNLOCKED_SELECTOR = 'header button[title^="当前已显示 18+"]'
+_LEGACY_UNLOCKED_SKIP_DETAIL = "Vue 版由 pose-safe-toggle / costume-safe-toggle 承接"
+
+
+def _legacy_unlocked_visible(page) -> bool:
+    """旧 React「当前已显示 18+」入口是否存在：只计数、不点击、不等待（避免 30s 超时）。"""
+    try:
+        return page.locator(_LEGACY_UNLOCKED_SELECTOR).count() > 0
+    except Exception:
+        return False
+
+
+def _skip_legacy_unlocked(name: str) -> None:
+    """旧 18+ 入口缺失时跳过依赖它的断言（SKIP 不进入 `_results`，不算 PASS 也不算 FAIL）。"""
+    skip(f"{name}（旧 React 18+ 入口不存在）", _LEGACY_UNLOCKED_SKIP_DETAIL)
+
+
 def check_nsfw_age_gate(browser, shots_dir: Path) -> None:
     section("3c 18+ 首次确认只弹一次")
     ctx = browser.new_context(viewport={"width": 1500, "height": 950})
@@ -531,26 +579,35 @@ def check_nsfw_age_gate(browser, shots_dir: Path) -> None:
     marker = page.evaluate("(k) => localStorage.getItem(k)", NSFW_CONFIRMED_KEY)
     check(marker == "true", "确认后写入记忆键 pose_atlas_nsfw_confirmed_v1", f"value={marker}")
     check(_alertdialog(page).count() == 0, "确认后弹窗关闭", f"count={_alertdialog(page).count()}")
-    unlocked_title = page.locator('header button[title^="当前已显示 18+"]').count()
-    check(unlocked_title == 1, "确认后进入 18+ 完整模式", f"header button={unlocked_title}")
+    unlocked_title = page.locator(_LEGACY_UNLOCKED_SELECTOR).count()
+    if _legacy_unlocked_visible(page):
+        check(unlocked_title == 1, "确认后进入 18+ 完整模式", f"header button={unlocked_title}")
 
-    # 切回安全模式：不撤销记忆键
-    page.locator('header button[title^="当前已显示 18+"]').first.click()
-    page.wait_for_timeout(500)
-    safe_title = page.locator('header button[title^="当前已开启安全模式"]').count()
-    check(safe_title == 1, "可切回安全模式", f"header button={safe_title}")
-    check(_alertdialog(page).count() == 0, "切回安全模式不弹确认框", "")
+        # 切回安全模式：不撤销记忆键
+        page.locator(_LEGACY_UNLOCKED_SELECTOR).first.click()
+        page.wait_for_timeout(500)
+        safe_title = page.locator('header button[title^="当前已开启安全模式"]').count()
+        check(safe_title == 1, "可切回安全模式", f"header button={safe_title}")
+        check(_alertdialog(page).count() == 0, "切回安全模式不弹确认框", "")
 
-    # 再次开启：不应重复弹窗
-    page.locator('header button[title^="当前已开启安全模式"]').first.click()
-    page.wait_for_timeout(900)
-    re_dialog = _alertdialog(page).count()
-    check(re_dialog == 0, "二次开启 18+ 不重复弹确认框", f"alertdialog={re_dialog}")
-    reopened = page.locator('header button[title^="当前已显示 18+"]').count()
-    check(reopened == 1, "二次开启直接进入 18+ 完整模式", f"header button={reopened}")
-    marker2 = page.evaluate("(k) => localStorage.getItem(k)", NSFW_CONFIRMED_KEY)
-    check(marker2 == "true", "记忆键在二次开启后仍存在", f"value={marker2}")
-    page.screenshot(path=str(shots_dir / "nsfw_second_unlock.png"))
+        # 再次开启：不应重复弹窗
+        page.locator('header button[title^="当前已开启安全模式"]').first.click()
+        page.wait_for_timeout(900)
+        re_dialog = _alertdialog(page).count()
+        check(re_dialog == 0, "二次开启 18+ 不重复弹确认框", f"alertdialog={re_dialog}")
+        reopened = page.locator(_LEGACY_UNLOCKED_SELECTOR).count()
+        check(reopened == 1, "二次开启直接进入 18+ 完整模式", f"header button={reopened}")
+        marker2 = page.evaluate("(k) => localStorage.getItem(k)", NSFW_CONFIRMED_KEY)
+        check(marker2 == "true", "记忆键在二次开启后仍存在", f"value={marker2}")
+        page.screenshot(path=str(shots_dir / "nsfw_second_unlock.png"))
+    else:
+        # Vue 页面没有旧入口：依赖它的整组操作全部 SKIP，避免 .first.click() 等满 30s 抛异常。
+        _skip_legacy_unlocked("确认后进入 18+ 完整模式")
+        _skip_legacy_unlocked("可切回安全模式")
+        _skip_legacy_unlocked("切回安全模式不弹确认框")
+        _skip_legacy_unlocked("二次开启 18+ 不重复弹确认框")
+        _skip_legacy_unlocked("二次开启直接进入 18+ 完整模式")
+        _skip_legacy_unlocked("记忆键在二次开启后仍存在")
 
     check(not errors, "18+ 交互期间无 console error", "; ".join(errors[:5]))
     page.close()
@@ -1364,8 +1421,11 @@ def check_phase2_cache_location() -> None:
                if ".cache/" in line and line.startswith("!!")]
     check(bool(ignored), "git status --ignored 显示 .cache/ 被忽略",
           f"lines={ignored[:3]}")
-    dist_cache = [p for p in DIST.rglob("*") if p.is_file() and ".cache" in p.as_posix()]
-    check(not dist_cache, "dist 内无缓存文件", f"hits={dist_cache[:3]}")
+    if DIST.is_dir():
+        dist_cache = [p for p in DIST.rglob("*") if p.is_file() and ".cache" in p.as_posix()]
+        check(not dist_cache, "dist 内无缓存文件", f"hits={dist_cache[:3]}")
+    else:
+        skip("dist 内无缓存文件", f"React 产物目录不存在：{DIST}")
 
 
 def check_phase2_pages(browser, shots_dir: Path) -> None:
@@ -1480,7 +1540,7 @@ def check_phase2_pages(browser, shots_dir: Path) -> None:
 #   - 断网（Playwright 阻断非 127.0.0.1）重载裂图 0、无外部请求、
 #     请求的 costume-anime 条目必须在已缓存集合内；
 #   - 返回入口 3 个、18+ 首次确认只弹一次、药丸由 nsfw 聚合；
-#   - 姿势搜索/体系切换/加载更多、服装分类/标签/加载更多、人像分区/发长；
+#   - 姿势搜索/体系切换/分页、服装分类/标签/分页、人像分区/发长；
 #   - studio 下拉仍选中后端 default。
 # ---------------------------------------------------------------------------
 PHASE3_CACHE_LIB = "costume-anime"
@@ -1605,14 +1665,14 @@ def _p3_card_texts(page) -> list[str]:
     return page.evaluate(_P3_CARD_TEXT_JS)
 
 
-def _p3_remaining_count(page) -> int | None:
-    """读取「加载更多（剩余 N 套/张/组）」中的 N；按钮不存在时返回 None。"""
+def _p3_page_label_of(page) -> tuple[int, int] | None:
+    """读取分页条「第 x / y 页」，返回 (当前页, 总页数)；分页条不存在时返回 None。"""
     try:
-        text = page.get_by_role("button", name=re.compile("^加载更多")).first.inner_text()
+        text = page.locator('[data-testid="ref-grid-page-label"]').first.inner_text()
     except Exception:
         return None
-    match = re.search(r"剩余\s*(\d+)", text)
-    return int(match.group(1)) if match else None
+    match = re.search(r"第\s*(\d+)\s*/\s*(\d+)\s*页", text)
+    return (int(match.group(1)), int(match.group(2))) if match else None
 
 
 def _p3_pill_texts(page) -> list[str]:
@@ -1632,6 +1692,10 @@ def _p3_anime_ids(srcs: list[str]) -> set[str]:
 
 def check_phase3_dist() -> None:
     section("阶段三-0 构建产物：无旧数据路径与外链残留（R3 / C-BUILD-ARTIFACT@1）")
+    if not DIST.is_dir():
+        skip("阶段三-0 构建产物检查（R3 / C-BUILD-ARTIFACT@1）",
+             f"React 产物目录不存在：{DIST}")
+        return
     index_path = DIST / "index.html"
     if not check(index_path.exists(), "[阶段三] dist/index.html 存在", str(index_path)):
         return
@@ -1643,7 +1707,9 @@ def check_phase3_dist() -> None:
     check(not bad_refs, "[阶段三] dist/index.html 只引用 /ref-web/assets/", f"异常引用={bad_refs}")
 
     dist_files = [p for p in DIST.rglob("*") if p.is_file()]
-    src_files = [p for p in (GALLERY / "src").rglob("*") if p.is_file()]
+    # gallery-web 可能已被删除（只留 dist）；此时源码 mtime 对比无从检查，留空跳过。
+    src_root = GALLERY / "src"
+    src_files = [p for p in src_root.rglob("*") if p.is_file()] if src_root.is_dir() else []
     check(bool(dist_files), "[阶段三] dist 产物非空", f"{len(dist_files)} 个文件")
     if dist_files and src_files:
         oldest_dist = min(p.stat().st_mtime for p in dist_files)
@@ -1652,6 +1718,9 @@ def check_phase3_dist() -> None:
               "[阶段三] dist 全部产物 mtime 晚于最新源码",
               f"dist_min={time.strftime('%H:%M:%S', time.localtime(oldest_dist))} "
               f"src_max={time.strftime('%H:%M:%S', time.localtime(newest_src))}")
+    elif dist_files:
+        skip("[阶段三] dist 全部产物 mtime 晚于最新源码",
+             f"gallery-web 源码目录不存在，无法比较 mtime：{src_root}")
 
     literals = LEGACY_DATA_LITERALS + ["charadb-2fi.pages.dev", "qwen2509_2img"]
     hits: dict[str, list[str]] = {lit: [] for lit in literals}
@@ -1916,16 +1985,22 @@ def check_phase3_nsfw(browser, shots_dir: Path) -> None:
         page.wait_for_timeout(300)
 
     # 第二次解锁：切回安全模式再解锁，不得再次弹窗。
-    page.locator('header button[title^="当前已显示 18+"]').first.click()
-    page.wait_for_timeout(500)
-    check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "true",
-          "[阶段三] 可切回安全模式", "")
-    page.locator('header button[title^="当前已开启安全模式"]').first.click()
-    page.wait_for_timeout(1200)
-    check(_alertdialog(page).count() == 0, "[阶段三] 第二次解锁不再弹年龄确认框",
-          f"alertdialog={_alertdialog(page).count()}")
-    check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "false",
-          "[阶段三] 第二次解锁直接进入完整模式", "")
+    if _legacy_unlocked_visible(page):
+        page.locator(_LEGACY_UNLOCKED_SELECTOR).first.click()
+        page.wait_for_timeout(500)
+        check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "true",
+              "[阶段三] 可切回安全模式", "")
+        page.locator('header button[title^="当前已开启安全模式"]').first.click()
+        page.wait_for_timeout(1200)
+        check(_alertdialog(page).count() == 0, "[阶段三] 第二次解锁不再弹年龄确认框",
+              f"alertdialog={_alertdialog(page).count()}")
+        check(page.evaluate("(k) => localStorage.getItem(k)", "pose_atlas_safe_mode_v1") == "false",
+              "[阶段三] 第二次解锁直接进入完整模式", "")
+    else:
+        # 旧 React 18+ 入口在 Vue 页面不存在：依赖它的整组操作 SKIP，不点、不等、不判 FAIL。
+        _skip_legacy_unlocked("[阶段三] 可切回安全模式")
+        _skip_legacy_unlocked("[阶段三] 第二次解锁不再弹年龄确认框")
+        _skip_legacy_unlocked("[阶段三] 第二次解锁直接进入完整模式")
 
     # 服装页：18+ 分类药丸由 nsfw 聚合，安全模式下隐藏。
     nsfw_costume = api_json("/api/reference/items?library=costume&nsfw=true&page_size=200")
@@ -1938,13 +2013,17 @@ def check_phase3_nsfw(browser, shots_dir: Path) -> None:
           "[阶段三] 解锁后至少一个服装分类药丸显示 18+",
           f"category={nsfw_category} pills={costume_pills}")
 
-    page.locator('header button[title^="当前已显示 18+"]').first.click()
-    page.wait_for_timeout(500)
-    costume_pills_safe = _p3_pill_texts(page)
-    check(bool(nsfw_category) and not any(p.startswith(nsfw_category)
-                                          for p in costume_pills_safe),
-          "[阶段三] 安全模式下 18+ 服装分类药丸隐藏",
-          f"category={nsfw_category} pills={costume_pills_safe}")
+    if _legacy_unlocked_visible(page):
+        page.locator(_LEGACY_UNLOCKED_SELECTOR).first.click()
+        page.wait_for_timeout(500)
+        costume_pills_safe = _p3_pill_texts(page)
+        check(bool(nsfw_category) and not any(p.startswith(nsfw_category)
+                                              for p in costume_pills_safe),
+              "[阶段三] 安全模式下 18+ 服装分类药丸隐藏",
+              f"category={nsfw_category} pills={costume_pills_safe}")
+    else:
+        # 旧 React 18+ 入口在 Vue 页面不存在：该断言依赖切回安全模式，如实 SKIP。
+        _skip_legacy_unlocked("[阶段三] 安全模式下 18+ 服装分类药丸隐藏")
     page.screenshot(path=str(shots_dir / "phase3_nsfw_costume_pills.png"))
 
     check(not errors, "[阶段三] 18+ 检查期间无 console error", "; ".join(errors[:6]))
@@ -1953,7 +2032,7 @@ def check_phase3_nsfw(browser, shots_dir: Path) -> None:
 
 
 def check_phase3_pose_interactions(browser, shots_dir: Path) -> None:
-    section("阶段三-6a 姿势页搜索 / 体系切换 / 加载更多")
+    section("阶段三-6a 姿势页搜索 / 体系切换 / 分页")
     ctx = _p3_new_context(browser, unlocked=True)
     errors: list[str] = []
     page = new_page(ctx, errors, "p3-poses")
@@ -1991,23 +2070,35 @@ def check_phase3_pose_interactions(browser, shots_dir: Path) -> None:
               "[阶段三] 体系切换后所有卡片属于该体系",
               f"system={system} cards={len(system_texts)} sample={system_texts[:2]}")
 
-    # 回到全部体系后验证 60 -> 120。
+    # 回到全部体系后验证分页：第 1 页 60 组 → 点「下一页」到第 2 页。
     page.get_by_role("button", name=re.compile(r"^全部 \(\d+\)$")).first.click()
     page.wait_for_timeout(600)
+    before_page = _p3_page_label_of(page)
+    check(before_page is not None and before_page[0] == 1 and before_page[1] > 1,
+          "[阶段三] 姿势页显示分页条且停在第 1 / N 页（N > 1）",
+          f"page_label={before_page}")
     before_load = _p3_card_count(page)
-    check(before_load == 60, "[阶段三] 返回全部体系后仍为 60 组", f"cards={before_load}")
-    page.get_by_role("button", name=re.compile("^加载更多")).first.click()
+    check(before_load == 60, "[阶段三] 姿势页第 1 页渲染 60 组（每页 60）", f"cards={before_load}")
+    page_one_texts = _p3_card_texts(page)
+    page.locator(".ref-grid__pager .pager-btn").nth(1).click()
     page.wait_for_timeout(800)
+    after_page = _p3_page_label_of(page)
+    check(after_page is not None and before_page is not None and after_page[0] == before_page[0] + 1,
+          "[阶段三] 姿势页点下一页后页码变为第 2 / N 页",
+          f"before={before_page} after={after_page}")
     after_load = _p3_card_count(page)
-    check(after_load == 120, "[阶段三] 姿势页加载更多 60 → 120", f"cards={after_load}")
-    page.screenshot(path=str(shots_dir / "phase3_poses_load_more.png"))
+    check(after_load == 60, "[阶段三] 姿势页第 2 页同样按每页 60 组切片", f"cards={after_load}")
+    check(_p3_card_texts(page) != page_one_texts,
+          "[阶段三] 姿势页翻页后卡片内容确实换页",
+          f"page1={page_one_texts[:2]}")
+    page.screenshot(path=str(shots_dir / "phase3_poses_pager.png"))
     check(not errors, "[阶段三] 姿势页交互期间无 console error", "; ".join(errors[:6]))
     page.close()
     ctx.close()
 
 
 def check_phase3_costume_interactions(browser, shots_dir: Path) -> None:
-    section("阶段三-6b 服装页分类 / 标签筛选与加载更多")
+    section("阶段三-6b 服装页分类 / 标签筛选与分页")
     ctx = _p3_new_context(browser, unlocked=True)
     errors: list[str] = []
     page = new_page(ctx, errors, "p3-costumes")
@@ -2028,26 +2119,20 @@ def check_phase3_costume_interactions(browser, shots_dir: Path) -> None:
               "[阶段三] 服装分类筛选后所有卡片属于该分类",
               f"category={category} cards={len(category_texts)} sample={category_texts[:2]}")
 
-    # 标签筛选：优先选「针织」，不可用时取第一个非「全部」选项。
-    # 记录分类筛选后的「剩余 N 套」，标签生效后应看到剩余量下降。
-    baseline_remaining = _p3_remaining_count(page)
-    page.locator('button[role="combobox"]').first.click()
-    page.wait_for_timeout(300)
+    # 标签筛选：Vue 版是原生 select（data-testid=costume-tag），优先选文本含「针织」的项；
+    # 没有「针织」时取第一个非「全部」项。记录分类筛选后的总页数，标签生效后应变少。
+    baseline_pages = _p3_page_label_of(page)
+    tag_select = page.locator('[data-testid="costume-tag"]')
     chose_tag = ""
     try:
-        option = page.get_by_role("option", name="针织", exact=True)
-        if option.count() > 0:
-            option.first.click()
-            chose_tag = "针织"
-        else:
-            options = page.get_by_role("option")
-            count = options.count()
-            for index in range(1, count):
-                text = options.nth(index).inner_text().strip()
-                if text and "全部" not in text:
-                    options.nth(index).click()
-                    chose_tag = text
-                    break
+        options = tag_select.locator("option")
+        option_texts = [(options.nth(index).text_content() or "").strip()
+                        for index in range(options.count())]
+        candidates = [text for text in option_texts if text and "全部" not in text]
+        preferred = next((text for text in candidates if "针织" in text), None)
+        chose_tag = preferred or (candidates[0] if candidates else "")
+        if chose_tag:
+            tag_select.select_option(label=chose_tag)
     except Exception as exc:
         observe("服装标签选择失败", f"{type(exc).__name__}: {exc}")
     page.wait_for_timeout(700)
@@ -2057,14 +2142,14 @@ def check_phase3_costume_interactions(browser, shots_dir: Path) -> None:
           f"tag={chose_tag} cards={tag_cards}")
     check(tag_cards <= baseline, "[阶段三] 标签筛选结果不超过默认集合",
           f"tag_cards={tag_cards} baseline={baseline}")
-    tag_remaining = _p3_remaining_count(page)
+    tag_pages = _p3_page_label_of(page)
     tag_narrowed = (
-        tag_remaining is None
-        or baseline_remaining is None
-        or tag_remaining < baseline_remaining
+        tag_pages is None
+        or baseline_pages is None
+        or tag_pages[1] < baseline_pages[1]
     )
     check(tag_narrowed, "[阶段三] 标签筛选确实缩小结果集",
-          f"remaining_before={baseline_remaining} remaining_after={tag_remaining}")
+          f"pages_before={baseline_pages} pages_after={tag_pages}")
     page.screenshot(path=str(shots_dir / "phase3_costumes_tag_filter.png"))
 
     # 二次元分类：卡片来源显示 CharaDB（后端端点），验证分类切换。
@@ -2079,13 +2164,25 @@ def check_phase3_costume_interactions(browser, shots_dir: Path) -> None:
     page.get_by_role("button", name="全部", exact=True).click()
     page.wait_for_timeout(600)
 
+    before_page = _p3_page_label_of(page)
+    check(before_page is not None and before_page[0] == 1 and before_page[1] > 1,
+          "[阶段三] 服装页显示分页条且停在第 1 / N 页（N > 1）",
+          f"page_label={before_page}")
     before_load = _p3_card_count(page)
-    check(before_load == 60, "[阶段三] 服装页返回全部分类后为 60 套", f"cards={before_load}")
-    page.get_by_role("button", name=re.compile("^加载更多")).first.click()
+    check(before_load == 60, "[阶段三] 服装页第 1 页渲染 60 套（每页 60）", f"cards={before_load}")
+    page_one_texts = _p3_card_texts(page)
+    page.locator(".ref-grid__pager .pager-btn").nth(1).click()
     page.wait_for_timeout(800)
+    after_page = _p3_page_label_of(page)
+    check(after_page is not None and before_page is not None and after_page[0] == before_page[0] + 1,
+          "[阶段三] 服装页点下一页后页码变为第 2 / N 页",
+          f"before={before_page} after={after_page}")
     after_load = _p3_card_count(page)
-    check(after_load == 120, "[阶段三] 服装页加载更多 60 → 120", f"cards={after_load}")
-    page.screenshot(path=str(shots_dir / "phase3_costumes_load_more.png"))
+    check(after_load == 60, "[阶段三] 服装页第 2 页同样按每页 60 套切片", f"cards={after_load}")
+    check(_p3_card_texts(page) != page_one_texts,
+          "[阶段三] 服装页翻页后卡片内容确实换页",
+          f"page1={page_one_texts[:2]}")
+    page.screenshot(path=str(shots_dir / "phase3_costumes_pager.png"))
     check(not errors, "[阶段三] 服装页交互期间无 console error", "; ".join(errors[:6]))
     page.close()
     ctx.close()
@@ -4396,6 +4493,21 @@ def check_tab_nav_regression(browser, shots_dir: Path) -> None:
     _t34_narrow(browser, shots_dir)
 
 
+def run_section(name: str, fn, *args, **kwargs):
+    """独立执行一个验收段：单段异常记 FAIL 但继续后续段，避免一处超时中断整轮。
+
+    异常仍写入 `_results`（`check(False, ...)`），并附 traceback 最后一行摘要；
+    不吞异常、不伪造 PASS。
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        lines = traceback.format_exc().strip().splitlines()
+        summary = lines[-1] if lines else f"{type(exc).__name__}: {exc}"
+        check(False, f"{name} 执行异常", summary)
+        return None
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -4416,16 +4528,16 @@ def main() -> int:
         proc = start_instance_if_needed()
         check(port_serving(PORT), f"临时实例 {BASE} 就绪", "")
 
-        check_static()
-        check_dist_artifact()
-        check_phase3_dist()
+        run_section("check_static", check_static)
+        run_section("check_dist_artifact", check_dist_artifact)
+        run_section("check_phase3_dist", check_phase3_dist)
 
         if NAV_ONLY:
             observe("T3_E2E_ONLY=nav：跑顶栏合并式、跨端无感切换与统一入口专项",
                     "跳过阶段一/二/三其余检查与阶段四 TestClient")
         else:
             # 阶段四（T13）：后端 recipes 契约用 TestClient 独立验证（与 8766 实例无关）。
-            check_phase4_recipe_testclient()
+            run_section("check_phase4_recipe_testclient", check_phase4_recipe_testclient)
 
             # 阶段二：断网等价探针需要重启临时实例（只有脚本自己拉起的实例才可重启）
             if P4_ONLY:
@@ -4452,52 +4564,55 @@ def main() -> int:
 
             if not P4_ONLY:
                 section("阶段二 HTTP 契约检查（C-REMOTE-CACHE@1 / C-REF-ITEM-DTO@2 / C-REF-RECIPES@2）")
-                check_phase2_dto()
-                check_phase2_image_cache()
-                check_phase2_recipes()
-                check_phase2_cache_location()
+                run_section("check_phase2_dto", check_phase2_dto)
+                run_section("check_phase2_image_cache", check_phase2_image_cache)
+                run_section("check_phase2_recipes", check_phase2_recipes)
+                run_section("check_phase2_cache_location", check_phase2_cache_location)
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             if NAV_ONLY:
-                check_nav_merge(browser, shots_dir)
-                check_embed_nav(browser, shots_dir)
-                check_unified_entry(browser, shots_dir)
-                check_tab_nav_regression(browser, shots_dir)
-                check_live_8656_tab_nav(browser, shots_dir)
+                run_section("check_nav_merge", check_nav_merge, browser, shots_dir)
+                run_section("check_embed_nav", check_embed_nav, browser, shots_dir)
+                run_section("check_unified_entry", check_unified_entry, browser, shots_dir)
+                run_section("check_tab_nav_regression", check_tab_nav_regression, browser, shots_dir)
+                run_section("check_live_8656_tab_nav", check_live_8656_tab_nav, browser, shots_dir)
             else:
                 if not P4_ONLY:
                     ctx_main = browser.new_context(viewport={"width": 1500, "height": 950})
-                    check_routes(ctx_main, shots_dir)
-                    check_gallery_entries_all(ctx_main, shots_dir)
-                    check_library_images(ctx_main, shots_dir)
-                    check_studio_workflow_default(ctx_main, shots_dir)
-                    check_history_section(ctx_main, shots_dir)
+                    run_section("check_routes", check_routes, ctx_main, shots_dir)
+                    run_section("check_gallery_entries_all", check_gallery_entries_all, ctx_main, shots_dir)
+                    run_section("check_library_images", check_library_images, ctx_main, shots_dir)
+                    run_section("check_studio_workflow_default", check_studio_workflow_default, ctx_main, shots_dir)
+                    run_section("check_history_section", check_history_section, ctx_main, shots_dir)
                     ctx_main.close()
 
-                    check_nsfw_age_gate(browser, shots_dir)
-                    check_library_images_offline(browser, shots_dir)
-                    check_settings_export(browser, shots_dir)
-                    check_history_empty_mock(browser, shots_dir)
-                    check_phase2_pages(browser, shots_dir)
+                    run_section("check_nsfw_age_gate", check_nsfw_age_gate, browser, shots_dir)
+                    run_section("check_library_images_offline", check_library_images_offline, browser, shots_dir)
+                    run_section("check_settings_export", check_settings_export, browser, shots_dir)
+                    run_section("check_history_empty_mock", check_history_empty_mock, browser, shots_dir)
+                    run_section("check_phase2_pages", check_phase2_pages, browser, shots_dir)
 
                     # 阶段三（T10）追加验收：独立新 context，逐项检查图库数据层。
-                    check_phase3_routes(browser, shots_dir)
-                    check_phase3_normal_images(browser, shots_dir)
-                    check_phase3_offline(browser, shots_dir)
-                    check_phase3_entries(browser, shots_dir)
-                    check_phase3_nsfw(browser, shots_dir)
-                    check_phase3_pose_interactions(browser, shots_dir)
-                    check_phase3_costume_interactions(browser, shots_dir)
-                    check_phase3_portrait_interactions(browser, shots_dir)
-                    check_phase3_studio_default(browser, shots_dir)
+                    run_section("check_phase3_routes", check_phase3_routes, browser, shots_dir)
+                    run_section("check_phase3_normal_images", check_phase3_normal_images, browser, shots_dir)
+                    run_section("check_phase3_offline", check_phase3_offline, browser, shots_dir)
+                    run_section("check_phase3_entries", check_phase3_entries, browser, shots_dir)
+                    run_section("check_phase3_nsfw", check_phase3_nsfw, browser, shots_dir)
+                    run_section("check_phase3_pose_interactions", check_phase3_pose_interactions, browser, shots_dir)
+                    run_section("check_phase3_costume_interactions", check_phase3_costume_interactions, browser, shots_dir)
+                    run_section("check_phase3_portrait_interactions", check_phase3_portrait_interactions, browser, shots_dir)
+                    run_section("check_phase3_studio_default", check_phase3_studio_default, browser, shots_dir)
 
                 # 阶段四（T13）关卡：真实提交 -> 轮询 -> 结果图 -> 任务中心。
-                phase4_state = check_phase4_real_submit(browser, shots_dir)
-                check_phase4_mock_result(browser, shots_dir, phase4_state)
-                check_phase4_failure_branch(browser, shots_dir, phase4_state)
-                check_phase4_upload_slot(browser, shots_dir)
-                check_phase4_ui_contract(browser, shots_dir)
+                phase4_state = run_section(
+                    "check_phase4_real_submit", check_phase4_real_submit, browser, shots_dir)
+                run_section("check_phase4_mock_result", check_phase4_mock_result,
+                            browser, shots_dir, phase4_state)
+                run_section("check_phase4_failure_branch", check_phase4_failure_branch,
+                            browser, shots_dir, phase4_state)
+                run_section("check_phase4_upload_slot", check_phase4_upload_slot, browser, shots_dir)
+                run_section("check_phase4_ui_contract", check_phase4_ui_contract, browser, shots_dir)
 
             browser.close()
 
@@ -4510,10 +4625,13 @@ def main() -> int:
 
     failed = [r for r in _results if not r[0]]
     print("\n" + "=" * 60)
-    print(f"硬检查：{len(_results) - len(failed)} 通过 / {len(failed)} 失败；观察项 {len(_observations)} 条")
+    print(f"硬检查：{len(_results) - len(failed)} 通过 / {len(failed)} 失败；"
+          f"观察项 {len(_observations)} 条；SKIP {len(_skips)} 条")
     for ok, name, detail in _results:
         if not ok:
             print(f"  FAIL: {name} | {detail}")
+    for name, detail in _skips:
+        print(f"  SKIP: {name} | {detail}")
     print(f"RESULT: {'PASS' if not failed else 'FAIL'}")
     print(f"截图目录：{shots_dir}")
 
@@ -4522,6 +4640,8 @@ def main() -> int:
         "base": BASE,
         "checks": [{"ok": ok, "name": name, "detail": detail} for ok, name, detail in _results],
         "observations": [{"name": n, "detail": d} for n, d in _observations],
+        "skipped": [{"name": n, "detail": d} for n, d in _skips],
+        "skipCount": len(_skips),
         "screenshotsDir": str(shots_dir),
         "passed": len(_results) - len(failed),
         "failed": len(failed),

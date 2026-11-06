@@ -2617,6 +2617,11 @@
             "title": "Aspect Ratio",
             "type": "string"
           },
+          "body_mode": {
+            "default": "costume",
+            "title": "Body Mode",
+            "type": "string"
+          },
           "costume_id": {
             "default": "",
             "title": "Costume Id",
@@ -3688,7 +3693,7 @@
         "title": "WorkflowCaps",
         "type": "object"
       },
-      "WorkflowListResponse": {
+      "WorkflowListResponseWithSlots": {
         "properties": {
           "default": {
             "default": "",
@@ -3697,13 +3702,13 @@
           },
           "workflows": {
             "items": {
-              "$ref": "#/components/schemas/WorkflowRow"
+              "$ref": "#/components/schemas/WorkflowRowWithSlots"
             },
             "title": "Workflows",
             "type": "array"
           }
         },
-        "title": "WorkflowListResponse",
+        "title": "WorkflowListResponseWithSlots",
         "type": "object"
       },
       "WorkflowParams": {
@@ -3795,7 +3800,8 @@
         "title": "WorkflowParams",
         "type": "object"
       },
-      "WorkflowRow": {
+      "WorkflowRowWithSlots": {
+        "description": "工作流行 + 角色能力（C-REF-WF-SLOTS@1）。\n\n`slots` 与 `input_count` 刻意不同：前者只统计标题能识别成业务角色的 LoadImage，\n后者仍按全部 LoadImage 计数（「主体」这类无法识别的标题不占用 slots，但仍是一个输入位）。\n\n`scope=\"studio\"` 时保证 `slots` 非空：一个业务角色都识别不出的工作流已被\n`workflow_catalog._studio_slots()` 过滤，不会进入合成台列表；解析失败仍返回 `[]`，\n但同样不会出现在 studio 列表里。因此前端可以放心用 `slots` 判断「该工作流能不能\n放人像/服装/姿势」。`scope=\"all\"` 统一给空数组，保持旧行为。",
         "properties": {
           "caps": {
             "$ref": "#/components/schemas/WorkflowCaps"
@@ -3848,6 +3854,13 @@
             "title": "Rel Path",
             "type": "string"
           },
+          "slots": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
           "source": {
             "default": "",
             "title": "Source",
@@ -3861,9 +3874,10 @@
         },
         "required": [
           "path",
-          "name"
+          "name",
+          "slots"
         ],
-        "title": "WorkflowRow",
+        "title": "WorkflowRowWithSlots",
         "type": "object"
       },
       "app__routers__prompts__BatchImportRequest": {
@@ -9661,7 +9675,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkflowListResponse"
+                  "$ref": "#/components/schemas/WorkflowListResponseWithSlots"
                 }
               }
             },

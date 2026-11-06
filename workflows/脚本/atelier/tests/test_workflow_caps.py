@@ -129,3 +129,30 @@ def test_workflow_list_exposes_input_count(api):
         row for row in rows if row["name"] == "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
     )
     assert qwen["input_count"] == 3
+
+def test_workflow_list_exposes_slots_in_loadimage_order(api):
+    """C-REF-WF-SLOTS@1：scope=studio 每项都带 slots，且顺序 = LoadImage 节点顺序。
+
+    默认 Qwen21 的节点顺序是 姿势 → 人像 → 服装（提示词图号并不是节点顺序），
+    所以 slots 必须是 ["pose", "portrait", "costume"]，不能按角色优先级重排。
+    """
+    resp = api.get("/api/workflows", params={"scope": "studio"})
+    assert resp.status_code == 200
+    rows = resp.json()["workflows"]
+    assert rows
+    assert all("slots" in row for row in rows), "合成台每一项都必须带 slots"
+
+    qwen = next(
+        row for row in rows if row["name"] == "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
+    )
+    assert qwen["slots"] == ["pose", "portrait", "costume"]
+    assert qwen["input_count"] == 3
+
+
+def test_workflow_list_scope_all_keeps_empty_slots(api):
+    """scope=all 行为不变：slots 统一空数组，老调用方不受影响。"""
+    resp = api.get("/api/workflows")
+    assert resp.status_code == 200
+    rows = resp.json()["workflows"]
+    assert isinstance(rows, list)
+    assert all(row["slots"] == [] for row in rows)

@@ -31,6 +31,17 @@ PHOTO_STYLES = frozenset({"realistic"})
 #: 上游用这个发型名称表示「没有特殊发型」，此时回退到发长描述。
 BASE_HAIR_NAME = "标准基础款"
 
+#: 素体模式（C-REF-BODY-MODE@1）：
+#: - `costume`：常规出图，服装槽有参考图就写服装段（默认，兼容旧调用）；
+#: - `bare`：中性素体展示，禁止选服装，只写中性、非性化的素体条款。
+BODY_MODES: tuple[str, str] = ("costume", "bare")
+
+#: 素体展示条款：不写身体部位清单、不写「裸露/性感」等词，只声明中性人体展示。
+BARE_DISPLAY_CLAUSE = (
+    "• 素体展示：画面为成年女性的素体人体展示，不穿任何服装与配饰；"
+    "保持中性、非性化的站姿或姿势构图，不添加任何性暗示元素。"
+)
+
 
 @dataclass(frozen=True)
 class RecipeEntry:
@@ -71,15 +82,22 @@ def build_recipe_prompt(
     style: str = "realistic",
     prompt_suffix: str = "",
     index_map: dict[str, int] | None = None,
+    body_mode: str = "costume",
 ) -> str:
-    """按上游顺序拼出完整提示词；未知画风抛 ValueError（由路由转成 400）。
+    """按上游顺序拼出完整提示词；未知画风/素体模式抛 ValueError（由路由转成 400）。
 
     `index_map` 是角色 → 工作流真实图号（"portrait"/"costume"/"pose"/"extra"）。
     合成台空槽裁剪后图位不会压缩重排（例如 Qwen21 缺人像时服装仍是图3、姿势仍是图1），
     这里必须按真实图号写提示词；不传时退回按出现顺序递增的旧行为。
+
+    `body_mode`（C-REF-BODY-MODE@1）默认 `"costume"` 保持旧调用方行为不变：
+    - 未选服装时**不再**写「保留图1人物原有可见服装」，避免模型补全/捏造衣服；
+    - `"bare"` 额外追加中性素体条款，双人姿势改为中性、非性化姿态描述。
     """
     if style not in STYLE_PRESETS:
         raise ValueError(f"不支持的画风：{style}")
+    if body_mode not in BODY_MODES:
+        raise ValueError(f"不支持的素体模式：{body_mode}")
 
     style_info = STYLE_PRESETS[style]
     is_photo = style in PHOTO_STYLES
@@ -91,18 +109,22 @@ def build_recipe_prompt(
 
     if portrait:
         num = _figure_no(index_map, "portrait", idx)
+        # bare 模式下没有服装，"服装镂空处露出的皮肤"无从谈起；同时避免出现
+        # 「裸露」等词，统一改成中性的「全身皮肤」表述。
         skin = (
-            "人物的肤色必须与图一人物一致，所有裸露皮肤（包括服装镂空处露出的皮肤）"
-            "必须与脸部肤色统一，统一后的肤色与质感按风格要求呈现。"
+            "人物的肤色必须与图一人物一致，全身皮肤必须与脸部肤色统一，"
+            "统一后的肤色与质感按风格要求呈现。"
+            if body_mode == "bare"
+            else (
+                "人物的肤色必须与图一人物一致，所有裸露皮肤（包括服装镂空处露出的皮肤）"
+                "必须与脸部肤色统一，统一后的肤色与质感按风格要求呈现。"
+            )
         )
-        outfit = (
-            ""
-            if costume
-            else "保留图1人物原有可见服装与配饰，不复制姿势参考图的服装或白模外观。"
-        )
+        # 未选服装时**不写任何服装指令**：任何"保留原有服装"的措辞都会让模型
+        # 补全/捏造衣服（实测缺陷），服装要留白就彻底留白。
         clauses.append(
             f"• 人物：图{num}中的人物，保持其脸型、五官、发型（{_hair_description(portrait)}）"
-            f"和发色一致。{skin}{outfit}"
+            f"和发色一致。{skin}"
         )
         idx += 1
 
@@ -140,19 +162,33 @@ def build_recipe_prompt(
     # 双人姿势（库内 id 统一为 `pair*`）：必须显式声明人数与两人的服装归属。
     # 实测（2026-11-04）：只写「按图3摆姿势」时，无论 Edit 还是 VNCCS 都只出一个；
     # 且第二人容易没衣服。这里把人数、两人的衣装、禁止合并都写死。
+    # 未选服装时不再写「两人各自都有完整服装」：那是凭空捏造衣装。
     is_pair = bool(pose and pose.id.startswith("pair"))
     if is_pair:
-        pair_costume = (
-            f"其中一位穿图{costume_idx}的整套服装和配饰，另一位穿同色系素色简化款；"
-            if costume_idx
-            else "两人各自都有完整服装，第二位穿与第一位同色系的素色简化款；"
-        )
-        clauses.append(
-            "• 双人要求：画面中必须同时出现两位成年女性，两人都要完整入镜；"
-            f"{pair_costume}任何一位都不允许裸露或半裸。"
-            f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
-            "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
-        )
+        if body_mode == "bare":
+            clauses.append(
+                "• 双人要求：画面中为两位成年女性的素体展示，两人都完整入镜，保持中性、非性化姿态。"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
+                "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
+        else:
+            pair_costume = (
+                f"其中一位穿图{costume_idx}的整套服装和配饰，另一位穿同色系素色简化款；"
+                if costume_idx
+                else ""
+            )
+            clauses.append(
+                "• 双人要求：画面中必须同时出现两位成年女性，两人都要完整入镜；"
+                f"{pair_costume}任何一位都不允许裸露或半裸。"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
+                "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
+
+    # 素体模式（C-REF-BODY-MODE@1）：只追加中性人体展示条款。
+    # bare 下不可能选服装，所以上面不会出现任何服装段落；faceless 也天然不触发
+    # （`not portrait and bool(costume and pose)` 需要 costume 存在）。
+    if body_mode == "bare":
+        clauses.append(BARE_DISPLAY_CLAUSE)
 
     if faceless:
         clauses.append(

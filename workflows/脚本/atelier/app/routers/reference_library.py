@@ -22,7 +22,12 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.services import reference_library, reference_remote_cache, uploads
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
-from app.services.recipe_prompt import RecipeEntry, STYLE_PRESETS, build_recipe_prompt
+from app.services.recipe_prompt import (
+    BODY_MODES,
+    RecipeEntry,
+    STYLE_PRESETS,
+    build_recipe_prompt,
+)
 from app.services.workflow_parser import (
     find_image_input_keys,
     find_loadimage_nodes,
@@ -259,6 +264,9 @@ class RecipeRequest(BaseModel):
     aspect_ratio: str = ""
     orientation: str = ""
     style: str = "realistic"
+    #: 素体模式（C-REF-BODY-MODE@1）：`costume`（默认，常规出图）/ `bare`（无服装素体展示）。
+    #: 其它值 400；`bare` 时不允许同时选择服装。
+    body_mode: str = "costume"
     prompt_suffix: str = ""
     seed: int = 100000
     seed_mode: str = "fixed"
@@ -567,12 +575,21 @@ def create_reference_recipe(req: RecipeRequest):
     """
     if req.style not in STYLE_PRESETS:
         raise HTTPException(400, f"不支持的画风：{req.style}")
+    if req.body_mode not in BODY_MODES:
+        raise HTTPException(
+            400,
+            f"不支持的素体模式：{req.body_mode}"
+            f"（仅支持 {' / '.join(BODY_MODES)}）",
+        )
     if req.costume_library not in COSTUME_LIBRARIES:
         raise HTTPException(
             400,
             f"不支持的服装库：{req.costume_library}"
             f"（仅支持 {' / '.join(COSTUME_LIBRARIES)}）",
         )
+    # 素体模式不穿衣服：同时选了服装（库条目或上传图）就自相矛盾，直接 400
+    if req.body_mode == "bare" and (req.costume_id.strip() or req.costume_path.strip()):
+        raise HTTPException(400, "素体模式不能同时选择服装")
 
     portrait, portrait_path = _resolve_slot("portrait", req.portrait_id, req.portrait_path, "人像")
     costume, costume_path = _resolve_slot(
@@ -615,9 +632,19 @@ def create_reference_recipe(req: RecipeRequest):
         )
 
     role_nodes = _role_nodes(api_wf)
+    # 整条工作流一个角色都认不出：与"缺某一个槽"是两回事，文案必须分开，
+    # 否则用户只会看到「该工作流没有人像输入」，完全猜不到根因（多为 UI 格式 .json）。
+    if not role_nodes:
+        raise HTTPException(
+            400,
+            f"该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），"
+            f"请换用 .api.json 工作流：{workflow_path.name}",
+        )
     for role in SLOT_ROLES:
         if filled[role] and role not in role_nodes:
-            raise HTTPException(400, f"该工作流没有{SLOT_LABELS[role]}输入")
+            raise HTTPException(
+                400, f"该工作流没有{SLOT_LABELS[role]}输入：{workflow_path.name}",
+            )
 
     if total < input_count:
         try:
@@ -645,6 +672,8 @@ def create_reference_recipe(req: RecipeRequest):
         style=req.style,
         prompt_suffix=req.prompt_suffix,
         index_map=index_map,
+        # 素体模式透传：提示词据此追加中性素体条款（C-REF-BODY-MODE@1）
+        body_mode=req.body_mode,
     )
 
     # 提交顺序固定 人像 → 服装 → 姿势 → 附加；节点 id 用工作流真实图位（不重排）

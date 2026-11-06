@@ -10,8 +10,8 @@ import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from app.schemas import WorkflowListResponse
-from pydantic import BaseModel
+from app.schemas import WorkflowListResponse, WorkflowRow
+from pydantic import BaseModel, Field
 
 from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
@@ -26,7 +26,7 @@ from app.services.workflow_catalog import (
 )
 from app.services.workflow_parser import (
     RatioNotSupported, detect_workflow_caps, find_loadimage_nodes,
-    load_workflow, inject_prompt,
+    loadimage_role, load_workflow, inject_prompt,
 )
 from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
@@ -135,30 +135,61 @@ def validate_workflow(path: str = Query("")):
 
 # ---------- 工作流列表 ----------
 
-#: 工作流输入数缓存：路径 → (mtime, LoadImage 数)。列表每次都要带该字段，
-#: 不缓存会为了一个整数把每个工作流重新解析一遍。
-_input_count_cache: dict[str, tuple[float, int]] = {}
+class WorkflowRowWithSlots(WorkflowRow):
+    """工作流行 + 角色能力（C-REF-WF-SLOTS@1）。
+
+    `slots` 与 `input_count` 刻意不同：前者只统计标题能识别成业务角色的 LoadImage，
+    后者仍按全部 LoadImage 计数（「主体」这类无法识别的标题不占用 slots，但仍是一个输入位）。
+
+    `scope="studio"` 时保证 `slots` 非空：一个业务角色都识别不出的工作流已被
+    `workflow_catalog._studio_slots()` 过滤，不会进入合成台列表；解析失败仍返回 `[]`，
+    但同样不会出现在 studio 列表里。因此前端可以放心用 `slots` 判断「该工作流能不能
+    放人像/服装/姿势」。`scope="all"` 统一给空数组，保持旧行为。
+    """
+
+    #: 必填：路由层对每一项都会显式赋值，漏填应当报错而不是静默变成空数组
+    slots: list[str]
 
 
-def _workflow_input_count(path: str) -> int:
-    """工作流里的 LoadImage 输入数（与 `find_loadimage_nodes()` 完全一致）。"""
+class WorkflowListResponseWithSlots(WorkflowListResponse):
+    workflows: list[WorkflowRowWithSlots] = Field(default_factory=list)
+
+
+#: 工作流输入信息缓存：路径 → (mtime, LoadImage 数, 角色列表)。
+#: 一次解析同时产出 input_count 与 slots：列表接口对每个工作流都要这两项，
+#: 分开算会把同一份 JSON 完整解析两遍（load_workflow 还要查 object_info，代价不低）。
+_loadimage_info_cache: dict[str, tuple[float, int, list[str]]] = {}
+
+
+def _workflow_loadimage_info(path: str) -> tuple[int, list[str]]:
+    """返回 (LoadImage 输入数, 能映射出的业务角色列表)。
+
+    角色按 LoadImage 节点顺序去重保序（不按角色优先级重排），因此同一工作流
+    选中不同图片时，前端看到的顺序与节点顺序一致。解析失败时 `slots` 为 `[]`，
+    不抛异常 —— 沿用「单个工作流坏掉不能拖垮整张列表」的既有语义。
+    """
     try:
         mtime = Path(path).stat().st_mtime
     except OSError:
-        return 0
-    cached = _input_count_cache.get(path)
+        return 0, []
+    cached = _loadimage_info_cache.get(path)
     if cached and cached[0] == mtime:
-        return cached[1]
+        return cached[1], list(cached[2])
     try:
-        count = len(find_loadimage_nodes(load_workflow(path)))
+        nodes = find_loadimage_nodes(load_workflow(path))
     except Exception as exc:  # noqa: BLE001 —— 单个工作流解析失败不能拖垮整个列表
-        logger.debug("统计工作流输入数失败 %s：%s", path, type(exc).__name__)
-        count = 0
-    _input_count_cache[path] = (mtime, count)
-    return count
+        logger.debug("解析工作流输入信息失败 %s：%s", path, type(exc).__name__)
+        nodes = []
+    slots: list[str] = []
+    for _node_id, title in nodes:
+        role = loadimage_role(title)
+        if role and role not in slots:
+            slots.append(role)
+    _loadimage_info_cache[path] = (mtime, len(nodes), slots)
+    return len(nodes), list(slots)
 
 
-@router.get("/workflows", response_model=WorkflowListResponse)
+@router.get("/workflows", response_model=WorkflowListResponseWithSlots)
 def list_workflows(
     sort: str = Query("mtime"),
     include_video: bool = Query(False, description="true=也返回视频工作流（默认隐藏）"),
@@ -171,9 +202,13 @@ def list_workflows(
     """列出所有可用工作流；视频工作流默认隐藏（结果中心只处理图片）。"""
     results = list_valid_workflows(include_video=include_video, scope=scope)
 
-    # input_count 必须在路由层显式补上：只靠 WorkflowRow 的默认值会把漏填字段静默变成 0
+    # input_count / slots 必须在路由层显式补上：只靠模型默认值会把漏填字段静默变成 0
     for item in results:
-        item["input_count"] = _workflow_input_count(item["path"])
+        input_count, slots = _workflow_loadimage_info(item["path"])
+        item["input_count"] = input_count
+        # 角色能力只对合成台生效；scope=all 保持向后兼容，统一给空数组。
+        # scope=studio 下空 slots 的工作流已在目录层被过滤，走到这里的必然非空。
+        item["slots"] = slots if scope == "studio" else []
 
     if scope == "studio":
         # 合成台：三槽（人像+服装+姿势）优先 → 画廊本机改版 > 参考库专用 > 库根 → 新到旧。

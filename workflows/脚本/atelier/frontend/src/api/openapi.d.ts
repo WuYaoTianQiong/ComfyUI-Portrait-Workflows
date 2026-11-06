@@ -3290,6 +3290,11 @@ export interface components {
              */
             aspect_ratio: string;
             /**
+             * Body Mode
+             * @default costume
+             */
+            body_mode: string;
+            /**
              * Costume Id
              * @default
              */
@@ -3897,15 +3902,15 @@ export interface components {
              */
             quality: boolean;
         };
-        /** WorkflowListResponse */
-        WorkflowListResponse: {
+        /** WorkflowListResponseWithSlots */
+        WorkflowListResponseWithSlots: {
             /**
              * Default
              * @default
              */
             default: string;
             /** Workflows */
-            workflows?: components["schemas"]["WorkflowRow"][];
+            workflows?: components["schemas"]["WorkflowRowWithSlots"][];
         };
         /**
          * WorkflowParams
@@ -3958,8 +3963,19 @@ export interface components {
             /** Quality Tiers */
             quality_tiers?: string[];
         };
-        /** WorkflowRow */
-        WorkflowRow: {
+        /**
+         * WorkflowRowWithSlots
+         * @description 工作流行 + 角色能力（C-REF-WF-SLOTS@1）。
+         *
+         *     `slots` 与 `input_count` 刻意不同：前者只统计标题能识别成业务角色的 LoadImage，
+         *     后者仍按全部 LoadImage 计数（「主体」这类无法识别的标题不占用 slots，但仍是一个输入位）。
+         *
+         *     `scope="studio"` 时保证 `slots` 非空：一个业务角色都识别不出的工作流已被
+         *     `workflow_catalog._studio_slots()` 过滤，不会进入合成台列表；解析失败仍返回 `[]`，
+         *     但同样不会出现在 studio 列表里。因此前端可以放心用 `slots` 判断「该工作流能不能
+         *     放人像/服装/姿势」。`scope="all"` 统一给空数组，保持旧行为。
+         */
+        WorkflowRowWithSlots: {
             caps?: components["schemas"]["WorkflowCaps"];
             /**
              * Image Slots
@@ -3996,6 +4012,8 @@ export interface components {
              * @default
              */
             rel_path: string;
+            /** Slots */
+            slots: string[];
             /**
              * Source
              * @default
@@ -7696,7 +7714,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkflowListResponse"];
+                    "application/json": components["schemas"]["WorkflowListResponseWithSlots"];
                 };
             };
             /** @description Validation Error */

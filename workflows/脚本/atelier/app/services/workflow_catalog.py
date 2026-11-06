@@ -11,7 +11,9 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.workflow_parser import (
+    find_loadimage_nodes,
     is_video_workflow,
+    loadimage_role,
     load_workflow,
     detect_workflow_caps,
     detect_workflow_params,
@@ -77,6 +79,15 @@ def _studio_slots(path: Path) -> tuple[int, bool]:
 
     参考合成至少要有 1 个 `LoadImage*`（放参考图）+ 1 个文本编码节点（放提示词）；
     文生图工作流没有 LoadImage、纯超分工作流没有文本编码，都会被判成不可用。
+
+    额外一条：**有 LoadImage 但标题一个业务角色都识别不出**的工作流同样不可用。
+    合成台靠 `loadimage_role()` 把 LoadImage 映射到人像/服装/姿势槽，角色认不出来
+    就永远只能 400「该工作流没有人像输入」。常见于 UI 格式 `.json`（节点标题是
+    `图像`/`主体` 这类默认名），解析出的 LoadImage 纯属误导。这类工作流不能出现在
+    下拉里，否则用户选中后才失败。
+
+    注意与「完全没有 LoadImage」区分：后者已由 `slots >= 1` 拦下，
+    这里只在 `slots >= 1` 的前提下补充角色判据，不重复处理同一个原因。
     """
     try:
         mtime = path.stat().st_mtime
@@ -93,7 +104,12 @@ def _studio_slots(path: Path) -> tuple[int, bool]:
             if isinstance(node, dict) and str(node.get("class_type", "")).startswith("LoadImage")
         )
         has_prompt = bool(detect_workflow_caps(workflow).get("prompt"))
-        ready = slots >= 1 and has_prompt
+        # 角色判据只看 `find_loadimage_nodes()`（class_type == "LoadImage"），
+        # 与 recipes 端点 `_role_nodes()` 的判定保持一致。
+        loadimage_nodes = find_loadimage_nodes(workflow)
+        has_role = any(loadimage_role(title) for _node_id, title in loadimage_nodes)
+        unroleable = bool(loadimage_nodes) and not has_role
+        ready = slots >= 1 and has_prompt and not unroleable
     except Exception:  # noqa: BLE001
         slots, ready = 0, False
     _slot_cache[str(path)] = (mtime, slots, ready)
