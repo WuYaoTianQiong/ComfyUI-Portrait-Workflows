@@ -508,7 +508,7 @@ async function copyId() {
 }
 
 /*
- * 弹窗：896 × 658.39（1080 视口实测）、max-height 90dvh、圆角 14px、底 #171717。
+ * 弹窗：896 × 658.39（1080 视口实测）、max-height 90dvh、圆角 14px、底 var(--surface-raised)。
  * 高度同时受 658.39px 与 90dvh 约束，窄屏（矮视口）自动收缩。
  */
 .ref-lightbox__panel {

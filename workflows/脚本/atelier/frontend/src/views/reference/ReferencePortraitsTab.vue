@@ -560,7 +560,7 @@ onMounted(() => {
   color: var(--on-inverse);
 }
 
-/* 筛选面板：圆角 22 / 内边距 16 / gap 12 / 底 #262626（§5 补充实测项） */
+/* 筛选面板：圆角 22 / 内边距 16 / gap 12 / 底 var(--surface-panel)（§5 补充实测项） */
 .portrait-filters {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px auto;
@@ -668,7 +668,7 @@ onMounted(() => {
   min-height: 34px;
 }
 
-/* §5：辅助文字统一 11px / 400 / #a1a1a1（人像 ID 行 10px 由 meta-mono 提供） */
+/* §5：辅助文字统一 11px / 400 / var(--text-muted)（人像 ID 行 10px 由 meta-mono 提供） */
 .portrait-tab :deep(.ref-card__meta-right) {
   color: var(--text-muted);
   font-weight: 400;

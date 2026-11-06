@@ -538,7 +538,7 @@ function goStudio(): void {
   opacity: 0.4;
 }
 
-/* 分区卡：22px 圆角 / 24px 内边距 / 底 #262626（施工手册 §5 补充实测项）。 */
+/* 分区卡：22px 圆角 / 24px 内边距 / 底 var(--surface-panel)（施工手册 §5 补充实测项）。 */
 .settings__section {
   display: flex;
   flex-direction: column;
