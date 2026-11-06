@@ -104,6 +104,14 @@
 【标签同步】
   脚本写入 prompts.tags 后会同步 tags + entity_tags；前端筛选/详情只读
   entity_tags，不能只写文本，否则标签筛选和计数看不到新条目。
+  写完后按 entity_tags 重算 tags.usage_count，避免新标签在 UI 里显示 0。
+
+【安全 lint（2026-11-07）】
+  - 明确裸露 → 自动追加 `18+` + `随机排除`；
+  - 服装只描述上衣 / 未覆盖下装 → 自动追加 `随机排除`；
+  - --strict 时结构/纯度/安全任一告警都跳过；
+  - 解析器与服装覆盖策略复用 `app.services.fragment_syntax` /
+    `app.services.costume_policy`，不在此维护第 4 份正则。
 
 【不要写在 organized_prompts.txt 顶部】
   该文件按三个以上空行切块，任何说明文字都会被解析成提示词块并入库。
@@ -147,12 +155,22 @@
 
 import argparse, re, sqlite3, sys, json
 from datetime import datetime
+from pathlib import Path
+
 sys.stdout.reconfigure(encoding='utf-8')
 
-DB_PATH = r'F:\ComfyUI_Migration\ComfyUI-Portrait-Workflows\workflows\文档\提示词收藏.db'
+# 复用 atelier 的唯一解析器与服装安全策略，避免第 4 份正则/关键词漂移。
+_ATELIER_ROOT = Path(__file__).resolve().parent / 'atelier'
+if str(_ATELIER_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ATELIER_ROOT))
+from app.services.fragment_syntax import FRAGMENT_TYPES, parse as parse_marked_fragments
+from app.services.costume_policy import costume_covers_lower, has_explicit_content
+
+DB_PATH = r'F:\ComfyUI_Migration\ComfyUI-Portrait-Workflows\workflows\脚本\atelier\data\prompts.db'
 STYLE_PREFIXES = ["Moody Photography", "Moody Distillation photography style",
                   "Moody Distillation", "Huihui(辉辉)", "Dori"]
-FRAGMENT_TYPES = ["姿态动作", "拍摄视角", "人物面部", "人物身材", "人物服饰", "场景环境", "光影色调", "画风技术"]
+SAFETY_EXCLUDE_TAG = '随机排除'
+SAFETY_NSFW_TAG = '18+'
 STYLE_REPLACEMENTS = [
     (r'Keep the presentation in a romantic intimate adult direction\.', '保持浪漫亲密的成人风格。'),
     (r'Keep the presentation in a suggestive adult direction\.', '保持暗示性成人风格。'),
@@ -179,9 +197,7 @@ ENGLISH_TAG_PATTERNS = re.compile(
 # ========== 碎片解析 ==========
 
 def parse_fragments(text):
-    result = {}
-    for m in re.finditer(r'【([^】]+)】\s*(.*?)(?=\n【|$)', text, re.DOTALL):
-        result[m.group(1).strip()] = m.group(2).strip()
+    result = {f['type']: f['content'] for f in parse_marked_fragments(text)}
     if not result:
         result = auto_split_fragments(text)
     return result
@@ -446,7 +462,38 @@ def generate_tags(frags, prompt_text, model, width, height):
     return ','.join(t for t in tags if not (t.lower() in seen or seen.add(t.lower())))[:100]
 
 
+def validate_structure(body, frags):
+    """结构层检查：重复/未知类型、残留标题、8 类完整性、自动拆分。"""
+    warns = []
+    labels = re.findall(r'【([^】]+)】', body or '')
+    known = set(FRAGMENT_TYPES)
+    unknown = sorted({label for label in labels if label not in known})
+    dup = sorted({label for label in labels if labels.count(label) > 1})
+    if unknown:
+        warns.append(f'未知碎片类型：{"、".join(unknown)}（不会写入 prompt 正文）')
+    if dup:
+        warns.append(f'重复碎片类型：{"、".join(dup)}')
+    if frags:
+        missing = [ft for ft in FRAGMENT_TYPES if not frags.get(ft)]
+        if missing:
+            warns.append(f'仅 {len(FRAGMENT_TYPES) - len(missing)}/8 类，不会进入同源整套随机池；缺：{"、".join(missing)}')
+    if body and not re.search(r'【[^】]+】', body) and frags:
+        warns.append('未使用【类型】标记，已自动拆分；请人工复核碎片归属')
+    for ft in FRAGMENT_TYPES:
+        val = frags.get(ft, '')
+        if not val:
+            continue
+        if '【' in val or '】' in val:
+            warns.append(f'【{ft}】正文残留【】标题')
+        if '\\n' in val:
+            warns.append(f'【{ft}】正文含字面量 \\n')
+        if len(val) > 500:
+            warns.append(f'【{ft}】长度 {len(val)} 字，可能整段搬运')
+    return warns
+
+
 def validate_purity(frags):
+    """语义纯度检查：只做保守关键词提示，--strict 时跳过。"""
     warns = []
     for ft in FRAGMENT_TYPES:
         val = frags.get(ft, "")
@@ -454,10 +501,53 @@ def validate_purity(frags):
         if ft == "人物面部":
             for p in STYLE_PREFIXES:
                 if p in val: warns.append(f'【{ft}】包含风格名「{p}」')
+            for kw in ["裙", "裤子", "衬衫", "外套", "鞋"]:
+                if kw in val: warns.append(f'【{ft}】可能混入服饰描述（含「{kw}」）')
         if ft == "姿态动作":
-            for kw in ["穿着", "上衣", "裤子", "裙子"]:
-                if kw in val: warns.append(f'【{ft}】可能混入服装描述（含「{kw}」）')
+            for kw in ["穿着", "上衣", "裤子", "裙子", "背景", "地板", "床沿", "机位", "构图", "焦段", "景深"]:
+                if kw in val: warns.append(f'【{ft}】可能混入服装/场景/视角描述（含「{kw}」）')
+        if ft == "人物服饰":
+            for kw in ["站在", "坐在", "跪", "躺", "回头", "背景", "光线", "阴影"]:
+                if kw in val: warns.append(f'【{ft}】可能混入姿态/场景描述（含「{kw}」）')
+        if ft == "拍摄视角":
+            for kw in ["背景", "房间", "场景", "光线", "色调"]:
+                if kw in val: warns.append(f'【{ft}】可能混入场景/光影描述（含「{kw}」）')
+        if ft == "场景环境":
+            for kw in ["她坐", "她站", "双手", "双腿", "镜头"]:
+                if kw in val: warns.append(f'【{ft}】可能混入姿态/视角描述（含「{kw}」）')
+        if ft == "画风技术":
+            for kw in ["构图", "机位", "焦距", "镜头"]:
+                if kw in val: warns.append(f'【{ft}】可能混入构图/镜头参数（含「{kw}」）')
     return warns
+
+
+def validate_safety(frags, prompt_text):
+    """安全层检查：服装覆盖 + 明确裸露。"""
+    warns = []
+    costume = frags.get('人物服饰', '')
+    if costume and not costume_covers_lower(costume):
+        warns.append('服装描述不完整：未写明下装，可能生成裸露')
+    if has_explicit_content(prompt_text):
+        warns.append('含明确裸露内容')
+    return warns
+
+
+def safety_tags(frags, prompt_text):
+    """根据安全 lint 生成自动标签：裸露 → 18+ + 随机排除；服装不完整 → 随机排除。"""
+    tags = []
+    if has_explicit_content(prompt_text):
+        tags.extend([SAFETY_NSFW_TAG, SAFETY_EXCLUDE_TAG])
+    elif frags.get('人物服饰') and not costume_covers_lower(frags['人物服饰']):
+        tags.append(SAFETY_EXCLUDE_TAG)
+    return tags
+
+
+def merge_tags(tags_text, extra_tags):
+    names = [n.strip() for n in re.split(r'[,，;；]', tags_text or '') if n.strip()]
+    for name in extra_tags:
+        if name not in names:
+            names.append(name)
+    return ','.join(names)
 
 
 def _sync_prompt_tags(cur, prompt_id, tags_text, now):
@@ -531,10 +621,14 @@ def insert_records(records, dry_run=False):
                     'INSERT INTO template_fragments (template_id, prompt_id, fragment_type, cached_content, sort_order) VALUES (?,?,?,?,?)',
                     (template_id, prompt_id, ft, content, sort_order))
 
+        # 4. 按 entity_tags 重算标签计数（新标签默认 usage_count=0，UI 会显示 0）
+        cur.execute(
+            'UPDATE tags SET usage_count = ('
+            ' SELECT COUNT(*) FROM entity_tags WHERE entity_tags.tag_id = tags.id'
+            ')'
+        )
         conn.commit()
         print(f'已插入 {inserted} 组碎片，跳过 {skipped} 条重复')
-        for r in records:
-            print(f'  {r["name"]} ({len([v for v in r.get("fragments",{}).values() if v])}个碎片)')
         for r in records:
             print(f'  {r["name"]} ({len([v for v in r.get("fragments",{}).values() if v])}个碎片)')
 
@@ -543,7 +637,7 @@ def main():
     p = argparse.ArgumentParser(description='批量插入提示词 V2')
     p.add_argument('--file', required=True)
     p.add_argument('--dry-run', action='store_true')
-    p.add_argument('--strict', action='store_true', help='严格：碎片不纯净则跳过')
+    p.add_argument('--strict', action='store_true', help='严格：结构 / 纯度 / 安全 lint 任一告警即跳过')
     p.add_argument('--llm-name', action='store_true',
                    help='LLM模式：输出每个提示词的碎片信息，复制给AI生成标题后再用 --import-names 导入')
     p.add_argument('--import-names', type=str, metavar='JSONFILE',
@@ -583,16 +677,34 @@ def main():
         if has_frags:
             if clean_fragments(frags):
                 print(f'  [CLEAN] 第 {idx+1} 块')
-            for w in validate_purity(frags):
-                print(f'  [WARN] {w}')
-            if validate_purity(frags) and args.strict:
-                print(f'  [SKIP] 跳过')
-                continue
-            # prompt存带标题的展示格式，前端复制用 JS 去标记：copyText.replace(/【[^】]+】\s*/g, '')
+            structure_warns = validate_structure(body, frags)
+        else:
+            structure_warns = validate_structure(body, {})
+        purity_warns = validate_purity(frags) if has_frags else []
+
+        # 安全 lint 用「最终正向正文」判定，避免负向里的「不要裸露」误伤。
+        if has_frags:
             display_lines = [f'【{k}】{frags[k]}' for k in FRAGMENT_TYPES if frags.get(k)]
             prompt_text = '\n\n'.join(display_lines)
         else:
             prompt_text = body
+        safety_warns = validate_safety(frags if has_frags else {}, prompt_text)
+
+        for w in structure_warns:
+            print(f'  [WARN] {w}')
+        for w in purity_warns:
+            print(f'  [WARN] {w}')
+        for w in safety_warns:
+            print(f'  [SAFETY] {w}')
+        if args.strict and (structure_warns or purity_warns or safety_warns):
+            print(f'  [SKIP] strict：结构/纯度/安全 lint 未通过')
+            continue
+
+        extra_tags = safety_tags(frags if has_frags else {}, prompt_text)
+        tags = merge_tags(
+            generate_tags(frags if has_frags else {}, prompt_text, meta['model'], meta['width'], meta['height']),
+            extra_tags,
+        )
 
         records.append({
             'name': _resolve_name(generate_name(frags if has_frags else {}, body, idx, args),
@@ -601,7 +713,7 @@ def main():
             'steps': meta['steps'], 'cfg_scale': meta['cfg_scale'],
             'sampler': meta['sampler'], 'seed': meta['seed'],
             'model': meta['model'], 'width': meta['width'], 'height': meta['height'],
-            'tags': generate_tags(frags if has_frags else {}, prompt_text, meta['model'], meta['width'], meta['height']),
+            'tags': tags,
             'scheduler': meta.get('scheduler'), 'steps_2': meta.get('steps_2'),
             'cfg_scale_2': meta.get('cfg_scale_2'), 'sampler_2': meta.get('sampler_2'),
             'scheduler_2': meta.get('scheduler_2'), 'lora_name': meta.get('lora_name'),
