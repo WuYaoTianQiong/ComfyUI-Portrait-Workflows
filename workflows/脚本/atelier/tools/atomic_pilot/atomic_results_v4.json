@@ -1,0 +1,113 @@
+[
+  {
+    "order": 1,
+    "pilot_index": 6,
+    "status": "done",
+    "job_id": 253,
+    "combo": {
+      "face": "face_bun",
+      "body": "body_petite",
+      "outfit": "outfit_navy_suit",
+      "pose": "pose_sit_floor",
+      "view": "view_high_full",
+      "scene": "scene_hotel_lobby",
+      "light": "light_window_soft",
+      "style": "style_commercial_clean"
+    },
+    "pose_image": "full_single_P006_front",
+    "name": "scene_hotel_lobby · outfit_navy_suit · pose_sit_floor",
+    "body": {
+      "portrait_text": "黑茶色中长发扎成低丸子头，脸侧碎发；圆脸，眼神温柔，浅粉腮红。；娇小轻盈，骨架纤细，比例紧凑。",
+      "costume_text": "藏青色西装外套，白色衬衫，藏青色直筒西装长裤，黑色中跟鞋。",
+      "pose_id": "full_single_P006_front",
+      "style": "realistic",
+      "seed": 20261107,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v4",
+      "modifier_fragments": "• 拍摄视角：高位俯拍，全身构图，人物位于画面下方，空间感清晰。\n• 场景环境：现代酒店大堂，石材墙面、沙发与暖色吊灯，空间安静。\n• 光影色调：柔和窗光从侧面进入，明暗过渡自然，整体低对比。\n• 画风技术：商业干净风格，清晰细节，自然肤色。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs253_full_single_P006_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v4",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v4\\fs253_full_single_P006_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 2,
+    "pilot_index": 17,
+    "status": "done",
+    "job_id": 254,
+    "combo": {
+      "face": "face_blonde_wave",
+      "body": "body_balanced",
+      "outfit": "outfit_qipao",
+      "pose": "pose_walk_hands_pockets",
+      "view": "view_side_full",
+      "scene": "scene_garden",
+      "light": "light_golden",
+      "style": "style_warm_portrait"
+    },
+    "pose_image": "full_single_P016_front",
+    "name": "scene_garden · outfit_qipao · pose_walk_hands_pockets",
+    "body": {
+      "portrait_text": "浅金色波浪长发，发丝柔软；柔和轮廓，浅色眉毛，自然裸妆。；中等身高，比例均衡，体态自然放松。",
+      "costume_text": "月白色过膝直筒中式长裙，立领盘扣，无开衩，不透明面料，浅色披肩，低跟鞋。",
+      "pose_id": "full_single_P016_front",
+      "style": "realistic",
+      "seed": 20261108,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v4",
+      "modifier_fragments": "• 拍摄视角：侧面机位，全身入镜，人物朝向画面左侧。\n• 场景环境：修剪整齐的花园，绿篱、石板路与盛开的白花，空间通透。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：暖调人像风格，肤色温润，层次柔和。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs254_full_single_P016_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v4",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v4\\fs254_full_single_P016_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 3,
+    "pilot_index": 22,
+    "status": "done",
+    "job_id": 255,
+    "combo": {
+      "face": "face_red_short",
+      "body": "body_compact",
+      "outfit": "outfit_qipao_green",
+      "pose": "pose_look_up",
+      "view": "view_wide_env",
+      "scene": "scene_train_station",
+      "light": "light_side_window",
+      "style": "style_soft_portrait"
+    },
+    "pose_image": "full_single_P019_front",
+    "name": "scene_train_station · outfit_qipao_green · pose_look_up",
+    "body": {
+      "portrait_text": "酒红色短发，耳下长度，微卷发尾；脸型小巧，眼神明亮，淡妆。；中等身高，躯干紧凑，四肢比例匀称，体态自然。",
+      "costume_text": "墨绿色过膝直筒中式长裙，立领盘扣，无开衩，不透明面料，黑色低跟鞋。",
+      "pose_id": "full_single_P019_front",
+      "style": "realistic",
+      "seed": 20261109,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v4",
+      "modifier_fragments": "• 拍摄视角：24mm广角环境人像，人物占画面三分之一，保留空间。\n• 场景环境：现代火车站候车大厅，玻璃幕墙与浅色地面，空间开阔。\n• 光影色调：侧窗自然光，面部一侧明亮，过渡柔和。\n• 画风技术：柔光人像风格，肤质细腻，层次柔和。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs255_full_single_P019_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v4",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v4\\fs255_full_single_P019_front_00001_.png"
+      }
+    ]
+  }
+]

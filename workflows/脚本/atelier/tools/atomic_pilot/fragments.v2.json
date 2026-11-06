@@ -1,0 +1,1233 @@
+{
+  "version": 2,
+  "note": "P4 原子碎片库试点种子 v2：8 类 × 12 条 = 96 条；仅实验，不写数据库/UI。",
+  "types": [
+    "人物面部",
+    "人物身材",
+    "人物服饰",
+    "姿态动作",
+    "拍摄视角",
+    "场景环境",
+    "光影色调",
+    "画风技术"
+  ],
+  "fragments": [
+    {
+      "id": "face_black_long",
+      "type": "人物面部",
+      "content": "鹅蛋脸，杏眼，鼻梁秀气，唇形柔和；黑色长直发自然垂落，发尾微卷，淡妆。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_brown_bob",
+      "type": "人物面部",
+      "content": "小巧瓜子脸，圆润杏眼，深棕色齐肩波波头，空气刘海，自然裸妆。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_short_black",
+      "type": "人物面部",
+      "content": "清爽黑色短发，耳下长度，利落刘海；眼睛清亮，淡玫瑰唇色，皮肤细腻。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_ponytail",
+      "type": "人物面部",
+      "content": "高马尾，额前碎发；鹅蛋脸，明净杏眼，淡豆沙唇色，清爽自然。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_bun",
+      "type": "人物面部",
+      "content": "黑茶色中长发扎成低丸子头，脸侧碎发；圆脸，眼神温柔，浅粉腮红。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_wavy",
+      "type": "人物面部",
+      "content": "深棕长卷发，松散波浪；心形脸，眼神沉静，哑光玫瑰唇。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_freckles",
+      "type": "人物面部",
+      "content": "浅棕短发，微卷；鼻梁与脸颊有淡淡雀斑，笑容自然，裸色唇。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_mature",
+      "type": "人物面部",
+      "content": "成熟东方女性，轮廓清晰，眉形自然，深色低盘发，淡妆，目光沉静。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_slim",
+      "type": "人物身材",
+      "content": "身形纤细匀称，肩颈线条柔和，腰线清晰。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_athletic",
+      "type": "人物身材",
+      "content": "身形紧致有运动感，肩背挺直，四肢线条流畅。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_curvy",
+      "type": "人物身材",
+      "content": "曲线柔和，腰臀比例自然，体态舒展。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_tall",
+      "type": "人物身材",
+      "content": "身材高挑，腿身比例修长，姿态挺拔。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_petite",
+      "type": "人物身材",
+      "content": "娇小轻盈，骨架纤细，比例紧凑。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_shoulders",
+      "type": "人物身材",
+      "content": "肩线平直，锁骨清晰，身形挺拔。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_waist",
+      "type": "人物身材",
+      "content": "腰身收束自然，腹部平坦，体态轻盈。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_balanced",
+      "type": "人物身材",
+      "content": "中等身高，比例均衡，体态自然放松。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "outfit_shirt_jeans",
+      "type": "人物服饰",
+      "content": "白色棉质衬衫，浅蓝色直筒牛仔裤，棕色皮带，白色运动鞋。",
+      "meta": {
+        "style": [
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_knit_skirt",
+      "type": "人物服饰",
+      "content": "雾蓝色方领针织短袖，白色高腰及膝半身裙，米色平底鞋。",
+      "meta": {
+        "style": [
+          "casual",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_trench_trousers",
+      "type": "人物服饰",
+      "content": "米色风衣，黑色高领针织衫，黑色直筒长裤，黑色短靴。",
+      "meta": {
+        "style": [
+          "formal",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_floral_dress",
+      "type": "人物服饰",
+      "content": "浅杏色碎花及膝连衣裙，细腰带，米色芭蕾鞋。",
+      "meta": {
+        "style": [
+          "elegant",
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_denim_jacket",
+      "type": "人物服饰",
+      "content": "浅蓝牛仔外套，白色T恤，深蓝直筒牛仔裤，白色帆布鞋。",
+      "meta": {
+        "style": [
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_tennis",
+      "type": "人物服饰",
+      "content": "白色短袖Polo衫，灰色高腰百褶及膝裙，白色运动鞋，白色短袜。",
+      "meta": {
+        "style": [
+          "sporty"
+        ],
+        "scene_fit": [
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_linen",
+      "type": "人物服饰",
+      "content": "米白亚麻衬衫，卡其色及膝短裤，棕色乐福鞋。",
+      "meta": {
+        "style": [
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_blazer",
+      "type": "人物服饰",
+      "content": "藏青西装外套，白色衬衫，灰色西装长裤，黑色皮鞋。",
+      "meta": {
+        "style": [
+          "formal"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "pose_stand_hand_waist",
+      "type": "姿态动作",
+      "content": "自然站立，重心落在一条腿上，一只手轻扶腰侧，肩线放松。",
+      "meta": {
+        "facet": "stand",
+        "view_fit": [
+          "full",
+          "three_quarter",
+          "half"
+        ]
+      }
+    },
+    {
+      "id": "pose_stand_hands_front",
+      "type": "姿态动作",
+      "content": "正面站立，双手在身前自然交叠，头部微偏，姿态安静。",
+      "meta": {
+        "facet": "stand",
+        "view_fit": [
+          "full",
+          "three_quarter",
+          "half"
+        ]
+      }
+    },
+    {
+      "id": "pose_walk",
+      "type": "姿态动作",
+      "content": "向前迈步，重心落在前脚，手臂自然摆动，身体微微侧转。",
+      "meta": {
+        "facet": "walk",
+        "view_fit": [
+          "full",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_sit_chair",
+      "type": "姿态动作",
+      "content": "坐姿，双腿并拢，双手放在膝上，上身自然挺直。",
+      "meta": {
+        "facet": "sit",
+        "view_fit": [
+          "full",
+          "half",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_sit_floor",
+      "type": "姿态动作",
+      "content": "坐姿，一条腿屈膝，另一条腿自然伸展，一只手撑在身侧。",
+      "meta": {
+        "facet": "sit",
+        "view_fit": [
+          "full",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_lean",
+      "type": "姿态动作",
+      "content": "侧身轻靠，一只手向前搭扶，另一只手自然下垂。",
+      "meta": {
+        "facet": "lean",
+        "view_fit": [
+          "full",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_look_back",
+      "type": "姿态动作",
+      "content": "身体背对镜头，头部向后转，视线越过肩膀看向镜头。",
+      "meta": {
+        "facet": "stand",
+        "view_fit": [
+          "full",
+          "three_quarter",
+          "half"
+        ]
+      }
+    },
+    {
+      "id": "pose_kneel",
+      "type": "姿态动作",
+      "content": "单膝跪地，另一条腿向前支撑，上身保持直立。",
+      "meta": {
+        "facet": "kneel",
+        "view_fit": [
+          "full",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "view_full_eye",
+      "type": "拍摄视角",
+      "content": "正面平视，全身构图，人物居中，头顶与脚下留出呼吸空间。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "walk",
+          "sit",
+          "lean",
+          "kneel"
+        ]
+      }
+    },
+    {
+      "id": "view_full_35",
+      "type": "拍摄视角",
+      "content": "35mm镜头，全身环境人像，人物位于画面中央偏右，保留周围空间。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "walk",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_half_85",
+      "type": "拍摄视角",
+      "content": "85mm中长焦，半身构图，焦点在面部，背景自然虚化。",
+      "meta": {
+        "framing": "half",
+        "pose_fit": [
+          "stand",
+          "sit",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_three_quarter",
+      "type": "拍摄视角",
+      "content": "四分之三侧身构图，膝盖以上入镜，视线看向镜头。",
+      "meta": {
+        "framing": "three_quarter",
+        "pose_fit": [
+          "stand",
+          "walk",
+          "sit",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_low_full",
+      "type": "拍摄视角",
+      "content": "略低机位，全身仰拍，腿部比例自然拉长。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "walk"
+        ]
+      }
+    },
+    {
+      "id": "view_high_half",
+      "type": "拍摄视角",
+      "content": "略高机位俯拍，半身构图，人物抬头看向镜头。",
+      "meta": {
+        "framing": "half",
+        "pose_fit": [
+          "stand",
+          "sit"
+        ]
+      }
+    },
+    {
+      "id": "view_side_full",
+      "type": "拍摄视角",
+      "content": "侧面机位，全身入镜，人物朝向画面左侧。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "walk",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_close",
+      "type": "拍摄视角",
+      "content": "近景特写，胸部以上入镜，焦点在眼睛与唇部。",
+      "meta": {
+        "framing": "close",
+        "pose_fit": [
+          "stand",
+          "sit"
+        ]
+      }
+    },
+    {
+      "id": "scene_studio_white",
+      "type": "场景环境",
+      "content": "纯白无缝摄影棚背景，地面与墙面同色，空间干净简洁。",
+      "meta": {
+        "group": "studio",
+        "style_fit": [
+          "casual",
+          "formal",
+          "sporty",
+          "elegant"
+        ],
+        "light_fit": [
+          "warm",
+          "cool",
+          "neutral",
+          "dramatic"
+        ]
+      }
+    },
+    {
+      "id": "scene_cafe_window",
+      "type": "场景环境",
+      "content": "安静的街角咖啡馆，靠窗木桌与浅色墙面，窗外有街景。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_library",
+      "type": "场景环境",
+      "content": "大学图书馆靠窗自习区，高书架、木桌与一盏台灯，环境安静。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "casual",
+          "formal"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_seaside_wall",
+      "type": "场景环境",
+      "content": "海边小镇的白色石墙街道，远处是浅蓝海面与低矮建筑。",
+      "meta": {
+        "group": "outdoor",
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "light_fit": [
+          "warm",
+          "cool",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_garden",
+      "type": "场景环境",
+      "content": "修剪整齐的花园，绿篱、石板路与盛开的白花，空间通透。",
+      "meta": {
+        "group": "outdoor",
+        "style_fit": [
+          "elegant",
+          "casual"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_street",
+      "type": "场景环境",
+      "content": "现代城市街道的人行道，玻璃橱窗与行道树，背景自然延伸。",
+      "meta": {
+        "group": "outdoor",
+        "style_fit": [
+          "casual",
+          "formal"
+        ],
+        "light_fit": [
+          "warm",
+          "cool",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_tennis",
+      "type": "场景环境",
+      "content": "户外网球场，蓝色场地、白色围网与看台，空间开阔。",
+      "meta": {
+        "group": "outdoor",
+        "style_fit": [
+          "sporty",
+          "casual"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_office",
+      "type": "场景环境",
+      "content": "现代办公室的落地窗前，浅色墙面与简洁办公桌，空间利落。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "formal",
+          "casual"
+        ],
+        "light_fit": [
+          "cool",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "light_window_soft",
+      "type": "光影色调",
+      "content": "柔和窗光从侧面进入，明暗过渡自然，整体低对比。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "light_golden",
+      "type": "光影色调",
+      "content": "傍晚金色光线，暖调高光，阴影柔和，氛围温暖。",
+      "meta": {
+        "temp": "warm",
+        "scene_fit": [
+          "outdoor",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "light_high_key",
+      "type": "光影色调",
+      "content": "高调均匀布光，画面明亮干净，阴影极浅。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "studio",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "light_cool_overcast",
+      "type": "光影色调",
+      "content": "阴天冷调漫射光，色彩克制，肤色自然。",
+      "meta": {
+        "temp": "cool",
+        "scene_fit": [
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "light_side_back",
+      "type": "光影色调",
+      "content": "侧逆光勾勒轮廓，面部保留柔和补光，层次清晰。",
+      "meta": {
+        "temp": "warm",
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "light_neutral_indoor",
+      "type": "光影色调",
+      "content": "室内中性白光，光线均匀，色彩还原自然。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "light_softbox",
+      "type": "光影色调",
+      "content": "柔光箱正面主光，皮肤质感细腻，阴影过渡平滑。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "studio",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "light_cinematic",
+      "type": "光影色调",
+      "content": "低调电影光，暗部深邃，暖色高光集中在面部。",
+      "meta": {
+        "temp": "dramatic",
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "style_editorial",
+      "type": "画风技术",
+      "content": "写实时尚编辑风，干净构图，真实皮肤与织物纹理。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "formal",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "style_commercial",
+      "type": "画风技术",
+      "content": "商业人像摄影，精细质感，色彩克制，8K高清。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "formal",
+          "sporty",
+          "elegant"
+        ],
+        "scene_fit": [
+          "studio",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "style_film",
+      "type": "画风技术",
+      "content": "胶片纪实风格，轻微颗粒，自然色彩，生活感。",
+      "meta": {
+        "style_fit": [
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "style_natural",
+      "type": "画风技术",
+      "content": "自然生活写真，柔和质感，不过度磨皮。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "style_soft_portrait",
+      "type": "画风技术",
+      "content": "柔光人像风格，肤质细腻，层次柔和。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "style_high_fashion",
+      "type": "画风技术",
+      "content": "高级时装大片，利落线条，精致妆发与面料。",
+      "meta": {
+        "style_fit": [
+          "formal",
+          "elegant"
+        ],
+        "scene_fit": [
+          "studio",
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "style_documentary",
+      "type": "画风技术",
+      "content": "纪实街拍风格，真实环境光感，轻微运动感。",
+      "meta": {
+        "style_fit": [
+          "casual"
+        ],
+        "scene_fit": [
+          "outdoor",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "style_minimal",
+      "type": "画风技术",
+      "content": "极简摄影风格，干净背景，主体突出，色彩简洁。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "formal",
+          "elegant",
+          "sporty"
+        ],
+        "scene_fit": [
+          "studio",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "face_red_short",
+      "type": "人物面部",
+      "content": "酒红色短发，耳下长度，微卷发尾；脸型小巧，眼神明亮，淡妆。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_blonde_wave",
+      "type": "人物面部",
+      "content": "浅金色波浪长发，发丝柔软；柔和轮廓，浅色眉毛，自然裸妆。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_curly_black",
+      "type": "人物面部",
+      "content": "黑色自然卷短发，蓬松有层次；圆润脸型，笑容明朗，珊瑚色唇。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "face_glasses",
+      "type": "人物面部",
+      "content": "细框眼镜，深色低马尾；清秀五官，皮肤通透，淡粉唇色。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_runner",
+      "type": "人物身材",
+      "content": "长跑者体型，四肢修长，肌肉线条紧实，体态轻盈。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_soft",
+      "type": "人物身材",
+      "content": "柔和圆润的体态，肩颈放松，腰线自然柔和。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_broad",
+      "type": "人物身材",
+      "content": "肩背宽阔，骨架舒展，体态挺拔，比例匀称。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "body_compact",
+      "type": "人物身材",
+      "content": "中等身高，躯干紧凑，四肢比例匀称，体态自然。",
+      "meta": {
+        "person_count": 1
+      }
+    },
+    {
+      "id": "outfit_office",
+      "type": "人物服饰",
+      "content": "浅灰色西装套裙，白色衬衫，裸色中跟鞋。",
+      "meta": {
+        "style": [
+          "formal"
+        ],
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_qipao",
+      "type": "人物服饰",
+      "content": "月白色改良旗袍，及膝长度，浅色披肩，低跟鞋。",
+      "meta": {
+        "style": [
+          "elegant",
+          "formal"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_winter",
+      "type": "人物服饰",
+      "content": "驼色羊毛大衣，黑色高领毛衣，深灰色直筒长裤，黑色短靴。",
+      "meta": {
+        "style": [
+          "casual",
+          "formal"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor",
+          "studio"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "outfit_sporty",
+      "type": "人物服饰",
+      "content": "黑色运动外套，白色T恤，深灰色运动长裤，白色跑鞋。",
+      "meta": {
+        "style": [
+          "sporty",
+          "casual"
+        ],
+        "scene_fit": [
+          "outdoor",
+          "studio",
+          "indoor"
+        ],
+        "coverage": "full"
+      }
+    },
+    {
+      "id": "pose_walk_turn",
+      "type": "姿态动作",
+      "content": "行走中身体微微转身，头部转向侧前方，手臂自然摆动。",
+      "meta": {
+        "facet": "walk",
+        "view_fit": [
+          "full",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_sit_side",
+      "type": "姿态动作",
+      "content": "侧坐，双腿自然交叠，一只手撑在身侧，另一只手放在膝上。",
+      "meta": {
+        "facet": "sit",
+        "view_fit": [
+          "full",
+          "half",
+          "three_quarter"
+        ]
+      }
+    },
+    {
+      "id": "pose_stand_arms_crossed",
+      "type": "姿态动作",
+      "content": "站立，双臂自然交叠在身前，肩线放松，视线平视。",
+      "meta": {
+        "facet": "stand",
+        "view_fit": [
+          "full",
+          "three_quarter",
+          "half"
+        ]
+      }
+    },
+    {
+      "id": "pose_look_up",
+      "type": "姿态动作",
+      "content": "站立，头部微抬看向上方，双手自然垂在身侧。",
+      "meta": {
+        "facet": "stand",
+        "view_fit": [
+          "full",
+          "three_quarter",
+          "half"
+        ]
+      }
+    },
+    {
+      "id": "view_over_shoulder",
+      "type": "拍摄视角",
+      "content": "过肩视角，人物背影在前景，焦点在侧脸与肩线。",
+      "meta": {
+        "framing": "three_quarter",
+        "pose_fit": [
+          "stand",
+          "sit",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_mirror",
+      "type": "拍摄视角",
+      "content": "镜面自拍视角，手机遮住部分面部，画面自然随性。",
+      "meta": {
+        "framing": "half",
+        "pose_fit": [
+          "stand",
+          "sit"
+        ]
+      }
+    },
+    {
+      "id": "view_wide_env",
+      "type": "拍摄视角",
+      "content": "24mm广角环境人像，人物占画面三分之一，保留空间。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "walk",
+          "lean"
+        ]
+      }
+    },
+    {
+      "id": "view_top_down",
+      "type": "拍摄视角",
+      "content": "高位俯拍，全身构图，人物位于画面下方。",
+      "meta": {
+        "framing": "full",
+        "pose_fit": [
+          "stand",
+          "sit"
+        ]
+      }
+    },
+    {
+      "id": "scene_bookstore",
+      "type": "场景环境",
+      "content": "安静的书店书架间，木质书架与阅读灯，空间整洁。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "casual",
+          "formal"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_balcony",
+      "type": "场景环境",
+      "content": "城市公寓的阳台，玻璃栏杆与远处楼群，空间开阔。",
+      "meta": {
+        "group": "outdoor",
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "light_fit": [
+          "warm",
+          "cool",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "scene_museum",
+      "type": "场景环境",
+      "content": "极简美术馆展厅，白色墙面与浅色地面，空间安静。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "formal",
+          "elegant"
+        ],
+        "light_fit": [
+          "neutral",
+          "cool"
+        ]
+      }
+    },
+    {
+      "id": "scene_kitchen",
+      "type": "场景环境",
+      "content": "明亮整洁的现代厨房，白色橱柜与木质台面，空间干净。",
+      "meta": {
+        "group": "indoor",
+        "style_fit": [
+          "casual"
+        ],
+        "light_fit": [
+          "warm",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "id": "light_morning",
+      "type": "光影色调",
+      "content": "清晨柔光，画面清透，阴影淡而干净。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "light_neon",
+      "type": "光影色调",
+      "content": "夜晚霓虹反射光，冷色环境光与暖色轮廓光，色彩丰富。",
+      "meta": {
+        "temp": "dramatic",
+        "scene_fit": [
+          "outdoor",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "light_soft_side",
+      "type": "光影色调",
+      "content": "柔和侧光，面部一侧明亮一侧柔和过渡，层次自然。",
+      "meta": {
+        "temp": "neutral",
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "light_warm_practical",
+      "type": "光影色调",
+      "content": "室内暖色实用光源，桌面与墙面有柔和光斑。",
+      "meta": {
+        "temp": "warm",
+        "scene_fit": [
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "style_clean",
+      "type": "画风技术",
+      "content": "清透干净的写实风格，肤色自然，细节克制。",
+      "meta": {
+        "style_fit": [
+          "casual",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "studio"
+        ]
+      }
+    },
+    {
+      "id": "style_magazine",
+      "type": "画风技术",
+      "content": "杂志封面人像风格，精致妆发与高级质感。",
+      "meta": {
+        "style_fit": [
+          "formal",
+          "elegant"
+        ],
+        "scene_fit": [
+          "studio",
+          "indoor"
+        ]
+      }
+    },
+    {
+      "id": "style_35mm",
+      "type": "画风技术",
+      "content": "35mm胶片日常风格，轻微颗粒与自然色彩。",
+      "meta": {
+        "style_fit": [
+          "casual"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    },
+    {
+      "id": "style_cinematic",
+      "type": "画风技术",
+      "content": "电影感人像风格，层次丰富，色彩沉稳。",
+      "meta": {
+        "style_fit": [
+          "formal",
+          "elegant"
+        ],
+        "scene_fit": [
+          "indoor",
+          "outdoor"
+        ]
+      }
+    }
+  ]
+}

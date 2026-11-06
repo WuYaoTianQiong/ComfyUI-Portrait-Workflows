@@ -1,0 +1,113 @@
+[
+  {
+    "order": 1,
+    "pilot_index": 2,
+    "status": "done",
+    "job_id": 253,
+    "combo": {
+      "face": "face_bun",
+      "body": "body_curvy",
+      "outfit": "outfit_knit_skirt",
+      "pose": "pose_look_back",
+      "view": "view_full_eye",
+      "scene": "scene_garden",
+      "light": "light_golden",
+      "style": "style_film"
+    },
+    "pose_image": "full_single_P019_front",
+    "name": "scene_garden · outfit_knit_skirt · pose_look_back",
+    "body": {
+      "portrait_text": "黑茶色中长发扎成低丸子头，脸侧碎发；圆脸，眼神温柔，浅粉腮红。；曲线柔和，腰臀比例自然，体态舒展。",
+      "costume_text": "雾蓝色方领针织短袖，白色高腰及膝半身裙，米色平底鞋。",
+      "pose_id": "full_single_P019_front",
+      "style": "realistic",
+      "seed": 20261107,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot",
+      "modifier_fragments": "• 拍摄视角：正面平视，全身构图，人物居中，头顶与脚下留出呼吸空间。\n• 场景环境：修剪整齐的花园，绿篱、石板路与盛开的白花，空间通透。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：胶片纪实风格，轻微颗粒，自然色彩，生活感。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs253_full_single_P019_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot\\fs253_full_single_P019_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 2,
+    "pilot_index": 3,
+    "status": "done",
+    "job_id": 254,
+    "combo": {
+      "face": "face_freckles",
+      "body": "body_slim",
+      "outfit": "outfit_denim_jacket",
+      "pose": "pose_sit_floor",
+      "view": "view_full_eye",
+      "scene": "scene_street",
+      "light": "light_golden",
+      "style": "style_film"
+    },
+    "pose_image": "full_single_P001_front",
+    "name": "scene_street · outfit_denim_jacket · pose_sit_floor",
+    "body": {
+      "portrait_text": "浅棕短发，微卷；鼻梁与脸颊有淡淡雀斑，笑容自然，裸色唇。；身形纤细匀称，肩颈线条柔和，腰线清晰。",
+      "costume_text": "浅蓝牛仔外套，白色T恤，深蓝直筒牛仔裤，白色帆布鞋。",
+      "pose_id": "full_single_P001_front",
+      "style": "realistic",
+      "seed": 20261108,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot",
+      "modifier_fragments": "• 拍摄视角：正面平视，全身构图，人物居中，头顶与脚下留出呼吸空间。\n• 场景环境：现代城市街道的人行道，玻璃橱窗与行道树，背景自然延伸。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：胶片纪实风格，轻微颗粒，自然色彩，生活感。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs254_full_single_P001_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot\\fs254_full_single_P001_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 3,
+    "pilot_index": 7,
+    "status": "done",
+    "job_id": 255,
+    "combo": {
+      "face": "face_wavy",
+      "body": "body_balanced",
+      "outfit": "outfit_shirt_jeans",
+      "pose": "pose_lean",
+      "view": "view_three_quarter",
+      "scene": "scene_seaside_wall",
+      "light": "light_golden",
+      "style": "style_natural"
+    },
+    "pose_image": "full_single_P068_front",
+    "name": "scene_seaside_wall · outfit_shirt_jeans · pose_lean",
+    "body": {
+      "portrait_text": "深棕长卷发，松散波浪；心形脸，眼神沉静，哑光玫瑰唇。；中等身高，比例均衡，体态自然放松。",
+      "costume_text": "白色棉质衬衫，浅蓝色直筒牛仔裤，棕色皮带，白色运动鞋。",
+      "pose_id": "full_single_P068_front",
+      "style": "realistic",
+      "seed": 20261109,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot",
+      "modifier_fragments": "• 拍摄视角：四分之三侧身构图，膝盖以上入镜，视线看向镜头。\n• 场景环境：海边小镇的白色石墙街道，远处是浅蓝海面与低矮建筑。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：自然生活写真，柔和质感，不过度磨皮。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs255_full_single_P068_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot\\fs255_full_single_P068_front_00001_.png"
+      }
+    ]
+  }
+]

@@ -1,0 +1,113 @@
+[
+  {
+    "order": 1,
+    "pilot_index": 1,
+    "status": "done",
+    "job_id": 253,
+    "combo": {
+      "face": "face_glasses",
+      "body": "body_soft",
+      "outfit": "outfit_winter",
+      "pose": "pose_stand_hand_waist",
+      "view": "view_half_85",
+      "scene": "scene_balcony",
+      "light": "light_morning",
+      "style": "style_cinematic"
+    },
+    "pose_image": "full_single_P019_front",
+    "name": "scene_balcony · outfit_winter · pose_stand_hand_waist",
+    "body": {
+      "portrait_text": "细框眼镜，深色低马尾；清秀五官，皮肤通透，淡粉唇色。；柔和圆润的体态，肩颈放松，腰线自然柔和。",
+      "costume_text": "驼色羊毛大衣，黑色高领毛衣，深灰色直筒长裤，黑色短靴。",
+      "pose_id": "full_single_P019_front",
+      "style": "realistic",
+      "seed": 20261107,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v2",
+      "modifier_fragments": "• 拍摄视角：85mm中长焦，半身构图，焦点在面部，背景自然虚化。\n• 场景环境：城市公寓的阳台，玻璃栏杆与远处楼群，空间开阔。\n• 光影色调：清晨柔光，画面清透，阴影淡而干净。\n• 画风技术：电影感人像风格，层次丰富，色彩沉稳。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs253_full_single_P019_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v2",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v2\\fs253_full_single_P019_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 2,
+    "pilot_index": 8,
+    "status": "done",
+    "job_id": 254,
+    "combo": {
+      "face": "face_short_black",
+      "body": "body_athletic",
+      "outfit": "outfit_office",
+      "pose": "pose_look_back",
+      "view": "view_three_quarter",
+      "scene": "scene_bookstore",
+      "light": "light_golden",
+      "style": "style_magazine"
+    },
+    "pose_image": "full_single_P016_front",
+    "name": "scene_bookstore · outfit_office · pose_look_back",
+    "body": {
+      "portrait_text": "清爽黑色短发，耳下长度，利落刘海；眼睛清亮，淡玫瑰唇色，皮肤细腻。；身形紧致有运动感，肩背挺直，四肢线条流畅。",
+      "costume_text": "浅灰色西装套裙，白色衬衫，裸色中跟鞋。",
+      "pose_id": "full_single_P016_front",
+      "style": "realistic",
+      "seed": 20261108,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v2",
+      "modifier_fragments": "• 拍摄视角：四分之三侧身构图，膝盖以上入镜，视线看向镜头。\n• 场景环境：安静的书店书架间，木质书架与阅读灯，空间整洁。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：杂志封面人像风格，精致妆发与高级质感。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs254_full_single_P016_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v2",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v2\\fs254_full_single_P016_front_00001_.png"
+      }
+    ]
+  },
+  {
+    "order": 3,
+    "pilot_index": 19,
+    "status": "done",
+    "job_id": 255,
+    "combo": {
+      "face": "face_ponytail",
+      "body": "body_athletic",
+      "outfit": "outfit_qipao",
+      "pose": "pose_sit_floor",
+      "view": "view_over_shoulder",
+      "scene": "scene_balcony",
+      "light": "light_golden",
+      "style": "style_cinematic"
+    },
+    "pose_image": "full_single_P004_front",
+    "name": "scene_balcony · outfit_qipao · pose_sit_floor",
+    "body": {
+      "portrait_text": "高马尾，额前碎发；鹅蛋脸，明净杏眼，淡豆沙唇色，清爽自然。；身形紧致有运动感，肩背挺直，四肢线条流畅。",
+      "costume_text": "月白色改良旗袍，及膝长度，浅色披肩，低跟鞋。",
+      "pose_id": "full_single_P004_front",
+      "style": "realistic",
+      "seed": 20261109,
+      "seed_mode": "fixed",
+      "output_subfolder": "_tmp_p3/atomic_pilot_v2",
+      "modifier_fragments": "• 拍摄视角：过肩视角，人物背影在前景，焦点在侧脸与肩线。\n• 场景环境：城市公寓的阳台，玻璃栏杆与远处楼群，空间开阔。\n• 光影色调：傍晚金色光线，暖调高光，阴影柔和，氛围温暖。\n• 画风技术：电影感人像风格，层次丰富，色彩沉稳。",
+      "dry_run": false
+    },
+    "error": "",
+    "images": [
+      {
+        "filename": "fs255_full_single_P004_front_00001_.png",
+        "subfolder": "_tmp_p3\\atomic_pilot_v2",
+        "abs_path": "F:\\ComfyUI_Migration\\output\\_tmp_p3\\atomic_pilot_v2\\fs255_full_single_P004_front_00001_.png"
+      }
+    ]
+  }
+]
