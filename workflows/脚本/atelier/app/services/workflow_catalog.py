@@ -33,12 +33,14 @@ _slot_cache: dict[str, tuple[float, int, bool]] = {}
 
 
 def search_dirs() -> list[Path]:
-    """自动扫描目录（通用工作流列表）：只扫库根目录。
+    """自动扫描目录（通用工作流列表）：库根 + 通用工作流归档目录。
 
+    库里按用途分层：`图库专用工作流/` 只给合成台用（不进本列表），
+    通用（文生图 / 视频 / 超分 / UI 格式）统一放 `通用工作流/`，库根保持清爽。
     其他位置（历史工作流 / 任意磁盘目录）走前端「上传自定义工作流」，
     内容存在本机 localStorage，出图时随请求带给后端。
     """
-    return [settings.library_root]
+    return [settings.library_root, settings.library_root / "通用工作流"]
 
 
 def studio_dirs() -> list[Path]:
