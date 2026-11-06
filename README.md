@@ -95,6 +95,7 @@ huggingface-cli download <repo_name>
 - [资产清单](workflows/文档/资产清单.md) - 工作流 / 模型 / 插件 / LoRA 的磁盘实测清单
 - [命名规范](workflows/文档/命名规范.md) - 工作流/目录/代码/API 的命名约定
 - [画室 Atelier](workflows/脚本/atelier/) - 提示词资产 + ComfyUI 出图/组合/换脸工作台
+- E2E 浏览器验收：`workflows/脚本/atelier/tools/e2e_reference_vue.py`（依赖 Playwright；需先起 8656）
 
 ## 常见问题
 
