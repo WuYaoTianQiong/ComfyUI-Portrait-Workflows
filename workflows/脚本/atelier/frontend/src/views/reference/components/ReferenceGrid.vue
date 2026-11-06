@@ -2,7 +2,10 @@
 import { computed } from 'vue'
 
 import EmptyState from '../../../components/EmptyState.vue'
+import Pager from '../../../components/Pager.vue'
 import Skeleton from '../../../components/Skeleton.vue'
+
+import { PAGE_SIZES } from './poseView'
 
 /**
  * 参考图库统一网格容器。
@@ -11,8 +14,7 @@ import Skeleton from '../../../components/Skeleton.vue'
  * - 列数：分组视图 5 列 / 单张视图 6 列（≥1024px），640/768 逐级降列，390px 下 2 列不横向溢出；
  * - 间距：`gap` 固定 16px（§5）；
  * - 状态：骨架屏、空态、错误重试；
- * - 「加载更多」按钮（§7 冻结：不用分页 Pager）：173.08 × 36px、圆角 8px、1px 边框、
- *   14px / 500、底 rgba(255,255,255,0.045)，文案带剩余数量。
+ * - 底部分页条：三库统一分页（Pager + 每页条数 20/60/100/200），替代旧的「加载更多」按钮。
  *
  * 本组件不持有数据与筛选状态，只做布局与状态呈现，卡片由插槽传入。
  */
@@ -24,12 +26,12 @@ const props = withDefaults(
     error?: string | null
     /** 当前结果条数（组或张） */
     total?: number
-    /** 是否还有未展示的条目 */
-    hasMore?: boolean
-    /** 剩余数量（组或张） */
-    remaining?: number
-    /** 量词：「组」或「张」 */
-    unit?: '组' | '张'
+    /** 当前页码（从 1 开始） */
+    page?: number
+    /** 总页数（至少 1） */
+    totalPages?: number
+    /** 每页条数 */
+    pageSize?: number
     emptyTitle?: string
     emptyHint?: string
     /** 加载态骨架卡片数量 */
@@ -42,9 +44,9 @@ const props = withDefaults(
     loading: false,
     error: null,
     total: 0,
-    hasMore: false,
-    remaining: 0,
-    unit: '组',
+    page: 1,
+    totalPages: 1,
+    pageSize: 60,
     emptyTitle: '没有找到匹配的条目',
     emptyHint: '试试更换搜索词或重置筛选条件',
     skeletonCount: 10,
@@ -53,13 +55,12 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  (e: 'load-more'): void
+  (e: 'update:page', value: number): void
+  (e: 'update:pageSize', value: number): void
   (e: 'retry'): void
 }>()
 
 const gridClass = computed(() => (props.mode === 'single' ? 'is-single' : 'is-group'))
-
-const moreLabel = computed(() => `加载更多（剩余 ${props.remaining} ${props.unit}）`)
 
 const skeletonThumbStyle = computed(() => ({
   aspectRatio: props.skeletonAspect.replace('/', ' / '),
@@ -69,6 +70,15 @@ const skeletonThumbStyle = computed(() => ({
 const showSkeleton = computed(() => props.loading && props.total === 0)
 const showBlockingError = computed(() => Boolean(props.error) && props.total === 0)
 const showEmpty = computed(() => !props.loading && !showBlockingError.value && props.total === 0)
+/** 分页条只在有结果且没有阻塞错误时出现；骨架 / 空态 / 错误分支不显示。 */
+const showPager = computed(() => !showBlockingError.value && props.total > 0)
+
+/** 每页条数下拉：`select` 的 value 是字符串，这里转成数字再回传。 */
+function onPageSizeChange(event: Event): void {
+  const next = Number((event.target as HTMLSelectElement).value)
+  if (!Number.isFinite(next)) return
+  emit('update:pageSize', next)
+}
 </script>
 
 <template>
@@ -102,11 +112,22 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
       <slot />
     </div>
 
-    <!-- 加载更多：§5 补充实测项 173.08 × 36px -->
-    <div v-if="hasMore" class="ref-grid__more">
-      <button type="button" class="ref-grid__more-btn" :disabled="loading" @click="emit('load-more')">
-        {{ moreLabel }}
-      </button>
+    <!-- 三库统一分页条：左侧页码、中间 Pager、右侧每页条数（与提示词页同款） -->
+    <div v-if="showPager" class="ref-grid__pager">
+      <span class="ref-grid__pager-label" data-testid="ref-grid-page-label">
+        第 {{ page }} / {{ totalPages }} 页
+      </span>
+      <Pager compact :page="page" :total-pages="totalPages" @update:page="emit('update:page', $event)" />
+      <select
+        class="ref-grid__page-size"
+        data-testid="ref-grid-page-size"
+        title="每页条数"
+        aria-label="每页条数"
+        :value="pageSize"
+        @change="onPageSizeChange"
+      >
+        <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }} 条/页</option>
+      </select>
     </div>
   </div>
 </template>
@@ -217,46 +238,66 @@ const showEmpty = computed(() => !props.loading && !showBlockingError.value && p
   line-height: 1.6;
 }
 
-.ref-grid__more {
-  display: flex;
-  justify-content: center;
-  padding-top: 8px;
+/*
+ * 分页条：三列（页码 / Pager / 每页条数），与 PromptView 的 `.pager-row` 同款结构。
+ * 全部用设计令牌，浅色主题下同样可读；只过渡颜色，不要 `transition: all`。
+ */
+.ref-grid__pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-sm);
+  border-top: 1px solid var(--border);
 }
 
-/* §5 补充实测项：173.08 × 36px、圆角 8px、1px 边框、14px 500、底 rgba(255,255,255,.045) */
-.ref-grid__more-btn {
-  box-sizing: border-box;
-  width: 173.08px;
-  height: 36px;
-  padding: 0 12px;
+.ref-grid__pager-label {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ref-grid__page-size {
+  justify-self: end;
+  flex: none;
+  padding: var(--gap-xs) var(--gap-sm);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--fill-faint);
   color: var(--text-strong);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
   transition:
     background-color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease);
 }
 
-.ref-grid__more-btn:hover:not(:disabled) {
+.ref-grid__page-size:hover {
   border-color: var(--border-strong);
-  background: var(--fill-soft);
 }
 
-.ref-grid__more-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.ref-grid__page-size:focus-visible {
+  border-color: var(--border-strong);
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
-@media (max-width: 400px) {
-  /* 390px 视口：按钮不撑破内容区 */
-  .ref-grid__more-btn {
-    width: 100%;
-    max-width: 240px;
+@media (max-width: 480px) {
+  /* 390px 视口：页码独占一行，Pager 与每页条数分列两侧，不横向溢出 */
+  .ref-grid__pager {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--gap-xs);
+  }
+
+  .ref-grid__pager-label {
+    grid-column: 1 / -1;
   }
 }
 </style>

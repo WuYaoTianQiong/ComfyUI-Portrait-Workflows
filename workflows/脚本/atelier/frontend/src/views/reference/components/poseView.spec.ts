@@ -3,7 +3,7 @@
  *
  * 覆盖 §7 姿势相关 8 行的判定核心：
  * 分组键（体系|姿势编号，编号缺失回退 id）、角度顺序、体系药丸计数与 18+ 后缀、
- * 筛选语义（体系 / 分类 / 角度 / 搜索）、加载更多计数（60 / 96 / +60）、
+ * 筛选语义（体系 / 分类 / 角度 / 搜索）、三库共用分页切片（每页 20/60/100/200）、
  * 灯箱角度与跨组翻页、图片地址（depth 仅 pose、无二次拼接）。
  */
 
@@ -14,19 +14,20 @@ import { buildPoseGroups } from '../../../composables/useReferenceLibrary'
 
 import {
   ANGLES,
-  INITIAL_GROUP_COUNT,
-  INITIAL_SINGLE_COUNT,
-  LOAD_MORE_STEP,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
   activeGroupItem,
+  clampPage,
   filterPoseGroups,
   filterPoseSingles,
   firstNsfwLine,
   groupAngleItem,
   groupIndexOfItem,
   hiddenNsfwCount,
-  loadMoreState,
   matchesPoseFilters,
-  nextShown,
+  normalizePageSize,
+  pageCount,
+  pageSlice,
   poseCategoryOptions,
   posePreviewUrl,
   poseSystemSummaries,
@@ -177,34 +178,61 @@ describe('体系药丸与 18+ 后缀', () => {
   })
 })
 
-describe('加载更多（不是分页）', () => {
-  it('初始 60 组 / 96 张，每次 +60', () => {
-    expect(INITIAL_GROUP_COUNT).toBe(60)
-    expect(INITIAL_SINGLE_COUNT).toBe(96)
-    expect(LOAD_MORE_STEP).toBe(60)
+describe('分页切片（三库共用）', () => {
+  const items = Array.from({ length: 25 }, (_, index) => `i${index}`)
+
+  it('每页条数只允许 20 / 60 / 100 / 200，默认 60，脏值回落 60', () => {
+    expect([...PAGE_SIZES]).toEqual([20, 60, 100, 200])
+    expect(DEFAULT_PAGE_SIZE).toBe(60)
+    expect(normalizePageSize(20)).toBe(20)
+    expect(normalizePageSize(200)).toBe(200)
+    expect(normalizePageSize('100')).toBe(100)
+    // 非法值（不在下拉选项内 / 0 / undefined / NaN）一律回落 60
+    expect(normalizePageSize(50)).toBe(60)
+    expect(normalizePageSize(0)).toBe(60)
+    expect(normalizePageSize(undefined)).toBe(60)
+    expect(normalizePageSize(Number.NaN)).toBe(60)
   })
 
-  it('分组模式剩余数量与按钮文案', () => {
-    const state = loadMoreState(60, 287, '组')
-    expect(state.hasMore).toBe(true)
-    expect(state.remaining).toBe(227)
-    expect(state.label).toBe('加载更多（剩余 227 组）')
+  it('第 1 页从第 1 条开始，按 pageSize 切片', () => {
+    expect(pageSlice(items, 1, 20)).toEqual(items.slice(0, 20))
+    expect(pageSlice(items, 1, 60)).toEqual(items)
   })
 
-  it('单张模式到末尾后不再显示加载更多', () => {
-    expect(loadMoreState(96, 1439, '张')).toMatchObject({ hasMore: true, remaining: 1343 })
-    expect(loadMoreState(1439, 1439, '张')).toEqual({
-      hasMore: false,
-      remaining: 0,
-      label: '加载更多（剩余 0 张）',
-    })
+  it('最后一页不满时只返回剩余条目，越界页返回空数组', () => {
+    expect(pageSlice(items, 2, 20)).toEqual(['i20', 'i21', 'i22', 'i23', 'i24'])
+    expect(pageSlice(items, 3, 20)).toEqual([])
+    expect(pageSlice([], 1, 60)).toEqual([])
   })
 
-  it('步进到末尾时收敛，不越界', () => {
-    expect(nextShown(60, 130)).toBe(120)
-    expect(nextShown(120, 130)).toBe(130)
-    expect(nextShown(130, 130)).toBe(130)
-    expect(nextShown(0, 0)).toBe(0)
+  it('页码非法回第 1 页，pageSize 非法回落 60', () => {
+    expect(pageSlice(items, 0, 20)).toEqual(items.slice(0, 20))
+    expect(pageSlice(items, -2, 20)).toEqual(items.slice(0, 20))
+    expect(pageSlice(items, Number.NaN, 20)).toEqual(items.slice(0, 20))
+    // pageSize 50 / 0 → 60，25 条全部落在第 1 页
+    expect(pageSlice(items, 1, 50)).toEqual(items)
+    expect(pageSlice(items, 1, 0)).toEqual(items)
+  })
+
+  it('总页数向上取整，空列表也至少 1 页', () => {
+    expect(pageCount(0, 60)).toBe(1)
+    expect(pageCount(1, 60)).toBe(1)
+    expect(pageCount(60, 60)).toBe(1)
+    expect(pageCount(61, 60)).toBe(2)
+    expect(pageCount(287, 60)).toBe(5)
+    expect(pageCount(10, 0)).toBe(1)
+    expect(pageCount(Number.NaN, 60)).toBe(1)
+  })
+
+  it('页码越界时夹到最后一页，非法页码夹到第 1 页', () => {
+    expect(clampPage(1, 100, 60)).toBe(1)
+    expect(clampPage(2, 100, 60)).toBe(2)
+    expect(clampPage(9, 100, 60)).toBe(2)
+    expect(clampPage(0, 100, 60)).toBe(1)
+    expect(clampPage(-3, 100, 60)).toBe(1)
+    expect(clampPage(Number.NaN, 61, 60)).toBe(1)
+    expect(clampPage(5, 0, 60)).toBe(1)
+    expect(clampPage(9, 100, 20)).toBe(5)
   })
 })
 

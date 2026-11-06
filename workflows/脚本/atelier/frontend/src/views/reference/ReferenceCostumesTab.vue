@@ -15,7 +15,7 @@ import {
   COSTUME_ALL_TAGS,
   COSTUME_KINDS,
   COSTUME_SEARCH_PLACEHOLDER,
-  INITIAL_COSTUME_COUNT,
+  clampPage,
   costumeAuthorSiteUrl,
   costumeBaseItems,
   costumeCategorySummaries,
@@ -23,7 +23,6 @@ import {
   costumeDownloadName,
   costumeHiddenNsfwCount,
   costumeLightboxMeta,
-  costumeLoadMore,
   costumePreviewUrl,
   costumeSourceLabel,
   costumeTagOptions,
@@ -31,9 +30,12 @@ import {
   costumeThumbnailUrl,
   filterCostumes,
   isRemoteCostume,
-  nextCostumeShown,
+  loadReferencePageSize,
+  pageCount,
+  pageSlice,
   resolveActiveCategory,
   resolveActiveTag,
+  saveReferencePageSize,
   stepCostumeIndex,
 } from './components/costumeView'
 import type { CostumeKind } from './components/costumeView'
@@ -50,7 +52,7 @@ import type { CostumeKind } from './components/costumeView'
  * - 外链来源标注（来源 / 二次元素材 · 仅作参考 / 原作者站点 / 英文关键词复制）；
  * - 下载分流：CharaDB 外链条目只有「前往来源原图」「原作者站点」、**不提供下载**；
  *   现实条目可「下载高清原图」；
- * - 搜索 + 重置 + 加载更多（+60）、灯箱（左右翻页 / 键盘 / 缩放拖动 / 复制英文 prompt）。
+ * - 搜索 + 重置 + 分页（Pager + 每页条数，替代旧加载更多）、灯箱（左右翻页 / 键盘 / 缩放拖动 / 复制英文 prompt）。
  *
  * 共享灯箱 `ReferenceLightbox` 底部固定是「下载 / 新窗口原图」两个链接，没有
  * slot 可分流，而本任务禁止改共享组件。这里用 `body[data-ref-tab='costume']`
@@ -97,8 +99,10 @@ const category = ref('')
 const tag = ref<string>(COSTUME_ALL_TAGS)
 /** 搜索词 */
 const query = ref('')
-/** 已展示条数：初始 60，每次 +60 */
-const shown = ref(INITIAL_COSTUME_COUNT)
+/** 当前页码（从 1 开始）；筛选 / 每页条数变化一律回第 1 页。 */
+const page = ref(1)
+/** 每页条数；三库共用 `pb.reference_page_size_v1`（默认 60）。 */
+const pageSize = ref(loadReferencePageSize())
 /** 灯箱当前下标（指向 `filtered`，与 React 的 `viewerIndex` 一致） */
 const viewerIndex = ref<number | null>(null)
 
@@ -140,8 +144,19 @@ const filters = computed(() => ({
 }))
 
 const filtered = computed(() => filterCostumes(baseItems.value, filters.value))
-const visibleItems = computed(() => filtered.value.slice(0, shown.value))
-const more = computed(() => costumeLoadMore(shown.value, filtered.value.length))
+const totalCount = computed(() => filtered.value.length)
+const totalPages = computed(() => pageCount(totalCount.value, pageSize.value))
+/** 当前页在完整筛选结果中的起始下标（灯箱按下标定位时使用）。 */
+const pageOffset = computed(() => (page.value - 1) * pageSize.value)
+const visibleItems = computed(() => pageSlice(filtered.value, page.value, pageSize.value))
+
+/**
+ * 页码越界保护：筛选结果或每页条数变化后总页数可能变少，
+ * 把当前页夹到最后一个合法页（每页条数变化本身已回第 1 页）。
+ */
+watch([totalCount, pageSize], () => {
+  page.value = clampPage(page.value, totalCount.value, pageSize.value)
+})
 
 // ---------------------------------------------------------------------------
 // 交互：筛选
@@ -152,23 +167,23 @@ function setKind(next: CostumeKind): void {
   kind.value = next
   category.value = ''
   tag.value = COSTUME_ALL_TAGS
-  shown.value = INITIAL_COSTUME_COUNT
+  page.value = 1
   viewerIndex.value = null
 }
 
 function selectCategory(next: string): void {
   category.value = next
   tag.value = COSTUME_ALL_TAGS
-  shown.value = INITIAL_COSTUME_COUNT
+  page.value = 1
 }
 
 function onTagChange(event: Event): void {
   tag.value = (event.target as HTMLSelectElement).value
-  shown.value = INITIAL_COSTUME_COUNT
+  page.value = 1
 }
 
 function onQueryInput(): void {
-  shown.value = INITIAL_COSTUME_COUNT
+  page.value = 1
 }
 
 function resetFilters(): void {
@@ -176,12 +191,15 @@ function resetFilters(): void {
   category.value = ''
   tag.value = COSTUME_ALL_TAGS
   query.value = ''
-  shown.value = INITIAL_COSTUME_COUNT
+  page.value = 1
   viewerIndex.value = null
 }
 
-function loadMore(): void {
-  shown.value = nextCostumeShown(shown.value, filtered.value.length)
+/** 切换每页条数：写本地记忆并回到第 1 页（三库共用同一个键）。 */
+function onPageSizeChange(next: number): void {
+  pageSize.value = next
+  page.value = 1
+  saveReferencePageSize(next)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +238,7 @@ function onUnlockPill(): void {
   const accepted = requestUnlock(() => {
     category.value = ''
     tag.value = COSTUME_ALL_TAGS
-    shown.value = INITIAL_COSTUME_COUNT
+    page.value = 1
     toast.success('已解锁 18+ 敏感服装分类')
   })
   if (!accepted) backendBlockedToast()
@@ -467,15 +485,16 @@ onBeforeUnmount(() => {
       :loading="loading"
       :error="error"
       :total="initialLoading ? 0 : filtered.length"
-      :has-more="more.hasMore"
-      :remaining="more.remaining"
-      unit="张"
+      :page="page"
+      :total-pages="totalPages"
+      :page-size="pageSize"
       empty-title="没有找到匹配的服装穿搭"
       empty-hint="试试更换搜索词或切换分类"
       :skeleton-count="10"
       skeleton-aspect="2/3"
       @retry="retry"
-      @load-more="loadMore"
+      @update:page="page = $event"
+      @update:page-size="onPageSizeChange"
     >
       <ReferenceCard
         v-for="(item, index) in visibleItems"
@@ -494,7 +513,7 @@ onBeforeUnmount(() => {
         fit="contain"
         selectable
         :selected="isCostumeSelected(item.id)"
-        @open="openViewer(index)"
+        @open="openViewer(pageOffset + index)"
         @toggle-select="onToggleCostume(item)"
       >
         <!-- 卡片只展示前 5 个标签；灯箱里展示全量（见 viewerMeta） -->

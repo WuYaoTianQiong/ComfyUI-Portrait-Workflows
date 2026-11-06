@@ -11,17 +11,19 @@ import ReferenceGrid from './components/ReferenceGrid.vue'
 import ReferenceLightbox from './components/ReferenceLightbox.vue'
 import {
   ALL_STYLES,
-  INITIAL_PORTRAIT_COUNT,
   activePortraitStyle,
+  clampPage,
   filterPortraits,
   formatPortraitSize,
-  nextPortraitShown,
+  loadReferencePageSize,
+  pageCount,
+  pageSlice,
   portraitHairCounts,
-  portraitLoadMoreState,
   portraitPreviewUrl,
   portraitSectionCounts,
   portraitStyleOptions,
   portraitThumbnailUrl,
+  saveReferencePageSize,
   stepPortraitIndex,
   togglePortraitHair,
   togglePortraitSection,
@@ -34,7 +36,7 @@ import {
  * - 分区 / 发长药丸：全部 / 正脸参考 / 造型氛围 / 短发 / 中发 / 中长发 / 长发，
  *   **再次点击同一项取消**；数量按全库统计；
  * - 发型细分下拉：按当前分区 + 发长联动收窄；
- * - 搜索 + 重置 + 加载更多（+60，不是分页）；
+ * - 搜索 + 重置 + 分页（Pager + 每页条数，替代旧加载更多）；
  * - 灯箱：CC0 授权说明、原图尺寸、ID 复制、下载（另含新窗口原图）；
  * - 卡片缩略图 4:5 / `object-cover`（§5）。
  *
@@ -61,8 +63,10 @@ const hair = ref('')
 /** 发型细分；`ALL_STYLES` = 全部（React 的 `styleName` 默认 `'all'`）。 */
 const styleName = ref<string>(ALL_STYLES)
 const query = ref('')
-/** 已展示张数：首屏 60，每次 +60（§7 冻结）。 */
-const shown = ref(INITIAL_PORTRAIT_COUNT)
+/** 当前页码（从 1 开始）；筛选 / 每页条数变化一律回第 1 页。 */
+const page = ref(1)
+/** 每页条数；三库共用 `pb.reference_page_size_v1`（默认 60）。 */
+const pageSize = ref(loadReferencePageSize())
 /** 灯箱当前下标；null = 关闭。下标相对**筛选结果**，与 React 一致。 */
 const viewerIndex = ref<number | null>(null)
 
@@ -82,8 +86,19 @@ const filtered = computed(() =>
   }),
 )
 
-const visibleItems = computed(() => filtered.value.slice(0, shown.value))
-const more = computed(() => portraitLoadMoreState(shown.value, filtered.value.length))
+const totalCount = computed(() => filtered.value.length)
+const totalPages = computed(() => pageCount(totalCount.value, pageSize.value))
+/** 当前页在完整筛选结果中的起始下标（灯箱按下标定位时使用）。 */
+const pageOffset = computed(() => (page.value - 1) * pageSize.value)
+const visibleItems = computed(() => pageSlice(filtered.value, page.value, pageSize.value))
+
+/**
+ * 页码越界保护：筛选结果或每页条数变化后总页数可能变少，
+ * 把当前页夹到最后一个合法页（每页条数变化本身已回第 1 页）。
+ */
+watch([totalCount, pageSize], () => {
+  page.value = clampPage(page.value, totalCount.value, pageSize.value)
+})
 
 interface PortraitCard {
   item: PortraitItem
@@ -111,29 +126,29 @@ function selectAll(): void {
   section.value = ''
   hair.value = ''
   styleName.value = ALL_STYLES
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
 /** 分区药丸：再次点击同一项取消（`togglePortraitSection`）。 */
 function selectSection(next: string): void {
   section.value = togglePortraitSection(section.value, next)
   styleName.value = ALL_STYLES
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
 /** 发长药丸：再次点击同一项取消（`togglePortraitHair`）。 */
 function selectHair(next: string): void {
   hair.value = togglePortraitHair(hair.value, next)
   styleName.value = ALL_STYLES
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
 function onQueryInput(): void {
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
 function onStyleChange(): void {
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
 /** 重置：分区 / 发长 / 发型 / 搜索全部清空（React 的「重置」语义）。 */
@@ -142,11 +157,14 @@ function resetFilters(): void {
   hair.value = ''
   styleName.value = ALL_STYLES
   query.value = ''
-  shown.value = INITIAL_PORTRAIT_COUNT
+  page.value = 1
 }
 
-function loadMore(): void {
-  shown.value = nextPortraitShown(shown.value, filtered.value.length)
+/** 切换每页条数：写本地记忆并回到第 1 页（三库共用同一个键）。 */
+function onPageSizeChange(next: number): void {
+  pageSize.value = next
+  page.value = 1
+  saveReferencePageSize(next)
 }
 
 /** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
@@ -403,15 +421,16 @@ onMounted(() => {
       :loading="loading"
       :error="error"
       :total="initialLoading ? 0 : filtered.length"
-      :has-more="more.hasMore"
-      :remaining="more.remaining"
-      unit="张"
+      :page="page"
+      :total-pages="totalPages"
+      :page-size="pageSize"
       empty-title="没有找到匹配的人像参考"
       empty-hint="试试更换发型关键词或重置筛选"
       :skeleton-count="10"
       skeleton-aspect="4/5"
       @retry="retry"
-      @load-more="loadMore"
+      @update:page="page = $event"
+      @update:page-size="onPageSizeChange"
     >
       <!-- 卡片：缩略图 4:5 / object-cover（§5）；标题两行截断，最小高 34px（人像） -->
       <ReferenceCard
@@ -430,7 +449,7 @@ onMounted(() => {
         meta-right="CC0"
         selectable
         :selected="card.selected"
-        @open="openViewer(index)"
+        @open="openViewer(pageOffset + index)"
         @toggle-select="onTogglePortrait(card.item)"
       />
     </ReferenceGrid>

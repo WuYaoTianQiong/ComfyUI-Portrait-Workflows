@@ -42,21 +42,30 @@ import Skeleton from './Skeleton.vue'
  * 信息卡放在左下角浮层，不占用图片显示区域；点击空白（stage 内图片外的
  * 区域）关闭查看器，点击图片本身不关闭。
  */
-const props = defineProps<{
-  items: HistoryItem[]
-  index: number
-  /** 工作流列表由父组件传入 —— 组件本身不查，避免多套查询状态。 */
-  workflows?: Array<{ path: string; name: string }>
-  /** 重新出图的任务正在提交/生成，按钮应保持禁用并给出可见反馈。 */
-  regenerating?: boolean
-  /**
-   * 只读：任务/结果中心里"图还没入库"时打开的情况。
-   * 隐藏收藏 / 删除 / 重出图 / 投喂这些写操作，其余（缩放、下载、信息）照常。
-   */
-  readonly?: boolean
-  /** 是否显示「在画廊中查看」（画廊自己用不到，任务侧才需要）。 */
-  canOpenGallery?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    items: HistoryItem[]
+    index: number
+    /** 工作流列表由父组件传入 —— 组件本身不查，避免多套查询状态。 */
+    workflows?: Array<{ path: string; name: string }>
+    /** 重新出图的任务正在提交/生成，按钮应保持禁用并给出可见反馈。 */
+    regenerating?: boolean
+    /**
+     * 只读：任务/结果中心里"图还没入库"时打开的情况。
+     * 隐藏收藏 / 删除 / 重出图 / 投喂这些写操作，其余（缩放、下载、信息）照常。
+     */
+    readonly?: boolean
+    /** 是否显示「在画廊中查看」（画廊自己用不到，任务侧才需要）。 */
+    canOpenGallery?: boolean
+    /**
+     * 文件类操作：下载原图 / 在资源管理器中打开目录 / 出片档案 / 存储位置。
+     * 这些入口都依赖 ComfyUI input/output/temp 三目录内的 `filename`；
+     * 参考图等非历史记录条目打开时传 false，默认 true 不影响画廊 / 任务页。
+     */
+    fileActions?: boolean
+  }>(),
+  { fileActions: true },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -83,6 +92,21 @@ const outputPath = computed(() => {
   const base = it.img_type && it.img_type !== 'output' ? it.img_type : 'output'
   return `${base}/${it.subfolder ? `${it.subfolder}/` : ''}${it.filename}`
 })
+
+/** `fileActions` 缺省时按 true 处理（画廊 / 任务页不传，行为不变）。 */
+const showFileActions = computed(() => props.fileActions !== false)
+
+/**
+ * 展示 / 下载用的图片地址。
+ *
+ * 历史记录的 `view_url` 是后端 `build_view_url()` 的产物，与 `viewUrl(item)`
+ * 完全同格式，因此优先用它不会改变画廊 / 任务页的地址；缺失时（老记录 /
+ * 占位 fixture）回落到统一的 `viewUrl` 拼装。参考图这类不在媒体三目录内的
+ * 条目，只有后端下发的 `view_url` 能指向真实图片。
+ */
+function displayUrl(target: HistoryItem): string {
+  return target.view_url || viewUrl(target)
+}
 
 /**
  * 能不能重新出图：prompt_id 存在时走提示词出图；prompt_params.prompt 存在时
@@ -321,7 +345,7 @@ async function removeItem() {
 
 function download() {
   if (!item.value) return
-  window.open(viewUrl(item.value), '_blank')
+  window.open(displayUrl(item.value), '_blank')
 }
 
 /** 文件名点击复制。 */
@@ -886,8 +910,15 @@ function onKey(event: KeyboardEvent) {
       >
         ⚡
       </button>
-      <button class="tool" title="下载原图" @click="download">⬇</button>
-      <button class="tool" title="在资源管理器中打开所在目录" @click="revealImage(item)">目录</button>
+      <button v-if="showFileActions" class="tool" title="下载原图" @click="download">⬇</button>
+      <button
+        v-if="showFileActions"
+        class="tool"
+        title="在资源管理器中打开所在目录"
+        @click="revealImage(item)"
+      >
+        目录
+      </button>
       <button
         v-if="canOpenGallery"
         class="tool"
@@ -965,7 +996,7 @@ function onKey(event: KeyboardEvent) {
       <img
         ref="imgEl"
         :key="`${item.id}-${reloadNonce}`"
-        :src="viewUrl(item)"
+        :src="displayUrl(item)"
         :alt="item.filename"
         :class="{ loaded: imgLoaded }"
         :draggable="false"
@@ -1002,7 +1033,7 @@ function onKey(event: KeyboardEvent) {
           <div v-if="item.file_size"><dt>体积</dt><dd>{{ formatSize(item.file_size) }}</dd></div>
           <div><dt>来源</dt><dd>{{ sourceLabel(item.source) }}</dd></div>
           <div><dt>出图时间</dt><dd>{{ shotTime(item) }}</dd></div>
-          <div>
+          <div v-if="showFileActions">
             <dt>存储位置</dt>
             <dd class="path" :title="outputPath">{{ outputPath }}</dd>
           </div>
@@ -1010,6 +1041,7 @@ function onKey(event: KeyboardEvent) {
         </dl>
 
         <button
+          v-if="showFileActions"
           class="prompt-link"
           title="查看这张图的提示词、工作流与出图参数"
           @click="promptInfoOpen = true"
@@ -1153,7 +1185,7 @@ function onKey(event: KeyboardEvent) {
                   <dt>{{ row.label }}</dt>
                   <dd :title="row.title">{{ row.value }}</dd>
                 </div>
-                <div class="kv wide">
+                <div v-if="showFileActions" class="kv wide">
                   <dt>存储位置</dt>
                   <dd
                     class="path linkable"
@@ -1258,7 +1290,7 @@ function onKey(event: KeyboardEvent) {
     <ManualCleanupModal
       :open="manualCleanupOpen"
       :image-id="item?.id ?? 0"
-      :image-url="item ? viewUrl(item) : ''"
+      :image-url="item ? displayUrl(item) : ''"
       @close="manualCleanupOpen = false"
       @applied="onCleanupApplied"
     />

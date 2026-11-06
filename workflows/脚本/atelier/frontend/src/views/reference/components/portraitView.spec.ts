@@ -5,7 +5,7 @@
  * - 分区 / 发长药丸计数（全库统计）与「再次点击取消」；
  * - 发型细分下拉按分区 / 发长联动收窄、中文排序、失效选项回落；
  * - 搜索语义（检索串 + ID，AND 组合）；
- * - 加载更多（初始 60、每次 +60、非分页）；
+ * - 三库共用分页切片（人像页转出姿势库实现，每页 20/60/100/200）；
  * - 灯箱翻页循环与原图尺寸文案；
  * - 图片地址（thumb / image、无图 null、无二次拼接）。
  */
@@ -16,18 +16,20 @@ import type { PortraitItem } from '../../../api/reference'
 
 import {
   ALL_STYLES,
-  INITIAL_PORTRAIT_COUNT,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
   PORTRAIT_HAIRS,
-  PORTRAIT_LOAD_MORE_STEP,
   PORTRAIT_SECTIONS,
   activePortraitStyle,
+  clampPage,
   filterPortraits,
   formatPortraitSize,
   matchesPortraitFilters,
   matchesPortraitQuery,
-  nextPortraitShown,
+  normalizePageSize,
+  pageCount,
+  pageSlice,
   portraitHairCounts,
-  portraitLoadMoreState,
   portraitPreviewUrl,
   portraitSectionCounts,
   portraitStyleOptions,
@@ -110,9 +112,9 @@ describe('枚举与常量（§7 冻结）', () => {
     expect([...PORTRAIT_HAIRS]).toEqual(['短发', '中发', '中长发', '长发'])
   })
 
-  it('首屏 60 张、每次 +60（加载更多，不是分页）', () => {
-    expect(INITIAL_PORTRAIT_COUNT).toBe(60)
-    expect(PORTRAIT_LOAD_MORE_STEP).toBe(60)
+  it('分页默认每页 60 张，下拉可选 20 / 60 / 100 / 200', () => {
+    expect(DEFAULT_PAGE_SIZE).toBe(60)
+    expect([...PAGE_SIZES]).toEqual([20, 60, 100, 200])
   })
 })
 
@@ -211,28 +213,44 @@ describe('发型细分下拉联动收窄', () => {
   })
 })
 
-describe('加载更多（不是分页）', () => {
-  it('剩余数量与按钮文案', () => {
-    expect(portraitLoadMoreState(60, 1499)).toEqual({
-      hasMore: true,
-      remaining: 1439,
-      label: '加载更多（剩余 1439 张）',
-    })
+describe('分页切片（复用姿势库实现）', () => {
+  const items = Array.from({ length: 1499 }, (_, index) => `p${index}`)
+
+  it('第 1 页按 pageSize 切片，页码从 1 开始', () => {
+    expect(pageSlice(items, 1, 60)).toHaveLength(60)
+    expect(pageSlice(items, 1, 60)[0]).toBe('p0')
+    expect(pageSlice(items, 1, 100)[99]).toBe('p99')
   })
 
-  it('到末尾后不再显示按钮', () => {
-    expect(portraitLoadMoreState(1499, 1499)).toEqual({
-      hasMore: false,
-      remaining: 0,
-      label: '加载更多（剩余 0 张）',
-    })
+  it('最后一页不满时只返回剩余条目，越界页为空', () => {
+    // 1499 = 24 * 60 + 59，最后一页 59 张
+    expect(pageSlice(items, 25, 60)).toHaveLength(59)
+    expect(pageSlice(items, 25, 60)[58]).toBe('p1498')
+    expect(pageSlice(items, 26, 60)).toEqual([])
   })
 
-  it('步进 +60 并收敛到总数，不越界', () => {
-    expect(nextPortraitShown(60, 1499)).toBe(120)
-    expect(nextPortraitShown(120, 130)).toBe(130)
-    expect(nextPortraitShown(130, 130)).toBe(130)
-    expect(nextPortraitShown(0, 0)).toBe(0)
+  it('pageSize 非法回落 60，页码非法回第 1 页', () => {
+    expect(normalizePageSize(50)).toBe(60)
+    expect(normalizePageSize(0)).toBe(60)
+    expect(normalizePageSize(undefined)).toBe(60)
+    expect(pageSlice(items, 0, 60)).toHaveLength(60)
+    expect(pageSlice(items, Number.NaN, 60)).toHaveLength(60)
+  })
+
+  it('总页数向上取整，空列表至少 1 页', () => {
+    expect(pageCount(1499, 60)).toBe(25)
+    expect(pageCount(1499, 100)).toBe(15)
+    expect(pageCount(0, 60)).toBe(1)
+    expect(pageCount(60, 60)).toBe(1)
+    expect(pageCount(61, 60)).toBe(2)
+  })
+
+  it('页码越界夹到最后一页，非法页码夹到第 1 页', () => {
+    expect(clampPage(2, 1499, 60)).toBe(2)
+    expect(clampPage(99, 1499, 60)).toBe(25)
+    expect(clampPage(0, 1499, 60)).toBe(1)
+    expect(clampPage(Number.NaN, 1499, 60)).toBe(1)
+    expect(clampPage(99, 10, 60)).toBe(1)
   })
 })
 

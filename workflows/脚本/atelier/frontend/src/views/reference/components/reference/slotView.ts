@@ -7,13 +7,18 @@
  *
  * 姿势槽复用阶段 2.1 的 `poseThumbnailUrl`（白模 / 深度图双模式），
  * 避免两处各写一份深度图回退逻辑。
+ *
+ * 2026-11-05：槽位卡改为「点缩略图开灯箱」，因此每个展示条目额外带 `image`
+ * （灯箱原图地址）；`thumb` 语义保持不变，其它代码可继续按缩略图使用。
  */
 
 import type { CostumeItem, PortraitItem, ReferenceItemDto } from '../../../../api/reference'
 import { referenceImageUrl } from '../../../../api/reference'
 import type { PoseItem } from '../../../../api/reference'
 
-import { poseThumbnailUrl } from '../poseView'
+import { costumePreviewUrl } from '../costumeView'
+import { posePreviewUrl, poseThumbnailUrl } from '../poseView'
+import { portraitPreviewUrl } from '../portraitView'
 
 /** 人像条目 → `ReferenceItemDto`（只服务 `kind=thumb`，其余字段填占位值）。 */
 export function portraitSlotDto(item: PortraitItem): ReferenceItemDto {
@@ -102,11 +107,18 @@ export function poseSlotName(item: PoseItem | null): string {
 // 多选槽位视图（合成台展示「已选数量 + 前 N 张缩略图」）
 // ---------------------------------------------------------------------------
 
-/** 单个已选槽位条目的展示数据。 */
+/**
+ * 单个已选槽位条目的展示数据。
+ *
+ * `thumb` 保持既有语义（卡片缩略图 / 回退图），`image` 专门给灯箱看大图；
+ * 两者都允许 null（条目无图），调用方必须渲染占位而不是输出空 `src`。
+ */
 export interface SlotSelectedItem {
   key: string
   name: string
   thumb: string | null
+  /** 原图 URL（灯箱使用）；无原图时为 null，由调用方回退到 `thumb`。 */
+  image: string | null
 }
 
 /** 人像槽：数组 → 展示条目（顺序即加入顺序）。 */
@@ -115,6 +127,7 @@ export function portraitSlotItems(items: readonly PortraitItem[]): SlotSelectedI
     key: item.id,
     name: portraitSlotName(item),
     thumb: portraitSlotThumb(item),
+    image: portraitPreviewUrl(item),
   }))
 }
 
@@ -124,6 +137,7 @@ export function costumeSlotItems(items: readonly CostumeItem[]): SlotSelectedIte
     key: item.id,
     name: costumeSlotName(item),
     thumb: costumeSlotThumb(item),
+    image: costumePreviewUrl(item),
   }))
 }
 
@@ -135,5 +149,7 @@ export function poseSlotItems(
     key: entry.item.id,
     name: poseSlotName(entry.item),
     thumb: poseSlotThumb(entry.item, entry.useDepth),
+    // 灯箱大图与缩略图共用同一模式：深度模式下看深度大图，白模模式下看原图。
+    image: posePreviewUrl(entry.item, entry.useDepth),
   }))
 }

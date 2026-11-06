@@ -1,47 +1,93 @@
 <script setup lang="ts">
 /**
- * 合成台工作流下拉（`/api/workflows?scope=studio`）。
+ * 合成台工作流下拉（`/api/workflows?scope=studio`），**受控多选**。
  *
- * 为什么不直接用主站 `WorkflowPicker.vue`：共享组件只接受 `WorkflowRow[]`
- * （name/path），既不支持 `scope=studio` 的目录过滤，也没有 `recommended`
- * 徽章的插槽；而白名单不允许改共享组件。因此这里按 §5「工作流下拉」数值重做，
- * 交互约定与 `WorkflowPicker` 保持一致（点击触发器展开、点击外部 / Esc 关闭）。
+ * 契约 C-REF-WF-SLOTS@1：下拉项按「当前已选槽位」判定适用性，
+ * 缺少对应业务角色（`slots`）的项显示原因并禁止勾选；空槽位不参与判定。
  *
- * §5 补充实测：触发器 336.33 × 36px、圆角 8px、字号 12px；
- * 下拉行 435.13 × 28px、圆角 6px、字号 12px、内边距 6px 32px 6px 8px；
- * 「推荐」徽章 26 × 13px、圆角 4px、9px / 500、内边距 2px 4px、
- * 字 `#009966`、底 `rgba(0,188,128,0.15)`。
+ * `slots` 三态（收紧点 1）：`undefined` = 旧后端字段缺失，不判定；
+ * `[]` = 角色不可识别（可能是 UI 格式工作流），对所有非空槽位都禁用并提示；
+ * 非空 = 按角色匹配。
+ *
+ * 为什么不用主站 `WorkflowPicker.vue`：共享组件只接受 `WorkflowRow[]` 且是单选，
+ * 也不支持 `scope=studio` 的目录过滤；白名单不允许改共享组件，因此这里重做，
+ * 交互约定保持一致（点击触发器展开、点击外部 / Esc 关闭）。
+ *
+ * §5 尺寸基线：触发器 336.33 × 36px、圆角 8px、字号 12px；
+ * 下拉行 435.13 × 28px、圆角 6px、字号 12px、内边距 6px 32px 6px 8px。
  */
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-import type { StudioWorkflowOption } from '../../../../composables/useReferenceRecipe'
-import { workflowDisplayName } from '../../../../composables/useReferenceRecipe'
+import type {
+  StudioWorkflowOption,
+  StudioWorkflowSlot,
+} from '../../../../composables/useReferenceRecipe'
+import {
+  describeWorkflowUnavailableFor,
+  workflowDisplayName,
+} from '../../../../composables/useReferenceRecipe'
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string
+    /** 多选值：有序、去重；空数组 = 使用后端默认工作流。 */
+    modelValue: string[]
     workflows: StudioWorkflowOption[]
+    /** 当前已选**非空**槽位的业务角色；空槽不传。 */
+    selectedRoles?: StudioWorkflowSlot[]
+    /** 后端默认工作流路径（空选择时 UI 明示）。 */
+    defaultPath?: string
     loading?: boolean
     disabled?: boolean
   }>(),
-  { loading: false, disabled: false },
+  {
+    selectedRoles: () => [],
+    defaultPath: '',
+    loading: false,
+    disabled: false,
+  },
 )
 
-const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string[]] }>()
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 
-const current = computed(() => props.workflows.find((item) => item.path === props.modelValue))
+const selectedSet = computed(() => new Set(props.modelValue))
 
-/** 触发器文案：没有选中项时给出占位，而不是空白。 */
+/** 已选工作流对应的目录项（保序、过滤目录中已消失的路径）。 */
+const selectedItems = computed(() =>
+  props.modelValue
+    .map((path) => props.workflows.find((item) => item.path === path))
+    .filter((item): item is StudioWorkflowOption => Boolean(item)),
+)
+
+/** 后端默认项：路径恰好等于 defaultPath。 */
+const defaultItem = computed(
+  () => props.workflows.find((item) => item.path === props.defaultPath) ?? null,
+)
+
+/** 触发器文案：空选择明示「使用默认工作流」，而不是留空白。 */
 const triggerLabel = computed(() => {
   if (props.loading) return '正在读取本机工作流…'
-  const item = current.value
-  if (!item) return '选择本机工作流'
-  return `${workflowDisplayName(item.name)}${inputLabel(item)}`
+  if (selectedItems.value.length === 0) {
+    if (defaultItem.value) {
+      return `使用默认工作流：${workflowDisplayName(defaultItem.value.name)}`
+    }
+    return '选择本机工作流'
+  }
+  if (selectedItems.value.length === 1) {
+    const item = selectedItems.value[0]
+    return `${workflowDisplayName(item.name)}${inputLabel(item)}`
+  }
+  const first = selectedItems.value[0]
+  return `已选 ${selectedItems.value.length} 个工作流（首个：${workflowDisplayName(first.name)}）`
+})
+
+const triggerTitle = computed(() => {
+  if (props.modelValue.length) return props.modelValue.join('\n')
+  return defaultItem.value?.path ?? '选择工作流'
 })
 
 /** 输入数文案：优先后端 `input_count`，旧响应回退 `image_slots`。 */
@@ -58,6 +104,21 @@ function optionLabel(item: StudioWorkflowOption): string {
   return `${prefix}${name}${inputLabel(item)}`
 }
 
+function isSelected(path: string): boolean {
+  return selectedSet.value.has(path)
+}
+
+/**
+ * 不可用原因：缺少当前已选槽位对应的输入、或 slots 为空导致角色不可识别时，
+ * 返回中文原因；否则空串。
+ *
+ * 三态口径（收紧点）：`slots === undefined`（旧后端字段缺失）不判定；
+ * `slots === []`（UI 格式工作流 / 解析失败）一律视为不可识别并禁用。
+ */
+function reasonFor(item: StudioWorkflowOption): string {
+  return describeWorkflowUnavailableFor(item, props.selectedRoles)
+}
+
 function toggle(): void {
   if (props.disabled || props.loading) return
   open.value = !open.value
@@ -70,9 +131,15 @@ function toggle(): void {
   }
 }
 
-function choose(item: StudioWorkflowOption): void {
-  emit('update:modelValue', item.path)
-  open.value = false
+/** 勾选 / 取消：不可用项直接忽略（禁止选中）。 */
+function toggleOption(item: StudioWorkflowOption): void {
+  if (props.disabled || props.loading) return
+  if (reasonFor(item)) return
+
+  const next = isSelected(item.path)
+    ? props.modelValue.filter((path) => path !== item.path)
+    : [...props.modelValue, item.path]
+  emit('update:modelValue', next)
 }
 
 function onDocMouseDown(event: MouseEvent): void {
@@ -112,13 +179,13 @@ onBeforeUnmount(() => {
       :disabled="loading || disabled"
       :aria-expanded="open"
       aria-haspopup="listbox"
-      :title="current?.path ?? '选择工作流'"
+      :title="triggerTitle"
       data-testid="studio-workflow-trigger"
       @click="toggle"
     >
       <span class="wf-trigger__label">{{ triggerLabel }}</span>
       <span
-        v-if="current?.recommended"
+        v-if="selectedItems.length === 1 && selectedItems[0].recommended"
         class="wf-badge"
         data-testid="studio-workflow-recommended"
       >推荐</span>
@@ -126,20 +193,51 @@ onBeforeUnmount(() => {
     </button>
 
     <div v-if="open" class="wf-menu">
-      <div ref="listEl" class="wf-list" role="listbox" aria-label="本机工作流列表">
+      <!-- 未选时明示默认工作流；已选时明示多选数量 -->
+      <p
+        v-if="!modelValue.length && defaultItem"
+        class="wf-default"
+        data-testid="studio-workflow-default-hint"
+      >
+        当前使用默认工作流：{{ workflowDisplayName(defaultItem.name) }}
+      </p>
+      <p v-else-if="modelValue.length" class="wf-default" data-testid="studio-workflow-selected-hint">
+        已选 {{ modelValue.length }} 个工作流；每组任务按所选工作流分别提交。
+      </p>
+
+      <div
+        ref="listEl"
+        class="wf-list"
+        role="listbox"
+        aria-label="本机工作流列表"
+        aria-multiselectable="true"
+      >
         <button
           v-for="item in workflows"
           :key="item.path"
           type="button"
           class="wf-option"
-          :class="{ 'is-active': item.path === modelValue }"
+          :class="{
+            'is-active': isSelected(item.path),
+            'is-unavailable': Boolean(reasonFor(item)),
+          }"
           role="option"
-          :aria-selected="item.path === modelValue"
+          :aria-selected="isSelected(item.path) || undefined"
+          :aria-disabled="Boolean(reasonFor(item)) || undefined"
           :title="item.path"
-          @click="choose(item)"
+          data-testid="studio-workflow-option"
+          @click="toggleOption(item)"
         >
+          <span class="wf-check" aria-hidden="true">{{ isSelected(item.path) ? '✓' : '' }}</span>
+          <span class="wf-option__body">
+            <span class="wf-option__text">{{ optionLabel(item) }}</span>
+            <span
+              v-if="reasonFor(item)"
+              class="wf-option__reason"
+              data-testid="studio-workflow-unavailable"
+            >{{ reasonFor(item) }}</span>
+          </span>
           <span v-if="item.recommended" class="wf-badge">推荐</span>
-          <span class="wf-option__text">{{ optionLabel(item) }}</span>
         </button>
 
         <p v-if="!loading && workflows.length === 0" class="wf-empty">
@@ -236,7 +334,7 @@ onBeforeUnmount(() => {
   z-index: 80;
   box-sizing: border-box;
   width: min(435.13px, calc(100vw - 64px));
-  max-height: 300px;
+  max-height: 360px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -247,19 +345,29 @@ onBeforeUnmount(() => {
     var(--shadow-3);
 }
 
+/* 默认 / 多选说明：常驻在列表顶部，进下拉第一眼就能看到 */
+.wf-default {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-body-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .wf-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0;
+  padding: 4px 0;
   overflow-y: auto;
 }
 
 /* 行 435.13 × 28、圆角 6、12px、内边距 6px 32px 6px 8px */
 .wf-option {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 6px;
   box-sizing: border-box;
   width: 100%;
   min-height: 28px;
@@ -285,13 +393,64 @@ onBeforeUnmount(() => {
   color: var(--text-strong);
 }
 
+/* 不适用项：名称保持可读，不整体降透明度（灰底灰字难辨认） */
+.wf-option.is-unavailable {
+  cursor: not-allowed;
+}
+
+.wf-option.is-unavailable:hover {
+  background: transparent;
+}
+
+.wf-option.is-unavailable .wf-option__text {
+  color: var(--text-muted);
+}
+
 .wf-option:focus-visible {
   outline: 1px solid var(--primary);
   outline-offset: -1px;
 }
 
+/* 多选勾选框：固定 14px，避免行高跳动 */
+.wf-check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--on-inverse);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.wf-option.is-active .wf-check {
+  border-color: transparent;
+  background: var(--primary);
+}
+
+.wf-option__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .wf-option__text {
   min-width: 0;
+}
+
+/* 不适用原因：红色可读，不靠浅灰 */
+.wf-option__reason {
+  color: var(--danger-text-soft);
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .wf-empty {

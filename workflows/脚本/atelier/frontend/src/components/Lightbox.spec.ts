@@ -162,6 +162,72 @@ describe('Lightbox', () => {
     expect(facts).toContain('本机出图')
   })
 
+  it('view_url 优先显示，缺失时回落到 viewUrl 拼装', () => {
+    const withViewUrl = {
+      ...item(1, 'a.png'),
+      view_url: '/api/reference/items/pose/P001/image?kind=image',
+    }
+    const linked = mount(Lightbox, { props: { items: [withViewUrl], index: 0 } })
+    expect(linked.find('.stage img').attributes('src')).toBe(
+      '/api/reference/items/pose/P001/image?kind=image',
+    )
+
+    // 老记录 / 占位 fixture 的 view_url 为空：行为与改动前一致
+    const fallback = mount(Lightbox, { props: { items: [item(2, 'b.png')], index: 0 } })
+    expect(fallback.find('.stage img').attributes('src')).toBe('/api/media/image?filename=b.png')
+  })
+
+  it('readonly 隐藏写操作按钮，保留查看类工具', () => {
+    const withPrompt = { ...item(1, 'a.png'), prompt_id: 1127 }
+    const wrapper = mount(Lightbox, {
+      props: { items: [withPrompt], index: 0, readonly: true },
+    })
+    const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+
+    // 写操作：投喂 / 重出图 / 提示词 / 收藏 / 删除
+    expect(tools).not.toContain('⚡')
+    expect(tools).not.toContain('🔄')
+    expect(tools).not.toContain('↗')
+    expect(tools).not.toContain('☆')
+    expect(tools).not.toContain('🗑')
+    // 查看类：下载 / 翻转 / 旋转 / 1:1 / 缩放 / 信息 / 关闭
+    expect(tools).toContain('⬇')
+    expect(tools).toContain('⇋')
+    expect(tools).toContain('⟳')
+    expect(tools).toContain('1:1')
+    expect(tools).toContain('ⓘ')
+    expect(tools).toContain('✕')
+  })
+
+  it('fileActions=false 隐藏下载 / 目录 / 出片档案 / 存储位置', async () => {
+    const wrapper = mount(Lightbox, {
+      props: { items: [item(1, 'a.png')], index: 0, fileActions: false },
+    })
+    const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+
+    expect(tools).not.toContain('⬇')
+    expect(tools).not.toContain('目录')
+    expect(wrapper.find('.prompt-link').exists()).toBe(false)
+    expect(wrapper.find('.info').exists()).toBe(true)
+    // 信息面板里不再给出依赖媒体三目录的假路径
+    expect(wrapper.find('.info-body').text()).not.toContain('存储位置')
+
+    // 缩放 / 翻转 / 旋转 / 信息 / 关闭仍然可用
+    expect(tools).toContain('⇋')
+    expect(tools).toContain('⟳')
+    expect(tools).toContain('ⓘ')
+    expect(tools).toContain('✕')
+  })
+
+  it('默认 fileActions=true：下载 / 目录 / 出片档案照常渲染', () => {
+    const wrapper = mount(Lightbox, { props: { items: [item(1, 'a.png')], index: 0 } })
+    const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+
+    expect(tools).toContain('⬇')
+    expect(tools).toContain('目录')
+    expect(wrapper.find('.prompt-link').exists()).toBe(true)
+  })
+
   it('缺失的图给出明确提示', () => {
     const missing = { ...item(1, 'a.png'), missing: true }
     const wrapper = mount(Lightbox, { props: { items: [missing], index: 0 } })

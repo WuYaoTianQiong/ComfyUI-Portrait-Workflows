@@ -2,8 +2,9 @@
  * 服装库视图层纯逻辑单测。
  *
  * 覆盖 §7 服装相关 6 行 + 下载分流：
- * 双库合并后的分类 / 标签联动、安全模式与 ` · 18+` 后缀、搜索、加载更多 60/+60、
- * 图片地址（统一走 referenceImageUrl、无二次拼接）、外链标注与「外链不下载 / 现实可下载」。
+ * 双库合并后的分类 / 标签联动、安全模式与 ` · 18+` 后缀、搜索、
+ * 三库共用分页切片（服装页转出姿势库实现）、图片地址（统一走 referenceImageUrl、
+ * 无二次拼接）、外链标注与「外链不下载 / 现实可下载」。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -12,11 +13,12 @@ import type { CostumeItem } from '../../../api/reference'
 
 import {
   COSTUME_ALL_TAGS,
-  COSTUME_LOAD_STEP,
-  INITIAL_COSTUME_COUNT,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
   REMOTE_COSTUME_NOTE,
   REMOTE_COSTUME_SOURCE,
   REAL_COSTUME_SOURCE,
+  clampPage,
   costumeAuthorSiteUrl,
   costumeBaseItems,
   costumeCategorySummaries,
@@ -24,7 +26,6 @@ import {
   costumeDownloadName,
   costumeHiddenNsfwCount,
   costumeLightboxMeta,
-  costumeLoadMore,
   costumePreviewUrl,
   costumeSourceLabel,
   costumeTagOptions,
@@ -33,7 +34,9 @@ import {
   filterCostumes,
   isRemoteCostume,
   matchesCostumeKind,
-  nextCostumeShown,
+  normalizePageSize,
+  pageCount,
+  pageSlice,
   resolveActiveCategory,
   resolveActiveTag,
   safeExternalUrl,
@@ -196,25 +199,42 @@ describe('搜索 + 最终筛选', () => {
   })
 })
 
-describe('加载更多（不是分页）', () => {
-  it('初始 60，每次 +60', () => {
-    expect(INITIAL_COSTUME_COUNT).toBe(60)
-    expect(COSTUME_LOAD_STEP).toBe(60)
+describe('分页切片（复用姿势库实现）', () => {
+  const items = Array.from({ length: 130 }, (_, index) => `c${index}`)
+
+  it('服装页转出的分页常量与姿势库一致', () => {
+    expect([...PAGE_SIZES]).toEqual([20, 60, 100, 200])
+    expect(DEFAULT_PAGE_SIZE).toBe(60)
+    expect(normalizePageSize(100)).toBe(100)
+    // pageSize 非法（不在 20/60/100/200 内）回落 60
+    expect(normalizePageSize(50)).toBe(60)
+    expect(normalizePageSize(0)).toBe(60)
+    expect(normalizePageSize('bad')).toBe(60)
   })
 
-  it('剩余数量与按钮状态', () => {
-    expect(costumeLoadMore(60, 1464)).toMatchObject({ hasMore: true, remaining: 1404 })
-    expect(costumeLoadMore(1464, 1464)).toEqual({
-      hasMore: false,
-      remaining: 0,
-      label: '加载更多（剩余 0 张）',
-    })
+  it('第 1 页按 pageSize 切片', () => {
+    expect(pageSlice(items, 1, 60)).toHaveLength(60)
+    expect(pageSlice(items, 1, 60)[0]).toBe('c0')
   })
 
-  it('步进到末尾时收敛，不越界', () => {
-    expect(nextCostumeShown(60, 130)).toBe(120)
-    expect(nextCostumeShown(120, 130)).toBe(130)
-    expect(nextCostumeShown(0, 0)).toBe(0)
+  it('最后一页不满时只返回剩余条目，越界页为空', () => {
+    expect(pageSlice(items, 3, 60)).toEqual(['c120', 'c121', 'c122', 'c123', 'c124', 'c125', 'c126', 'c127', 'c128', 'c129'])
+    expect(pageSlice(items, 4, 60)).toEqual([])
+  })
+
+  it('总页数向上取整，空列表至少 1 页', () => {
+    expect(pageCount(1464, 60)).toBe(25)
+    expect(pageCount(120, 60)).toBe(2)
+    expect(pageCount(121, 60)).toBe(3)
+    expect(pageCount(0, 60)).toBe(1)
+  })
+
+  it('页码越界夹到最后一页，非法页码夹到第 1 页', () => {
+    expect(clampPage(2, 1464, 60)).toBe(2)
+    expect(clampPage(99, 1464, 60)).toBe(25)
+    expect(clampPage(0, 1464, 60)).toBe(1)
+    expect(clampPage(Number.NaN, 1464, 60)).toBe(1)
+    expect(clampPage(9, 10, 60)).toBe(1)
   })
 })
 

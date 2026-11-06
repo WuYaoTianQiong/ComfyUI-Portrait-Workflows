@@ -6,7 +6,7 @@
  * - 一级分类（全部 / 现实 / 二次元）收窄；
  * - 分类药丸（计数 + ` · 18+` 文本后缀）与标签下拉 `allTags` 的联动；
  * - 搜索（只匹配后端预拼的 `检索` 串，与 React 一致）；
- * - 加载更多（初始 60、每次 +60，**不是分页**）；
+ * - 分页切片与每页条数归一（复用姿势库的共用实现，三库口径一致）；
  * - 图片地址（唯一出口 `referenceImageUrl`，禁止二次拼接）；
  * - 外链来源标注与下载分流（CharaDB 不提供下载，现实条目可下载）。
  *
@@ -19,19 +19,23 @@ import {
 } from '../../../api/reference'
 import type { CostumeItem, ReferenceItemDto } from '../../../api/reference'
 
-// 加载更多的计数 / 步进是姿势与服装共用的通用算法，直接复用阶段 2.1 的实现，
-// 不在这里重造一份（避免两套口径漂移）。
-import { loadMoreState, nextShown } from './poseView'
-import type { LoadMoreState } from './poseView'
+// 分页切片 / 页码夹取是姿势、服装、人像共用的通用算法，直接复用阶段 2.1 的实现，
+// 不在这里重造一份（避免三套口径漂移）。
+export {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
+  PAGE_SIZE_STORAGE_KEY,
+  clampPage,
+  loadReferencePageSize,
+  normalizePageSize,
+  pageCount,
+  pageSlice,
+  saveReferencePageSize,
+} from './poseView'
 
 /** 一级分类按钮组；「全部」是不限。 */
 export const COSTUME_KINDS = ['全部', '现实', '二次元'] as const
 export type CostumeKind = (typeof COSTUME_KINDS)[number]
-
-/** 初始展示 60 套（与 React `useState(60)` 一致）。 */
-export const INITIAL_COSTUME_COUNT = 60
-/** 「加载更多」每次追加 60 套（与 React `setShown((s) => s + 60)` 一致）。 */
-export const COSTUME_LOAD_STEP = 60
 
 /** 标签下拉的「全部」哨兵值（与 React 的 `tag === 'all'` 一致）。 */
 export const COSTUME_ALL_TAGS = 'all'
@@ -194,15 +198,6 @@ export function filterCostumes(items: CostumeItem[], filters: CostumeFilters): C
   })
 }
 
-/** 加载更多的展示状态；单位用「张」（见 ReferenceGrid 的 unit 枚举限制）。 */
-export function costumeLoadMore(shown: number, total: number): LoadMoreState {
-  return loadMoreState(shown, total, '张')
-}
-
-/** 下一次点击「加载更多」后的展示条数（+60，到末尾收敛）。 */
-export function nextCostumeShown(shown: number, total: number): number {
-  return nextShown(shown, total, COSTUME_LOAD_STEP)
-}
 
 /** 卡片上展示的标签：只取前 5 个（React `(item.标签 || []).slice(0, 5)`）。 */
 export function costumeTagPreview(item: CostumeItem, limit = 5): string[] {

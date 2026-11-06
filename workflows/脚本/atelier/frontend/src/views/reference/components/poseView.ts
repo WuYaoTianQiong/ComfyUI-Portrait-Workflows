@@ -3,7 +3,7 @@
  *
  * 本文件只放「可以脱离 Vue 组件单测」的算法：
  * - 体系药丸 / 分类下拉 / 视角胶囊 / 搜索的筛选语义（逐条对齐 React `poses.tsx`）；
- * - 加载更多的计数与文案（60 组 / 96 张，每次 +60，不是分页）；
+ * - 三库共用的分页切片（每页 20 / 60 / 100 / 200，页码从 1 开始）；
  * - 卡片与灯箱的图片地址（统一走 `referenceImageUrl`，禁止二次拼接）。
  *
  * 深度图模式是顶栏、卡片、角度条、灯箱共享的一份状态，因此放在模块级 ref；
@@ -15,16 +15,80 @@ import { ref } from 'vue'
 import { referenceImageUrl } from '../../../api/reference'
 import type { PoseGroup, PoseItem, ReferenceItemDto } from '../../../api/reference'
 import { ANGLES } from '../../../composables/useReferenceLibrary'
+import { readSession, writeSession } from '../../../composables/useSessionState'
 
 /** 组内角度展示顺序（§7 冻结：正面/俯视/仰视/侧面/斜侧）。 */
 export { ANGLES }
 
-/** 分组视图初始展示 60 组。 */
-export const INITIAL_GROUP_COUNT = 60
-/** 单张视图初始展示 96 张。 */
-export const INITIAL_SINGLE_COUNT = 96
-/** 「加载更多」每次追加 60（组或张）。 */
-export const LOAD_MORE_STEP = 60
+/** 每页条数下拉的合法取值。 */
+export const PAGE_SIZES = [20, 60, 100, 200] as const
+
+/** 默认每页 60 条（与旧「首屏 60」口径一致）。 */
+export const DEFAULT_PAGE_SIZE = 60
+
+/** 三库共用的每页条数记忆键（值形如 `{ pageSize: 60 }`）。 */
+export const PAGE_SIZE_STORAGE_KEY = 'pb.reference_page_size_v1'
+
+/** 每页条数本地存档的形状。 */
+export interface ReferencePageSizeSession {
+  pageSize: number
+}
+
+/**
+ * 每页条数归一：只接受 20 / 60 / 100 / 200，其余（缺失、脏值、0、非数字）一律回落 60。
+ */
+export function normalizePageSize(value: unknown): number {
+  const candidate = Number(value)
+  return (PAGE_SIZES as readonly number[]).includes(candidate) ? candidate : DEFAULT_PAGE_SIZE
+}
+
+/**
+ * 按页切片：页码从 1 开始，`page = 1` 返回前 `pageSize` 条。
+ *
+ * 页码与每页条数先归一（非法页码回 1、非法条数回 60），
+ * 所以越界页返回空数组而不是把负数下标透给 `slice`。
+ */
+export function pageSlice<T>(items: readonly T[], page: number, pageSize: number): T[] {
+  const size = normalizePageSize(pageSize)
+  const safePage = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1
+  const start = (safePage - 1) * size
+  return items.slice(start, start + size)
+}
+
+/** 总页数：向上取整，空列表也至少 1 页（分页条不会显示「第 1 / 0 页」）。 */
+export function pageCount(total: number, pageSize: number): number {
+  const size = normalizePageSize(pageSize)
+  const count = Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0
+  return Math.max(1, Math.ceil(count / size))
+}
+
+/**
+ * 页码夹取：筛选后结果变少时把当前页夹到最后一个合法页。
+ *
+ * 非法页码（0 / 负数 / NaN）统一回第 1 页；空结果为 1。
+ */
+export function clampPage(page: number, total: number, pageSize: number): number {
+  const last = pageCount(total, pageSize)
+  const current = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1
+  return Math.min(current, last)
+}
+
+/** 读取三库共用的每页条数；读写失败或脏值回落 60。 */
+export function loadReferencePageSize(): number {
+  try {
+    const saved = readSession<ReferencePageSizeSession>(PAGE_SIZE_STORAGE_KEY, {
+      pageSize: DEFAULT_PAGE_SIZE,
+    })
+    return normalizePageSize(saved.pageSize)
+  } catch {
+    return DEFAULT_PAGE_SIZE
+  }
+}
+
+/** 写入三库共用的每页条数（用户在任一库改动，另两库下次进入沿用）。 */
+export function saveReferencePageSize(pageSize: number): void {
+  writeSession(PAGE_SIZE_STORAGE_KEY, { pageSize: normalizePageSize(pageSize) })
+}
 
 /**
  * 深度图模式：`false` 素体白模、`true` 深度图。
@@ -179,34 +243,6 @@ export function firstNsfwLine(lines: string[], items: PoseItem[]): string {
   return lines.find((line) => items.some((item) => item.体系 === line && Boolean(item.nsfw))) ?? ''
 }
 
-/** 加载更多的展示状态。 */
-export interface LoadMoreState {
-  hasMore: boolean
-  /** 还剩多少条未展示（组或张） */
-  remaining: number
-  /** 按钮文案，带剩余数量 */
-  label: string
-}
-
-/**
- * 加载更多状态。
- *
- * 注意这是「加载更多」而不是分页：React 版没有页码，只有 60 的步进，
- * 阶段 2.1 不得改用 `Pager`（§7 冻结结论）。
- */
-export function loadMoreState(shown: number, total: number, unit: '组' | '张'): LoadMoreState {
-  const remaining = Math.max(0, total - shown)
-  return {
-    hasMore: remaining > 0,
-    remaining,
-    label: `加载更多（剩余 ${remaining} ${unit}）`,
-  }
-}
-
-/** 下一次点击「加载更多」后的展示条数；已到末尾时保持不变。 */
-export function nextShown(shown: number, total: number, step: number = LOAD_MORE_STEP): number {
-  return Math.min(Math.max(0, total), shown + Math.max(1, step))
-}
 
 /** 卡片上当前生效的角度：鼠标悬停 / 点击过的角度优先，其次是筛选视角，最后取组内首张。 */
 export function activeGroupItem(

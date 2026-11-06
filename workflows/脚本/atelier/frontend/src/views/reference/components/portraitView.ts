@@ -8,7 +8,7 @@
  * - 发型细分下拉按「当前分区 + 发长」联动收窄，中文排序；
  * - 搜索匹配以 `检索` 串为主（后端已拼入 id / 分区 / 发长 / 发型名称），
  *   附加 id 兜底，保证「搜 ID」一定可用；
- * - 加载更多是 **+60 步进**，不是分页（§7 冻结结论）；
+ * - 分页切片与每页条数归一复用姿势库的共用实现（三库口径一致）；
  * - 灯箱前后翻页在筛选结果内循环；
  * - 图片地址一律走 `referenceImageUrl`，禁止二次拼接（§0 铁律 5 / §9 R7），
  *   无图返回 null，由卡片 / 灯箱渲染占位。
@@ -19,6 +19,19 @@
 import { referenceImageUrl } from '../../../api/reference'
 import type { PortraitItem, ReferenceItemDto } from '../../../api/reference'
 
+// 分页切片 / 页码夹取是姿势、服装、人像共用的通用算法，直接复用姿势库实现。
+export {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
+  PAGE_SIZE_STORAGE_KEY,
+  clampPage,
+  loadReferencePageSize,
+  normalizePageSize,
+  pageCount,
+  pageSlice,
+  saveReferencePageSize,
+} from './poseView'
+
 /** 分区枚举与展示顺序（与 React 的 `(['正脸参考','造型氛围'] as const)` 一致）。 */
 export const PORTRAIT_SECTIONS = ['正脸参考', '造型氛围'] as const
 
@@ -27,12 +40,6 @@ export const PORTRAIT_HAIRS = ['短发', '中发', '中长发', '长发'] as con
 
 /** 发型下拉「全部」的哨兵值（与 React 的 `styleName = 'all'` 一致）。 */
 export const ALL_STYLES = 'all'
-
-/** 首屏展示 60 张（React `useState(60)`）。 */
-export const INITIAL_PORTRAIT_COUNT = 60
-
-/** 「加载更多」每次追加 60 张（§7：+60，不是分页）。 */
-export const PORTRAIT_LOAD_MORE_STEP = 60
 
 /** 人像筛选条件；空串 / `ALL_STYLES` 表示不限制。 */
 export interface PortraitFilters {
@@ -144,29 +151,6 @@ export function activePortraitStyle(current: string, options: string[]): string 
   return options.includes(current) ? current : ALL_STYLES
 }
 
-/** 加载更多的展示状态。 */
-export interface PortraitLoadMoreState {
-  hasMore: boolean
-  /** 还剩多少张未展示 */
-  remaining: number
-  /** 按钮文案，带剩余数量 */
-  label: string
-}
-
-/** 加载更多状态（不是分页：没有页码，只有 +60 步进）。 */
-export function portraitLoadMoreState(shown: number, total: number): PortraitLoadMoreState {
-  const remaining = Math.max(0, total - shown)
-  return {
-    hasMore: remaining > 0,
-    remaining,
-    label: `加载更多（剩余 ${remaining} 张）`,
-  }
-}
-
-/** 下一次点击「加载更多」后的展示条数；已到末尾时保持不变。 */
-export function nextPortraitShown(shown: number, total: number): number {
-  return Math.min(Math.max(0, total), shown + PORTRAIT_LOAD_MORE_STEP)
-}
 
 /**
  * 灯箱前后翻页：在筛选结果内循环。

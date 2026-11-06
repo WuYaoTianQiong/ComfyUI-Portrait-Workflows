@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import { isNsfwPoseItem } from '../../api/reference'
 import type { PoseGroup, PoseItem } from '../../api/reference'
@@ -14,23 +14,24 @@ import ReferenceGrid from './components/ReferenceGrid.vue'
 import ReferenceLightbox from './components/ReferenceLightbox.vue'
 import {
   ANGLES,
-  INITIAL_GROUP_COUNT,
-  INITIAL_SINGLE_COUNT,
   activeGroupItem,
+  clampPage,
   filterPoseGroups,
   filterPoseSingles,
   firstNsfwLine,
   groupAngleItem,
   groupIndexOfItem,
   hiddenNsfwCount,
-  loadMoreState,
-  nextShown,
+  loadReferencePageSize,
+  pageCount,
+  pageSlice,
   poseCategoryOptions,
   poseDepthMode,
   posePreviewUrl,
   poseSystemSummaries,
   poseThumbnailUrl,
   resolveActiveLine,
+  saveReferencePageSize,
   setPoseDepthMode,
   stepGroupItem,
 } from './components/poseView'
@@ -41,8 +42,8 @@ import {
  * 功能逐条对齐 §7 的 8 行姿势特性 + 全局安全模式：
  * 体系药丸（含 ` · 18+` 文本后缀）、按「体系|姿势编号」分组、组内 5 角度切换、
  * 白模 / 深度图（顶栏与灯箱共享）、搜索 + 动作分类下拉 + 视角胶囊 + 重置、
- * 分组 / 单张视图（5 列 60 组 / 6 列 96 张）、加载更多（+60）、卡片加入配方、
- * 灯箱（缩放拖动、←/→ 组内、↑/↓ 跨组、复制 ID、下载 / 新窗口、加入配方）。
+ * 分组 / 单张视图（5 列 / 6 列）、分页（Pager + 每页条数，替代旧加载更多）、
+ * 卡片加入配方、灯箱（缩放拖动、←/→ 组内、↑/↓ 跨组、复制 ID、下载 / 新窗口、加入配方）。
  *
  * 数据来自阶段 1.2 的 `useReferencePoses`（分页并发 ≤6、按 id 去重保序），
  * 本文件只做展示状态与筛选，不重复实现数据层算法。
@@ -91,8 +92,10 @@ const angle = ref('')
 /** 搜索词 */
 const query = ref('')
 const viewMode = ref<'group' | 'single'>('group')
-/** 已展示条数：分组 60 组 / 单张 96 张起步 */
-const shown = ref(INITIAL_GROUP_COUNT)
+/** 当前页码（从 1 开始）；筛选 / 视图 / 每页条数变化一律回第 1 页。 */
+const page = ref(1)
+/** 每页条数；三库共用 `pb.reference_page_size_v1`（默认 60）。 */
+const pageSize = ref(loadReferencePageSize())
 /** 每个分组卡片当前悬停 / 点击的角度（key = group.key） */
 const hoverAngles = ref<Record<string, string>>({})
 
@@ -140,10 +143,23 @@ const filteredSingles = computed(() => filterPoseSingles(baseItems.value, filter
 const totalCount = computed(() =>
   viewMode.value === 'group' ? filteredGroups.value.length : filteredSingles.value.length,
 )
-const visibleGroups = computed(() => filteredGroups.value.slice(0, shown.value))
-const visibleSingles = computed(() => filteredSingles.value.slice(0, shown.value))
-const unit = computed<'组' | '张'>(() => (viewMode.value === 'group' ? '组' : '张'))
-const more = computed(() => loadMoreState(shown.value, totalCount.value, unit.value))
+const totalPages = computed(() => pageCount(totalCount.value, pageSize.value))
+/** 当前页在完整筛选结果中的起始下标（灯箱按下标定位时使用）。 */
+const pageOffset = computed(() => (page.value - 1) * pageSize.value)
+const visibleGroups = computed(() =>
+  pageSlice(filteredGroups.value, page.value, pageSize.value),
+)
+const visibleSingles = computed(() =>
+  pageSlice(filteredSingles.value, page.value, pageSize.value),
+)
+
+/**
+ * 页码越界保护：筛选结果或每页条数变化后总页数可能变少，
+ * 把当前页夹到最后一个合法页（每页条数变化本身已回第 1 页）。
+ */
+watch([totalCount, pageSize], () => {
+  page.value = clampPage(page.value, totalCount.value, pageSize.value)
+})
 
 interface AngleCell {
   angle: string
@@ -162,7 +178,8 @@ interface GroupCard {
 const groupCards = computed<GroupCard[]>(() =>
   visibleGroups.value.map((group, index) => ({
     group,
-    index,
+    // 灯箱按 `filteredGroups` 的下标定位，分页后需要补上当前页的起始偏移
+    index: pageOffset.value + index,
     item: activeGroupItem(group, hoverAngles.value, angle.value),
     angles: ANGLES.map((value) => {
       const angleItem = groupAngleItem(group, value)
@@ -196,21 +213,21 @@ const singleCards = computed<SingleCard[]>(() =>
 function selectLine(next: string): void {
   line.value = next
   category.value = 'all'
-  shown.value = INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
 function selectCategory(event: Event): void {
   category.value = (event.target as HTMLSelectElement).value
-  shown.value = INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
 function selectAngle(next: string): void {
   angle.value = next
-  shown.value = INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
 function onQueryInput(): void {
-  shown.value = INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
 function resetFilters(): void {
@@ -218,17 +235,20 @@ function resetFilters(): void {
   category.value = 'all'
   angle.value = ''
   query.value = ''
-  shown.value = INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
 function setViewMode(mode: 'group' | 'single'): void {
   if (viewMode.value === mode) return
   viewMode.value = mode
-  shown.value = mode === 'single' ? INITIAL_SINGLE_COUNT : INITIAL_GROUP_COUNT
+  page.value = 1
 }
 
-function loadMore(): void {
-  shown.value = nextShown(shown.value, totalCount.value)
+/** 切换每页条数：写本地记忆并回到第 1 页（三库共用同一个键）。 */
+function onPageSizeChange(next: number): void {
+  pageSize.value = next
+  page.value = 1
+  saveReferencePageSize(next)
 }
 
 function setHoverAngle(group: PoseGroup, next: string): void {
@@ -271,7 +291,7 @@ function onUnlockPill(): void {
   const accepted = requestUnlock(() => {
     line.value = firstRiskyLine.value
     category.value = 'all'
-    shown.value = INITIAL_GROUP_COUNT
+    page.value = 1
     toast.success('已解锁 18+ 敏感姿势体系')
   })
   if (!accepted) backendBlockedToast()
@@ -603,16 +623,17 @@ onMounted(() => {
       :loading="loading"
       :error="error"
       :total="initialLoading ? 0 : totalCount"
-      :has-more="more.hasMore"
-      :remaining="more.remaining"
-      :unit="unit"
+      :page="page"
+      :total-pages="totalPages"
+      :page-size="pageSize"
       empty-title="没有找到匹配的姿势"
       empty-hint="试试更换搜索词或重置筛选条件"
       :skeleton-count="viewMode === 'single' ? 12 : 10"
       @retry="retry"
-      @load-more="loadMore"
+      @update:page="page = $event"
+      @update:page-size="onPageSizeChange"
     >
-      <!-- 分组视图：5 列 60 组，组内 5 角度缩略条 -->
+      <!-- 分组视图：5 列，按当前页切片 -->
       <template v-if="viewMode === 'group'">
         <ReferenceCard
           v-for="card in groupCards"
@@ -655,7 +676,7 @@ onMounted(() => {
         </ReferenceCard>
       </template>
 
-      <!-- 单张视图：6 列 96 张 -->
+      <!-- 单张视图：6 列，按当前页切片 -->
       <template v-else>
         <ReferenceCard
           v-for="card in singleCards"
