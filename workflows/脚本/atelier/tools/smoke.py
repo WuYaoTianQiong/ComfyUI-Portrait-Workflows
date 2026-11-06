@@ -156,6 +156,40 @@ def _cleanup_tmp():
         shutil.rmtree(log_dir, ignore_errors=True)
 
 
+def _studio_recipe_expectations() -> tuple[list[tuple[str, str]] | None, list[str]]:
+    """推导 /api/reference/recipes 检查的期望值，避免把默认工作流写死。
+
+    返回 `(nodes.inputs 期望, 槽位权威顺序)`：
+    · 槽位顺序直接取后端 `SLOT_ROLES`（portrait → costume → pose → extra）；
+    · 角色→节点来自 `reference_library._role_nodes()`（按 LoadImage 标题识别，
+      与 `/reference/recipes` 同源），节点号是工作流真实图位，不做重排；
+    · 冒烟固定提交 portrait/costume/pose 三槽，所以第一个非空槽是 target，
+      其余按槽位顺序依次是 ref1/ref2。
+
+    工作流不可用或角色不全时返回 `(None, slot_roles)`，调用方降级为结构断言。
+    """
+    from app.routers.reference_library import SLOT_ROLES
+
+    slot_roles = list(SLOT_ROLES)
+    expected_nodes: list[tuple[str, str]] | None = None
+    try:
+        from app.routers.reference_library import _resolve_studio_workflow, _role_nodes
+        from app.services.workflow_parser import load_workflow
+
+        api_wf = load_workflow(str(_resolve_studio_workflow("")))
+        role_nodes = _role_nodes(api_wf)
+        submitted = ("portrait", "costume", "pose")
+        ordered = [role for role in slot_roles if role in submitted and role_nodes.get(role)]
+        if len(ordered) == len(submitted):
+            expected_nodes = [("target", role_nodes[ordered[0]])] + [
+                (f"ref{index}", role_nodes[role])
+                for index, role in enumerate(ordered[1:], start=1)
+            ]
+    except Exception:  # noqa: BLE001
+        expected_nodes = None
+    return expected_nodes, slot_roles
+
+
 def main() -> int:
     """返回 0 = 全部通过；1 = 有失败。可作为门禁使用。"""
     _kill_port(PORT)
@@ -283,8 +317,10 @@ def main() -> int:
                     parsed = urllib.parse.urlsplit(location)
                     actual = parsed.path + (f"?{parsed.query}" if parsed.query else "")
                     ok = exc.code == expected_code and actual == expected_location
-                    checks.append((label, exc.code if ok else -2,
-                                   f"→ {actual}" if ok else
+                    # 重定向是 301/302 而不是 200，通过时必须把 code 记成 200，
+                    # 否则汇总逻辑（只认 200）会把正确重定向判成 FAIL。
+                    checks.append((label, 200 if ok else -2,
+                                   f"HTTP {exc.code} → {actual}" if ok else
                                    f"期望 {expected_code} {expected_location}，实测 {exc.code} {actual}"))
                 except Exception as exc:  # noqa: BLE001
                     checks.append((label, -2, f"请求失败：{exc}"))
@@ -397,6 +433,8 @@ def main() -> int:
                 checks.append(("reference/items image kind=thumb", -3, "姿势库暂无条目，跳过图片断言"))
 
             # 出图配方：只跑 dry_run，核对三图节点映射，不向 ComfyUI 提交任务
+            # 期望值从默认工作流与后端 SLOT_ROLES 动态推导，换工作流不会过期
+            expected_nodes, slot_roles = _studio_recipe_expectations()
             portrait_first = _first_ref_id("portrait")
             costume_first = _first_ref_id("costume")
             if pose_first and portrait_first and costume_first:
@@ -413,28 +451,47 @@ def main() -> int:
                     recipe = json.loads(body)
                     nodes = (recipe.get("nodes") or {}).get("inputs") or []
                     mapping = [(item.get("role"), item.get("id")) for item in nodes]
-                    ok = (
-                        code == 200
-                        and recipe.get("dry_run") is True
-                        and mapping
-                        == [("target", "1"), ("ref1", "2"), ("ref2", "3")]
-                    )
-                    recipe_detail = f"HTTP {code} nodes={mapping}"
+                    if expected_nodes is None:
+                        # 工作流无法解析时的降级断言：role 顺序正确且节点号非空
+                        ok = (
+                            code == 200
+                            and recipe.get("dry_run") is True
+                            and [role for role, _ in mapping] == ["target", "ref1", "ref2"]
+                            and all(node_id for _, node_id in mapping)
+                        )
+                        expected_detail = "期望 role 顺序（工作流无法解析，已降级）"
+                    else:
+                        ok = (
+                            code == 200
+                            and recipe.get("dry_run") is True
+                            and mapping == expected_nodes
+                        )
+                        expected_detail = f"期望 {expected_nodes}"
+                    recipe_detail = f"HTTP {code} nodes={mapping}；{expected_detail}"
                 except Exception as e:
                     ok = False
                     recipe_detail = f"HTTP {code} PARSE_ERR:{e!r}"
                 checks.append(("reference/recipes dry_run", 200 if ok else -2, recipe_detail))
 
-                # 槽位溯源：库条目与上传图统一成 source/id/path 形状
+                # 槽位溯源：库条目与上传图统一成 source/id/path 形状。
+                # slots 固定含全部 SLOT_ROLES（空槽 source=empty / path=""），
+                # 本次提交的三槽必须都是 library 来源且带真实路径。
                 try:
                     slots = recipe.get("slots") or []
                     roles = [s.get("role") for s in slots]
+                    filled_slots = [s for s in slots if s.get("source") != "empty"]
                     slot_ok = (
-                        roles == ["portrait", "costume", "pose"]
-                        and all(s.get("source") == "library" for s in slots)
-                        and all(s.get("path") for s in slots)
+                        roles == slot_roles
+                        and [s.get("role") for s in filled_slots]
+                        == ["portrait", "costume", "pose"]
+                        and all(s.get("source") == "library" for s in filled_slots)
+                        and all(s.get("path") for s in filled_slots)
                     )
-                    slot_detail = f"roles={roles} sources={[s.get('source') for s in slots]}"
+                    slot_detail = (
+                        f"roles={roles} "
+                        f"非空={[s.get('role') for s in filled_slots]} "
+                        f"sources={[s.get('source') for s in filled_slots]}"
+                    )
                 except Exception as e:
                     slot_ok, slot_detail = False, f"PARSE_ERR:{e!r}"
                 checks.append(("reference/recipes slots", 200 if slot_ok else -2, slot_detail))

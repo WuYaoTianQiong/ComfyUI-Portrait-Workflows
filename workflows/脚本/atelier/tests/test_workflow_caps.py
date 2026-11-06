@@ -20,7 +20,7 @@ from app.services.workflow_parser import (
 )
 
 QWEN21 = "图库专用工作流/图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
-PORNMASTER = "PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json"
+PORNMASTER = "图库专用工作流/PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json"
 
 
 def _load_real(name: str) -> dict:
