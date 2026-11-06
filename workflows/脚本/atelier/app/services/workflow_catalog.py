@@ -263,10 +263,19 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
 
     `include_video=False`（默认）时跳过含 SaveVideo / VideoCombine 的工作流：
     画廊只处理图片，视频工作流请直接在 ComfyUI 里跑。
+
+    同名去重：多个扫描目录里可能出现同一个文件名——典型是把「部分共用」的工作流
+    复制一份进 `图库专用工作流/`、原件仍留在库根。下拉按文件名（大小写不敏感）只保留
+    先扫描到的那份，即 `studio_dirs()` 里优先级更高的目录，`path` / `rel_path` /
+    `source` 都取实际选中那份。去重**必须晚于 `_studio_slots` 的 ready 过滤**：
+    否则「专用目录那份不可用」会先占住文件名，把库根那份可用的挤掉。
     """
     directories = studio_dirs() if scope == "studio" else search_dirs()
     results: list[dict] = []
-    seen: set[str] = set()
+    #: 同一文件的物理路径去重（多个扫描目录可能指向同一目录/junction）
+    seen_paths: set[str] = set()
+    #: 文件名去重（casefold，大小写不敏感）：目录优先级高者先赢
+    seen_names: set[str] = set()
     for directory in directories:
         if not directory.is_dir():
             continue
@@ -278,15 +287,21 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
                 logger.info("studio 下拉已屏蔽不可用工作流 %s：%s", file.name, blocked_reason)
                 continue
             resolved = str(file.resolve(strict=False))
-            if resolved in seen:
+            if resolved in seen_paths:
                 continue
-            seen.add(resolved)
+            seen_paths.add(resolved)
             mtime, caps, params, media_kind = _load_meta(file)
             if media_kind == "video" and not include_video:
                 continue
             slots, ready = _studio_slots(file)
             if scope == "studio" and not ready:
                 continue
+            # 先完成可用性过滤，再按文件名去重：不可用的同名文件不能占用名额。
+            name_key = file.name.casefold()
+            if name_key in seen_names:
+                logger.debug("同名工作流已由更高优先级目录提供，跳过 %s", file)
+                continue
+            seen_names.add(name_key)
             results.append({
                 "path": str(file),
                 "name": file.name,
