@@ -1,0 +1,50 @@
+{
+  "all_count": 9,
+  "all_sources": {
+    "上游原版": 9
+  },
+  "all_slots": {
+    "0": 4,
+    "3": 1,
+    "1": 3,
+    "2": 1
+  },
+  "studio_count": 2,
+  "studio_ready": 0,
+  "studio": [
+    {
+      "name": "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",
+      "input_count": 3,
+      "roles": [
+        "portrait",
+        "costume",
+        "pose"
+      ],
+      "submittable": [
+        "portrait",
+        "costume",
+        "pose",
+        "portrait+costume",
+        "portrait+pose",
+        "costume+pose",
+        "portrait+costume+pose"
+      ]
+    },
+    {
+      "name": "图库专用_QwenEdit-2511_三图_4步_标准.api.json",
+      "input_count": 3,
+      "roles": [
+        "portrait",
+        "costume",
+        "pose"
+      ],
+      "submittable": [
+        "pose",
+        "portrait+pose",
+        "costume+pose",
+        "portrait+costume+pose"
+      ]
+    }
+  ],
+  "total_submittable_combos": 11
+}
