@@ -4,7 +4,7 @@ WAL 模式下直接复制主库文件会漏掉 -wal 里尚未 checkpoint 的数�
 sqlite3 的 backup() 才能拿到一致快照。
 
 用法（项目解释器）：
-    python tools/backup_db.py                    # 备份到 文档/backups/，保留最近 10 个
+    python tools/backup_db.py                    # 备份到 <data_dir>/backups/，自动备份保留最近 10 个
     python tools/backup_db.py --tag pre_refactor # 备份文件名带自定义标记
     python tools/backup_db.py --keep 5           # 只保留最近 5 个
     python tools/backup_db.py --list             # 只列出已有备份

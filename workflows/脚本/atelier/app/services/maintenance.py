@@ -68,6 +68,15 @@ def list_backups() -> list[Path]:
     return sorted(backup_dir().glob("*.db*"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
+def list_auto_backups() -> list[Path]:
+    """只列**自动启动备份**（`*.db.startup_*`），轮转只作用于这一组。
+
+    人工/工具显式打出的恢复点（`*.db.pre_cleanup_*`、`*.db.pre_tombstone_*` 等）
+    永不自动删除；`list_backups()` 仍返回全量供 API 展示。
+    """
+    return sorted(backup_dir().glob("*.db.startup_*"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
 def backup_database(tag: str = "bak", stamp: str | None = None) -> Path:
     """在线备份当前库，返回备份文件路径。
 
@@ -93,7 +102,8 @@ def rotate_backups(keep: int = BACKUP_KEEP) -> dict:
     迁移完成后旧目录自然为空，多扫一遍无副作用。
 
     历史遗留的备份进 legacy/ 且不参与轮转 —— 那是过去手工打的快照，可能对应某次
-    事故的恢复点，不值得为了省几十 MB 删掉；轮转只作用于本次重构之后自动生成的备份。
+    事故的恢复点，不值得为了省几十 MB 删掉；轮转只作用于自动启动备份
+    （`*.db.startup_*`，见 `list_auto_backups()`），人工恢复点 `*.db.pre_*` 永不删除。
     """
     import os
 
@@ -122,7 +132,7 @@ def rotate_backups(keep: int = BACKUP_KEEP) -> dict:
             except OSError as exc:
                 logger.warning("归档备份失败 %s: %s", p.name, exc)
 
-    backups = list_backups()
+    backups = list_auto_backups()
     removed = 0
     for p in backups[keep:]:
         try:
