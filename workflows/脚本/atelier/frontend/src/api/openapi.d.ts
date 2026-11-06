@@ -208,9 +208,55 @@ export interface paths {
         };
         /**
          * Get Fragments
-         * @description 获取当前筛选提示词范围内的碎片列表，按类型分组
+         * @description 获取当前筛选提示词范围内的碎片列表，按类型分组。
+         *
+         *     `safe_mode=1`：跳过 tags / note 命中 NSFW 关键词的提示词（启发式，无法保证全覆盖）。
          */
         get: operations["get_fragments_api_composer_fragments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composer/recipes/atomic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Atomic Recipe
+         * @description 跨源实验：从原子碎片库抽一套兼容组合（不写数据库、不进生产随机池）。
+         */
+        get: operations["get_atomic_recipe_api_composer_recipes_atomic_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composer/recipes/random": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Random Recipe
+         * @description 随机返回一套完整 8 类配方（同源整套随机）。
+         *
+         *     只接受「恰好 8 个标准类、无重复、无残留标题/字面量换行」的提示词；
+         *     `随机排除` 标签与安全模式在这里过滤。`exclude_id` 用于避免连续重复，
+         *     若排除后为空则回退到完整候选集，保证不会因为只有一套而 404。
+         */
+        get: operations["get_random_recipe_api_composer_recipes_random_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -667,6 +713,33 @@ export interface paths {
         put?: never;
         /** Sync History */
         post: operations["sync_history_api_images_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/images/sync/light": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync History Light
+         * @description 轻量增量同步：画廊刷新/挂载时调用，只返回新增条数，不拉列表。
+         *
+         *     刷新页面本身不触发任何扫描，旧实现只能等 writer 每 30 秒扫一次盘，外部
+         *     ComfyUI 出的图最多要等半分钟才出现。这里让刷新动作显式跑一次增量扫描
+         *     （目录 mtime 缓存命中时很快），前端再按 `added` 决定是否重拉列表。
+         *
+         *     不复用 `/images/sync`：那条是强制全量扫描并返回 500 条列表（实测约 1s），
+         *     挂在每次页面加载上太重，也会让前端多做一次无意义的列表解析。
+         */
+        post: operations["sync_history_light_api_images_sync_light_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1492,6 +1565,9 @@ export interface paths {
          *     每个槽都允许为空；空槽会在工作流副本上裁掉，提示词编号仍按真实图位书写。
          *     这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、
          *     任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。
+         *
+         *     `prompt_override` 非空 = P3 手动改写：整段正向由前端编辑后原样带回，不再跑
+         *     `build_recipe_prompt`，槽位文本字段也不参与校验；图片槽位、裁剪与体态判定不变。
          */
         post: operations["create_reference_recipe_api_reference_recipes_post"];
         delete?: never;
@@ -2011,6 +2087,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AtomicRecipeResponse */
+        AtomicRecipeResponse: {
+            /** Bank Version */
+            bank_version: number;
+            /** Combo Id */
+            combo_id: string;
+            /** Fragments */
+            fragments: components["schemas"]["RandomRecipeFragment"][];
+            /**
+             * Labels
+             * @default {}
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /** Pose Facet */
+            pose_facet: string;
+            /**
+             * Warning
+             * @default 跨源实验：建议人工复核
+             */
+            warning: string;
+        };
         /** BatchDeleteRequest */
         BatchDeleteRequest: {
             /**
@@ -2440,6 +2539,11 @@ export interface components {
              * @default fixed
              */
             seed_mode: string;
+            /**
+             * Skip Compile
+             * @default false
+             */
+            skip_compile: boolean;
             /** Workflow Content */
             workflow_content?: string | null;
             /**
@@ -3293,6 +3397,34 @@ export interface components {
             /** Width */
             width?: number | null;
         };
+        /** RandomRecipeFragment */
+        RandomRecipeFragment: {
+            /** Content */
+            content: string;
+            /** Type */
+            type: string;
+        };
+        /** RandomRecipeResponse */
+        RandomRecipeResponse: {
+            /** Fragments */
+            fragments: components["schemas"]["RandomRecipeFragment"][];
+            /** Name */
+            name: string;
+            /** Prompt Id */
+            prompt_id: number;
+            /** Recipe Count */
+            recipe_count: number;
+            /**
+             * Source
+             * @default prompt
+             */
+            source: string;
+            /**
+             * Tags
+             * @default
+             */
+            tags: string;
+        };
         /**
          * RecipeRequest
          * @description 参考库出图；人像/服装/姿势/第 4 张每个槽都允许留空。
@@ -3333,6 +3465,16 @@ export interface components {
              */
             costume_path: string;
             /**
+             * Costume Supplement
+             * @default false
+             */
+            costume_supplement: boolean;
+            /**
+             * Costume Text
+             * @default
+             */
+            costume_text: string;
+            /**
              * Dry Run
              * @default false
              */
@@ -3352,6 +3494,16 @@ export interface components {
              * @default
              */
             extra_path: string;
+            /**
+             * Modifier Fragments
+             * @default
+             */
+            modifier_fragments: string;
+            /**
+             * Negative Prompt
+             * @default
+             */
+            negative_prompt: string;
             /**
              * Orientation
              * @default
@@ -3373,6 +3525,16 @@ export interface components {
              */
             portrait_path: string;
             /**
+             * Portrait Supplement
+             * @default false
+             */
+            portrait_supplement: boolean;
+            /**
+             * Portrait Text
+             * @default
+             */
+            portrait_text: string;
+            /**
              * Pose Id
              * @default
              */
@@ -3382,6 +3544,21 @@ export interface components {
              * @default
              */
             pose_path: string;
+            /**
+             * Pose Supplement
+             * @default false
+             */
+            pose_supplement: boolean;
+            /**
+             * Pose Text
+             * @default
+             */
+            pose_text: string;
+            /**
+             * Prompt Override
+             * @default
+             */
+            prompt_override: string;
             /**
              * Prompt Suffix
              * @default
@@ -3463,6 +3640,11 @@ export interface components {
              * @default
              */
             angle: string;
+            /**
+             * Composition
+             * @default
+             */
+            composition: string;
             /** Depth Thumb Url */
             depth_thumb_url?: string | null;
             /** Depth Url */
@@ -3482,6 +3664,11 @@ export interface components {
              * @default
              */
             group: string;
+            /**
+             * Has Depth
+             * @default false
+             */
+            has_depth: boolean;
             /**
              * Hot
              * @default false
@@ -3511,6 +3698,11 @@ export interface components {
              */
             number: string;
             /**
+             * Pose Type
+             * @default
+             */
+            pose_type: string;
+            /**
              * Remote
              * @default false
              */
@@ -3520,8 +3712,18 @@ export interface components {
              * @default
              */
             search_text: string;
+            /**
+             * Source
+             * @default
+             */
+            source: string;
             /** Source Url */
             source_url?: string | null;
+            /**
+             * Style
+             * @default
+             */
+            style: string;
             /**
              * Subtitle
              * @default
@@ -3562,6 +3764,22 @@ export interface components {
             /** Libraries */
             libraries?: components["schemas"]["ReferenceLibraryStats"][];
         };
+        /**
+         * ReferenceLibrarySourceStats
+         * @description 多来源库（当前仅 pose）的逐来源明细。
+         */
+        ReferenceLibrarySourceStats: {
+            /** Available */
+            available: boolean;
+            /** Has Depth */
+            has_depth: boolean;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Total */
+            total: number;
+        };
         /** ReferenceLibraryStats */
         ReferenceLibraryStats: {
             /**
@@ -3585,6 +3803,8 @@ export interface components {
             local: number;
             /** Remote */
             remote: number;
+            /** Sources */
+            sources?: components["schemas"]["ReferenceLibrarySourceStats"][];
             /** Total */
             total: number;
             /** Visible */
@@ -4498,6 +4718,7 @@ export interface operations {
                 category_id?: number | null;
                 tag_ids?: string | null;
                 fragment_type?: string;
+                safe_mode?: boolean;
             };
             header?: never;
             path?: never;
@@ -4512,6 +4733,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_atomic_recipe_api_composer_recipes_atomic_get: {
+        parameters: {
+            query?: {
+                /** @description 固定随机种子，便于复现 */
+                seed?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AtomicRecipeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_random_recipe_api_composer_recipes_random_get: {
+        parameters: {
+            query?: {
+                /** @description 避免连续抽到同一套 */
+                exclude_id?: number | null;
+                safe_mode?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RandomRecipeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5343,6 +5629,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_history_light_api_images_sync_light_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
