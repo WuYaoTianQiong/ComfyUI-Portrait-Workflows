@@ -32,11 +32,22 @@ TOMBSTONE_KEEP_DAYS = 7
 
 
 def _is_production_db() -> bool:
-    """当前连的是不是 project_root/文档 下的那个库（而非测试/冒烟用的临时库）。"""
+    """当前连的是不是生产运行库（而非测试/冒烟用的临时库）。
+
+    2026-11-06 起运行库归一在 `data_dir`（默认 `<app_root>/data`，可 ATELIER_DATA_DIR 覆盖）。
+    测试/冒烟会通过 ATELIER_DB_PATH 把库显式指到临时目录，此时 db_path 与
+    `data_dir/<库名>` 不一致，维护任务（备份/轮转/墓碑回收）自动跳过，避免把
+    临时库的备份写进真实 backups/ 目录。
+    """
     import os
 
+    # 显式 ATELIER_DB_PATH（测试/冒烟/临时库，可能恰好与 data_dir 同目录）一律视为非生产库。
+    # 注意不能用 settings.model_fields_set：pydantic-settings 在 validator 之后会把派生
+    # 赋值（db_path/thumbnail_dir）也记进去，运行期已无法区分「env 显式指定」与「默认派生」。
+    if os.environ.get("ATELIER_DB_PATH"):
+        return False
     db = Path(settings.db_path)
-    expected = Path(settings.library_root) / "文档" / db.name
+    expected = Path(settings.data_dir) / "prompts.db"
     try:
         return os.path.normcase(os.path.abspath(db)) == os.path.normcase(os.path.abspath(expected))
     except OSError:
@@ -48,7 +59,7 @@ def _is_production_db() -> bool:
 # ---------------------------------------------------------------------------
 
 def backup_dir() -> Path:
-    d = Path(settings.library_root) / "文档" / "backups"
+    d = Path(settings.data_dir) / "backups"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -75,27 +86,41 @@ def backup_database(tag: str = "bak", stamp: str | None = None) -> Path:
 
 
 def rotate_backups(keep: int = BACKUP_KEEP) -> dict:
-    """把散落在 文档/ 根目录的 .db.bak* 归档进 backups/legacy/，再按数量轮转 backups/。
+    """把散落的 .db.bak* 归档进 backups/legacy/，再按数量轮转 backups/。
+
+    扫描两个位置：新运行数据根 `data_dir`（2026-11-06 起）与旧位置
+    `<库根>/文档/`（迁移期间的旧备份仍然散落在这里）。两处按绝对路径去重；
+    迁移完成后旧目录自然为空，多扫一遍无副作用。
 
     历史遗留的备份进 legacy/ 且不参与轮转 —— 那是过去手工打的快照，可能对应某次
     事故的恢复点，不值得为了省几十 MB 删掉；轮转只作用于本次重构之后自动生成的备份。
     """
-    doc_dir = Path(settings.library_root) / "文档"
+    import os
+
     target_dir = backup_dir() / "legacy"
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    scan_dirs = (Path(settings.data_dir), Path(settings.library_root) / "文档")
     moved = 0
-    for p in doc_dir.glob("*.db.bak*"):
-        if not p.is_file():
+    seen: set[str] = set()
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
             continue
-        dst = target_dir / p.name
-        if dst.exists():
-            continue
-        try:
-            shutil.move(str(p), str(dst))
-            moved += 1
-        except OSError as exc:
-            logger.warning("归档备份失败 %s: %s", p.name, exc)
+        for p in scan_dir.glob("*.db.bak*"):
+            if not p.is_file():
+                continue
+            key = os.path.normcase(os.path.abspath(p))
+            if key in seen:
+                continue
+            seen.add(key)
+            dst = target_dir / p.name
+            if dst.exists():
+                continue
+            try:
+                shutil.move(str(p), str(dst))
+                moved += 1
+            except OSError as exc:
+                logger.warning("归档备份失败 %s: %s", p.name, exc)
 
     backups = list_backups()
     removed = 0

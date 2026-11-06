@@ -53,7 +53,7 @@ def _validate_reference_cache_dir(
 
 
 def _resolve_library_root(app_root: Path) -> Path:
-    """ComfyUI 工作流库根：*.json 工作流、文档/提示词收藏.db、thumbnails 都在这一层。
+    """ComfyUI 工作流库根：只放工作流与文档；运行数据在 `data_dir`（默认 `脚本/atelier/data`）。
 
     atelier 通常放在 <库>/脚本/ 下，需要跳过一层「脚本」；若直接放在 <库>/ 下则上一层即是。
     """
@@ -163,10 +163,16 @@ class Settings(BaseSettings):
     package_dir: Path = Path(__file__).absolute().parent        # <库>/脚本/atelier/app
     app_root: Path = package_dir.parent                        # <库>/脚本/atelier  ← 代码项目根
     library_root: Path = _resolve_library_root(app_root)       # <库>                ← 工作流库根
+    # 应用运行数据根（DB / 缩略图 / 上传 / 备份）：与 ComfyUI 工作流库分离
+    # ATELIER_DATA_DIR 覆盖；默认 app_root/"data"
+    data_dir: Path | None = None
     # 由 model_validator 在 env 解析后计算；不能把 _resolve_comfyui_root(...) 写在这里，
     # 否则读到的永远是类默认的 comfyui_root_env（None），ATELIER_COMFYUI_ROOT_ENV 形同虚设。
     comfyui_root: Path = Path()
-    thumbnail_dir: Path = library_root / "thumbnails"
+    # 缩略图目录（2026-11-06 归一：由 model_validator 派生到 data_dir/thumbnails）；
+    # 不能写成 `library_root / "thumbnails"`，否则会固化成模块加载时的类默认值
+    # （与 reference_root 当初的坑同源）。
+    thumbnail_dir: Path = Path()
 
     # AI 参考图库（只读素材层，上游 ai-pose-gallery-zh）
     reference_enabled: bool = True
@@ -199,6 +205,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_comfyui_root_field(self):
         self.comfyui_root = _resolve_comfyui_root(self.library_root, self.comfyui_root_env)
+        # 运行数据根：与 ComfyUI 工作流库分离。
+        # 必须在 validator 里重新派生 db_path / thumbnail_dir —— 它们若写成类属性
+        # `library_root / ...`，会固化成模块加载时的类默认值（reference_root 踩过的坑）。
+        # 例外：显式 ATELIER_DB_PATH / ATELIER_THUMBNAIL_DIR 优先（tests/conftest.py、
+        # tools/smoke.py、tests/e2e 靠它们把库与缩略图隔离到临时目录）。
+        if self.data_dir is None:
+            self.data_dir = self.app_root / "data"
+        self.data_dir = Path(self.data_dir).expanduser().absolute()
+        if "db_path" not in self.model_fields_set:
+            self.db_path = self.data_dir / "prompts.db"
+        if "thumbnail_dir" not in self.model_fields_set:
+            self.thumbnail_dir = self.data_dir / "thumbnails"
         # 三级解析：显式/env > comfyui_root/custom_nodes > library_root 旧布局兼容回退。
         # 依赖上面的 comfyui_root，顺序不能颠倒。
         self.reference_root = _resolve_reference_root(
@@ -248,8 +266,9 @@ class Settings(BaseSettings):
     def temp_dir(self) -> Path:
         return self.comfyui_root / "temp"
 
-    # 数据库
-    db_path: Path = library_root / "文档" / "提示词收藏.db"
+    # 数据库（2026-11-06 归一：由 validator 派生到 data_dir/prompts.db，
+    # 不再是 library_root/文档/提示词收藏.db；显式 ATELIER_DB_PATH 仍优先）
+    db_path: Path = Path()
 
     # 前端构建产物目录（vite build 输出，需含 index.html 与 assets/）
     web_dir: Path = app_root / "web"
@@ -258,12 +277,16 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+# 运行数据根必须先建：upload 落盘、备份目录都直接在它下面派生
+settings.data_dir.mkdir(parents=True, exist_ok=True)
 settings.thumbnail_dir.mkdir(parents=True, exist_ok=True)
 
 # 启动时打印确认
 print(f"[config] comfyui_root = {settings.comfyui_root}")
 print(f"[config]   output dir = {settings.output_dir}")
 print(f"[config]   output dir exists = {_safe_is_dir(settings.output_dir)}")
+print(f"[config]   data_dir = {settings.data_dir}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")
+print(f"[config]   db_path = {settings.db_path}")
 print(f"[config]   reference_root = {settings.reference_root} (enabled={settings.reference_enabled})")
 print(f"[config]   reference_cache_dir = {settings.reference_cache_dir}")

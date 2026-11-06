@@ -112,7 +112,10 @@ def sheet_env(tmp_path: Path, monkeypatch):
     _write_png(ref_root / "img" / "portrait" / "p1.png", (210, 180, 170))
 
     library_root = tmp_path / "library"
-    uploads = library_root / "uploads"
+    # 运行数据根跟随 fixture 注入临时目录（生产默认 app_root/data）
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(settings, "data_dir", data_dir)
+    uploads = settings.data_dir / "uploads"
     extra = uploads / "uploaded.png"
     _write_png(extra, (40, 160, 120), size=(480, 320))
 

@@ -1,6 +1,6 @@
 """参考图上传（M3）：落盘、去重、白名单、大小上限、HEIC 改名、路径安全。
 
-所有用例都指向临时目录，不写入真实 `library_root/uploads`。
+所有用例都指向临时目录，不写入真实 `data_dir/uploads`。
 """
 from __future__ import annotations
 
@@ -30,10 +30,10 @@ def heic_bytes(size=(64, 48), color=(200, 80, 40)) -> bytes:
 
 @pytest.fixture()
 def upload_root(tmp_path: Path, monkeypatch) -> Path:
-    root = tmp_path / "library"
-    (root / "uploads").mkdir(parents=True)
-    monkeypatch.setattr(settings, "library_root", root)
-    return root / "uploads"
+    data_dir = tmp_path / "data"
+    (data_dir / "uploads").mkdir(parents=True)
+    monkeypatch.setattr(settings, "data_dir", data_dir)
+    return data_dir / "uploads"
 
 
 def _post(api, filename: str, data: bytes):

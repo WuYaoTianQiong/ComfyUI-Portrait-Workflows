@@ -198,3 +198,5 @@ workflows/uploads/
 /.resultverify/
 # Windows 重定向误建的 0 字节文件（`> null` 的产物，不是源码）
 workflows/脚本/atelier/null
+# atelier 运行数据（DB / 缩略图 / 上传 / 备份），2026-11-06 从工作流库迁出
+workflows/脚本/atelier/data/

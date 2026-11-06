@@ -194,7 +194,10 @@ def recipe_env(tmp_path: Path, monkeypatch):
     outside_workflow = library_root / "别处" / "外部工作流.api.json"
     _write_json(outside_workflow, _qwen21_workflow())
 
-    uploads = library_root / "uploads"
+    # 运行数据根跟随 fixture 注入临时目录（生产默认 app_root/data）
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(settings, "data_dir", data_dir)
+    uploads = settings.data_dir / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     portrait_upload = uploads / "portrait.png"
     _write_bytes(portrait_upload, b"upload-portrait")

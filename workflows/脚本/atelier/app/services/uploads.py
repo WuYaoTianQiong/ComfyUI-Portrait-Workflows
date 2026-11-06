@@ -1,6 +1,7 @@
 """参考图上传落盘（M3）。
 
-上传的图片统一放在 `library_root/uploads/`，文件名由服务端按内容 sha1 前 12 位生成，
+上传的图片统一放在 `<data_dir>/uploads/`（默认 `脚本/atelier/data/uploads`，
+2026-11-06 从 library_root 迁出），文件名由服务端按内容 sha1 前 12 位生成，
 **不接受客户端指定目录**：任何带目录分隔符、盘符或控制字符的文件名直接拒绝。
 
 三条硬规则：
@@ -43,11 +44,11 @@ class UploadError(ValueError):
 
 
 def uploads_dir(root: Path | None = None) -> Path:
-    """上传目录：`library_root/uploads`，只允许服务端决定。
+    """上传目录：默认 `<data_dir>/uploads`，只允许服务端决定。
 
-    `root` 为 library_root（测试可注入临时目录），不是 uploads 本身。
+    `root` 为 data_dir（测试可注入临时目录），不是 uploads 本身。
     """
-    base = Path(root) if root is not None else settings.library_root
+    base = Path(root) if root is not None else settings.data_dir
     return base / "uploads"
 
 
@@ -107,7 +108,7 @@ def _store_bytes(dest: Path, temp: Path) -> None:
 def save_upload(filename: str, data: bytes, root: Path | None = None) -> dict:
     """保存一张上传图，返回 `{path, name, width, height, bytes, dedup}`。
 
-    `root` 仅供测试注入；生产固定 `settings.library_root`。
+    `root` 仅供测试注入；生产固定 `settings.data_dir`。
     """
     name = safe_upload_name(filename)
     if not data:
