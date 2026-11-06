@@ -18,13 +18,16 @@ import {
   PAGE_SIZES,
   activeGroupItem,
   clampPage,
+  compositionSummaries,
   filterPoseGroups,
   filterPoseSingles,
   firstNsfwLine,
   groupAngleItem,
   groupIndexOfItem,
   hiddenNsfwCount,
+  hiddenNsfwGroupCount,
   matchesPoseFilters,
+  matchesPoseQuery,
   normalizePageSize,
   pageCount,
   pageSlice,
@@ -32,8 +35,10 @@ import {
   posePreviewUrl,
   poseSystemSummaries,
   poseThumbnailUrl,
+  poseTypeOptions,
   resolveActiveLine,
   stepGroupItem,
+  styleOptions,
 } from './poseView'
 import type { PoseFilters } from './poseView'
 
@@ -135,6 +140,130 @@ describe('筛选语义', () => {
     expect(poseCategoryOptions(items, '')).toEqual(['站姿', '坐姿'])
     expect(poseCategoryOptions(items, 'A')).toEqual(['坐姿'])
     expect(poseCategoryOptions(items, 'B')).toEqual(['站姿'])
+  })
+})
+
+describe('三轴筛选', () => {
+  const items = [
+    pose({
+      id: 'f1',
+      体系: '全身单人・标准系',
+      姿势编号: 'F1',
+      分类: '站姿',
+      composition: 'full',
+      source: 'upstream',
+      poseType: '站立',
+      style: '标准',
+    }),
+    pose({
+      id: 'f2',
+      体系: '全身单人・性感系',
+      姿势编号: 'F2',
+      分类: '坐姿',
+      composition: 'full',
+      source: 'upstream',
+      poseType: '坐姿',
+      style: '性感',
+      nsfw: true,
+    }),
+    pose({
+      id: 'u1',
+      体系: '上半身单人',
+      姿势编号: 'U1',
+      分类: '可爱系',
+      composition: 'upper',
+      source: 'upstream',
+      poseType: '上半身',
+      style: '可爱',
+    }),
+    pose({
+      id: 'psl-P001',
+      体系: 'pose-studio-lite・正常姿势',
+      姿势编号: 'P001',
+      分类: '站立',
+      composition: 'full',
+      source: 'pose-studio-lite',
+      poseType: '站立',
+      style: '标准',
+    }),
+  ]
+  const groups = buildPoseGroups(items).groups
+  const base: PoseFilters = {
+    composition: '',
+    source: '',
+    rating: '',
+    poseType: 'all',
+    style: 'all',
+    angle: '',
+    query: '',
+  }
+
+  it('来源 / 分级 / 构图 / 类型 / 风格逐项过滤', () => {
+    expect(matchesPoseFilters(items[3], { ...base, source: 'pose-studio-lite' })).toBe(true)
+    expect(matchesPoseFilters(items[0], { ...base, source: 'pose-studio-lite' })).toBe(false)
+    expect(matchesPoseFilters(items[1], { ...base, rating: 'general' })).toBe(false)
+    expect(matchesPoseFilters(items[1], { ...base, rating: 'nsfw' })).toBe(true)
+    expect(matchesPoseFilters(items[2], { ...base, composition: 'upper' })).toBe(true)
+    expect(matchesPoseFilters(items[2], { ...base, poseType: '站立' })).toBe(false)
+    expect(matchesPoseFilters(items[2], { ...base, style: '可爱' })).toBe(true)
+    expect(matchesPoseFilters(items[0], { ...base, poseType: '站立', style: '标准' })).toBe(true)
+  })
+
+  it('构图胶囊按姿势组数计数，来源/分级影响计数', () => {
+    const general = compositionSummaries(groups, { source: 'upstream', rating: 'general' })
+    expect(general.map((row) => [row.key, row.count, row.images])).toEqual([
+      ['', 2, 2],
+      ['full', 1, 1],
+      ['upper', 1, 1],
+      ['pair', 0, 0],
+    ])
+
+    const nsfw = compositionSummaries(groups, { source: 'upstream', rating: 'nsfw' })
+    expect(nsfw.find((row) => row.key === 'full')).toMatchObject({ count: 1, images: 1 })
+    expect(nsfw.find((row) => row.key === 'upper')).toMatchObject({ count: 0, images: 0 })
+  })
+
+  it('姿势类型随构图收窄；风格随类型收窄', () => {
+    expect(
+      poseTypeOptions(items, { ...base, composition: 'full' }),
+    ).toEqual(['站立', '坐姿'])
+    expect(
+      poseTypeOptions(items, { ...base, composition: 'upper' }),
+    ).toEqual(['上半身'])
+
+    expect(
+      styleOptions(items, { ...base, composition: 'full' }),
+    ).toEqual(['标准', '性感'])
+    expect(
+      styleOptions(items, { ...base, composition: 'full', poseType: '站立' }),
+    ).toEqual(['标准'])
+  })
+
+  it('「全部」构图不混入双人体位；只剩双人时回退', () => {
+    const pair = pose({
+      id: 'd1',
+      体系: '双人缠绵',
+      姿势编号: 'D1',
+      composition: 'pair',
+      source: 'upstream',
+      poseType: '背向坐',
+      style: '性感',
+      nsfw: true,
+    })
+    expect(poseTypeOptions([...items, pair], base)).toEqual(['站立', '坐姿', '上半身'])
+    expect(poseTypeOptions([pair], { ...base, composition: 'pair' })).toEqual(['背向坐'])
+  })
+
+  it('搜索覆盖来源 / 构图 / 类型 / 风格', () => {
+    expect(matchesPoseQuery(items[3], 'pose-studio-lite')).toBe(true)
+    expect(matchesPoseQuery(items[0], '原图库')).toBe(true)
+    expect(matchesPoseQuery(items[2], '可爱')).toBe(true)
+    expect(matchesPoseQuery(items[1], '坐姿')).toBe(true)
+    expect(matchesPoseQuery(items[0], '可爱')).toBe(false)
+  })
+
+  it('隐藏的 18+ 组数按组统计', () => {
+    expect(hiddenNsfwGroupCount(groups)).toBe(1)
   })
 })
 
@@ -292,6 +421,19 @@ describe('图片地址', () => {
       depthUrl: '/api/reference/items/pose/p2/image?kind=depth',
     })
     expect(poseThumbnailUrl(withoutThumb, true)).toBe('/api/reference/items/pose/p2/image?kind=depth')
+  })
+
+  it('无深度条目在深度模式下回退白模（多来源姿势）', () => {
+    const noDepth = pose({
+      id: 'p4',
+      缩略图: '/api/reference/items/pose/p4/image?kind=thumb',
+      原图: '/api/reference/items/pose/p4/image?kind=image',
+      hasDepth: false,
+      depthThumbUrl: null,
+      depthUrl: null,
+    })
+    expect(poseThumbnailUrl(noDepth, true)).toBe('/api/reference/items/pose/p4/image?kind=thumb')
+    expect(posePreviewUrl(noDepth, true)).toBe('/api/reference/items/pose/p4/image?kind=image')
   })
 
   it('无图返回 null，不产出空串或二次拼接的 //api', () => {

@@ -62,6 +62,33 @@ def _resolve_library_root(app_root: Path) -> Path:
     return app_root.parent
 
 
+def _resolve_pose_extra_dir(library_root: Path, explicit: Path | None) -> Path | None:
+    """第二姿势来源（pose-studio-lite）根目录。
+
+    显式 `ATELIER_POSE_EXTRA_DIR` 优先；未配置时按常见落点自动探测，
+    都没有则返回 None（只加载上游，行为与合并前一致）。
+    只认带 `meta.json` 的目录，避免把空目录/半成品当来源。
+    """
+    if explicit is not None:
+        path = Path(explicit).expanduser()
+        if not path.is_absolute():
+            path = library_root / path
+        return path.absolute()
+
+    candidates = (
+        library_root.parent / "reference-assets" / "pose-studio-lite",
+        library_root.parent.parent / "reference-assets" / "pose-studio-lite",
+        library_root / "reference-assets" / "pose-studio-lite",
+    )
+    for path in candidates:
+        try:
+            if (path / "meta.json").is_file():
+                return path.absolute()
+        except OSError:
+            continue
+    return None
+
+
 def _safe_is_dir(p: Path) -> bool:
     """容错 is_dir：junction/符号链接在 Windows 上可能抛 WinError 448，视为不存在。
 
@@ -173,6 +200,8 @@ class Settings(BaseSettings):
     # 不能写成 `library_root / "thumbnails"`，否则会固化成模块加载时的类默认值
     # （与 reference_root 当初的坑同源）。
     thumbnail_dir: Path = Path()
+    # 入库后后台预热 600px 缩略图；测试/极慢磁盘可用 ATELIER_THUMBNAIL_PREWARM=0 关闭
+    thumbnail_prewarm: bool = True
 
     # AI 参考图库（只读素材层，上游 ai-pose-gallery-zh）
     reference_enabled: bool = True
@@ -182,6 +211,9 @@ class Settings(BaseSettings):
     # 不要写成 library_root / "..."，否则会固化成模块加载时的类默认值，
     # ATELIER_LIBRARY_ROOT / ATELIER_COMFYUI_ROOT_ENV 覆盖后不会跟着变。
     reference_root: Path | None = None
+    #: 第二姿势来源（pose-studio-lite）根；None = 禁用。
+    #: `ATELIER_POSE_EXTRA_DIR` 显式覆盖；未配置时按 reference-assets 常见落点自动探测。
+    pose_extra_dir: Path | None = None
     reference_allow_nsfw: bool = False
 
     reference_page_size: int = 60
@@ -222,6 +254,7 @@ class Settings(BaseSettings):
         self.reference_root = _resolve_reference_root(
             self.library_root, self.comfyui_root, self.reference_root
         )
+        self.pose_extra_dir = _resolve_pose_extra_dir(self.library_root, self.pose_extra_dir)
         self.reference_cache_dir = _validate_reference_cache_dir(
             self.reference_cache_dir,
             self.app_root,
@@ -289,4 +322,5 @@ print(f"[config]   data_dir = {settings.data_dir}")
 print(f"[config]   thumbnail_dir = {settings.thumbnail_dir}")
 print(f"[config]   db_path = {settings.db_path}")
 print(f"[config]   reference_root = {settings.reference_root} (enabled={settings.reference_enabled})")
+print(f"[config]   pose_extra_dir = {settings.pose_extra_dir}")
 print(f"[config]   reference_cache_dir = {settings.reference_cache_dir}")

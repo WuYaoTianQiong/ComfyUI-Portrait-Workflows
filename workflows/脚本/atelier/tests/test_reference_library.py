@@ -181,8 +181,105 @@ def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     _write_bytes(root / "img" / "portrait" / "p1.webp")
 
     monkeypatch.setattr(settings, "reference_root", root)
+    # 隔离本机真实安装的第二姿势来源，避免合并条数污染既有用例
+    monkeypatch.setattr(settings, "pose_extra_dir", None)
     monkeypatch.setattr(settings, "reference_allow_nsfw", False)
     monkeypatch.setattr(settings, "reference_page_size", 60)
+    rl.clear_cache()
+    yield root
+    rl.clear_cache()
+
+
+@pytest.fixture()
+def pose_extra_root(tmp_path: Path, monkeypatch) -> Path:
+    """最小 pose-studio-lite 来源：std/sexy/upper/duo 四种 series 各 1 条。"""
+    root = tmp_path / "pose-studio-lite"
+    base = {
+        "angle": "front",
+        "angle_zh": "正面",
+        "prompt_zh": "图1是人物照片，图2是姿势参考线稿。",
+        "prompt_en": "Image 1 is the person; image 2 is the pose reference.",
+    }
+    items = [
+        {
+            **base,
+            "id": "P001",
+            "name": "正面站姿",
+            "name_en": "Front stance",
+            "file": "normal/P001_front.webp",
+            "thumb": "thumbs/normal/P001_front.webp",
+            "category": "normal",
+            "group": "正常姿势",
+            "facet": "站立",
+            "series": "std",
+            "series_label": "全身",
+            "tags": ["全身", "站立"],
+            "nsfw": False,
+            "search": "P001 正面站姿 站立",
+        },
+        {
+            **base,
+            "id": "S001",
+            "name": "成人坐姿",
+            "name_en": "Adult seated",
+            "file": "adult/S001_front.webp",
+            "thumb": "thumbs/adult/S001_front.webp",
+            "category": "adult",
+            "group": "成人风格",
+            "facet": "坐姿",
+            "series": "sexy",
+            "series_label": "风格姿势",
+            "tags": ["风格姿势", "坐姿"],
+            "nsfw": True,
+            "search": "S001 成人坐姿 坐姿",
+        },
+        {
+            **base,
+            "id": "U001",
+            "name": "上半身可爱",
+            "name_en": "Upper cute",
+            "file": "normal/U001_front.webp",
+            "thumb": "thumbs/normal/U001_front.webp",
+            "category": "normal",
+            "group": "正常姿势",
+            "facet": "可爱系",
+            "series": "upper",
+            "series_label": "半身",
+            "tags": ["半身", "可爱系"],
+            "nsfw": False,
+            "search": "U001 上半身可爱 可爱系",
+        },
+        {
+            **base,
+            "id": "D001",
+            "name": "双人背向坐",
+            "name_en": "Duo seated back",
+            "file": "adult/D001_front.webp",
+            "thumb": "thumbs/adult/D001_front.webp",
+            "category": "adult",
+            "group": "成人风格",
+            "facet": "背向坐",
+            "series": "duo",
+            "series_label": "双人",
+            "tags": ["双人", "背向坐"],
+            "nsfw": True,
+            "search": "D001 双人背向坐 背向坐",
+        },
+    ]
+    _write_json(root / "meta.json", {"count": len(items), "items": items})
+    for rel in (
+        "normal/P001_front.webp",
+        "thumbs/normal/P001_front.webp",
+        "normal/U001_front.webp",
+        "thumbs/normal/U001_front.webp",
+        "adult/S001_front.webp",
+        "thumbs/adult/S001_front.webp",
+        "adult/D001_front.webp",
+        "thumbs/adult/D001_front.webp",
+    ):
+        _write_bytes(root / rel)
+
+    monkeypatch.setattr(settings, "pose_extra_dir", root)
     rl.clear_cache()
     yield root
     rl.clear_cache()
@@ -247,6 +344,138 @@ def test_library_counts_and_availability(api, ref_root):
     # 默认隐藏敏感分类：pose 可见 2 条、costume 可见 1 条
     assert stats["pose"]["visible"] == 2
     assert stats["costume"]["visible"] == 1
+
+
+def test_pose_merges_extra_source(api, ref_root, pose_extra_root):
+    """上游 3 条 + PSL 4 条（std/sexy/upper/duo）；安全模式隐藏 3 条敏感。"""
+    stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
+    assert stats["pose"]["total"] == 7
+    assert stats["pose"]["visible"] == 4
+    assert stats["pose"]["available"] is True
+    groups = {row["value"]: row["count"] for row in stats["pose"]["groups"]}
+    assert groups["pose-studio-lite・正常姿势"] == 2
+    assert "pose-studio-lite・成人风格" not in groups
+    sources = {row["key"]: row for row in stats["pose"]["sources"]}
+    assert sources["upstream"]["total"] == 3
+    assert sources["pose-studio-lite"]["total"] == 4
+    assert sources["pose-studio-lite"]["has_depth"] is False
+
+    items = api.get(
+        "/api/reference/items", params={"library": "pose", "search": "psl-P001"}
+    ).json()
+    assert items["total"] == 1
+    item = items["items"][0]
+    assert item["id"] == "psl-P001"
+    assert item["group"] == "pose-studio-lite・正常姿势"
+    assert item["number"] == "P001"
+    assert item["source"] == "pose-studio-lite"
+    assert item["composition"] == "full"
+    assert item["pose_type"] == "站立"
+    assert item["style"] == "标准"
+    assert item["depth_url"] is None
+    assert item["has_depth"] is False
+
+    image = api.get("/api/reference/items/pose/psl-P001/image", params={"kind": "image"})
+    assert image.status_code == 200
+    thumb = api.get("/api/reference/items/pose/psl-P001/image", params={"kind": "thumb"})
+    assert thumb.status_code == 200
+    depth = api.get("/api/reference/items/pose/psl-P001/image", params={"kind": "depth"})
+    assert depth.status_code == 404
+
+    # PSL 图片必须落在自己的根目录，不能借用上游根
+    path = rl.resolve_image("pose", "psl-P001", "image")
+    assert str(path).startswith(str(pose_extra_root))
+    # 上游深度图不受影响
+    upstream_depth = api.get(
+        "/api/reference/items/pose/P001_front/image", params={"kind": "depth"}
+    )
+    assert upstream_depth.status_code == 200
+
+
+def test_pose_extra_nsfw_and_taxonomy(api, ref_root, pose_extra_root, monkeypatch):
+    monkeypatch.setattr(settings, "reference_allow_nsfw", True)
+    stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
+    assert stats["pose"]["total"] == 7
+    assert stats["pose"]["visible"] == 7
+    groups = {row["value"]: row["count"] for row in stats["pose"]["groups"]}
+    assert groups["pose-studio-lite・正常姿势"] == 2
+    assert groups["pose-studio-lite・成人风格"] == 2
+
+    def get(item_id: str) -> dict:
+        payload = api.get("/api/reference/items", params={"library": "pose", "search": item_id}).json()
+        assert payload["total"] == 1
+        return payload["items"][0]
+
+    sexy = get("psl-S001")
+    assert sexy["nsfw"] is True
+    assert sexy["composition"] == "full"
+    assert sexy["pose_type"] == "坐姿"
+    assert sexy["style"] == "性感"
+
+    upper = get("psl-U001")
+    assert upper["composition"] == "upper"
+    assert upper["pose_type"] == "上半身"
+    assert upper["style"] == "可爱"
+
+    duo = get("psl-D001")
+    assert duo["composition"] == "pair"
+    assert duo["pose_type"] == "背向坐位"
+    assert duo["style"] == "性感"
+
+
+def test_upstream_taxonomy_mapping():
+    assert rl._upstream_composition("上半身单人") == "upper"
+    assert rl._upstream_composition("双人缠绵") == "pair"
+    assert rl._upstream_composition("全身单人・标准系") == "full"
+    assert rl._upstream_pose_type_style("上半身单人", "可爱系", "upper") == ("上半身", "可爱")
+    assert rl._upstream_pose_type_style(
+        "全身单人・标准系", "坐姿", "full"
+    ) == ("坐姿", "标准")
+    assert rl._upstream_pose_type_style(
+        "全身单人・性感系", "趴卧", "full"
+    ) == ("躺卧", "性感")
+    assert rl._upstream_pose_type_style(
+        "双人缠绵", "骑乘位", "pair"
+    ) == ("骑乘位", "性感")
+
+
+def test_psl_taxonomy_mapping():
+    sexy = {"series": "sexy", "category": "adult", "facet": "坐姿", "tags": ["风格姿势"], "nsfw": True}
+    assert rl._psl_composition(sexy) == "full"
+    assert rl._psl_pose_type_style(sexy, "full") == ("坐姿", "性感")
+
+    upper = {"series": "upper", "category": "normal", "facet": "可爱系", "tags": ["半身"], "nsfw": False}
+    assert rl._psl_composition(upper) == "upper"
+    assert rl._psl_pose_type_style(upper, "upper") == ("上半身", "可爱")
+
+    duo = {"series": "duo", "category": "adult", "facet": "背向坐", "tags": ["双人"], "nsfw": True}
+    assert rl._psl_composition(duo) == "pair"
+    assert rl._psl_pose_type_style(duo, "pair") == ("背向坐位", "性感")
+
+
+def test_pose_extra_image_path_is_scoped(api, ref_root, pose_extra_root):
+    """PSL 元数据里出现 ../ 时按越界 400 处理，不读上游/任意文件。"""
+    meta = json.loads((pose_extra_root / "meta.json").read_text(encoding="utf-8"))
+    meta["items"][0]["file"] = "../../evil.webp"
+    (pose_extra_root / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
+    rl.clear_cache()
+    with pytest.raises(rl.ReferenceImageError) as exc:
+        rl.resolve_image("pose", "psl-P001", "image")
+    assert exc.value.status_code == 400
+
+
+def test_pose_extra_missing_keeps_upstream(api, ref_root, pose_extra_root):
+    (pose_extra_root / "meta.json").unlink()
+    rl.clear_cache()
+    stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
+    assert stats["pose"]["total"] == 3
+    assert stats["pose"]["available"] is True
+    items = api.get(
+        "/api/reference/items", params={"library": "pose", "search": "psl-P001"}
+    ).json()
+    assert items["total"] == 0
 
 
 def test_search_matches_upstream_search_field(api, ref_root):
@@ -336,7 +565,11 @@ def test_dto_number_and_search_text_per_library(api, ref_root):
     pose = api.get("/api/reference/items/pose/P001_front").json()
     assert pose["number"] == "P001"
     assert pose["subtitle"] == "P001 · 正面"
-    assert pose["search_text"] == "P001_front 日常 站姿 正面站姿 正面"
+    assert pose["search_text"] == "P001_front 日常 站姿 正面站姿 正面 unknown 站立 标准"
+    assert pose["source"] == "upstream"
+    assert pose["composition"] == "unknown"
+    assert pose["pose_type"] == "站立"
+    assert pose["style"] == "标准"
     assert pose["source_url"] is None
 
     costume = api.get("/api/reference/items/costume/SPR-0001").json()

@@ -36,9 +36,16 @@ export interface ReferenceItemDto {
   hot: boolean
   featured: boolean
   nsfw: boolean
+  /** 该条目是否有深度变体；旧响应缺字段按 true 兼容 */
+  has_depth?: boolean
   remote: boolean
   /** 仅 pose 非空：上游「姿势编号」 */
   number: string
+  /** canonical 三轴字段（仅 pose 非空） */
+  source?: string
+  composition?: string
+  pose_type?: string
+  style?: string
   /** 仅 costume-anime 且上游有「来源地址」时非空 */
   source_url: string | null
   /** 与后端过滤一致的预拼检索串（小写前的原文） */
@@ -72,6 +79,11 @@ export interface PoseItem {
   检索: string
   /** 条目来源库；旧持久化数据可能没有该字段 */
   library?: ReferenceLibraryId
+  /** canonical 三轴字段；旧持久化数据缺省按 unknown/未分类处理 */
+  source?: string
+  composition?: string
+  poseType?: string
+  style?: string
   /** 是否外链条目（仅 costume-anime 为 true） */
   remote?: boolean
   /** 敏感标记；唯一来源为后端 DTO 的 nsfw 字段 */
@@ -80,6 +92,8 @@ export interface PoseItem {
   depthUrl?: string | null
   /** 后端深度缩略图端点；无派生缩略图时为 null */
   depthThumbUrl?: string | null
+  /** 该条目是否有深度变体；缺省按 true 兼容旧持久化数据 */
+  hasDepth?: boolean
 }
 
 /** 姿势分组：同一「体系 + 姿势编号」的多个角度归一组。 */
@@ -324,8 +338,13 @@ export function toPoseItem(dto: ReferenceItemDto): PoseItem {
     检索: text(dto.search_text),
     library: 'pose',
     remote: false,
+    source: text(dto.source) || (dto.id.startsWith('psl-') ? 'pose-studio-lite' : 'upstream'),
+    composition: text(dto.composition) || 'unknown',
+    poseType: text(dto.pose_type) || '未分类',
+    style: text(dto.style) || '未分类',
     nsfw: Boolean(dto.nsfw),
-    // 深度图端点保留 null（页面据此判断是否有深度图）
+    // 深度图端点保留 null；能力位缺省 true（兼容旧响应/旧持久化数据）
+    hasDepth: dto.has_depth !== false,
     depthUrl: text(dto.depth_url) || null,
     depthThumbUrl: text(dto.depth_thumb_url) || null,
   }

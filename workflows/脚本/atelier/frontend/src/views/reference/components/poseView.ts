@@ -103,12 +103,91 @@ export function setPoseDepthMode(value: boolean): void {
   poseDepthMode.value = value
 }
 
-/** 筛选条件；空串表示不限制。 */
+/** 筛选条件；空串表示不限制。新三轴字段与旧体系/分类字段并存，旧字段仅兼容旧调用。 */
 export interface PoseFilters {
-  line: string
-  category: string
+  /** 构图：'' / full / upper / pair */
+  composition?: string
+  /** 来源：'' / upstream / pose-studio-lite */
+  source?: string
+  /** 分级：'' / general / nsfw */
+  rating?: string
+  /** 姿势类型：'all' 或 canonical 值 */
+  poseType?: string
+  /** 风格：'all' 或 canonical 值 */
+  style?: string
   angle: string
   query: string
+  /** @deprecated 旧「体系」筛选；新 UI 不再使用 */
+  line?: string
+  /** @deprecated 旧「动作分类」筛选；新 UI 不再使用 */
+  category?: string
+}
+
+/** 构图胶囊的展示信息；count 是**姿势组数**，不是图片数。 */
+export interface PoseCompositionSummary {
+  key: string
+  label: string
+  count: number
+  images: number
+}
+
+export const COMPOSITION_OPTIONS = [
+  { key: '', label: '全部' },
+  { key: 'full', label: '全身单人' },
+  { key: 'upper', label: '上半身单人' },
+  { key: 'pair', label: '双人' },
+  { key: 'unknown', label: '未分类' },
+] as const
+
+const POSE_TYPE_ORDER = [
+  '站立',
+  '坐姿',
+  '跪姿',
+  '躺卧',
+  '蹲姿',
+  '前倾',
+  '后仰',
+  '扭转',
+  '上半身',
+  '特殊',
+  '未分类',
+] as const
+
+const STYLE_ORDER = ['标准', '性感', '可爱', '胸线强调', '特殊', '未分类'] as const
+
+/** 条目来源；旧数据没有 source 时按 `psl-` 前缀兜底。 */
+export function poseSourceOf(item: PoseItem): string {
+  return item.source || (item.id.startsWith('psl-') ? 'pose-studio-lite' : 'upstream')
+}
+
+/** 条目构图；旧数据缺字段时归为 unknown。 */
+export function poseCompositionOf(item: PoseItem): string {
+  return item.composition || 'unknown'
+}
+
+/** 条目姿势类型；旧数据缺字段时归为未分类。 */
+export function poseTypeOf(item: PoseItem): string {
+  return item.poseType || '未分类'
+}
+
+/** 条目风格；旧数据缺字段时归为未分类。 */
+export function poseStyleOf(item: PoseItem): string {
+  return item.style || '未分类'
+}
+
+/** 分级匹配：''/all 不加限制。 */
+function matchesRating(item: PoseItem, rating?: string): boolean {
+  if (!rating || rating === 'all') return true
+  if (rating === 'general') return !item.nsfw
+  if (rating === 'nsfw') return Boolean(item.nsfw)
+  return true
+}
+
+/** 三个筛选轴（来源/分级/构图）的上下文匹配，供类型/风格选项收窄。 */
+function matchesPoseContext(item: PoseItem, filters: PoseFilters): boolean {
+  if (filters.source && poseSourceOf(item) !== filters.source) return false
+  if (filters.composition && poseCompositionOf(item) !== filters.composition) return false
+  return matchesRating(item, filters.rating)
 }
 
 /** 体系药丸的展示信息。 */
@@ -137,16 +216,25 @@ export function normalizePoseQuery(query: string): string {
 export function matchesPoseQuery(item: PoseItem, query: string): boolean {
   const needle = normalizePoseQuery(query)
   if (!needle) return true
+  const sourceLabel = poseSourceOf(item) === 'pose-studio-lite' ? '扩展库' : '原图库'
   const haystack =
-    `${item.姿势名称} ${item.id} ${item.分类} ${item.姿势编号} ${item.体系}`.toLowerCase()
-  return haystack.includes(needle)
+    `${item.姿势名称} ${item.id} ${item.分类} ${item.姿势编号} ${item.体系} ` +
+    `${sourceLabel} ${poseCompositionOf(item)} ${poseTypeOf(item)} ${poseStyleOf(item)}`
+  return haystack.toLowerCase().includes(needle)
 }
 
-/** 单条目是否命中体系 / 分类 / 视角 / 搜索四类条件。 */
+/** 单条目是否命中来源/分级/构图/类型/风格/视角/搜索。 */
 export function matchesPoseFilters(item: PoseItem, filters: PoseFilters): boolean {
+  // 旧字段兼容：旧 UI / 旧测试仍可只传 line/category。
   if (filters.line && item.体系 !== filters.line) return false
-  // `'all'` 是「全部动作分类」的哨兵值（与 React 的 Select 默认值一致）
   if (filters.category && filters.category !== 'all' && item.分类 !== filters.category) return false
+  if (!matchesPoseContext(item, filters)) return false
+  if (filters.poseType && filters.poseType !== 'all' && poseTypeOf(item) !== filters.poseType) {
+    return false
+  }
+  if (filters.style && filters.style !== 'all' && poseStyleOf(item) !== filters.style) {
+    return false
+  }
   if (filters.angle && item.角度 !== filters.angle) return false
   return matchesPoseQuery(item, filters.query)
 }
@@ -162,6 +250,18 @@ export function filterPoseGroups(groups: PoseGroup[], filters: PoseFilters): Pos
   return groups.filter((group) => {
     if (filters.line && group.system !== filters.line) return false
     if (filters.category && filters.category !== 'all' && group.category !== filters.category) return false
+    const head = group.items[0]
+    if (!head) return false
+    // 组内同一体系/编号的 canonical 字段应一致；取首条即可。
+    if (filters.source && poseSourceOf(head) !== filters.source) return false
+    if (filters.composition && poseCompositionOf(head) !== filters.composition) return false
+    if (!matchesRating(head, filters.rating)) return false
+    if (filters.poseType && filters.poseType !== 'all' && poseTypeOf(head) !== filters.poseType) {
+      return false
+    }
+    if (filters.style && filters.style !== 'all' && poseStyleOf(head) !== filters.style) {
+      return false
+    }
     return group.items.some((item) => {
       if (filters.angle && item.角度 !== filters.angle) return false
       if (needle && !matchesPoseQuery(item, needle)) return false
@@ -186,6 +286,92 @@ export function poseCategoryOptions(items: PoseItem[], activeLine: string): stri
   return [...new Set(scoped.map((item) => item.分类).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, 'zh-CN'),
   )
+}
+
+function sortByOrder(values: string[], order: readonly string[]): string[] {
+  const rank = new Map(order.map((value, index) => [value, index]))
+  return values.sort((a, b) => {
+    const ra = rank.get(a)
+    const rb = rank.get(b)
+    if (ra !== undefined || rb !== undefined) return (ra ?? 999) - (rb ?? 999)
+    return a.localeCompare(b, 'zh-CN')
+  })
+}
+
+/**
+ * 构图胶囊（三轴的一级筛选）。
+ *
+ * 计数单位是**姿势组数**，不是图片数；来源/分级会改变计数，构图本身不改变。
+ */
+export function compositionSummaries(
+  groups: PoseGroup[],
+  filters: Pick<PoseFilters, 'source' | 'rating'> = {},
+): PoseCompositionSummary[] {
+  const counts = new Map<string, { count: number; images: number }>()
+  for (const group of groups) {
+    const head = group.items[0]
+    if (!head) continue
+    if (filters.source && poseSourceOf(head) !== filters.source) continue
+    if (!matchesRating(head, filters.rating)) continue
+    const key = poseCompositionOf(head)
+    const entry = counts.get(key) ?? { count: 0, images: 0 }
+    entry.count += 1
+    entry.images += group.items.length
+    counts.set(key, entry)
+  }
+  return COMPOSITION_OPTIONS.filter((option) => option.key !== 'unknown' || counts.has('unknown'))
+    .map((option) => {
+      if (option.key === '') {
+        const all = [...counts.values()]
+        return {
+          key: '',
+          label: option.label,
+          count: all.reduce((sum, entry) => sum + entry.count, 0),
+          images: all.reduce((sum, entry) => sum + entry.images, 0),
+        }
+      }
+      const entry = counts.get(option.key)
+      return {
+        key: option.key,
+        label: option.label,
+        count: entry?.count ?? 0,
+        images: entry?.images ?? 0,
+      }
+    })
+}
+
+/** 姿势类型选项：来源/分级/构图收窄；不按当前 poseType 收窄。
+ *
+ * 构图=全部时不把双人体位混进下拉：先选「双人」再选体位；若当前过滤后只剩双人，
+ * 则回退到双人体位，避免下拉为空。
+ */
+export function poseTypeOptions(items: PoseItem[], filters: PoseFilters): string[] {
+  const scoped = items.filter((item) => matchesPoseContext(item, filters))
+  const nonPair = filters.composition
+    ? scoped
+    : scoped.filter((item) => poseCompositionOf(item) !== 'pair')
+  const sourceItems = nonPair.length > 0 ? nonPair : scoped
+  return sortByOrder(
+    [...new Set(sourceItems.map((item) => poseTypeOf(item)).filter(Boolean))],
+    POSE_TYPE_ORDER,
+  )
+}
+
+/** 风格选项：来源/分级/构图/姿势类型收窄；不按当前 style 收窄。 */
+export function styleOptions(items: PoseItem[], filters: PoseFilters): string[] {
+  const scoped = items.filter((item) => {
+    if (!matchesPoseContext(item, filters)) return false
+    if (filters.poseType && filters.poseType !== 'all' && poseTypeOf(item) !== filters.poseType) {
+      return false
+    }
+    return true
+  })
+  return sortByOrder([...new Set(scoped.map((item) => poseStyleOf(item)).filter(Boolean))], STYLE_ORDER)
+}
+
+/** 安全模式下被隐藏的 18+ 姿势组数（用于「解锁」胶囊文案）。 */
+export function hiddenNsfwGroupCount(groups: PoseGroup[]): number {
+  return groups.filter((group) => group.items.some((item) => Boolean(item.nsfw))).length
 }
 
 /**
@@ -300,6 +486,7 @@ export function poseItemDto(item: PoseItem): ReferenceItemDto {
     hot: false,
     featured: false,
     nsfw: Boolean(item.nsfw),
+    has_depth: item.hasDepth !== false,
     remote: false,
     number: item.姿势编号,
     source_url: null,
@@ -311,18 +498,23 @@ export function poseItemDto(item: PoseItem): ReferenceItemDto {
  * 卡片 / 角度条缩略图地址。
  *
  * - 白模：`kind=thumb`；
- * - 深度图：优先后端下发的 `depth_thumb`，缺失时退回 `depth`
- *   （与 React `depthThumbUrl ?? depthUrl` 一致）；
+ * - 深度图：优先 `depth_thumb`，缺失退回 `depth`；
+ * - 该条目根本没有深度图时回退白模（PSL 等多来源姿势没有深度变体）；
  * - 完全无图返回 `null`，调用方渲染占位，绝不产出 `src=""`。
  */
 export function poseThumbnailUrl(item: PoseItem, useDepth: boolean): string | null {
   const dto = poseItemDto(item)
-  if (!useDepth) return referenceImageUrl(dto, 'thumb')
+  if (!useDepth || item.hasDepth === false) {
+    return referenceImageUrl(dto, 'thumb')
+  }
   return referenceImageUrl(dto, item.depthThumbUrl ? 'depth_thumb' : 'depth')
 }
 
-/** 灯箱大图地址：白模 `kind=image`，深度图 `kind=depth`（仅 pose）。 */
+/** 灯箱大图地址：白模 `kind=image`；无深度条目即使切到深度模式也回退原图。 */
 export function posePreviewUrl(item: PoseItem, useDepth: boolean): string | null {
   const dto = poseItemDto(item)
-  return referenceImageUrl(dto, useDepth ? 'depth' : 'image')
+  if (!useDepth || item.hasDepth === false) {
+    return referenceImageUrl(dto, 'image')
+  }
+  return referenceImageUrl(dto, 'depth')
 }

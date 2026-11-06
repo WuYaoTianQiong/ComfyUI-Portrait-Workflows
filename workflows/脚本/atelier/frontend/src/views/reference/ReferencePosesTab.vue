@@ -16,25 +16,27 @@ import {
   ANGLES,
   activeGroupItem,
   clampPage,
+  compositionSummaries as buildCompositionSummaries,
   filterPoseGroups,
   filterPoseSingles,
-  firstNsfwLine,
   groupAngleItem,
   groupIndexOfItem,
-  hiddenNsfwCount,
+  hiddenNsfwGroupCount,
   loadReferencePageSize,
   pageCount,
   pageSlice,
-  poseCategoryOptions,
   poseDepthMode,
   posePreviewUrl,
-  poseSystemSummaries,
+  poseStyleOf,
   poseThumbnailUrl,
-  resolveActiveLine,
+  poseTypeOf,
+  poseTypeOptions,
   saveReferencePageSize,
   setPoseDepthMode,
   stepGroupItem,
+  styleOptions,
 } from './components/poseView'
+import type { PoseFilters } from './components/poseView'
 
 /**
  * 姿势库（阶段 2.1）。
@@ -52,7 +54,6 @@ import {
 const {
   items,
   groups,
-  lines,
   loading,
   error,
   load,
@@ -83,10 +84,16 @@ const toast = useToast()
 // 筛选 / 视图状态
 // ---------------------------------------------------------------------------
 
-/** 体系筛选；空串 = 全部。 */
-const line = ref('')
-/** 动作分类；'all' = 全部（与 React 一致，用字符串而非空串） */
-const category = ref('all')
+/** 构图筛选；空串 = 全部。 */
+const composition = ref('')
+/** 来源筛选；空串 = 全部。 */
+const source = ref('')
+/** 分级筛选；空串 = 全部。安全模式下由 ratingSelect/filters 强制为 general。 */
+const rating = ref('')
+/** 姿势类型；'all' = 全部。 */
+const poseType = ref('all')
+/** 风格；'all' = 全部。 */
+const style = ref('all')
 /** 视角胶囊；空串 = 全部视角 */
 const angle = ref('')
 /** 搜索词 */
@@ -117,26 +124,42 @@ const baseItems = computed(() =>
 const baseGroups = computed(() =>
   safeMode.value ? groups.value.filter((group) => !isNsfwPoseItem(group)) : groups.value,
 )
-const systemSummaries = computed(() =>
-  poseSystemSummaries(lines.value, items.value, safeMode.value),
+/** 安全模式固定全年龄；完整模式按用户选择。 */
+const effectiveRating = computed(() => (safeMode.value ? 'general' : rating.value))
+const ratingSelect = computed({
+  get: () => effectiveRating.value,
+  set: (value: string) => {
+    rating.value = value
+    poseType.value = 'all'
+    style.value = 'all'
+    page.value = 1
+  },
+})
+/** 构图胶囊：count 是姿势组数；来源/分级会改变计数。 */
+const compositionSummary = computed(() =>
+  buildCompositionSummaries(baseGroups.value, {
+    source: source.value,
+    rating: effectiveRating.value,
+  }),
 )
-const visibleSystems = computed(() => systemSummaries.value.filter((summary) => summary.visible))
-const hiddenTotal = computed(() => hiddenNsfwCount(items.value))
-const firstRiskyLine = computed(() => firstNsfwLine(lines.value, items.value))
-const activeLine = computed(() => resolveActiveLine(line.value, safeMode.value, items.value))
+const hiddenTotal = computed(() => hiddenNsfwGroupCount(groups.value))
 
 // ---------------------------------------------------------------------------
 // 派生列表
 // ---------------------------------------------------------------------------
 
-const filters = computed(() => ({
-  line: activeLine.value,
-  category: category.value,
+const filters = computed<PoseFilters>(() => ({
+  composition: composition.value,
+  source: source.value,
+  rating: effectiveRating.value,
+  poseType: poseType.value,
+  style: style.value,
   angle: angle.value,
   query: query.value,
 }))
 
-const categories = computed(() => poseCategoryOptions(baseItems.value, activeLine.value))
+const poseTypes = computed(() => poseTypeOptions(baseItems.value, filters.value))
+const styles = computed(() => styleOptions(baseItems.value, filters.value))
 const filteredGroups = computed(() => filterPoseGroups(baseGroups.value, filters.value))
 const filteredSingles = computed(() => filterPoseSingles(baseItems.value, filters.value))
 
@@ -176,20 +199,28 @@ interface GroupCard {
 
 /** 分组卡片：把当前角度与 5 格缩略条提前算好，避免模板里重复调函数。 */
 const groupCards = computed<GroupCard[]>(() =>
-  visibleGroups.value.map((group, index) => ({
-    group,
-    // 灯箱按 `filteredGroups` 的下标定位，分页后需要补上当前页的起始偏移
-    index: pageOffset.value + index,
-    item: activeGroupItem(group, hoverAngles.value, angle.value),
-    angles: ANGLES.map((value) => {
-      const angleItem = groupAngleItem(group, value)
-      return {
-        angle: value,
-        item: angleItem,
-        url: angleItem ? poseThumbnailUrl(angleItem, poseDepthMode.value) : null,
-      }
-    }),
-  })),
+  visibleGroups.value.map((group, index) => {
+    // 单角度分组（如 pose-studio-lite）只渲染实际角度，避免 4 个空占位；
+    // 2–5 个角度仍保持原有 5 格布局，不影响上游既有观感。
+    const angleNames =
+      group.order.length === 1 && group.order[0].角度
+        ? [group.order[0].角度]
+        : ANGLES
+    return {
+      group,
+      // 灯箱按 `filteredGroups` 的下标定位，分页后需要补上当前页的起始偏移
+      index: pageOffset.value + index,
+      item: activeGroupItem(group, hoverAngles.value, angle.value),
+      angles: angleNames.map((value) => {
+        const angleItem = groupAngleItem(group, value)
+        return {
+          angle: value,
+          item: angleItem,
+          url: angleItem ? poseThumbnailUrl(angleItem, poseDepthMode.value) : null,
+        }
+      }),
+    }
+  }),
 )
 
 interface SingleCard {
@@ -210,14 +241,28 @@ const singleCards = computed<SingleCard[]>(() =>
 // 交互
 // ---------------------------------------------------------------------------
 
-function selectLine(next: string): void {
-  line.value = next
-  category.value = 'all'
+function selectComposition(next: string): void {
+  composition.value = next
+  poseType.value = 'all'
+  style.value = 'all'
   page.value = 1
 }
 
-function selectCategory(event: Event): void {
-  category.value = (event.target as HTMLSelectElement).value
+function selectSource(event: Event): void {
+  source.value = (event.target as HTMLSelectElement).value
+  poseType.value = 'all'
+  style.value = 'all'
+  page.value = 1
+}
+
+function selectPoseType(event: Event): void {
+  poseType.value = (event.target as HTMLSelectElement).value
+  style.value = 'all'
+  page.value = 1
+}
+
+function selectStyle(event: Event): void {
+  style.value = (event.target as HTMLSelectElement).value
   page.value = 1
 }
 
@@ -231,8 +276,11 @@ function onQueryInput(): void {
 }
 
 function resetFilters(): void {
-  line.value = ''
-  category.value = 'all'
+  composition.value = ''
+  source.value = ''
+  rating.value = ''
+  poseType.value = 'all'
+  style.value = 'all'
   angle.value = ''
   query.value = ''
   page.value = 1
@@ -280,25 +328,40 @@ function onToggleSafeMode(): void {
   if (!safeMode.value) {
     // 完整模式 → 安全模式：只切显示，确认标记保留
     toggleSafeMode()
+    rating.value = 'general'
+    poseType.value = 'all'
+    style.value = 'all'
+    page.value = 1
     toast.success('已开启安全模式（已隐藏 18+ 敏感分类）')
     return
   }
-  const accepted = requestUnlock(() => toast.success('已解锁 18+ 完整图库模式'))
+  const accepted = requestUnlock(() => {
+    rating.value = ''
+    poseType.value = 'all'
+    style.value = 'all'
+    page.value = 1
+    toast.success('已解锁 18+ 完整图库模式')
+  })
   if (!accepted) backendBlockedToast()
 }
 
 function onUnlockPill(): void {
   const accepted = requestUnlock(() => {
-    line.value = firstRiskyLine.value
-    category.value = 'all'
+    rating.value = ''
+    poseType.value = 'all'
+    style.value = 'all'
     page.value = 1
-    toast.success('已解锁 18+ 敏感姿势体系')
+    toast.success('已解锁 18+ 内容')
   })
   if (!accepted) backendBlockedToast()
 }
 
 function onConfirmAgeGate(): void {
   confirmUnlock()
+  rating.value = ''
+  poseType.value = 'all'
+  style.value = 'all'
+  page.value = 1
   toast.success('已解锁 18+ 完整图库模式')
 }
 
@@ -521,30 +584,20 @@ onMounted(() => {
     </header>
 
     <template v-if="!initialLoading">
-      <!-- 体系（一级分类）横向药丸；18+ 用文本后缀而不是独立角标 -->
-      <div class="pose-pills" data-testid="pose-system-pills" role="group" aria-label="姿势体系筛选">
+      <!-- 构图横向药丸；计数单位是姿势组数，不是图片数 -->
+      <div class="pose-pills" data-testid="pose-composition-pills" role="group" aria-label="姿势构图筛选">
         <button
+          v-for="summary in compositionSummary"
+          :key="summary.key || 'all'"
           type="button"
           class="pose-pill"
-          :class="{ 'is-active': activeLine === '' }"
-          :aria-pressed="activeLine === ''"
-          data-system=""
-          @click="selectLine('')"
+          :class="{ 'is-active': composition === summary.key }"
+          :aria-pressed="composition === summary.key"
+          :data-composition="summary.key"
+          :title="`${summary.count} 组 / ${summary.images} 张`"
+          @click="selectComposition(summary.key)"
         >
-          全部 ({{ baseItems.length }})
-        </button>
-        <button
-          v-for="summary in visibleSystems"
-          :key="summary.line"
-          type="button"
-          class="pose-pill"
-          :class="{ 'is-active': activeLine === summary.line }"
-          :aria-pressed="activeLine === summary.line"
-          :data-system="summary.line"
-          :data-nsfw="summary.nsfw ? '1' : '0'"
-          @click="selectLine(summary.line)"
-        >
-          {{ summary.line }} ({{ summary.count }})<template v-if="summary.nsfw"> · 18+</template>
+          {{ summary.label }} ({{ summary.count }})
         </button>
 
         <button
@@ -553,15 +606,16 @@ onMounted(() => {
           class="pose-pill is-unlock"
           data-testid="pose-unlock-nsfw"
           :disabled="!nsfwAvailable"
-          :title="nsfwAvailable ? '解锁后显示 18+ 敏感姿势体系' : '后端总闸已关闭，无法解锁'"
+          :title="nsfwAvailable ? '解锁后显示 18+ 内容' : '后端总闸已关闭，无法解锁'"
           @click="onUnlockPill"
         >
-          解锁 18+ 敏感姿势体系 ({{ hiddenTotal }})
+          解锁 18+ 内容 ({{ hiddenTotal }})
         </button>
       </div>
 
-      <!-- 搜索 + 动作分类下拉 + 视角胶囊 + 重置 -->
+      <!-- 第一行：搜索 + 来源/分级/类型/风格；第二行：视角 + 重置 -->
       <div class="pose-filters">
+        <div class="pose-filter-row">
         <label class="pose-search">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.3" />
@@ -577,17 +631,57 @@ onMounted(() => {
           />
         </label>
 
+        <div class="pose-selects">
         <select
-          v-model="category"
+          v-model="source"
           class="pose-select"
-          data-testid="pose-category"
-          aria-label="动作分类"
-          @change="selectCategory"
+          data-testid="pose-source"
+          aria-label="来源"
+          @change="selectSource"
         >
-          <option value="all">全部动作分类</option>
-          <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
+          <option value="">全部来源</option>
+          <option value="upstream">原图库</option>
+          <option value="pose-studio-lite">pose-studio-lite</option>
         </select>
 
+        <select
+          v-model="ratingSelect"
+          class="pose-select"
+          data-testid="pose-rating"
+          aria-label="分级"
+          :disabled="safeMode"
+          :title="safeMode ? '安全模式下固定全年龄' : '选择全年龄 / 18+'"
+        >
+          <option value="">全部分级</option>
+          <option value="general">全年龄</option>
+          <option value="nsfw" :disabled="safeMode">18+</option>
+        </select>
+
+        <select
+          v-model="poseType"
+          class="pose-select"
+          data-testid="pose-category"
+          aria-label="姿势类型"
+          @change="selectPoseType"
+        >
+          <option value="all">全部姿势类型</option>
+          <option v-for="item in poseTypes" :key="item" :value="item">{{ item }}</option>
+        </select>
+
+        <select
+          v-model="style"
+          class="pose-select"
+          data-testid="pose-style"
+          aria-label="风格"
+          @change="selectStyle"
+        >
+          <option value="all">全部风格</option>
+          <option v-for="item in styles" :key="item" :value="item">{{ item }}</option>
+        </select>
+        </div>
+        </div>
+
+        <div class="pose-filter-row pose-filter-row--secondary">
         <div class="pose-angles" data-testid="pose-angles" role="group" aria-label="视角筛选">
           <button
             v-for="option in angleOptions"
@@ -615,6 +709,7 @@ onMounted(() => {
           </svg>
           重置
         </button>
+        </div>
       </div>
     </template>
 
@@ -646,7 +741,11 @@ onMounted(() => {
           :badge="card.group.number"
           :angle="card.item?.角度"
           :meta-left="card.group.system"
-          :meta-right="card.group.category"
+          :meta-right="
+            card.item
+              ? [poseTypeOf(card.item), poseStyleOf(card.item)].filter(Boolean).join(' · ')
+              : ''
+          "
           :selectable="Boolean(card.item)"
           :selected="card.item ? isPoseSelected(card.item.id) : false"
           @open="openGroup(card.group, card.index)"
@@ -689,6 +788,7 @@ onMounted(() => {
           :angle="card.item.角度"
           meta-mono
           :meta-left="card.item.id"
+          :meta-right="[poseTypeOf(card.item), poseStyleOf(card.item)].filter(Boolean).join(' · ')"
           selectable
           :selected="card.selected"
           @open="openSingle(card.item)"
@@ -932,33 +1032,41 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-/* 筛选面板：1280 × 68 / 圆角 22 / 内边距 16 / gap 12 / 深色底 */
+/* 筛选面板：第一行搜索 + 四个下拉；第二行视角 + 重置 */
 .pose-filters {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 200px minmax(0, auto) auto;
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin: 12px 0 16px;
   padding: 16px;
   border-radius: 22px;
   background: var(--surface-panel);
 }
 
-@media (max-width: 1023px) {
-  .pose-filters {
-    grid-template-columns: minmax(0, 1fr) 200px;
-  }
+.pose-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
 }
 
-@media (max-width: 639px) {
-  .pose-filters {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.pose-filter-row--secondary {
+  gap: 8px;
+}
+
+.pose-selects {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .pose-search {
   position: relative;
   display: block;
+  flex: 1 1 280px;
   min-width: 0;
 }
 
@@ -996,7 +1104,8 @@ onMounted(() => {
 
 .pose-select {
   box-sizing: border-box;
-  width: 100%;
+  flex: 0 0 140px;
+  width: 140px;
   height: 36px;
   padding: 0 8px;
   border: 1px solid var(--border);
@@ -1006,9 +1115,29 @@ onMounted(() => {
   font-size: 14px;
 }
 
+@media (max-width: 639px) {
+  .pose-filter-row {
+    align-items: stretch;
+  }
+
+  .pose-search {
+    flex-basis: 100%;
+  }
+
+  .pose-selects {
+    width: 100%;
+  }
+
+  .pose-select {
+    flex: 1 1 calc(50% - 4px);
+    width: auto;
+  }
+}
+
 .pose-angles {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 4px;
   min-width: 0;
   padding: 4px;

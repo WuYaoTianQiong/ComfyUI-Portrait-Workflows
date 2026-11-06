@@ -59,6 +59,156 @@ LIBRARY_LABELS: dict[str, str] = {
     "costume-anime": "外链服装",
 }
 
+#: 姿势库的来源注册表（只服务 `pose`，不是新的对外库）。
+#: 每个来源有自己的根目录与元数据格式；合并只在内存里发生，不落盘。
+POSE_SOURCE_UPSTREAM = "upstream"
+POSE_SOURCE_PSL = "pose-studio-lite"
+PSL_ID_PREFIX = "psl-"
+
+
+@dataclass(frozen=True)
+class PoseSource:
+    key: str
+    label: str
+    root: Path
+    metadata: Path
+    kind: str  # "upstream" | "psl"
+    id_prefix: str
+    has_depth: bool
+    baseline: int | None
+
+
+POSE_SOURCE_BASELINES = {
+    POSE_SOURCE_UPSTREAM: 1439,
+    POSE_SOURCE_PSL: 280,
+}
+
+#: 姿势库 canonical 分类（三轴：来源 / 分级 / 构图；类型与风格独立）。
+COMPOSITION_FULL = "full"
+COMPOSITION_UPPER = "upper"
+COMPOSITION_PAIR = "pair"
+COMPOSITION_UNKNOWN = "unknown"
+
+UPSTREAM_POSE_TYPE = {
+    "站姿": "站立",
+    "坐姿": "坐姿",
+    "跪立": "跪姿",
+    "跪立・四肢着地": "跪姿",
+    "趴卧": "躺卧",
+    "侧坐・女孩坐": "坐姿",
+    "蹲姿": "蹲姿",
+    "前倾": "前倾",
+    "后仰・挺背": "后仰",
+    "扭身": "扭转",
+    "特殊": "特殊",
+}
+UPSTREAM_UPPER_STYLE = {
+    "可爱系": "可爱",
+    "挤胸・强调事业线系": "胸线强调",
+    "性感・大胆系": "性感",
+}
+PSL_POSE_TYPE = {
+    "站立": "站立",
+    "站姿": "站立",
+    "站立贴近": "站立",
+    "坐姿": "坐姿",
+    "侧坐・少女坐": "坐姿",
+    "跪姿": "跪姿",
+    "跪姿・爬姿": "跪姿",
+    "躺姿": "躺卧",
+    "躺卧": "躺卧",
+    "侧卧": "躺卧",
+    "蹲姿": "蹲姿",
+    "前倾": "前倾",
+    "后仰": "后仰",
+    "扭转": "扭转",
+    "特殊": "特殊",
+}
+PSL_UPPER_STYLE = {
+    "可爱系": "可爱",
+    "胸线强调系": "胸线强调",
+    "性感系": "性感",
+}
+#: PSL 双人档的分类混了「身体姿态」和「体位」；归一成与上游同名的体位词，
+#: 原始 facet 仍保留在 `facet` / 搜索串里。
+PSL_PAIR_POSITION = {
+    "站立": "立位",
+    "坐姿": "坐位",
+    "躺卧": "卧姿",
+    "侧卧": "卧姿",
+    "站立贴近": "立位贴身",
+    "坐着贴近": "坐位贴身",
+    "面对面坐": "面对面坐位",
+    "背向坐": "背向坐位",
+    "坐在上方": "骑乘位",
+    "前后位置": "后入位",
+    "正对卧位": "正常位（传教士）",
+    "贴脸系": "贴脸系",
+    "特殊": "特殊",
+}
+
+
+def _upstream_composition(group: str) -> str:
+    if "双人" in group:
+        return COMPOSITION_PAIR
+    if "上半身" in group:
+        return COMPOSITION_UPPER
+    if "全身" in group:
+        return COMPOSITION_FULL
+    return COMPOSITION_UNKNOWN
+
+
+def _upstream_pose_type_style(
+    group: str, facet: str, composition: str
+) -> tuple[str, str]:
+    """上游「体系 + 分类」→ canonical pose_type/style。"""
+    if composition == COMPOSITION_UPPER:
+        return "上半身", UPSTREAM_UPPER_STYLE.get(facet, "未分类")
+    if composition == COMPOSITION_PAIR:
+        return facet or "未分类", "性感"
+    pose_type = UPSTREAM_POSE_TYPE.get(facet, "未分类")
+    if pose_type == "特殊":
+        return pose_type, "特殊"
+    return pose_type, ("性感" if "性感" in group else "标准")
+
+
+def _psl_composition(obj: dict[str, Any]) -> str:
+    """PSL `series` 是构图真源；tags 只做兜底。"""
+    series = str(obj.get("series") or "").strip()
+    tags = {str(tag) for tag in (obj.get("tags") or [])}
+    if series == "duo" or "双人" in tags:
+        return COMPOSITION_PAIR
+    if series == "upper" or "半身" in tags:
+        return COMPOSITION_UPPER
+    if series in ("std", "sexy") or "全身" in tags:
+        return COMPOSITION_FULL
+    return COMPOSITION_UNKNOWN
+
+
+def _psl_pose_type_style(
+    obj: dict[str, Any], composition: str
+) -> tuple[str, str]:
+    """PSL `facet` + `category` → canonical pose_type/style。"""
+    facet = str(obj.get("facet") or "").strip()
+    series = str(obj.get("series") or "").strip()
+    nsfw = bool(obj.get("nsfw"))
+    if composition == COMPOSITION_PAIR:
+        return PSL_PAIR_POSITION.get(facet, facet or "未分类"), (
+            "性感" if nsfw else "标准"
+        )
+    if composition == COMPOSITION_UPPER:
+        return "上半身", PSL_UPPER_STYLE.get(facet, "未分类")
+    pose_type = PSL_POSE_TYPE.get(facet, "未分类")
+    if pose_type == "特殊":
+        return pose_type, "特殊"
+    if series == "sexy" or nsfw:
+        return pose_type, "性感"
+    if facet == "可爱系":
+        return pose_type, "可爱"
+    if facet == "胸线强调系":
+        return pose_type, "胸线强调"
+    return pose_type, "标准"
+
 #: 每库字段映射（中文键 → DTO 字段）。`None` 表示该库没有这个字段。
 #: `subtitle` / `nsfw` / `remote` / `depth` 有库专属逻辑，在 `_to_record` 里处理。
 FIELD_MAP: dict[str, dict[str, str | None]] = {
@@ -235,6 +385,17 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
     remote = library == "costume-anime"
     #: 姿势编号单独暴露给前端（`subtitle` 仍是 `编号 · 角度`，兼容旧调用方）
     number = _text(obj, "姿势编号") if library == "pose" else ""
+    nsfw = _is_nsfw(library, obj, group)
+
+    #: canonical 三轴字段；非 pose 库保持空串，前端按旧字段展示。
+    source = ""
+    composition = ""
+    pose_type = ""
+    style = ""
+    if library == "pose":
+        source = POSE_SOURCE_UPSTREAM
+        composition = _upstream_composition(group)
+        pose_type, style = _upstream_pose_type_style(group, facet, composition)
 
     fields = {
         "id": item_id,
@@ -247,8 +408,21 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "angle": angle,
         "tags": _tags(obj),
         "keywords": _text(obj, "关键词"),
+        "source": source,
+        "composition": composition,
+        "pose_type": pose_type,
+        "style": style,
     }
-    search_text = _search_text(library, obj, fields)
+    search_text = " ".join(
+        part
+        for part in [
+            _search_text(library, obj, fields),
+            composition,
+            pose_type,
+            style,
+        ]
+        if part
+    )
 
     thumb_upstream = _text(obj, mapping["thumb"])
     image_upstream = _text(obj, mapping["image"])
@@ -280,7 +454,8 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "depth_thumb_url": depth_thumb_url,
         "hot": bool(obj.get("热门", False)),
         "featured": bool(obj.get("精选", False)),
-        "nsfw": _is_nsfw(library, obj, group),
+        "nsfw": nsfw,
+        "has_depth": library == "pose",
         "remote": remote,
         #: 仅 costume-anime 映射上游「来源地址」；其他库恒 None
         "source_url": (_text(obj, "来源地址") or None) if remote else None,
@@ -293,6 +468,205 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "_remote_thumb": thumb_upstream or image_upstream,
         "_remote_image": image_upstream or None,
     }
+
+
+def _pose_sources() -> list[PoseSource]:
+    """当前可用的姿势来源；第二来源缺失时只返回上游，行为与合并前一致。"""
+    root = reference_root()
+    sources = [
+        PoseSource(
+            key=POSE_SOURCE_UPSTREAM,
+            label="原图库",
+            root=root,
+            metadata=root / LIBRARY_FILES["pose"],
+            kind="upstream",
+            id_prefix="",
+            has_depth=True,
+            baseline=POSE_SOURCE_BASELINES[POSE_SOURCE_UPSTREAM],
+        )
+    ]
+    extra = settings.pose_extra_dir
+    if extra is not None:
+        extra = Path(extra).expanduser().absolute()
+        sources.append(
+            PoseSource(
+                key=POSE_SOURCE_PSL,
+                label=POSE_SOURCE_PSL,
+                root=extra,
+                metadata=extra / "meta.json",
+                kind="psl",
+                id_prefix=PSL_ID_PREFIX,
+                has_depth=False,
+                baseline=POSE_SOURCE_BASELINES[POSE_SOURCE_PSL],
+            )
+        )
+    return sources
+
+
+def _psl_to_record(source: PoseSource, obj: dict[str, Any]) -> dict[str, Any] | None:
+    """`pose-studio-lite/meta.json` 条目 → 与上游同形的姿势 DTO。
+
+    该来源没有深度图；`depth_url` / `depth_thumb_url` 恒 None。
+    """
+    raw_id = str(obj.get("id") or "").strip()
+    if not raw_id:
+        return None
+    item_id = f"{source.id_prefix}{raw_id}"
+    name = str(obj.get("name") or "").strip()
+    group = f"{source.label}・{str(obj.get('group') or '').strip()}".rstrip("・")
+    facet = str(obj.get("facet") or "").strip()
+    angle = str(obj.get("angle_zh") or obj.get("angle") or "").strip()
+    tags = [str(tag).strip() for tag in (obj.get("tags") or []) if str(tag).strip()]
+    composition = _psl_composition(obj)
+    pose_type, style = _psl_pose_type_style(obj, composition)
+    search_text = " ".join(
+        part
+        for part in [
+            str(obj.get("search") or ""),
+            item_id,
+            name,
+            raw_id,
+            source.label,
+            group,
+            facet,
+            composition,
+            pose_type,
+            style,
+            angle,
+            *tags,
+        ]
+        if part
+    )
+    thumb_rel = str(obj.get("thumb") or obj.get("file") or "").strip()
+    image_rel = str(obj.get("file") or "").strip()
+    subtitle = " · ".join(part for part in [raw_id, angle] if part)
+    return {
+        "id": item_id,
+        "library": "pose",
+        "name": name,
+        "subtitle": subtitle,
+        "number": raw_id,
+        "group": group,
+        "facet": facet,
+        "angle": angle,
+        "tags": tags,
+        "keywords": "",
+        "source": source.key,
+        "composition": composition,
+        "pose_type": pose_type,
+        "style": style,
+        "thumb_url": _image_url("pose", item_id, "thumb"),
+        "image_url": _image_url("pose", item_id, "image"),
+        "depth_url": None,
+        "depth_thumb_url": None,
+        "hot": False,
+        "featured": False,
+        "nsfw": bool(obj.get("nsfw")),
+        "has_depth": False,
+        "remote": False,
+        "source_url": None,
+        "search_text": search_text,
+        "_search": search_text.lower(),
+        "_thumb_rel": thumb_rel,
+        "_image_rel": image_rel,
+    }
+
+
+def _log_source_count(source: PoseSource, count: int) -> None:
+    """逐来源校验条数；合并总数不能再用单一基线判断。"""
+    if count == 0:
+        logger.warning("姿势来源 %s 加载到 0 条：%s", source.label, source.metadata)
+        return
+    if source.baseline and abs(count - source.baseline) > source.baseline * BASELINE_TOLERANCE:
+        logger.warning(
+            "姿势来源 %s 条数 %d 偏离基线 %d（±%d%%），请检查字段是否改名",
+            source.label,
+            count,
+            source.baseline,
+            int(BASELINE_TOLERANCE * 100),
+        )
+        return
+    logger.info("姿势来源 %s 加载完成：%d 条", source.label, count)
+
+
+def _load_pose_source(source: PoseSource) -> list[dict[str, Any]]:
+    """加载单个姿势来源并缓存；图片根/深度能力/来源标记随记录下发。"""
+    if source.root is None:
+        return []
+    mtime = _mtime_ns(source.metadata)
+    if mtime is None:
+        if source.kind == "upstream":
+            logger.warning("姿势来源 %s 数据文件不存在：%s", source.label, source.metadata)
+        else:
+            logger.info("姿势来源 %s 未安装，已跳过：%s", source.label, source.metadata)
+        return []
+    key = (str(source.metadata), f"pose-source:{source.key}")
+    with _LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached.mtime_ns == mtime:
+            return cached.items
+
+    try:
+        raw = json.loads(source.metadata.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("姿势来源 %s 读取/解析失败：%s", source.label, exc)
+        return []
+    rows = raw.get("items") if source.kind == "psl" and isinstance(raw, dict) else raw
+    if not isinstance(rows, list):
+        logger.warning("姿势来源 %s 顶层结构不是数组/items：%s", source.label, source.metadata)
+        return []
+
+    records: list[dict[str, Any]] = []
+    for obj in rows:
+        if not isinstance(obj, dict):
+            continue
+        record = (
+            _psl_to_record(source, obj)
+            if source.kind == "psl"
+            else _to_record("pose", obj)
+        )
+        if record is None:
+            continue
+        record["_root"] = source.root
+        record["_has_depth"] = source.has_depth
+        record["_source"] = source.key
+        record["_source_label"] = source.label
+        records.append(record)
+
+    _log_source_count(source, len(records))
+    with _LOCK:
+        _CACHE[key] = _CacheEntry(
+            mtime_ns=mtime,
+            items=records,
+            by_id={record["id"]: record for record in records},
+        )
+    return records
+
+
+def _load_pose_merged() -> list[dict[str, Any]]:
+    """合并所有姿势来源；任一来源 mtime 变化即重建合并缓存。"""
+    sources = _pose_sources()
+    stamps = tuple(
+        (str(source.metadata), _mtime_ns(source.metadata)) for source in sources
+    )
+    key = ("__pose_merged__", "pose")
+    stamp = hash(stamps)
+    with _LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached.mtime_ns == stamp:
+            return cached.items
+
+    items: list[dict[str, Any]] = []
+    for source in sources:
+        items.extend(_load_pose_source(source))
+
+    with _LOCK:
+        _CACHE[key] = _CacheEntry(
+            mtime_ns=stamp,
+            items=items,
+            by_id={record["id"]: record for record in items},
+        )
+    return items
 
 
 def _log_loaded_count(library: str, count: int) -> None:
@@ -314,9 +688,14 @@ def _log_loaded_count(library: str, count: int) -> None:
 
 
 def _load(library: str) -> list[dict[str, Any]]:
-    """按 mtime 缓存加载单库；文件缺失或 JSON 损坏时降级为空列表。"""
+    """按 mtime 缓存加载单库；文件缺失或 JSON 损坏时降级为空列表。
+
+    `pose` 是唯一的多来源库：上游 + pose-studio-lite，在内存里合并。
+    """
     if library not in LIBRARY_FILES:
         return []
+    if library == "pose":
+        return _load_pose_merged()
     path = _library_path(library)
     mtime = _mtime_ns(path)
     key = (str(path), library)
@@ -409,26 +788,47 @@ def library_stats() -> list[dict[str, Any]]:
     for library in LIBRARIES:
         all_items = _load(library)
         visible = [r for r in all_items if _visible(r)]
-        path = _library_path(library)
-        try:
-            available = path.is_file()
-        except OSError:
+        source_stats: list[dict[str, Any]] | None = None
+        if library == "pose":
             available = False
-        out.append(
-            {
-                "library": library,
-                "label": LIBRARY_LABELS[library],
-                "total": len(all_items),
-                "local": sum(1 for r in all_items if not r["remote"]),
-                "remote": sum(1 for r in all_items if r["remote"]),
-                "visible": len(visible),
-                "available": available,
-                "allow_nsfw": settings.reference_allow_nsfw,
-                "groups": _facet_values(visible, "group"),
-                "facets": _facet_values(visible, "facet"),
-                "angles": _facet_values(visible, "angle"),
-            }
-        )
+            source_stats = []
+            for source in _pose_sources():
+                try:
+                    source_available = source.metadata.is_file()
+                except OSError:
+                    source_available = False
+                available = available or source_available
+                source_stats.append(
+                    {
+                        "key": source.key,
+                        "label": source.label,
+                        "total": len(_load_pose_source(source)),
+                        "available": source_available,
+                        "has_depth": source.has_depth,
+                    }
+                )
+        else:
+            path = _library_path(library)
+            try:
+                available = path.is_file()
+            except OSError:
+                available = False
+        entry: dict[str, Any] = {
+            "library": library,
+            "label": LIBRARY_LABELS[library],
+            "total": len(all_items),
+            "local": sum(1 for r in all_items if not r["remote"]),
+            "remote": sum(1 for r in all_items if r["remote"]),
+            "visible": len(visible),
+            "available": available,
+            "allow_nsfw": settings.reference_allow_nsfw,
+            "groups": _facet_values(visible, "group"),
+            "facets": _facet_values(visible, "facet"),
+            "angles": _facet_values(visible, "angle"),
+        }
+        if source_stats is not None:
+            entry["sources"] = source_stats
+        out.append(entry)
     return out
 
 
@@ -495,7 +895,10 @@ def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
     if library not in LIBRARY_FILES or not item_id:
         return None
     _load(library)  # 确保缓存已按 mtime 填充
-    key = (str(_library_path(library)), library)
+    key = ("__pose_merged__", "pose") if library == "pose" else (
+        str(_library_path(library)),
+        library,
+    )
     with _LOCK:
         entry = _CACHE.get(key)
         return entry.by_id.get(item_id) if entry else None
@@ -506,19 +909,23 @@ def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def _safe_image_path(rel: str) -> Path:
-    """把 JSON 里的相对路径解析成真实文件；越界 400、缺失 404。"""
+def _safe_image_path(rel: str, root: Path | None = None) -> Path:
+    """把 JSON 里的相对路径解析成真实文件；越界 400、缺失 404。
+
+    `root` 是该条目所属来源的根（pose 多来源时必须逐来源校验），默认上游根。
+    """
     parts = _relative_parts(rel)
     if parts is None:
         raise ReferenceImageError(400, "非法的图片路径")
     if not parts:
         raise ReferenceImageError(404, "图片不存在")
 
-    cur = reference_root()
+    base = Path(root) if root is not None else reference_root()
+    cur = base
     for part in parts:
         cur = strip_extended_prefix(_resolve_if_reparse(cur / part))
 
-    if not is_inside_dir(reference_root(), cur):
+    if not is_inside_dir(base, cur):
         raise ReferenceImageError(400, "图片路径越界")
     if cur.suffix.lower() not in IMAGE_EXTENSIONS:
         raise ReferenceImageError(404, "图片不存在")
@@ -544,13 +951,13 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
         raise ReferenceImageError(400, "外链条目不提供本地图片")
 
     if kind == "depth":
-        if library != "pose":
-            raise ReferenceImageError(404, "该库没有深度图")
-        rel = f"img/depth/{item_id}.webp"
+        if library != "pose" or not record.get("_has_depth"):
+            raise ReferenceImageError(404, "该来源没有深度图")
+        rel = f"img/depth/{record['id']}.webp"
     elif kind == "depth_thumb":
-        if library != "pose":
-            raise ReferenceImageError(404, "该库没有深度缩略图")
-        rel = f"thumbs/depth/{item_id}.webp"
+        if library != "pose" or not record.get("_has_depth"):
+            raise ReferenceImageError(404, "该来源没有深度缩略图")
+        rel = f"thumbs/depth/{record['id']}.webp"
     elif kind == "thumb":
         rel = record["_thumb_rel"]
     else:
@@ -558,7 +965,7 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
 
     if not rel:
         raise ReferenceImageError(404, "图片不存在")
-    return _safe_image_path(rel)
+    return _safe_image_path(rel, record.get("_root"))
 
 
 def media_type_for(path: Path) -> str:

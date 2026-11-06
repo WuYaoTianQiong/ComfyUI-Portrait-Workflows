@@ -2,6 +2,30 @@
 import shutil
 
 
+def test_light_sync_reports_only_new_rows(api):
+    """画廊刷新走的轻量同步：第一次能捡到新图，第二次 added 归零。"""
+    from app.config import settings
+    from app.routers import images
+
+    images._dir_mtimes.clear()
+    images._last_full_scan = -1e9
+    image = settings.output_dir / "light_sync.png"
+    image.write_bytes(b"x")
+    try:
+        first = api.post("/api/images/sync/light")
+        assert first.status_code == 200
+        assert first.json()["added"] >= 1
+        assert first.json()["busy"] is False
+
+        second = api.post("/api/images/sync/light")
+        assert second.status_code == 200
+        assert second.json()["added"] == 0
+    finally:
+        image.unlink(missing_ok=True)
+        images._dir_mtimes.clear()
+        images._last_full_scan = -1e9
+
+
 def test_sync_all_skips_when_another_scan_holds_lock(monkeypatch):
     from app.routers import images
 
