@@ -8,6 +8,17 @@ G9 深链组与 G10「产物不含 ref-web」在阶段 4.3 + 4.4（删除 React 
 建立 `/ref-web` → `/reference?tab=` 的 301/302 重定向）之后转正，不再 SKIP；
 G9 另补了 query 传递、前缀边界与路径穿越 3 条边界断言（见 §6 实现注意）。
 
+**2026-11-06 已知失效项**：合成台工作流按视觉评分治理后，Flux 系
+（`PornMaster_Flux2Klein9B_三图/四图`）已归档到 `历史工作流/未采用/`。
+本脚本 G7 的「尺寸档 / 上限 100 / 降级确认框」与 G11 的同名断言都靠它构造
+（唯一 caps 支持 quality 且不可裁剪的工作流），因此**这三类断言目前会超时失败**。
+保留代码是为了工作流恢复时直接可用；当前跑 G7/G11 请只看其余项。
+恢复条件：再引入一个 `caps.quality=true` 或 `input_count > 非空槽且不可裁剪` 的工作流。
+
+**另外**：G7「extra 越界拒绝」用例也会失败 —— 所有现行工作流的 `slots` 都不含 `extra`，
+前端已隐藏第 4 张上传入口（`supportsExtraSlot`），页面上没有 `input[type="file"]` 可操作。
+恢复条件：把声明 `slots` 含 `extra` 的工作流放回 `图库专用工作流/`。
+
 设计约束（§9 R5）：
 - 只用语义选择器：文本、role、aria-label、data-testid；
   不使用 #root、React 类名或构建产物里的 hash 类名；
@@ -1871,30 +1882,34 @@ def run_g7(browser: Browser, base: str, recorder: Recorder) -> None:
         )
         session.shoot("G7-batch-limit")
 
-        # 4) 空槽提交：M=1（仅姿势）< N=3，先弹降级确认框；点「仍用当前工作流提交」
-        #    后提交体只带 pose_id，不带空槽字段（后端自行裁掉空槽）。
-        #    切换工作流会清掉尺寸多选并回落为 1 档，N 随之回到 3。
+        # 4) 空槽提交：M=1（仅姿势）< N=3。
+        #    可裁剪工作流（Qwen21 三图）→ 后端探测可裁 → 直接提交 + 裁剪 toast，不弹确认框；
+        #    不可裁剪工作流（PornMaster/Flux）→ 才弹降级确认框，且不给「仍用当前工作流提交」。
         choose_workflow(page, "图库专用_Qwen21+VNCCS")
-        choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        page.wait_for_timeout(500)
         counts_before_submit = read_slot_counts(page)
         total_before_submit, _, _ = read_batch_total(page)
         captured_bodies.clear()
         page.locator('[data-testid="studio-generate"]').click()
-        page.wait_for_selector(
-            '[data-testid="studio-workflow-downgrade"]', state="visible", timeout=15_000
-        )
-        downgrade_message = text_of(page, '[data-testid="studio-downgrade-message"]')
+        page.wait_for_timeout(2500)
+        trim_dialog = page.locator('[data-testid="studio-workflow-downgrade"]').count()
+        try:
+            trim_toast = page.get_by_text(re.compile("自动裁剪空槽后提交")).first.inner_text(
+                timeout=10_000
+            )
+        except PlaywrightTimeoutError:
+            trim_toast = "未出现裁剪提示"
+        empty_slot_body = captured_bodies[-1] if captured_bodies else {}
         recorder.check(
             group,
-            "槽位数 < input_count 时弹降级确认框",
-            "切换后任务语义可能变为换衣/编辑" in downgrade_message
-            and "当前工作流需要 3 个输入" in downgrade_message,
-            "确认框文案含「切换后任务语义可能变为换衣/编辑」与「需要 3 个输入」",
-            f"文案=「{downgrade_message}」，提交前槽位={counts_before_submit}，N={total_before_submit}",
+            "可裁剪工作流（Qwen21，M=1<N=3）直接提交并 toast 说明，不弹确认框",
+            trim_dialog == 0
+            and "自动裁剪空槽后提交" in trim_toast
+            and bool(captured_bodies),
+            "无确认框、出现「已按 1 图自动裁剪空槽后提交」toast、POST 已发出",
+            f"确认框={trim_dialog}，toast=「{trim_toast}」，POST={len(captured_bodies)}，"
+            f"提交前槽位={counts_before_submit}，N={total_before_submit}",
         )
-        page.locator('[data-testid="studio-downgrade-current"]').click()
-        page.wait_for_timeout(1500)
-        empty_slot_body = captured_bodies[-1] if captured_bodies else {}
         recorder.check(
             group,
             "空槽提交只发送已填槽（不含 portrait_id / costume_id）",
@@ -1906,6 +1921,39 @@ def run_g7(browser: Browser, base: str, recorder: Recorder) -> None:
             f"提交体键={sorted(empty_slot_body.keys())}，"
             f"pose_id={empty_slot_body.get('pose_id')}",
         )
+        # 缺服装必须自动按素体展示提交（否则 Qwen 系会出裸体）
+        recorder.check(
+            group,
+            "缺服装时自动按素体展示（body_mode=bare）提交",
+            empty_slot_body.get("body_mode") == "bare",
+            "提交体 body_mode=bare",
+            f"body_mode={empty_slot_body.get('body_mode')!r}",
+        )
+
+        # 不可裁剪工作流必须仍能拦住：Flux 系参考图不进文本编码器，裁不掉就是 400。
+        choose_workflow(page, "PornMaster_Flux2Klein9B_三图角色合成")
+        page.wait_for_timeout(500)
+        captured_bodies.clear()
+        page.locator('[data-testid="studio-generate"]').click()
+        page.wait_for_selector(
+            '[data-testid="studio-workflow-downgrade"]', state="visible", timeout=15_000
+        )
+        downgrade_message = text_of(page, '[data-testid="studio-downgrade-message"]')
+        blocked_reason = text_of(page, '[data-testid="studio-downgrade-blocked"]')
+        has_force_button = page.locator('[data-testid="studio-downgrade-current"]').count() > 0
+        recorder.check(
+            group,
+            "不可裁剪工作流才弹确认框，且不提供「仍用当前工作流提交」",
+            "切换后任务语义可能变为换衣/编辑" in downgrade_message
+            and "无法裁剪" in blocked_reason
+            and not has_force_button
+            and not captured_bodies,
+            "文案含语义变化 + 后端确认无法裁剪原因，强制提交按钮不存在，未发出 POST",
+            f"文案=「{downgrade_message}」，原因=「{blocked_reason}」，"
+            f"强制按钮={has_force_button}，POST={len(captured_bodies)}",
+        )
+        page.locator('[data-testid="studio-downgrade-cancel"]').click()
+        page.wait_for_timeout(500)
 
         # 5) 非 studio 400 与 M==0 400：直接打后端，避免页面前置校验。
         all_workflows = api_json(base, "/api/workflows?scope=all")
@@ -2613,12 +2661,17 @@ def run_g11(browser: Browser, base: str, recorder: Recorder) -> None:
             '[data-testid="studio-workflow-downgrade"]', state="visible", timeout=15_000
         )
         downgrade_message = text_of(page, '[data-testid="studio-downgrade-message"]')
+        blocked_reason = text_of(page, '[data-testid="studio-downgrade-blocked"]')
+        has_force_button = page.locator('[data-testid="studio-downgrade-current"]').count() > 0
         recorder.check(
             group,
-            "槽位数 < input_count 时弹出降级确认框并说明语义变化",
-            "切换后任务语义可能变为换衣/编辑" in downgrade_message,
-            "确认框文案含「切换后任务语义可能变为换衣/编辑」",
-            f"文案=「{downgrade_message}」，提交前 N 文本=「{text_before}」",
+            "不可裁剪工作流弹出降级确认框并说明语义变化与无法裁剪原因",
+            "切换后任务语义可能变为换衣/编辑" in downgrade_message
+            and "无法裁剪" in blocked_reason
+            and not has_force_button,
+            "确认框文案含「切换后任务语义可能变为换衣/编辑」与后端原因，且无强制提交按钮",
+            f"文案=「{downgrade_message}」，原因=「{blocked_reason}」，"
+            f"强制按钮={has_force_button}，提交前 N 文本=「{text_before}」",
         )
         session.shoot("G11-downgrade")
 

@@ -80,6 +80,12 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
 } else {
     Push-Location $frontend
 
+    # IDE（CodeBuddy/VS Code 扩展）会往 NODE_OPTIONS 注入 node-language-shim.cjs：
+    # - vue-tsc 在它下面会 "Zone Allocation failed - process out of memory"（内存被 shim 拖爆）；
+    # - vite build 的 emptyOutDir 会报 trash operation failed。
+    # 前端三道关都不需要这个 shim，统一在这里清掉。
+    $env:NODE_OPTIONS = ''
+
     Step '3' '6' 'vue-tsc --noEmit'
     & npx vue-tsc --noEmit
     if ($LASTEXITCODE -ne 0) {

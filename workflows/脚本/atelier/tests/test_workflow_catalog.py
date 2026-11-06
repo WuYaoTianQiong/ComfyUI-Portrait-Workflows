@@ -174,15 +174,15 @@ def test_studio_slots_degrade_to_empty_on_parse_error(api, tmp_path, monkeypatch
     assert rows[0]["slots"] == []
     assert rows[0]["input_count"] == 0
 
-#: 本机 studio 白名单基线（2026-11-06 实测）：7 条能识别角色的参考合成工作流。
+#: 本机 studio 白名单基线（2026-11-06 逐张视觉评分后）：只留 1 条全能力工作流。
+#: 已归档到 `历史工作流/未采用/`（原因见该目录 README）：
+#: - Nunchaku-fp4：连续出图会把 ComfyUI 打崩；
+#: - Flux 三图 / 四图：姿势不复现、服装配色漂、腿部结构错，且无低成本抢救路径；
+#: - QwenEdit 全身构图 / 自动裁切 / 2509 标准版：质量更低或同质冗余；
+#: - QwenEdit-2511：抢救后 F4.5/C4/P3 仍达不到「姿势照做」的承诺，各项被 Qwen21 压制
+#:   （唯一优势是快 1 分钟），用户 2026-11-06 拍板只留 Qwen21。
 STUDIO_ROLE_WORKFLOWS = {
     "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",
-    "图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图.api.json",
-    "图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图_自动裁切.api.json",
-    "图库专用_QwenEdit_GGUF-Q5KM_三图_4步_标准.api.json",
-    "图库专用_QwenEdit_Nunchaku-fp4_三图_4步_低显存.api.json",
-    "PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json",
-    "PornMaster_Flux2Klein9B_四图参考_6步_自动尺寸.api.json",
 }
 
 #: UI 格式 .json：能解析出 LoadImage，但标题一个业务角色都认不出 → 合成台永远失败。

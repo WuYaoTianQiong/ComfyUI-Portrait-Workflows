@@ -13,32 +13,61 @@
 只保留「有 `LoadImage*` 槽位 **且** 有文本编码节点」的工作流。
 **新增工作流**：把 `.api.json` 丢进本目录（或 `我的工作流/`），刷新页面即可出现，不用重建前端。
 
-## 清单
+## 清单（2026-11-06 逐张视觉评分后，只留 1 个）
 
-| 文件 | 模型栈 | 步数 | 槽位 | 适用场景 | 实测 |
-|---|---|---:|---:|---|---|
-| `图库专用_QwenEdit_GGUF-Q5KM_三图_4步_标准.api.json` | `Qwen_Image_Edit-Q5_K_M.gguf` + `Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16` LoRA，CLIP `qwen_2.5_vl_7b_fp8_scaled`，VAE `qwen_image_vae` | 4 | 3 | **默认**。脸/衣服/姿势一致性最稳，`ReferenceLatent×4` 四路参考 | ✅ 2026-11-04 真出图 880×1184，约 130s / 160s 两次 |
-| `图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图.api.json` | 同上（20 节点，参考 latent 2 路） | 4 | 3 | 人像只作「脸/发型语义参考」，不继承原图构图；人像参考是半身/大头照时用它更容易出全身 | 结构校验通过（节点/模型齐全），未单独真出图 |
-| `图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图_自动裁切.api.json` | 同上 + AutoCrop 预处理 | 4 | 3 | 服装图/人像图不是全身时先裁到主体，避免把半身服装硬拉成全身；比标准版略慢 | 结构校验通过，未单独真出图 |
-| `图库专用_QwenEdit_Nunchaku-fp4_三图_4步_低显存.api.json` | Nunchaku `svdq-fp4_r32-qwen-image-edit-lightningv1.0-4steps`，CLIP/VAE 同上 | 4 | 3 | 显存最省、出图最快，适合批量试稿；换脸/文字/织物细节不如 GGUF Q5_K_M | 结构校验通过，未单独真出图 |
+评分口径见 `文档/参考图库_合成台工作流实测矩阵_20261106.md`：每项 1–5 分，
+**F**=人脸一致、**C**=服装还原、**P**=姿势还原、**A**=解剖与构图、**E**=画面干净度。
+「缺项」表示该组合没有这一路参考，不计分。
 
-「结构校验通过」= 14 个节点类全部已装 + 4 个模型文件都在 ComfyUI 的候选列表里（2026-11-04 实测）。
+| 文件 | 定位 | 1 图 | 2 图 | 3 图 |
+|---|---|---|---|---|
+| `图库专用_Qwen21+VNCCS_三图_25步_单人.api.json` | **唯一可用、默认推荐**，三项能力齐全 | 人像 F5/A4.5 ・ 服装 C5/A4 ・ 姿势 P4.5/A4（裸体） | 人像+服装 **F5/C4.5/A4.5**（最佳换装）・ 人像+姿势 F5/P4.5（裸体）・ 服装+姿势 C5/P4.5（faceless） | **F5/C4.5/P4.5/A4**（旗舰组合） |
+
+**必须知道的边界**：
+
+1. **缺服装 = 素体展示**（`body_mode=bare`，前端会 toast 说明）：Qwen21 会照做 →
+   **画面是裸体素体**。要穿衣服请务必选服装槽。
+2. **三槽都支持上传本地图**（与库条目二选一，可多张，一起参与组合）：素材区每个槽下方
+   有「＋ 上传本地图」；上传图落在 `data/uploads/`，提交时走 `*_path`，缩略图走 `/uploads/`。
+3. QwenEdit（2509 / 2511）已全部归档 —— 抢救后仍只有 P2–3（姿势不做），
+   其余各项被 Qwen21 压制，唯一优势是快约 1 分钟。详见 `历史工作流/未采用/README.md`。
+
+## 已归档（不在下拉里）
+
+归档位置 `历史工作流/未采用/`，原因与证据见该目录 README。**不要直接删**：修好后可搬回来。
+
+| 文件 | 归档原因（2026-11-06 实测） |
+|---|---|
+| `图库专用_QwenEdit_Nunchaku-fp4_三图_4步_低显存.api.json` | 连续出图把 ComfyUI 打崩（`dequantize_blocks_Q6_K` → `Aborted`，两轮复现） |
+| `PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json` | 姿势 P1.5 / 服装 C3（粉裙出成蓝裙、草帽与包丢失）/ 解剖 A2（抬起的腿膝关节错位） |
+| `PornMaster_Flux2Klein9B_四图参考_6步_自动尺寸.api.json` | 同上（第 4 张实测无额外约束效果） |
+| `图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图.api.json` | 与「标准」版质量重叠（同模型同 seed 出图几乎一致），保留会让下拉多一个同质选项 |
+| `图库专用_QwenEdit_GGUF-Q5KM_三图_4步_全身构图_自动裁切.api.json` | 同上 + **人像+姿势组合出过废图**（半透明横纹割裂画面、多指） |
+| `图库专用_QwenEdit-2511_三图_4步_标准.api.json` | 抢救后 F4.5 / C4 / **P2.5–3** / A4.5：姿势仍不做（编辑模型惯性，4→8 步无效），各项被 Qwen21 压制，只快约 1 分钟；用户 2026-11-06 拍板只留 Qwen21 |
+
+> 归档 Flux 四图后，**「第 4 张 extra」槽暂时没有工作流支持**：前端按生效工作流的 `slots`
+> 自动隐藏上传入口（`supportsExtraSlot`），素材区收成 3 列、最多选三张；会话里残留的 extra
+> 会被自动清空并 toast 提示。要恢复该能力，只需把声明 `slots` 含 `extra` 的工作流放回本目录，
+> 入口会自动重新出现（无需改前端）。
 
 ## 与上游「参考库专用」的关系
 
 上游开源项目自带一份 `qwen_image_edit_2509_3img.api.json`
 （在 `ai-pose-gallery-zh/src/workflows/`，下拉里显示为「上游原版」），
 它引用 `qwen_image_edit_2509_fp8_e4m3fn.safetensors` —— **本机没有这个模型**，
-直接选中会报「工作流与本机不匹配」。本目录这 4 份就是它在**本机 GGUF / Nunchaku 栈**上的等价改版。
-
-要做成"完全替代"，二选一：
-
-1. 补 `qwen_image_edit_2509_fp8_e4m3fn`（约 20GB）到 `F:\ComfyUI_Migration\models\diffusion_models`；
-2. 把上游那份的 `UNETLoader` 换成 `UnetLoaderGGUF` + 本目录的 GGUF 名称（即本目录"标准"版的模型段）。
+直接选中会报「工作流与本机不匹配」，已在 `workflow_catalog._UNUSABLE_STUDIO` 里屏蔽。
+本目录的 QwenEdit 版就是它在**本机 GGUF 栈**上的等价改版。
 
 ## 改动工作流时的注意事项
 
 - 保留 3 个 `LoadImage` 的**标题**（`图1：人像参考 (Portrait)` / `图2：服装参考 (Costume)` / `图3：姿势参考 (Pose)`）——
-  前端靠标题自动识别槽位，标题变了也能识别，但会退化成按节点顺序猜。
+  前端靠标题自动识别槽位；标题变了也能识别，但会退化成按节点顺序猜。
 - `SaveImage.filename_prefix` 统一用 `pose_studio/result`，出图会落到 `output/pose_studio/`。
 - 文件名前缀 `图库专用_` 是给下拉框"一眼看出是专用"用的，别去掉。
+- **不要在多路参考上共享同一个 `VAEEncode` latent 后又期待"只删其中一路"**：
+  共享 latent 会让整条 `ReferenceLatent` 链一起被裁，`KSampler.positive/negative`
+  必须能被递归解析到存活的 `TextEncode`（后端 `_live_conditioning` 负责，2026-11-06 修）。
+- 新增/下线工作流后，跑 `python -m pytest tests/test_workflow_catalog.py`：
+  基线 `STUDIO_ROLE_WORKFLOWS` 必须与目录里实际可用的文件一致。
+- 改完**必须真出图**再下结论：用 `python tools/studio_matrix.py --limit 5 --tag xxx`
+  跑该工作流的可提交组合，逐张看脸/服装/姿势/解剖，再决定保留或归档（分批复跑，避免压崩 ComfyUI）。

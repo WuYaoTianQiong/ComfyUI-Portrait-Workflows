@@ -110,7 +110,9 @@ def run_browser_checks() -> None:
         )
 
         page.goto(BASE + "/", wait_until="domcontentloaded")
-        page.wait_for_selector(".card", timeout=25000)
+        # 45s：CI 里紧接 smoke + vite build 之后首屏冷启动会明显变慢，
+        # 25s 曾偶发超时（单独重跑可过），与代码无关。
+        page.wait_for_selector(".card", timeout=45000)
         page.wait_for_timeout(1200)
 
         check(page.title() == "画室 · Atelier", "根路径是新前端", f"title={page.title()!r}")

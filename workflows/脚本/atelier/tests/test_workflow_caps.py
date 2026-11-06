@@ -20,7 +20,11 @@ from app.services.workflow_parser import (
 )
 
 QWEN21 = "图库专用工作流/图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
-PORNMASTER = "图库专用工作流/PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json"
+#: 该工作流 2026-11-06 因视觉质量不合格已归档（不在 studio 下拉），
+#: 但「linked-image 尺寸旋钮」这条 caps 解析路径只有它能覆盖，所以从归档区读。
+PORNMASTER = (
+    "历史工作流/未采用/PornMaster_Flux2Klein9B_三图角色合成_6步_自动尺寸.api.json"
+)
 
 
 def _load_real(name: str) -> dict:
