@@ -25,15 +25,29 @@ from app.routers.jobs import (
     update_job_items,
 )
 from app.config import settings
-from app.services.fragment_syntax import FRAGMENT_TYPES, parse, strip_headers
+from app.services.fragment_syntax import (
+    FRAGMENT_TYPES, contains_nsfw_keyword, parse, strip_headers,
+)
+from app.services import atomic_pilot
+from app.services.costume_policy import (
+    costume_covers_lower, costume_coverage_warning, has_explicit_content,
+)
+from app.services.tagging import (
+    RANDOM_EXCLUDE_TAG, RANDOM_EXCLUDE_WARNING, split_tags,
+)
 
 router = APIRouter(tags=["组合创作"])
 
 
-def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=""):
+def _get_fragment_data(
+    search="", category_id=None, tag_ids=None, fragment_type="", safe_mode=False,
+):
     """获取碎片数据，按类型分组，供随机组合 / 批量替换使用。
 
     α 之后碎片统一从 prompts 解析（单块 prompt 就是碎片），不再读 fragments 表。
+
+    `safe_mode=True` 时跳过 tags / note 命中 NSFW_KEYWORDS 的提示词：
+    只做启发式过滤（无法保证全覆盖），且**不检查正文**，避免正常描述被误伤。
     """
     query = Prompt.select()
 
@@ -72,7 +86,21 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
         return f"{ftype}||{content}"
 
     for r in rows:
+        # 安全模式：整条提示词隐藏（其下所有碎片一起消失），只按 tags/note 判定。
+        if safe_mode and contains_nsfw_keyword(r.tags, r.note):
+            continue
+        excluded = RANDOM_EXCLUDE_TAG in split_tags(r.tags)
         fragments = parse(r.prompt)
+        costume_text = next(
+            (f["content"] for f in fragments if f["type"] == "人物服饰"), "",
+        )
+        coverage_warning = costume_coverage_warning(costume_text)
+        warnings = []
+        if excluded:
+            warnings.append(RANDOM_EXCLUDE_WARNING)
+        if coverage_warning:
+            warnings.append(coverage_warning)
+        warning = "；".join(warnings)
         for f in fragments:
             ftype = f["type"]
             if ftype not in grouped:
@@ -86,6 +114,9 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
                 src = f"{r.name or ''} (ID:{r.id})"
                 if src not in entry.get("source_names", []):
                     entry.setdefault("source_names", []).append(src)
+                # 同一内容只要还有一个「未排除且服装完整」的来源，就清掉警告。
+                if not excluded and not coverage_warning:
+                    entry["warning"] = ""
             else:
                 entry = {
                     "prompt_id": r.id,
@@ -97,6 +128,7 @@ def _get_fragment_data(search="", category_id=None, tag_ids=None, fragment_type=
                     "source": "prompt",
                     "dup_count": 1,
                     "source_names": [f"{r.name or ''} (ID:{r.id})"],
+                    "warning": warning,
                 }
                 seen_content[ck] = entry
                 grouped[ftype].append(entry)
@@ -110,15 +142,105 @@ def get_fragments(
     category_id: Optional[int] = Query(None),
     tag_ids: Optional[str] = Query(None),
     fragment_type: str = Query(""),
+    safe_mode: bool = Query(False),
 ):
-    """获取当前筛选提示词范围内的碎片列表，按类型分组"""
-    grouped = _get_fragment_data(search, category_id, tag_ids, fragment_type)
+    """获取当前筛选提示词范围内的碎片列表，按类型分组。
+
+    `safe_mode=1`：跳过 tags / note 命中 NSFW 关键词的提示词（启发式，无法保证全覆盖）。
+    """
+    grouped = _get_fragment_data(search, category_id, tag_ids, fragment_type, safe_mode)
     total_fragments = sum(len(v) for v in grouped.values())
     return {
         "grouped": grouped,
         "total_prompts": 0,  # 不再需要，保留兼容
         "fragment_count": total_fragments,
     }
+
+
+class RandomRecipeFragment(BaseModel):
+    type: str
+    content: str
+
+
+class RandomRecipeResponse(BaseModel):
+    prompt_id: int
+    name: str
+    fragments: list[RandomRecipeFragment]
+    tags: str = ""
+    source: str = "prompt"
+    recipe_count: int
+
+
+class AtomicRecipeResponse(BaseModel):
+    bank_version: int
+    combo_id: str
+    fragments: list[RandomRecipeFragment]
+    pose_facet: str
+    labels: dict[str, str] = {}
+    warning: str = "跨源实验：建议人工复核"
+
+
+@router.get("/composer/recipes/random", response_model=RandomRecipeResponse)
+def get_random_recipe(
+    exclude_id: Optional[int] = Query(None, description="避免连续抽到同一套"),
+    safe_mode: bool = Query(False),
+):
+    """随机返回一套完整 8 类配方（同源整套随机）。
+
+    只接受「恰好 8 个标准类、无重复、无残留标题/字面量换行」的提示词；
+    `随机排除` 标签与安全模式在这里过滤。`exclude_id` 用于避免连续重复，
+    若排除后为空则回退到完整候选集，保证不会因为只有一套而 404。
+    """
+    candidates: list[tuple[Prompt, dict[str, str]]] = []
+    for row in Prompt.select().order_by(Prompt.id.desc()):
+        if safe_mode and contains_nsfw_keyword(row.tags, row.note):
+            continue
+        if safe_mode and has_explicit_content(row.prompt):
+            continue
+        if RANDOM_EXCLUDE_TAG in split_tags(row.tags):
+            continue
+        fragments = parse(row.prompt)
+        if len(fragments) != len(FRAGMENT_TYPES):
+            continue
+        types = [f["type"] for f in fragments]
+        if len(set(types)) != len(types) or set(types) != set(FRAGMENT_TYPES):
+            continue
+        by_type = {f["type"]: f["content"] for f in fragments}
+        # P4 safety：服装只描述上衣 / 通用「服装」的配方可能补出裸露，随机池跳过。
+        if not costume_covers_lower(by_type.get("人物服饰", "")):
+            continue
+        if any("【" in content or "\\n" in content for content in by_type.values()):
+            continue
+        candidates.append((row, by_type))
+
+    if exclude_id is not None:
+        filtered = [item for item in candidates if item[0].id != exclude_id]
+        if filtered:
+            candidates = filtered
+    if not candidates:
+        raise HTTPException(404, "没有可用的完整 8 类配方")
+
+    row, by_type = random.choice(candidates)
+    return RandomRecipeResponse(
+        prompt_id=row.id,
+        name=row.name or "",
+        fragments=[
+            RandomRecipeFragment(type=ftype, content=by_type[ftype])
+            for ftype in FRAGMENT_TYPES
+        ],
+        tags=row.tags or "",
+        recipe_count=len(candidates),
+    )
+
+
+@router.get("/composer/recipes/atomic", response_model=AtomicRecipeResponse)
+def get_atomic_recipe(seed: Optional[int] = Query(None, description="固定随机种子，便于复现")):
+    """跨源实验：从原子碎片库抽一套兼容组合（不写数据库、不进生产随机池）。"""
+    try:
+        combo = atomic_pilot.sample_combo(seed)
+    except atomic_pilot.AtomicPilotUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    return AtomicRecipeResponse(**combo)
 
 
 class ComposerRunRequest(BaseModel):

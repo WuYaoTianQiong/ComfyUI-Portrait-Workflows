@@ -14,6 +14,8 @@
 import { computed } from 'vue'
 
 import { countSlotCombinations } from '../../../../composables/useReferenceRecipe'
+import { createImageSlotModes } from '../../../../composables/recipeTextFragments'
+import type { RecipeSlotModes } from '../../../../composables/recipeTextFragments'
 import { CONFIRM_PROMPTS } from '../../../../utils/confirmKeys'
 import { confirmDialog } from '../../../../utils/naive'
 
@@ -31,9 +33,15 @@ const props = defineProps<{
   canSubmit: boolean
   submitting: boolean
   libraryLoading: boolean
+  /** P4 整套随机请求中：禁用入口，避免连续点击。 */
+  recipeLoading?: boolean
+  /** P4 跨源实验请求中：禁用入口。 */
+  atomicLoading?: boolean
+  /** 三槽模式（P2）：文本槽不参与图片维度计数。缺省 = 全 image。 */
+  slotModes?: RecipeSlotModes
 }>()
 
-const emit = defineEmits<{ randomize: []; submit: [] }>()
+const emit = defineEmits<{ randomize: []; randomizeRecipe: []; randomizeAtomic: []; submit: [] }>()
 
 /**
  * 槽位组合数：与提交口径一致。
@@ -42,23 +50,39 @@ const emit = defineEmits<{ randomize: []; submit: [] }>()
  * 三槽全空为 0，和后端拒绝 M==0 的行为一致。
  */
 const slotCombos = computed(() =>
-  countSlotCombinations({
-    portrait: props.portraitCount,
-    costume: props.costumeCount,
-    pose: props.poseCount,
-  }),
+  countSlotCombinations(
+    {
+      portrait: props.portraitCount,
+      costume: props.costumeCount,
+      pose: props.poseCount,
+    },
+    props.slotModes ?? createImageSlotModes(),
+  ),
 )
 
-/** 维度明细：人像4 × 服装2 × 姿势3 = 24，×1 工作流 ×1 尺寸 */
-const detailText = computed(
-  () =>
-    `人像${props.portraitCount} × 服装${props.costumeCount} × 姿势${props.poseCount} = ${slotCombos.value}，` +
-    `×${props.workflowCount} 工作流 ×${props.qualityCount} 尺寸`,
-)
+/** 维度明细：人像4 × 服装2 × 姿势3 = 24，×1 工作流 ×1 尺寸（文本槽折叠为 1）。 */
+const detailText = computed(() => {
+  const modes = props.slotModes ?? createImageSlotModes()
+  const dimension = (slot: 'portrait' | 'costume' | 'pose', count: number): string => {
+    if (modes[slot] === 'text') return '文本'
+    return String(count)
+  }
+  return (
+    `人像${dimension('portrait', props.portraitCount)} × ` +
+    `服装${dimension('costume', props.costumeCount)} × ` +
+    `姿势${dimension('pose', props.poseCount)} = ${slotCombos.value}，` +
+    `×${props.workflowCount} 工作流 ×${props.qualityCount} 尺寸`
+  )
+})
 
-/** 只读展示用：提交按钮的禁用条件。 */
+/** 只读展示用：提交按钮的禁用条件（整套随机 / 跨源实验进行中也拒绝提交）。 */
 const submitDisabled = computed(
-  () => !props.canSubmit || props.submitting || props.overLimit,
+  () =>
+    !props.canSubmit ||
+    props.submitting ||
+    props.overLimit ||
+    props.recipeLoading ||
+    props.atomicLoading,
 )
 
 /** 任一维度 > 1 才需要确认（`total === 1` 时必然全为 1，直接提交）。 */
@@ -119,6 +143,34 @@ async function onSubmit(): Promise<void> {
         @click="emit('randomize')"
       >
         随机捏人
+      </button>
+      <button
+        type="button"
+        class="action-bar__secondary"
+        data-testid="studio-random-recipe"
+        :disabled="libraryLoading || recipeLoading"
+        :title="
+          libraryLoading
+            ? '图库加载中，请稍候'
+            : '从完整配方池中抽一套，姿势图锚定，其余 7 类文本生效'
+        "
+        @click="emit('randomizeRecipe')"
+      >
+        {{ recipeLoading ? '整套随机中…' : '同源整套随机' }}
+      </button>
+      <button
+        type="button"
+        class="action-bar__secondary"
+        data-testid="studio-random-atomic"
+        :disabled="libraryLoading || atomicLoading"
+        :title="
+          libraryLoading
+            ? '图库加载中，请稍候'
+            : '从原子碎片库跨源组合（实验，建议人工复核）'
+        "
+        @click="emit('randomizeAtomic')"
+      >
+        {{ atomicLoading ? '跨源实验中…' : '跨源实验' }}
       </button>
       <button
         type="button"

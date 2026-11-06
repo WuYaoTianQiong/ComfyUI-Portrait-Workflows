@@ -47,6 +47,9 @@ import {
 } from './useReferenceStudioSettings'
 import type { ReferenceStudioSettings } from './useReferenceStudioSettings'
 import { DEFAULT_RECIPE_SEED } from './useReferenceRecipe'
+import {
+  createEmptyRecipeTextFragments,
+} from './recipeTextFragments'
 
 /** 一份字段齐全的合法快照。 */
 function validSnapshot(): ReferenceStudioSettings {
@@ -78,6 +81,20 @@ function validSnapshot(): ReferenceStudioSettings {
     qualities: ['4K'],
     ratios: ['3:4'],
     sizesConfigured: true,
+    textFragments: {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: '黑色短发，齐刘海' }],
+      场景环境: [{ type: '场景环境', content: '黄昏街道' }],
+    },
+    negativePrompt: '低质量，多余手指',
+    portraitMode: 'image',
+    costumeMode: 'image',
+    poseMode: 'image',
+    portraitSupplement: true,
+    costumeSupplement: false,
+    poseSupplement: false,
+    recipeSourceId: 622,
+    recipeSourceName: '粉色卧室·抹胸长裙·韩系',
   }
 }
 
@@ -118,6 +135,16 @@ describe('默认值', () => {
       qualities: [],
       ratios: [],
       sizesConfigured: false,
+      textFragments: createEmptyRecipeTextFragments(),
+      negativePrompt: '',
+      portraitMode: null,
+      costumeMode: null,
+      poseMode: null,
+      portraitSupplement: false,
+      costumeSupplement: false,
+      poseSupplement: false,
+      recipeSourceId: null,
+      recipeSourceName: '',
     })
   })
 })
@@ -129,6 +156,28 @@ describe('写入后读回', () => {
     flushReferenceStudioSettings()
 
     expect(readReferenceStudioSettings()).toEqual(snapshot)
+  })
+
+  it('P4 补充开关 / 来源字段缺失或脏数据时按默认值读回', () => {
+    const raw = validSnapshot() as unknown as Record<string, unknown>
+    delete raw.portraitSupplement
+    delete raw.costumeSupplement
+    delete raw.poseSupplement
+    delete raw.recipeSourceId
+    delete raw.recipeSourceName
+
+    const parsed = parseReferenceStudioSettings(raw)
+    expect(parsed?.portraitSupplement).toBe(false)
+    expect(parsed?.costumeSupplement).toBe(false)
+    expect(parsed?.poseSupplement).toBe(false)
+    expect(parsed?.recipeSourceId).toBeNull()
+    expect(parsed?.recipeSourceName).toBe('')
+
+    raw.portraitSupplement = 'yes'
+    raw.recipeSourceId = 'not-a-number'
+    const dirty = parseReferenceStudioSettings(raw)
+    expect(dirty?.portraitSupplement).toBe(false)
+    expect(dirty?.recipeSourceId).toBeNull()
   })
 
   it('多次写入合并成一份，不丢其它字段', () => {
@@ -232,6 +281,82 @@ describe('数据校验：脏数据整体丢弃', () => {
     const { sizesConfigured: _ignored, ...withoutFlag } = validSnapshot()
     storeRaw(JSON.stringify(withoutFlag))
     expect(readReferenceStudioSettings()?.sizesConfigured).toBe(false)
+  })
+
+  it('文本补充字段缺失时按空读回（旧快照不整体丢弃）', () => {
+    const { textFragments: _t, negativePrompt: _n, ...legacy } = validSnapshot()
+    storeRaw(JSON.stringify(legacy))
+
+    const stored = readReferenceStudioSettings()
+    expect(stored).not.toBeNull()
+    expect(stored?.portrait).toHaveLength(1)
+    expect(stored?.textFragments).toEqual(createEmptyRecipeTextFragments())
+    expect(stored?.negativePrompt).toBe('')
+  })
+
+  it('文本补充脏数据逐条丢弃 / 逐类回落空，不影响其余设置', () => {
+    storeRaw(
+      JSON.stringify({
+        ...validSnapshot(),
+        textFragments: {
+          人物面部: [{ content: '保留' }, { content: 42 }, null],
+          人物身材: 'not-array',
+          人物服饰: [{ content: '   ' }],
+          姿态动作: [
+            { content: 'a' },
+            { content: 'b' },
+            { content: 'c' },
+          ],
+        },
+        negativePrompt: 42,
+      }),
+    )
+
+    const stored = readReferenceStudioSettings()
+    expect(stored?.textFragments.人物面部).toEqual([
+      { type: '人物面部', content: '保留' },
+    ])
+    expect(stored?.textFragments.人物身材).toEqual([])
+    expect(stored?.textFragments.人物服饰).toEqual([])
+    // 单类裁剪到软上限 2 条
+    expect(stored?.textFragments.姿态动作).toHaveLength(2)
+    expect(stored?.negativePrompt).toBe('')
+    expect(stored?.workflow).toBe('Qwen21+VNCCS.json')
+  })
+
+  it('P2 槽位模式缺字段时读回 null（由草稿按内容推导，不整体丢弃）', () => {
+    const {
+      portraitMode: _pm,
+      costumeMode: _cm,
+      poseMode: _sm,
+      ...legacy
+    } = validSnapshot()
+    storeRaw(JSON.stringify(legacy))
+
+    const stored = readReferenceStudioSettings()
+    expect(stored).not.toBeNull()
+    expect(stored?.portraitMode).toBeNull()
+    expect(stored?.costumeMode).toBeNull()
+    expect(stored?.poseMode).toBeNull()
+    // 其余字段照常恢复
+    expect(stored?.portrait).toHaveLength(1)
+    expect(stored?.textFragments.人物面部).toHaveLength(1)
+  })
+
+  it('P2 槽位模式：合法值保留，非法值按 null 容错', () => {
+    storeRaw(
+      JSON.stringify({
+        ...validSnapshot(),
+        portraitMode: 'text',
+        costumeMode: 'bogus',
+        poseMode: 'empty',
+      }),
+    )
+
+    const stored = readReferenceStudioSettings()
+    expect(stored?.portraitMode).toBe('text')
+    expect(stored?.costumeMode).toBeNull()
+    expect(stored?.poseMode).toBe('empty')
   })
 })
 

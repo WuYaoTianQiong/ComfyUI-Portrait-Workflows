@@ -22,6 +22,15 @@
  */
 
 import type { ReferenceLibraryId } from '../api/reference'
+import {
+  cloneRecipeTextFragments,
+  createEmptyRecipeTextFragments,
+  isRecipeSlotMode,
+} from './recipeTextFragments'
+import type {
+  RecipeSlotMode,
+  RecipeTextFragments,
+} from './recipeTextFragments'
 import type { RecipeStyle } from './useReferenceRecipe'
 
 /** 合成台参数 + 三槽选择的持久化键（带版本后缀）。 */
@@ -84,6 +93,34 @@ export interface ReferenceStudioSettings {
    * 前者不覆盖 `useWorkflowCaps` 的 reconcile 结果，后者必须持久化为空数组。
    */
   sizesConfigured: boolean
+  /**
+   * 八类文本补充碎片（2026-11-06 新增）。
+   *
+   * 只存 `{type, content}` 全文：体积预估 8 类 × 2 条 × 783 字 ≈ 12KB，可接受；
+   * 从旧快照读回时缺字段按空表处理（不整体丢弃其余设置）。
+   */
+  textFragments: RecipeTextFragments
+  /** 用户手填的负向提示词；最终负向 = 后端自动抽取 + 这里的内容。 */
+  negativePrompt: string
+  /**
+   * 三槽模式（P2 替代态，方案 §4.4）。
+   *
+   * `null` 表示旧快照没有该字段：调用方按
+   * 「有图 → image；无图 + 对应碎片非空 → text；否则 empty」推导。
+   */
+  portraitMode: RecipeSlotMode | null
+  costumeMode: RecipeSlotMode | null
+  poseMode: RecipeSlotMode | null
+  /**
+   * 跨源补充开关（P4）。旧快照没有该字段按 false；
+   * 只在对应槽为 image 模式时有意义。
+   */
+  portraitSupplement: boolean
+  costumeSupplement: boolean
+  poseSupplement: boolean
+  /** 最近一次「同源整套随机」的来源；仅用于展示，不参与提交。 */
+  recipeSourceId: number | null
+  recipeSourceName: string
 }
 
 /** 合法库标识；校验时用于收窄字符串。 */
@@ -153,6 +190,20 @@ function parseStyle(value: unknown): RecipeStyle | null {
   return value === 'none' || value === 'realistic' ? value : null
 }
 
+/**
+ * 槽位模式校验：合法值原样保留；缺字段 / 非法值一律返回 null。
+ *
+ * 返回 null 不丢弃整份快照：旧数据没有 mode 字段，调用方按条目数与碎片推导。
+ */
+function parseSlotMode(value: unknown): RecipeSlotMode | null {
+  return isRecipeSlotMode(value) ? value : null
+}
+
+/** P4 开关容错：只认显式 true；缺字段 / 脏数据按 false，不丢整份快照。 */
+function parseSupplementFlag(value: unknown): boolean {
+  return value === true
+}
+
 /** 种子校验：非负有限数，向下取整（与 `setBaseSeed` 口径一致）。 */
 function parseBaseSeed(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null
@@ -196,6 +247,12 @@ export function parseReferenceStudioSettings(
     return null
   }
 
+  // 2026-11-06 扩展字段：**容错读回**，缺字段 / 结构不符按空处理，
+  // 不因为新增的可选字段把整份旧快照（三槽 / 画风 / 种子）一起丢掉。
+  const textFragments = cloneRecipeTextFragments(value.textFragments)
+  const negativePrompt =
+    typeof value.negativePrompt === 'string' ? value.negativePrompt : ''
+
   return {
     portrait,
     costume,
@@ -206,6 +263,23 @@ export function parseReferenceStudioSettings(
     qualities,
     ratios,
     sizesConfigured: value.sizesConfigured === true,
+    textFragments,
+    negativePrompt,
+    // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
+    portraitMode: parseSlotMode(value.portraitMode),
+    costumeMode: parseSlotMode(value.costumeMode),
+    poseMode: parseSlotMode(value.poseMode),
+    // P4 扩展字段：缺字段 / 脏数据 = false。
+    portraitSupplement: parseSupplementFlag(value.portraitSupplement),
+    costumeSupplement: parseSupplementFlag(value.costumeSupplement),
+    poseSupplement: parseSupplementFlag(value.poseSupplement),
+    // 随机整套来源：可选展示字段，缺字段 / 脏数据按空处理。
+    recipeSourceId:
+      typeof value.recipeSourceId === 'number' && Number.isFinite(value.recipeSourceId)
+        ? Math.trunc(value.recipeSourceId)
+        : null,
+    recipeSourceName:
+      typeof value.recipeSourceName === 'string' ? value.recipeSourceName : '',
   }
 }
 
@@ -221,6 +295,18 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     qualities: [],
     ratios: [],
     sizesConfigured: false,
+    textFragments: createEmptyRecipeTextFragments(),
+    negativePrompt: '',
+    // 默认没有模式记录：旧数据同样走「有图 / 有文本」推导。
+    portraitMode: null,
+    costumeMode: null,
+    poseMode: null,
+    // P4：跨源补充默认关闭，必须在 image 模式下显式打开。
+    portraitSupplement: false,
+    costumeSupplement: false,
+    poseSupplement: false,
+    recipeSourceId: null,
+    recipeSourceName: '',
   }
 }
 

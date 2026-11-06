@@ -218,6 +218,24 @@ describe('ComposerView 自定义碎片 / 复制 / 存为提示词', () => {
     expect(head.classes()).not.toContain('on')
   })
 
+  it('点列头定位图标把已选碎片滚到中间，且不会误锁该列', async () => {
+    const wrapper = await mountView()
+    const body = wrapper.findAll('.reel-body')[0]
+    await body.find('.card').trigger('click')
+    await flushPromises()
+
+    const on = body.find('.card.on').element as HTMLElement
+    const scrollIntoView = vi.fn()
+    on.scrollIntoView = scrollIntoView
+
+    const head = wrapper.findAll('.reel-head')[0]
+    await head.find('.locate-ico').trigger('click')
+    await flushPromises()
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
+    expect(head.classes()).not.toContain('on')
+  })
+
   it('双击卡片打开全文弹层', async () => {
     const wrapper = await mountView()
     await wrapper.findAll('.reel-body .card').at(0)?.trigger('dblclick')

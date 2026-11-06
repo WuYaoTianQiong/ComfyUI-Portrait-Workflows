@@ -108,6 +108,8 @@ class FaceswapRequest(BaseModel):
     workflow_content: str | None = None
     prompt: str = ""
     negative_prompt: str = ""
+    #: 手动改写（P3）：true = 跳过 compile_prompt，prompt 原文写正向、用户负向原文写负向
+    skip_compile: bool = False
     seed_mode: str = "fixed"       # fixed | random | increment
     seed: int = 100000
     pair_mode: str = "cross"       # cross = 各组全组合；zip = 按选择顺序 1:1 配对
@@ -589,6 +591,7 @@ def faceswap_batch(req: FaceswapRequest):
         inject_prompt(api_wf, {
             "prompt": prompt_text,
             "negative_prompt": req.negative_prompt or "",
+            "skip_compile": req.skip_compile,
             "seed_override": plan[i]["seed"],
             "orientation": orientation,
             "aspect_ratio": aspect_ratio,

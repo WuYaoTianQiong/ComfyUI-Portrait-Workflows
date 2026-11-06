@@ -660,6 +660,27 @@ function pickFromDetail() {
   detailOpen.value = false
 }
 
+/** 一键把该列已选碎片滚到列表中间；选中项还没加载出来时先补一批。 */
+async function locatePicked(type: string) {
+  const slot = canvas.value[type]
+  if (!slot?.content) {
+    toast.error(`「${type}」还没有选碎片，先选一个再定位`)
+    return
+  }
+  if (slot.source !== 'custom') {
+    const index = (grouped.value[type] ?? []).findIndex((f) => f.content === slot.content)
+    if (index >= limitOf(type)) {
+      limits.value = { ...limits.value, [type]: index + PAGE_SIZE }
+      await nextTick()
+    }
+  }
+  const body = reelBodies.get(type)
+  body?.querySelector<HTMLElement>('.card.on')?.scrollIntoView({
+    block: 'center',
+    behavior: 'smooth',
+  })
+}
+
 /** 锁定/解锁一列；锁定前必须有内容，否则随机时会静默失效。 */
 function toggleLock(type: string) {
   if (!pinned.value.includes(type) && !canvas.value[type]?.content) {
@@ -1180,6 +1201,17 @@ function toggleTag(id: number) {
           @click="toggleLock(type)"
         >
           <span class="pin-ico">{{ pinned.includes(type) ? '🔒' : '🔓' }}</span>
+          <button
+            class="locate-ico"
+            :title="`定位「${type}」已选碎片到列中间`"
+            :aria-label="`定位「${type}」已选碎片`"
+            @click.stop="locatePicked(type)"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="3.2" />
+              <path d="M8 1v3M8 12v3M1 8h3M12 8h3" />
+            </svg>
+          </button>
           <span class="reel-type">{{ type }}</span>
           <span class="reel-count">{{ (grouped[type] ?? []).length }}</span>
         </header>
@@ -1618,6 +1650,33 @@ function toggleTag(id: number) {
 
 .reel-head.on .pin-ico {
   color: var(--warn);
+}
+
+/* 列头定位：把已选碎片滚回可视区中间 */
+.locate-ico {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.locate-ico svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.locate-ico:hover {
+  color: var(--primary);
 }
 
 /* 列头下方：当前选中的碎片，替代旧版底部 8/8 的信息 */

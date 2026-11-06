@@ -31,6 +31,13 @@ _TAG_SEP_RE = re.compile(r"[,，;；]")
 ENTITY_PROMPT = "prompt"
 ENTITY_IMAGE = "image"
 
+#: 保留标签：标记「多图拼贴 / 双人 / 参考图指令」等不适合单图随机合成的提示词。
+#: 随机配方接口按它过滤；手动碎片弹层只展示警告，不隐藏。
+RANDOM_EXCLUDE_TAG = "随机排除"
+
+#: 手动碎片弹层展示的警告文案（标签口径：多图 / 双人 / 服装不完整等）。
+RANDOM_EXCLUDE_WARNING = "不适合单图随机合成"
+
 
 def split_tags(text: str | None) -> list[str]:
     """把标签文本拆成去重、保序的标签名列表。"""

@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.services import reference_library, reference_remote_cache, uploads
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
+from app.services.prompt_compiler import compile_prompt
 from app.services.recipe_prompt import (
     BODY_MODES,
     RecipeEntry,
@@ -29,6 +30,7 @@ from app.services.recipe_prompt import (
     build_recipe_prompt,
 )
 from app.services.workflow_parser import (
+    detect_workflow_caps,
     find_image_input_keys,
     find_loadimage_nodes,
     image_input_key_index,
@@ -87,6 +89,11 @@ class ReferenceItem(BaseModel):
     group: str = ""
     facet: str = ""
     angle: str = ""
+    #: canonical 三轴字段（仅 pose 非空）：来源 / 构图 / 姿势类型 / 风格
+    source: str = ""
+    composition: str = ""
+    pose_type: str = ""
+    style: str = ""
     tags: list[str] = Field(default_factory=list)
     keywords: str = ""
     #: 外链条目字段缺失时给 None（空串会让前端 <img src=""> 请求当前页面）
@@ -98,6 +105,8 @@ class ReferenceItem(BaseModel):
     hot: bool = False
     featured: bool = False
     nsfw: bool = False
+    #: 该条目是否有深度变体；pose-studio-lite 等第二来源为 false
+    has_depth: bool = False
     remote: bool = False
     #: 仅 costume-anime 且上游有「来源地址」时非空
     source_url: str | None = None
@@ -117,6 +126,16 @@ class ReferenceFacetValue(BaseModel):
     count: int
 
 
+class ReferenceLibrarySourceStats(BaseModel):
+    """多来源库（当前仅 pose）的逐来源明细。"""
+
+    key: str
+    label: str
+    total: int
+    available: bool
+    has_depth: bool
+
+
 class ReferenceLibraryStats(BaseModel):
     library: str
     label: str
@@ -131,6 +150,8 @@ class ReferenceLibraryStats(BaseModel):
     groups: list[ReferenceFacetValue] = Field(default_factory=list)
     facets: list[ReferenceFacetValue] = Field(default_factory=list)
     angles: list[ReferenceFacetValue] = Field(default_factory=list)
+    #: 多来源库（pose）逐来源条数/可用性；单源库为空数组
+    sources: list[ReferenceLibrarySourceStats] = Field(default_factory=list)
 
 
 class ReferenceLibraryListResponse(BaseModel):
@@ -268,6 +289,22 @@ class RecipeRequest(BaseModel):
     #: 其它值 400；`bare` 时不允许同时选择服装。
     body_mode: str = "costume"
     prompt_suffix: str = ""
+    #: 槽位碎片文本：槽有图时仅在对应 `*_supplement=true` 时作为补充；
+    #: 槽无图时作为替代（§5.1 文本主句）。image 模式 + 文本但开关关闭 → 400。
+    portrait_text: str = ""
+    costume_text: str = ""
+    pose_text: str = ""
+    #: 跨源补充开关（P4）：图片槽有图时，是否允许把同槽文本追加为「此外需体现」。
+    #: 默认 false；随机整套默认关闭，手动模式按槽显式开启。
+    portrait_supplement: bool = False
+    costume_supplement: bool = False
+    pose_supplement: bool = False
+    #: 修饰层渲染结果（`• 类型：内容` 多行）；始终追加，插在「补充要求」之前
+    modifier_fragments: str = ""
+    #: 真负向（透传 FaceswapRequest.negative_prompt）；实际提交内容由编译层合并
+    negative_prompt: str = ""
+    #: 手动改写（P3）：非空 = 手动模式，直接用该文本作为正向，不再渲染碎片、不校验槽位文本
+    prompt_override: str = ""
     seed: int = 100000
     seed_mode: str = "fixed"
     output_subfolder: str = ""
@@ -746,7 +783,13 @@ def create_reference_recipe(req: RecipeRequest):
     每个槽都允许为空；空槽会在工作流副本上裁掉，提示词编号仍按真实图位书写。
     这里**不**新写图片注入与提交队列：`_collect_sources`、`inject_input_image`、
     任务记录、SSE、画廊归档全部走 `/api/editor/faceswap/batch` 的现成实现。
+
+    `prompt_override` 非空 = P3 手动改写：整段正向由前端编辑后原样带回，不再跑
+    `build_recipe_prompt`，槽位文本字段也不参与校验；图片槽位、裁剪与体态判定不变。
     """
+    # P3 手动改写：前端把编辑后的整段提示词原样带回，非空即手动模式。
+    # 统一 strip 一次，后续 prompt / prompt_raw / payload 都用同一份文本。
+    manual_override = (req.prompt_override or "").strip()
     if req.style not in STYLE_PRESETS:
         raise HTTPException(400, f"不支持的画风：{req.style}")
     if req.body_mode not in BODY_MODES:
@@ -764,6 +807,14 @@ def create_reference_recipe(req: RecipeRequest):
     # 素体模式不穿衣服：同时选了服装（库条目或上传图）就自相矛盾，直接 400
     if req.body_mode == "bare" and (req.costume_id.strip() or req.costume_path.strip()):
         raise HTTPException(400, "素体模式不能同时选择服装")
+    # bare 下服装文本同样属于「不穿衣服却描述衣服」，与服装图一视同仁拒绝。
+    # P3 手动模式下文本字段不参与（前端不发送），因此不再据此 400。
+    if (
+        not manual_override
+        and req.body_mode == "bare"
+        and req.costume_text.strip()
+    ):
+        raise HTTPException(400, "素体模式不能同时选择服装文本")
 
     portrait, portrait_path = _resolve_slot("portrait", req.portrait_id, req.portrait_path, "人像")
     costume, costume_path = _resolve_slot(
@@ -800,10 +851,29 @@ def create_reference_recipe(req: RecipeRequest):
     input_count = len(find_loadimage_nodes(api_wf))
     if total == 0:
         raise HTTPException(400, "请至少选择一个参考图或上传一张参考图")
+    # P2 替代态（方案 §4.4）：*_text 在对应槽无图时作为替代主描述，不再 400。
+    # 文本槽不计入 filled，仍交给 _resolve_trim_plan → _trim_unfilled_slots 裁剪；
+    # 三槽全无图已在上方 total==0 拦住（文本不参与计数）。
     if total > input_count:
         raise HTTPException(
             400, f"该工作流只有 {input_count} 个输入，但提交了 {total} 张",
         )
+
+    # P4（2026-11-06）：图片槽 + 同槽文本默认不再静默补充。
+    # 必须显式开启 *_supplement；否则 400，避免跨源文本覆盖参考图特征。
+    # 手动改写（P3）不渲染槽位文本，因此不参与本校验。
+    if not manual_override:
+        for role, label, text, enabled in (
+            ("portrait", "人像", req.portrait_text, req.portrait_supplement),
+            ("costume", "服装", req.costume_text, req.costume_supplement),
+            ("pose", "姿势", req.pose_text, req.pose_supplement),
+        ):
+            if filled[role] and text.strip() and not enabled:
+                raise HTTPException(
+                    400,
+                    f"{label}槽已选择参考图；文本补充需显式开启 {role}_supplement=true，"
+                    "或把该槽切为文本模式",
+                )
 
     role_nodes = _role_nodes(api_wf)
     role_error = _role_support_error(role_nodes, filled, workflow_path.name)
@@ -815,28 +885,48 @@ def create_reference_recipe(req: RecipeRequest):
     if trim_error:
         raise HTTPException(400, trim_error)
 
-    # 缺服装时的体态语义（2026-11-06 实测）：`costume` 模式但服装槽为空时，提示词里
+    # 缺服装时的体态语义（2026-11-06 实测）：`costume` 模式但「服装槽无图」时，若提示词里
     # 没有任何服装约束，Qwen 系会自由发挥（实测两张连续出裸体）。这里统一按 `bare`
     # （中性素体展示 + 禁止性化措辞）生成提示词；响应回传生效值，前端据此 toast 说明。
-    # `bare` 与服装同时出现仍在上方直接 400，本兜底只在服装槽为空时生效。
+    # P2（C3-1）：服装**文本**也是服装约束，只有「既无服装图、也无服装文本」才自动切 bare，
+    # 否则用户填的文字描述会被素体条款抹掉，等于静默丢需求。
+    # `bare` 与服装（图/文本）同时出现仍在上方直接 400，本兜底只在服装槽为空时生效。
+    # P3 手动模式下槽位文本不参与提示词，因此自动素体只看「服装槽是否有图」。
+    effective_costume_text = "" if manual_override else req.costume_text
     body_mode = req.body_mode
     body_mode_auto = False
-    if body_mode == "costume" and not filled["costume"]:
+    if (
+        body_mode == "costume"
+        and not filled["costume"]
+        and not effective_costume_text.strip()
+    ):
         body_mode = "bare"
         body_mode_auto = True
 
-    # 空槽直接传 None（不再用上传占位包装），否则 faceless 分支永远不会触发
-    prompt = build_recipe_prompt(
-        _slot_entry(portrait, "portrait") if portrait_path else None,
-        _slot_entry(costume, "costume") if costume_path else None,
-        _slot_entry(pose, "pose") if pose_path else None,
-        _slot_entry(extra, "extra") if extra_path else None,
-        style=req.style,
-        prompt_suffix=req.prompt_suffix,
-        index_map=index_map,
-        # 素体模式透传：提示词据此追加中性素体条款（C-REF-BODY-MODE@1）
-        body_mode=body_mode,
-    )
+    # 手动改写（P3）：前端已按分段编辑好整段正向，后端不再渲染碎片。
+    if manual_override:
+        prompt = manual_override
+    else:
+        # 空槽直接传 None（不再用上传占位包装），否则 faceless 分支永远不会触发
+        prompt = build_recipe_prompt(
+            _slot_entry(portrait, "portrait") if portrait_path else None,
+            _slot_entry(costume, "costume") if costume_path else None,
+            _slot_entry(pose, "pose") if pose_path else None,
+            _slot_entry(extra, "extra") if extra_path else None,
+            style=req.style,
+            prompt_suffix=req.prompt_suffix,
+            index_map=index_map,
+            # 素体模式透传：提示词据此追加中性素体条款（C-REF-BODY-MODE@1）
+            body_mode=body_mode,
+            # P2/P4 三槽文本：槽无图 → 替代态（§5.1）；槽有图 + supplement=true
+            # → 补充态（「此外需体现」）。槽有图但开关关闭已在上方 400，不会到这里。
+            portrait_text=req.portrait_text,
+            costume_text=req.costume_text,
+            pose_text=req.pose_text,
+            # 修饰层：始终追加，插在「补充要求」/固定风格段之前
+            modifier_fragments=req.modifier_fragments,
+            negative_prompt=req.negative_prompt,
+        )
 
     # 提交顺序固定 人像 → 服装 → 姿势 → 附加；节点 id 用工作流真实图位（不重排）
     ordered = [
@@ -862,6 +952,10 @@ def create_reference_recipe(req: RecipeRequest):
         # 空槽裁剪只作用在副本上：把裁剪后的 API 工作流随请求传下去，不改磁盘文件
         workflow_content=json.dumps(trimmed_api, ensure_ascii=False) if trimmed else None,
         prompt=prompt,
+        # 负向透传：真实提交由 inject_prompt 统一跑 compile_prompt 合并/清空
+        negative_prompt=req.negative_prompt,
+        # P3 手动改写：跳过 compile_prompt，按原文写入正向/负向
+        skip_compile=bool(manual_override),
         seed=req.seed,
         seed_mode=req.seed_mode,
         #: 尺寸参数原样透传，由 editor 统一校验并按工作流能力做二次防护
@@ -874,6 +968,34 @@ def create_reference_recipe(req: RecipeRequest):
     )
     result = editor_router.faceswap_batch(payload)
 
+    # dry-run 一致性（方案 §11.3）：真实提交时 inject_prompt 会跑 compile_prompt，
+    # 把「不要军姿 / 文字水印」等否定抽成负向并改写正向；预览必须返回同一份结果，
+    # 否则用户看到的和实际跑的不是一份。`prompt_raw` 保留编译前原文供对照。
+    # P3 手动改写不走编译：预览与实际提交都必须是用户编辑后的原文。
+    prompt_raw = prompt
+    response_prompt = prompt
+    response_negative = req.negative_prompt
+    negative_effective: bool | None = None
+    if manual_override:
+        if req.dry_run:
+            # 与 inject_prompt 同源判定，且用裁剪后的工作流（与真实提交内容一致）
+            caps = detect_workflow_caps(trimmed_api)
+            negative_effective = bool(caps.get("negative_effective"))
+            # 负向不生效时实际提交空串，预览同步显示空串
+            response_negative = (
+                req.negative_prompt if negative_effective else ""
+            )
+    elif req.dry_run:
+        # 与 inject_prompt 同源判定，且用裁剪后的工作流（与真实提交内容一致）
+        caps = detect_workflow_caps(trimmed_api)
+        negative_effective = bool(caps.get("negative_effective"))
+        compiled = compile_prompt(
+            prompt, req.negative_prompt, negative_effective=negative_effective,
+        )
+        response_prompt = compiled.positive
+        # inject_prompt 在负向不生效时提交空串，这里同步显示空串（而不是原文）
+        response_negative = compiled.negative if negative_effective else ""
+
     slots = [
         _slot_info("portrait", portrait, portrait_path, "portrait"),
         _slot_info("costume", costume, costume_path, req.costume_library),
@@ -881,15 +1003,42 @@ def create_reference_recipe(req: RecipeRequest):
         _slot_info("extra", extra, extra_path, req.extra_library or ""),
     ]
 
-    return {
+    body = {
         **result,
-        "prompt": prompt,
+        "prompt": response_prompt,
+        #: 编译前正向原文（dry_run 与真实提交共用同一份来源）
+        "prompt_raw": prompt_raw,
+        #: 实际会提交的负向：dry_run 时为「自动抽取 + 用户填写」合并后的结果
+        "negative_prompt": response_negative,
+        #: 仅 dry_run 计算，与 inject_prompt 的 negative_effective 同源；其它情况为 None
+        "negative_effective": negative_effective,
         "style": req.style,
         "workflow_path": str(workflow_path),
         "input_count": input_count,
         #: 实际生效的体态模式；`body_mode_auto=True` 表示「服装槽为空 → 自动素体展示」
         "body_mode": body_mode,
         "body_mode_auto": body_mode_auto,
+        #: 本次实际生效的跨源补充槽；手动改写恒为 false
+        "supplements": {
+            "portrait": bool(
+                not manual_override
+                and filled["portrait"]
+                and req.portrait_text.strip()
+                and req.portrait_supplement
+            ),
+            "costume": bool(
+                not manual_override
+                and filled["costume"]
+                and req.costume_text.strip()
+                and req.costume_supplement
+            ),
+            "pose": bool(
+                not manual_override
+                and filled["pose"]
+                and req.pose_text.strip()
+                and req.pose_supplement
+            ),
+        },
         #: 统一溯源：库条目 / 上传图 / 空槽同一形状。`references` 保留兼容。
         "slots": slots,
         "references": {
@@ -899,3 +1048,7 @@ def create_reference_recipe(req: RecipeRequest):
             "extra": extra["id"] if extra else "",
         },
     }
+    #: 手动改写标记只在该模式下出现，自动模式（P1/P2）响应形状保持不变
+    if manual_override:
+        body["manual_override"] = True
+    return body

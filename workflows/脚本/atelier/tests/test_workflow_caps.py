@@ -4,7 +4,8 @@
 - `linked-image` 模式：Empty*Latent 的 width/height 指向 GetImageSize 时，
   向上回溯到 LoadImage，用图片实际像素作为默认值（文件缺失时用 1024² 占位）；
 - 图生图工作流不再一律关闭画质/方向旋钮：只要独立 latent 的宽高可覆盖就继续判定；
-- Qwen 系（latent 来自文本编码器）必须保持 False/False。
+- Qwen 系（latent 来自文本编码器）：`resolution` 可映射成像素总量档（quality=True），
+  比例仍跟随第一张参考图（orientation=False）。
 """
 from __future__ import annotations
 
@@ -46,13 +47,48 @@ def _linked_image_workflow() -> dict:
     }
 
 
-def test_qwen21_has_no_independent_latent():
-    """Qwen21 的 latent 在文本编码器内部，没有独立 Empty*Latent 节点。"""
+def test_qwen21_encoder_resolution_exposes_quality_only():
+    """Qwen21 的 latent 在文本编码器内部：resolution 映射像素档，比例仍跟随参考图。"""
     workflow = _load_real(QWEN21)
+    info = _latent_info(workflow)
+    assert info is not None
+    assert info["mode"] == "resolution"
+    assert info["base_resolution"] == 1024
+
     caps = detect_workflow_caps(workflow)
-    assert caps["quality"] is False
+    assert caps["quality"] is True
     assert caps["orientation"] is False
+
+    params = detect_workflow_params(workflow)
+    assert params["quality_mode"] == "megapixels"
+    assert params["base_megapixels"] == 1.049
+    assert params["mp_unit"] == "mp"
+    assert params["aspect_ratios"] == []
+    assert params["orientation_mode"] == "none"
+
+
+def test_qwen21_encoder_resolution_injection_scales_linearly():
+    """quality 档按线性倍率写到 TextEncodeQwenImage21.resolution；比例输入被忽略。"""
+    cases = {"0.75x": 768, "1.0x": 1024, "1.25x": 1280, "1.5x": 1536, "2.0x": 2048}
+    for quality, expected in cases.items():
+        workflow = _load_real(QWEN21)
+        inject_prompt(workflow, {
+            "prompt": "测试",
+            "seed": 1,
+            "quality": quality,
+            # 比例在这里无法生效：输出跟随第一张参考图，不能因此报错
+            "aspect_ratio": "16:9",
+            "orientation": "landscape",
+        })
+        assert workflow["8"]["inputs"]["resolution"] == expected
+
+
+def test_qwen21_encoder_resolution_zero_disables_quality():
+    """resolution=0 表示参考图各保持原尺寸，没有稳定基准 → 不暴露画质档。"""
+    workflow = _load_real(QWEN21)
+    workflow["8"]["inputs"]["resolution"] = 0
     assert _latent_info(workflow) is None
+    assert detect_workflow_caps(workflow)["quality"] is False
     assert detect_workflow_params(workflow)["quality_mode"] == "none"
 
 

@@ -193,6 +193,42 @@ describe('StudioMatrix 生成清单', () => {
     expect(wrapper.findAll('[data-testid="studio-matrix-row"]')).toHaveLength(0)
   })
 
+  it('P2 文本槽：组头显示「文本 · 类型」+ 前 12 字，不显示空图占位', () => {
+    const build = (costumeText: string) =>
+      buildBatchGroups({
+        portrait: [portrait('p1', '人像A')],
+        costume: [costume('c1', '服装B')],
+        pose: [pose('s1', '姿势C')],
+        workflows: [],
+        qualities: [],
+        ratios: [],
+        qualityEnabled: false,
+        orientationEnabled: false,
+        baseSeed: 100000,
+        slotModes: { portrait: 'image', costume: 'text', pose: 'image' },
+        slotTexts: { portrait: '', costume: costumeText, pose: '' },
+      })
+
+    const groups = [...build('白色衬衫配黑色西裤和黑色皮鞋'), ...build('黑色外套')]
+    const wrapper = mountMatrix({
+      groups,
+      total: groups.length,
+      workflows: [],
+      slotCounts: { portrait: 1, costume: 1, pose: 1 },
+      activeSlotCount: 2,
+    })
+
+    // 不同文本不能碰撞成同一组（组键包含文本内容）
+    expect(wrapper.findAll('[data-testid="studio-matrix-group"]')).toHaveLength(2)
+
+    const chips = wrapper.findAll('[data-testid="studio-matrix-thumb-costume"]')
+    expect(chips.length).toBeGreaterThanOrEqual(2)
+    expect(chips[0]!.text()).toContain('文本 · 人物服饰')
+    expect(chips[0]!.text()).toContain('白色衬衫配黑色西裤和黑色…')
+    // text 槽不渲染「空」占位
+    expect(chips.every((chip) => !chip.find('.matrix__thumb-empty').exists())).toBe(true)
+  })
+
   it('删掉 1 张人像导致原首组键失效时，自动展开新的首组而不是整块收起', async () => {
     const build = (portraits: PortraitItem[]) =>
       buildBatchGroups({

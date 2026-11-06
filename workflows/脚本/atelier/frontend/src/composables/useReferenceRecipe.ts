@@ -31,6 +31,26 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
+import {
+  NO_IMAGE_SLOT_HINT,
+  RECIPE_SLOT_KEYS,
+  compileActiveSlotTexts,
+  compileRecipeTextFragments,
+  createImageSlotModes,
+  describeAlternateModeConflicts,
+  hasStyleFragment,
+  isSlotTextActive,
+  resolveSlotModes,
+  resolveSupplementFlags,
+} from './recipeTextFragments'
+import type {
+  RecipeSlotKey,
+  RecipeSlotModes,
+  RecipeSlotTexts,
+  RecipeSupplementFlags,
+  RecipeTextFragments,
+  SelectedFragment,
+} from './recipeTextFragments'
 import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 import {
   useWorkflowCaps,
@@ -124,6 +144,9 @@ export type RecipeBodyMode = 'costume' | 'bare'
 // 类型
 // ---------------------------------------------------------------------------
 
+/** 文本补充碎片的契约类型统一从这里导出（实现见 `recipeTextFragments`）。 */
+export type { RecipeTextFragments, SelectedFragment }
+
 /** 提交给后端的配方请求（字段名与后端 `RecipeRequest` 逐字一致）。 */
 export interface RecipeSubmitRequest {
   portrait_id?: string
@@ -146,9 +169,39 @@ export interface RecipeSubmitRequest {
   /** 体态模式；`bare` 时后端不接受服装（提交体不会带 `costume_id`）。 */
   body_mode?: RecipeBodyMode
   style: RecipeStyle
-  prompt_suffix: string
+  /** 追加要求；手动改写（`prompt_override`）模式不发送。 */
+  prompt_suffix?: string
   seed: number
   seed_mode: 'fixed' | 'random'
+  /** 人像补充文本（人物面部 + 人物身材）；空不发送。 */
+  portrait_text?: string
+  /** 服装补充文本（人物服饰）；空不发送。 */
+  costume_text?: string
+  /** 姿势补充文本（姿态动作）；空不发送。 */
+  pose_text?: string
+  /**
+   * P4 跨源补充开关：image 模式 + 文本时，后端只有看到对应 true 才追加
+   * 「此外需体现」；text 模式不发送该字段（文本是替代）。
+   */
+  portrait_supplement?: boolean
+  costume_supplement?: boolean
+  pose_supplement?: boolean
+  /** 修饰层渲染结果（视角 / 场景 / 光影 / 画风，多行 `• 类型：内容`）；空不发送。 */
+  modifier_fragments?: string
+  /**
+   * 真负向（后端透传 `FaceswapRequest.negative_prompt`）；空不发送。
+   *
+   * 手动改写模式（`prompt_override` 非空）下这是**唯一**负向来源：
+   * 后端不再自动抽取，前端也不发送任何三槽文本。
+   */
+  negative_prompt?: string
+  /**
+   * P3 手动改写：非空 = 按原文提交（方案 §14.3）。
+   *
+   * 前端只在「手动改写」模式发送；后端据此推断 `skip_compile`（前端不传该字段），
+   * 因此手动模式**不发送** `*_text` / `modifier_fragments` / `prompt_suffix`。
+   */
+  prompt_override?: string
 }
 
 /** `POST /api/reference/recipes` 响应（只声明前端用得到的字段）。 */
@@ -167,8 +220,19 @@ export interface RecipeSubmitResponse {
 export interface RecipePreviewResponse {
   success?: boolean
   dry_run?: boolean
-  /** 后端按三槽自动组合出的提示词。 */
+  /** 后端按三槽自动组合出的提示词（P1 起为 `compile_prompt` 后的最终正向）。 */
   prompt?: string
+  /** 编译后的最终负向（自动抽取 + 用户手填）。 */
+  negative_prompt?: string
+  /**
+   * 当前工作流负向是否生效。
+   *
+   * `false` 表示后端判定该工作流不消费负向（例如 cfg=1），实际提交为空；
+   * `null` / 缺省表示后端未给出判定（旧后端），前端不臆测。
+   */
+  negative_effective?: boolean | null
+  /** 编译前的原始提示词（排障 / 对照用，可缺省）。 */
+  prompt_raw?: string
 }
 
 /** `POST /api/reference/trim-check` 请求：只报「哪几个槽有图」，不传具体素材。 */
@@ -296,9 +360,37 @@ export interface RecipeRequestOptions {
   bodyMode?: RecipeBodyMode
   seed?: number
   seedMode?: 'fixed' | 'random'
+  /** 八类文本补充碎片（方案 §4.1）；缺省 = 不发送任何 `*_text` 字段。 */
+  textFragments?: RecipeTextFragments
+  /**
+   * 三槽模式（P2 替代态，方案 §4.4）。
+   *
+   * - `image`：发送该槽 `*_id` / `*_path`（有碎片时文本作为补充一并发送）；
+   * - `text`：**不发送**图片字段，只发送该槽 `*_text`；
+   * - `empty`：两者都不发送。
+   *
+   * 缺省时按「该槽是否有条目」回退为 image / empty，保持 P1 调用方行为不变。
+   */
+  slotModes?: RecipeSlotModes
+  /**
+   * P4 跨源补充开关；缺省全关。
+   *
+   * 只有 `mode === 'image'` 且该槽开关为 true 时，文本才随图片发送并带
+   * `*_supplement=true`；text 模式仍只走替代，empty 模式两者都不发。
+   */
+  supplementFlags?: RecipeSupplementFlags
+  /** 用户手填负向；空串不发送。 */
+  negativePrompt?: string
+  /**
+   * P3 手动改写：非空 = 按原文提交（方案 §14.3）。
+   *
+   * 设置后**不再发送**三槽文本 / 修饰层 / 追加要求，只发 `prompt_override`；
+   * 图片槽、工作流、种子、`body_mode`、负向仍照常发送。
+   */
+  promptOverride?: string
 }
 
-/** 批量输入：三槽多选 + 工作流多选 + 尺寸档位多选。 */
+/** 批量输入：三槽多选 + 工作流多选 + 尺寸档位多选 + 槽位模式 / 文本。 */
 export interface RecipeBatchInput {
   portrait: readonly PortraitItem[]
   costume: readonly CostumeItem[]
@@ -315,6 +407,10 @@ export interface RecipeBatchInput {
   qualityEnabled: boolean
   orientationEnabled: boolean
   baseSeed: number
+  /** 三槽模式；缺省 = 全 image（旧调用方行为不变）。 */
+  slotModes?: RecipeSlotModes
+  /** 三槽编译后的文本（供矩阵组键 / 组标签使用）；缺省 = 全空。 */
+  slotTexts?: RecipeSlotTexts
 }
 
 /** 一个笛卡尔积组合（= 一次 POST / 一个独立 job）。 */
@@ -331,6 +427,15 @@ export interface RecipeBatchGroup {
   /** 空串表示本轮不发送 orientation；否则由比例推导。 */
   orientation: 'portrait' | 'landscape' | ''
   seed: number
+  /**
+   * 本组的槽位模式（P2）。
+   *
+   * 文本 / 空槽在组合阶段已折叠为 null，但要保留模式供提交体判断「发图还是发文本」。
+   * 旧批次对象可能没有该字段，读取方需回退为全 image。
+   */
+  slotModes?: RecipeSlotModes
+  /** 本组的三槽编译文本；用于矩阵组键与组标签。 */
+  slotTexts?: RecipeSlotTexts
 }
 
 /** 提交前降级确认框数据。 */
@@ -399,30 +504,58 @@ export function buildRecipeRequest(
   slots: RecipeSlots,
   options: RecipeRequestOptions,
 ): RecipeSubmitRequest {
-  const bodyMode: RecipeBodyMode = options.bodyMode === 'bare' ? 'bare' : 'costume'
+  // 三槽模式：缺省按「是否有条目」回退，P1 调用方与旧单测行为不变。
+  const modes: RecipeSlotModes = options.slotModes
+    ? resolveSlotModes(options.slotModes)
+    : {
+        portrait: slots.portrait ? 'image' : 'empty',
+        costume: slots.costume ? 'image' : 'empty',
+        pose: slots.pose ? 'image' : 'empty',
+      }
+  const imageMode = (slot: RecipeSlotKey): boolean => modes[slot] === 'image'
+  const supplements = resolveSupplementFlags(options.supplementFlags)
+
+  // 服装槽用文本替代时必须按服装模式提交：body_mode=bare 会让后端写「不穿任何服装」，
+  // 与 costume_text 直接冲突（方案 C3-1 的前端对齐）。
+  const requestedBare = options.bodyMode === 'bare'
+  const bodyMode: RecipeBodyMode =
+    requestedBare && modes.costume !== 'text' ? 'bare' : 'costume'
+  // 画风技术碎片与画风预设互斥（方案 §5.4）：选了碎片就强制 style='none'，
+  // 页面同时禁用下拉；后端也只渲染碎片、不追加固定风格段。
+  const style: RecipeStyle = hasStyleFragment(options.textFragments)
+    ? 'none'
+    : normalizeRecipeStyle(options.style)
+  // P3 手动改写（方案 §14.3）：非空 = 原文提交，不再二次编译。
+  const promptOverride = options.promptOverride?.trim() ?? ''
   const request: RecipeSubmitRequest = {
     costume_library: costumeLibraryOf(slots.costume),
     body_mode: bodyMode,
-    style: normalizeRecipeStyle(options.style),
-    prompt_suffix: options.promptSuffix.trim(),
+    style,
     seed: options.seed ?? DEFAULT_RECIPE_SEED,
     seed_mode: options.seedMode ?? 'fixed',
   }
+  if (promptOverride) {
+    request.prompt_override = promptOverride
+  } else {
+    // 追加要求（prompt_suffix）只参与自动编译；手动模式按原文提交，不再发它。
+    request.prompt_suffix = options.promptSuffix.trim()
+  }
 
   // 本地上传图（`upload:` 伪条目）发 `*_path`，库条目发 `*_id`：后端二选一。
+  // 只有 image 模式才发送图片字段；text 模式即使还有残留图片也不发送。
   const portraitUpload = uploadPathOf(slots.portrait)
-  if (slots.portrait) {
+  if (slots.portrait && imageMode('portrait')) {
     if (portraitUpload) request.portrait_path = portraitUpload
     else request.portrait_id = slots.portrait.id
   }
   // 素体模式后端明确拒绝「同时带服装」：这里做最后一道防御，防止槽位清空竞态。
-  if (slots.costume && bodyMode !== 'bare') {
+  if (slots.costume && bodyMode !== 'bare' && imageMode('costume')) {
     const costumeUpload = uploadPathOf(slots.costume)
     if (costumeUpload) request.costume_path = costumeUpload
     else request.costume_id = slots.costume.id
   }
   const poseUpload = uploadPathOf(slots.pose)
-  if (slots.pose) {
+  if (slots.pose && imageMode('pose')) {
     if (poseUpload) request.pose_path = poseUpload
     else request.pose_id = slots.pose.id
   }
@@ -441,6 +574,38 @@ export function buildRecipeRequest(
 
   if (options.orientation) request.orientation = options.orientation
 
+  // 三槽文本按「本次真正生效」口径发送（P4）：
+  // - text 模式 → 替代（发 *_text，不发 flag）；
+  // - image 模式 + supplement=true → 补充（发 *_text + *_supplement=true）；
+  // - image 模式 + supplement=false / empty → 一律不发。
+  // P3 手动改写：三槽文本 / 修饰层一律不发送 —— 用户改的是编译后的最终原文，
+  // 再发碎片会让后端二次改写；负向只保留用户填写内容。
+  if (!promptOverride) {
+    const compiled = compileRecipeTextFragments(options.textFragments)
+    if (
+      compiled.portraitText &&
+      isSlotTextActive('portrait', modes.portrait, supplements)
+    ) {
+      request.portrait_text = compiled.portraitText
+      if (modes.portrait === 'image') request.portrait_supplement = true
+    }
+    if (
+      compiled.costumeText &&
+      isSlotTextActive('costume', modes.costume, supplements)
+    ) {
+      request.costume_text = compiled.costumeText
+      if (modes.costume === 'image') request.costume_supplement = true
+    }
+    if (compiled.poseText && isSlotTextActive('pose', modes.pose, supplements)) {
+      request.pose_text = compiled.poseText
+      if (modes.pose === 'image') request.pose_supplement = true
+    }
+    if (compiled.modifierFragments) request.modifier_fragments = compiled.modifierFragments
+  }
+
+  const negativePrompt = options.negativePrompt?.trim()
+  if (negativePrompt) request.negative_prompt = negativePrompt
+
   return request
 }
 
@@ -458,14 +623,27 @@ export function costumeDimensionForBodyMode(
 }
 
 /**
- * 槽位组合数：三个维度各自「空 → 1 种，非空 → 条目数种」。
+ * 槽位组合数：三个维度各自「空 / 文本 → 1 种，image 有图 → 条目数种」。
  *
- * 三槽都为空时返回 0 —— 这不是「1 种空组合」，而是后端会拒绝的 M==0。
+ * 三槽都没有可提交内容（image 无图且非 text）时返回 0 —— 这不是「1 种空组合」，
+ * 而是后端会拒绝的 M==0。
+ *
+ * `slotModes` 缺省 = 全 image（旧口径）；text 模式即使 items 非空也只算 1 维。
  */
-export function countSlotCombinations(counts: RecipeSlotCounts): number {
-  const dims = [counts.portrait, counts.costume, counts.pose]
-  if (dims.every((value) => value <= 0)) return 0
-  return dims.reduce((total, value) => total * Math.max(1, value), 1)
+export function countSlotCombinations(
+  counts: RecipeSlotCounts,
+  slotModes: RecipeSlotModes = createImageSlotModes(),
+): number {
+  const modes = resolveSlotModes(slotModes)
+  const hasContent = (['portrait', 'costume', 'pose'] as const).some((slot) =>
+    modes[slot] === 'text' ? true : modes[slot] === 'image' && counts[slot] > 0,
+  )
+  if (!hasContent) return 0
+
+  return (['portrait', 'costume', 'pose'] as const).reduce((total, slot) => {
+    const imageCount = modes[slot] === 'image' ? counts[slot] : 0
+    return total * Math.max(1, imageCount)
+  }, 1)
 }
 
 /**
@@ -479,8 +657,9 @@ export function countBatchTotal(
   qualityCount: number,
   ratioCount: number,
   workflowCount = 1,
+  slotModes: RecipeSlotModes = createImageSlotModes(),
 ): number {
-  const combos = countSlotCombinations(counts)
+  const combos = countSlotCombinations(counts, slotModes)
   if (combos === 0) return 0
   return (
     combos *
@@ -511,15 +690,25 @@ export function orientationForRatio(ratio: string): 'portrait' | 'landscape' {
   return width > height ? 'landscape' : 'portrait'
 }
 
-/** 三槽多选 → 单值槽位组合（空槽维度用 null 占位，计数为 1）。 */
+/**
+ * 三槽多选 → 单值槽位组合（空槽 / 文本槽维度用 null 占位，计数为 1）。
+ *
+ * `slotModes` 缺省 = 全 image（旧口径）。text / empty 模式的槽即使还有残留图片
+ * 也折叠成 null：text 模式不提交图片（方案 §4.4），残留图片只用于「改回图片」。
+ */
 export function buildSlotCombinations(
   portrait: readonly PortraitItem[],
   costume: readonly CostumeItem[],
   pose: readonly PoseItem[],
+  slotModes: RecipeSlotModes = createImageSlotModes(),
 ): RecipeSlots[] {
-  const portraitDim: (PortraitItem | null)[] = portrait.length ? [...portrait] : [null]
-  const costumeDim: (CostumeItem | null)[] = costume.length ? [...costume] : [null]
-  const poseDim: (PoseItem | null)[] = pose.length ? [...pose] : [null]
+  const modes = resolveSlotModes(slotModes)
+  const imageDim = <T>(items: readonly T[], slot: RecipeSlotKey): (T | null)[] =>
+    modes[slot] === 'image' && items.length ? [...items] : [null]
+
+  const portraitDim = imageDim(portrait, 'portrait')
+  const costumeDim = imageDim(costume, 'costume')
+  const poseDim = imageDim(pose, 'pose')
 
   const combos: RecipeSlots[] = []
   for (const portraitItem of portraitDim) {
@@ -538,9 +727,22 @@ export function buildSlotCombinations(
  * 顺序固定：槽位组合 → 工作流 → 画质 → 比例；第 i 组种子 = baseSeed + i。
  * 工作流维度为空时折叠为 1 条空路径（后端默认工作流），绝不乘成 0；
  * caps 不支持时尺寸维度折叠为「不发参数」（空串），计数仍为 1。
+ *
+ * P2：每组带上槽位模式与三槽文本，供提交体 / 矩阵组键使用（同一批内共享一份）。
  */
 export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
-  const slotCombos = buildSlotCombinations(input.portrait, input.costume, input.pose)
+  const slotModes = resolveSlotModes(input.slotModes)
+  const slotTexts: RecipeSlotTexts = {
+    portrait: input.slotTexts?.portrait ?? '',
+    costume: input.slotTexts?.costume ?? '',
+    pose: input.slotTexts?.pose ?? '',
+  }
+  const slotCombos = buildSlotCombinations(
+    input.portrait,
+    input.costume,
+    input.pose,
+    slotModes,
+  )
   const workflowDim = input.workflows.length ? [...input.workflows] : ['']
   const qualityDim =
     input.qualityEnabled && input.qualities.length ? [...input.qualities] : ['']
@@ -561,6 +763,8 @@ export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
             aspectRatio: ratio,
             orientation: ratio ? orientationForRatio(ratio) : '',
             seed: baseSeed + index,
+            slotModes: { ...slotModes },
+            slotTexts: { ...slotTexts },
           })
           index += 1
         }
@@ -1762,10 +1966,14 @@ export function useReferenceRecipe() {
    * 后端 `create_reference_recipe` 用同一条规则兜底（2026-11-06 实测：缺服装且不声明
    * 素体时，Qwen 系会自由发挥出裸体）。组合裁剪、预览与提交体都用这个生效值，
    * 保证「预览给出的提示词 = 真正提交的提示词」。
+   *
+   * P2：服装槽用文本替代时**不能**判素体（否则后端写「不穿任何服装」），
+   * 所以 text 模式直接返回 costume（方案 C3-1 的前端对齐）。
    */
-  const effectiveBodyMode = computed<RecipeBodyMode>(() =>
-    bodyMode.value === 'bare' || draft.costumeCount.value === 0 ? 'bare' : 'costume',
-  )
+  const effectiveBodyMode = computed<RecipeBodyMode>(() => {
+    if (draft.slotModes.value.costume === 'text') return 'costume'
+    return bodyMode.value === 'bare' || draft.costumeCount.value === 0 ? 'bare' : 'costume'
+  })
 
   const slotCounts = computed<RecipeSlotCounts>(() => ({
     portrait: draft.portraitCount.value,
@@ -1773,12 +1981,18 @@ export function useReferenceRecipe() {
     pose: draft.poseCount.value,
   }))
 
+  /** 某槽本次提交是否真的带图（text / empty 模式即使有残留条目也不算）。 */
+  function slotHasImage(slot: RecipeSlotKey): boolean {
+    if (draft.slotModes.value[slot] !== 'image') return false
+    return slotCounts.value[slot] > 0
+  }
+
   /** 非空槽位名（含第 4 张）：后端按「非空槽数 M」校验工作流输入数。 */
   const filledSlotNames = computed<string[]>(() => {
     const names: string[] = []
-    if (draft.portraitCount.value > 0) names.push('人像')
-    if (draft.costumeCount.value > 0) names.push('服装')
-    if (draft.poseCount.value > 0) names.push('姿势')
+    if (slotHasImage('portrait')) names.push('人像')
+    if (slotHasImage('costume')) names.push('服装')
+    if (slotHasImage('pose')) names.push('姿势')
     if (extraPath.value.trim()) names.push('第 4 张')
     return names
   })
@@ -1787,9 +2001,9 @@ export function useReferenceRecipe() {
   /** 非空槽位的**业务角色**（工作流 `slots` 适用性判定用；空槽不参与）。 */
   const filledSlotRoles = computed<StudioWorkflowSlot[]>(() => {
     const roles: StudioWorkflowSlot[] = []
-    if (draft.portraitCount.value > 0) roles.push('portrait')
-    if (draft.costumeCount.value > 0) roles.push('costume')
-    if (draft.poseCount.value > 0) roles.push('pose')
+    if (slotHasImage('portrait')) roles.push('portrait')
+    if (slotHasImage('costume')) roles.push('costume')
+    if (slotHasImage('pose')) roles.push('pose')
     if (extraPath.value.trim()) roles.push('extra')
     return roles
   })
@@ -1814,6 +2028,7 @@ export function useReferenceRecipe() {
       qualityDimension.value,
       ratioDimension.value,
       workflowDimension.value,
+      draft.slotModes.value,
     ),
   )
   const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
@@ -1821,7 +2036,7 @@ export function useReferenceRecipe() {
     batchOverLimit.value ? describeBatchLimit(batchTotal.value) : '',
   )
 
-  /** Qwen 系（尺寸跟随参考图）：caps 既不支持画质也不支持横竖。 */
+  /** 尺寸和比例都不可选（编辑类模型全程跟随参考图）。Qwen21 现在有像素档，只剩比例跟随。 */
   const followsReferenceSize = computed(
     () => !caps.value.quality && !caps.value.orientation,
   )
@@ -1899,7 +2114,8 @@ export function useReferenceRecipe() {
       !submitting.value &&
       !workflowsLoading.value &&
       effectiveWorkflows.value.length > 0 &&
-      activeSlotCount.value > 0 &&
+      // P2：text 模式槽也会产生组合（batchTotal > 0），不要求必须有图片槽；
+      // 「至少 1 张图 / 文本碎片为空」由 submit() 统一拦截并给出文案。
       batchTotal.value > 0 &&
       !batchOverLimit.value,
   )
@@ -1910,8 +2126,42 @@ export function useReferenceRecipe() {
 
   /** 后端组合出的提示词；空串表示尚未拿到有效预览。 */
   const previewPrompt = ref('')
+  /**
+   * P3 手动改写（方案 §14）。
+   *
+   * - `null`：自动模式，提示词由碎片 + 后端编译生成；
+   * - 字符串：用户手动改写后的最终原文，提交时作为 `prompt_override` 发送，
+   *   后端据此跳过二次编译（`skip_compile` 由后端推断，前端不传）。
+   */
+  const promptOverride = ref<string | null>(null)
+
+  /** 设置手动改写原文；空白字符串按「未改写」处理（回到自动模式）。 */
+  function setPromptOverride(value: string | null): void {
+    const text = typeof value === 'string' ? value : ''
+    promptOverride.value = text.trim() ? value : null
+  }
+  /**
+   * 编译后的最终负向（dry-run 返回）。
+   *
+   * §11.3：预览必须显示「最终正向 + 最终负向」，否则用户看到的不是实际提交内容。
+   * 空串表示后端明确返回空负向，或尚未拿到有效预览。
+   */
+  const previewNegativePrompt = ref('')
+  /**
+   * 当前工作流负向是否生效。
+   *
+   * `false`（后端明确判定不生效）时实际提交为空，页面要如实说明；
+   * `null` 表示后端未给出该字段（旧后端），前端不臆测生效与否。
+   */
+  const previewNegativeEffective = ref<boolean | null>(null)
   const previewError = ref('')
   const previewLoading = ref(false)
+
+  /** 清空「最终负向」两条状态；必须与正向预览同时清，避免旧值留在界面上。 */
+  function clearPreviewNegative(): void {
+    previewNegativePrompt.value = ''
+    previewNegativeEffective.value = null
+  }
 
   /** 防抖定时器与请求序号：新请求会丢弃旧响应，避免快速切换槽位时串轮。 */
   let previewTimer: ReturnType<typeof setTimeout> | null = null
@@ -1940,6 +2190,14 @@ export function useReferenceRecipe() {
         bodyMode: effectiveBodyMode.value,
         seed: baseSeed.value,
         seedMode: 'fixed',
+        textFragments: draft.textFragments.value,
+        // P2：预览与提交使用同一份槽位模式（text 槽不带图，只带文本）。
+        slotModes: draft.slotModes.value,
+        // P4：image 模式 + 文本只有显式开关才作为补充发送。
+        supplementFlags: draft.supplementFlags.value,
+        negativePrompt: draft.negativePrompt.value,
+        // P3：手动模式下 dry-run 也按原文请求（与正式提交同一构造器）。
+        promptOverride: promptOverride.value ?? '',
       },
     )
   }
@@ -1964,12 +2222,20 @@ export function useReferenceRecipe() {
 
   /** 立即刷新预览（按请求序号丢弃过期响应）；失败只写 `previewError`，不影响提交状态机。 */
   async function refreshPreviewPrompt(): Promise<void> {
+    // P3 手动改写：预览文本就是用户原文，发 dry-run 只会拿回同一份内容，
+    // 但仍可能覆盖正在编辑的 `previewPrompt`；直接 return 由 clear 时再刷新。
+    if (promptOverride.value !== null) {
+      previewLoading.value = false
+      return
+    }
+
     const blocked = previewWorkflowSkipReason.value
     if (blocked) {
       // 前置校验命中：不发请求，直接展示现象 / 原因 / 下一步。
       previewRequestSeq += 1
       previewTimer = null
       previewPrompt.value = ''
+      clearPreviewNegative()
       previewError.value = blocked
       previewLoading.value = false
       return
@@ -1983,6 +2249,11 @@ export function useReferenceRecipe() {
       const response = await previewRecipePrompt(buildPreviewRequest())
       if (seq !== previewRequestSeq) return
       previewPrompt.value = typeof response.prompt === 'string' ? response.prompt : ''
+      // 最终负向与正向同批返回：缺字段按空（旧后端不返回时不显示错误的旧值）。
+      previewNegativePrompt.value =
+        typeof response.negative_prompt === 'string' ? response.negative_prompt : ''
+      previewNegativeEffective.value =
+        typeof response.negative_effective === 'boolean' ? response.negative_effective : null
       if (!previewPrompt.value) {
         previewError.value =
           '提示词预览为空。原因：后端未返回 prompt 字段。下一步：点击「重试」再次请求，仍为空请检查工作流是否支持提示词。'
@@ -1990,10 +2261,24 @@ export function useReferenceRecipe() {
     } catch (cause) {
       if (seq !== previewRequestSeq) return
       previewPrompt.value = ''
+      clearPreviewNegative()
       previewError.value = describePreviewFailure(cause)
     } finally {
       if (seq === previewRequestSeq) previewLoading.value = false
     }
+  }
+
+  /**
+   * 清空手动改写，回到碎片驱动的自动模式。
+   *
+   * 清空后必须主动刷新一次预览：手动期间 `refreshPreviewPrompt` 是空转的，
+   * 不刷新会一直显示进入手动模式前的旧文本。
+   */
+  function clearPromptOverride(): void {
+    if (promptOverride.value === null) return
+    promptOverride.value = null
+    previewError.value = ''
+    void refreshPreviewPrompt()
   }
 
   /**
@@ -2009,6 +2294,7 @@ export function useReferenceRecipe() {
       previewTimer = null
       previewRequestSeq += 1
       previewPrompt.value = ''
+      clearPreviewNegative()
       previewError.value = ''
       previewLoading.value = false
       return
@@ -2032,6 +2318,12 @@ export function useReferenceRecipe() {
       previewWorkflow,
       bodyMode,
       baseSeed,
+      // 文本补充与负向也进提交体，预览必须跟着刷新（否则预览 ≠ 真实提交）。
+      () => draft.textFragments.value,
+      () => draft.negativePrompt.value,
+      // P2/P4：模式与补充开关决定文本是否发送，切换后必须刷新预览。
+      () => draft.slotModes.value,
+      () => draft.supplementFlags.value,
     ],
     () => schedulePreviewRefresh(),
     { immediate: true },
@@ -2318,6 +2610,15 @@ export function useReferenceRecipe() {
           bodyMode: effectiveBodyMode.value,
           seed: group.seed,
           seedMode: 'fixed',
+          // 八类补充文本 / 负向：每组提示词都带同一份（不参与笛卡尔积）。
+          textFragments: draft.textFragments.value,
+          // 每组带自己的模式（与预览清单一致）：text 槽不发图片字段。
+          slotModes: group.slotModes ?? draft.slotModes.value,
+          // P4：补充开关是全局选择，不参与笛卡尔积。
+          supplementFlags: draft.supplementFlags.value,
+          negativePrompt: draft.negativePrompt.value,
+          // P3 手动改写：非空时只发原文，三槽文本 / 修饰 / 后缀由构造器统一跳过。
+          promptOverride: promptOverride.value ?? '',
         })
         try {
           const response = await submitRecipe(request)
@@ -2509,6 +2810,14 @@ export function useReferenceRecipe() {
       qualityEnabled: caps.value.quality,
       orientationEnabled: caps.value.orientation,
       baseSeed: baseSeed.value,
+      // P2：模式与文本一起进入组合，提交体按模式只发图片或文本。
+      slotModes: draft.slotModes.value,
+      // P4：矩阵组键只统计真正生效的文本（image + 开关关闭的文本不参与）。
+      slotTexts: compileActiveSlotTexts(
+        draft.textFragments.value,
+        draft.slotModes.value,
+        draft.supplementFlags.value,
+      ),
     })
   }
 
@@ -2580,12 +2889,60 @@ export function useReferenceRecipe() {
       )
     }
 
-    if (activeSlotCount.value === 0) {
-      return rejectBeforeSubmit(
-        '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图' +
-          (supportsExtraSlot.value ? '，或上传第 4 张后再提交。' : '后再提交。'),
+    // P3 手动改写（方案 §14.2）：原文提交时后端不再二次编译，
+    // P2 的槽位文本校验（text 模式碎片 / 素体+服装 / 双人姿势）没有意义，全部跳过；
+    // 但仍必须至少 1 张参考图 —— 手动模式只替换「提示词」，不替换图片输入。
+    if (promptOverride.value !== null) {
+      // 空白的「手动改写」不能静默回落到自动生成：后端会把空 override 当自动模式，
+      // 用户看到的是手动徽标、实际跑的却是碎片提示词。
+      if (!promptOverride.value.trim()) {
+        return rejectBeforeSubmit(
+          '无法提交。原因：手动改写内容为空。下一步：填写提示词后重试，或点「恢复自动生成」。',
+        )
+      }
+      const imageCounts: Record<RecipeSlotKey, number> = {
+        portrait: draft.portraitCount.value,
+        costume: draft.costumeCount.value,
+        pose: draft.poseCount.value,
+      }
+      const hasImageSlot = RECIPE_SLOT_KEYS.some(
+        (slot) => draft.slotModes.value[slot] === 'image' && imageCounts[slot] > 0,
       )
+      if (!hasImageSlot && !extraPath.value.trim()) {
+        return rejectBeforeSubmit(
+          `无法提交。原因：${NO_IMAGE_SLOT_HINT}。下一步：选择至少 1 张参考图后重试。`,
+        )
+      }
+    } else {
+      // P2 替代态校验（方案 §4.4）：
+      // - 至少 1 个 image 模式槽有图（文本不计入参考图）；
+      // - text 模式必须有对应类碎片；
+      // - 素体展示 + 服装文本；
+      // - 姿势文本 + 双人姿势（当前 / 上次选择）。
+      // P1 的「文本非空但槽无图」不再阻止：无图 + 文本正是替代态的合法用法。
+      const modeConflict = describeAlternateModeConflicts({
+        modes: draft.slotModes.value,
+        fragments: draft.textFragments.value,
+        imageCounts: {
+          portrait: draft.portraitCount.value,
+          costume: draft.costumeCount.value,
+          pose: draft.poseCount.value,
+        },
+        extraFilled: Boolean(extraPath.value.trim()),
+        bodyMode: bodyMode.value,
+        // 批量多选时只要任一姿势是 pair* 就阻止：文本替代无法表达双人语义。
+        poseId:
+          draft.pose.value.find((entry) => entry.item.id.startsWith('pair'))?.item.id ??
+          draft.pose.value[0]?.item.id ??
+          draft.lastPoseId.value,
+      })
+      if (modeConflict) {
+        return rejectBeforeSubmit(
+          `无法提交。原因：${modeConflict}。下一步：调整槽位模式或文本补充后重试。`,
+        )
+      }
     }
+
 
     if (batchOverLimit.value) {
       return rejectBeforeSubmit(
@@ -2685,6 +3042,12 @@ export function useReferenceRecipe() {
     draft.costume.value = [...costumes.values()]
     draft.pose.value = [...poses.values()].map((item) => ({ item, useDepth: false }))
 
+    // P2：槽位回填后再恢复模式（顺序不能反：先设槽位会触发 empty → image）。
+    const firstGroup = batch.groups[0]
+    if (firstGroup?.slotModes) {
+      draft.slotModes.value = { ...firstGroup.slotModes }
+    }
+
     const workflows = [
       ...new Set(batch.groups.map((group) => group.workflow).filter((path) => !!path)),
     ]
@@ -2777,11 +3140,19 @@ export function useReferenceRecipe() {
     clearExtra,
     // 提示词只读预览（dry_run，与正式提交完全独立）
     previewPrompt,
+    /** 编译后的最终负向（§11.3：预览 = 最终正向 + 最终负向）。 */
+    previewNegativePrompt,
+    /** 负向是否在当前工作流生效；null = 后端未返回该字段。 */
+    previewNegativeEffective,
     previewError,
     previewLoading,
     refreshPreviewPrompt,
     previewWorkflow,
     previewWorkflowSkipReason,
+    // P3 手动改写：null = 自动模式；字符串 = 用户原文（提交时作为 prompt_override）
+    promptOverride,
+    setPromptOverride,
+    clearPromptOverride,
     // 降级确认
     workflowDowngrade,
     confirmWorkflowDowngrade,

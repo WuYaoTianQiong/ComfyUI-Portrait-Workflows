@@ -21,6 +21,13 @@ import { defineComponent, h, reactive } from 'vue'
 import type { CostumeItem, PoseItem, PortraitItem } from '@/api/reference'
 
 import {
+  NO_IMAGE_SLOT_HINT,
+  POSE_TEXT_PAIR_CONFLICT_HINT,
+  TEXT_MODE_FRAGMENT_REQUIRED_HINT,
+  createEmptyRecipeTextFragments,
+  describeAlternateModeConflicts,
+} from './recipeTextFragments'
+import {
   DEFAULT_RECIPE_SEED,
   MAX_CONSECUTIVE_POLL_ERRORS,
   RecipeSubmitError,
@@ -58,6 +65,7 @@ import type {
   RecipeBatchGroup,
   RecipeJobSnapshot,
   RecipeSubmitRequest,
+  RecipeTextFragments,
   StudioWorkflowOption,
 } from './useReferenceRecipe'
 
@@ -235,6 +243,347 @@ describe('buildRecipeRequest', () => {
       { style: 'realistic', promptSuffix: '', extraPath: '   ' },
     )
     expect('extra_path' in blank).toBe(false)
+  })
+
+  it('八类碎片按归属映射到 4 个文本字段（同类以「；」连接）', () => {
+    const fragments: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [
+        { type: '人物面部', content: '黑色短发' },
+        { type: '人物面部', content: '圆脸' },
+      ],
+      人物身材: [{ type: '人物身材', content: '身形纤细' }],
+      人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+      姿态动作: [{ type: '姿态动作', content: '自然站立' }],
+      拍摄视角: [{ type: '拍摄视角', content: '低角度仰拍' }],
+      场景环境: [{ type: '场景环境', content: '黄昏街道' }],
+      光影色调: [{ type: '光影色调', content: '暖色侧光' }],
+      画风技术: [{ type: '画风技术', content: '胶片质感' }],
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: fragments,
+        // P4：image 模式 + 文本默认不发；本用例验证完整映射，显式打开三槽补充。
+        supplementFlags: { portrait: true, costume: true, pose: true },
+        negativePrompt: '  低质量，多余手指  ',
+      },
+    )
+
+    expect(request.portrait_text).toBe('黑色短发；圆脸；身形纤细')
+    expect(request.costume_text).toBe('白色衬衫')
+    expect(request.pose_text).toBe('自然站立')
+    expect(request.portrait_supplement).toBe(true)
+    expect(request.costume_supplement).toBe(true)
+    expect(request.pose_supplement).toBe(true)
+    expect(request.modifier_fragments).toBe(
+      [
+        '• 拍摄视角：低角度仰拍',
+        '• 场景环境：黄昏街道',
+        '• 光影色调：暖色侧光',
+        '• 画风技术：胶片质感',
+      ].join('\n'),
+    )
+    expect(request.negative_prompt).toBe('低质量，多余手指')
+  })
+
+  it('选「画风技术」碎片时 style 强制 none；未选时保留原画风', () => {
+    const base: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+    }
+
+    const locked = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: {
+          ...base,
+          画风技术: [{ type: '画风技术', content: '胶片质感' }],
+        },
+      },
+    )
+    expect(locked.style).toBe('none')
+
+    const unlocked = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '', textFragments: base },
+    )
+    expect(unlocked.style).toBe('realistic')
+  })
+
+  it('文本 / 负向为空时不发送对应字段', () => {
+    const blanks: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: '   ' }],
+      场景环境: [{ type: '场景环境', content: '' }],
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: blanks,
+        negativePrompt: '   ',
+      },
+    )
+
+    expect('portrait_text' in request).toBe(false)
+    expect('costume_text' in request).toBe(false)
+    expect('pose_text' in request).toBe(false)
+    expect('modifier_fragments' in request).toBe(false)
+    expect('negative_prompt' in request).toBe(false)
+
+    // 完全不传 textFragments 时同样不带这些字段（旧调用方行为不变）
+    const legacy = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '' },
+    )
+    expect('portrait_text' in legacy).toBe(false)
+    expect('negative_prompt' in legacy).toBe(false)
+  })
+
+  it('P2 text 模式：只发对应槽文本，不发该槽 id / path', () => {
+    const fragments: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+      姿态动作: [{ type: '姿态动作', content: '自然站立' }],
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: fragments,
+        slotModes: { portrait: 'image', costume: 'text', pose: 'text' },
+      },
+    )
+
+    expect(request.portrait_id).toBe('portrait-1')
+    expect('costume_id' in request).toBe(false)
+    expect('costume_path' in request).toBe(false)
+    expect('pose_id' in request).toBe(false)
+    expect('pose_path' in request).toBe(false)
+    expect(request.costume_text).toBe('白色衬衫')
+    expect(request.pose_text).toBe('自然站立')
+  })
+
+  it('P2 image 模式 + 碎片 = 补充：图文同时发送', () => {
+    const fragments: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: '圆脸' }],
+    }
+
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: fragments,
+        slotModes: { portrait: 'image', costume: 'empty', pose: 'empty' },
+        // P4：image + 文本必须显式打开补充才发送，并带对应 *_supplement=true。
+        supplementFlags: { portrait: true, costume: false, pose: false },
+      },
+    )
+
+    expect(request.portrait_id).toBe('portrait-1')
+    expect(request.portrait_text).toBe('圆脸')
+    expect(request.portrait_supplement).toBe(true)
+  })
+
+  it('P4 image 模式 + 碎片 + 补充关闭：只发图片，不发文本', () => {
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        textFragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物面部: [{ type: '人物面部', content: '圆脸' }],
+        },
+        slotModes: { portrait: 'image', costume: 'empty', pose: 'empty' },
+      },
+    )
+
+    expect(request.portrait_id).toBe('portrait-1')
+    expect('portrait_text' in request).toBe(false)
+    expect('portrait_supplement' in request).toBe(false)
+  })
+
+  it('P2 服装 text 模式：body_mode 仍为 costume（即使调用方传 bare）', () => {
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        bodyMode: 'bare',
+        textFragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+        },
+        slotModes: { portrait: 'image', costume: 'text', pose: 'empty' },
+      },
+    )
+
+    expect(request.body_mode).toBe('costume')
+    expect(request.costume_text).toBe('白色衬衫')
+    expect('costume_id' in request).toBe(false)
+  })
+})
+
+describe('P2 替代态校验（至少 1 图 / 文本模式 / 素体 / 双人）', () => {
+  const imageModes = {
+    portrait: 'image',
+    costume: 'image',
+    pose: 'image',
+  } as const
+
+  it('P1 旧规则已移除：某槽无图但有文本不再阻止（image 模式 + 碎片 = 补充）', () => {
+    const fragments: RecipeTextFragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: '圆脸' }],
+    }
+    expect(
+      describeAlternateModeConflicts({
+        modes: imageModes,
+        fragments,
+        imageCounts: { portrait: 1, costume: 1, pose: 1 },
+      }),
+    ).toBe('')
+  })
+
+  it('三槽都没有图片槽 → 至少保留 1 张参考图（文本不计入）', () => {
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'text', costume: 'text', pose: 'text' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物面部: [{ type: '人物面部', content: '圆脸' }],
+        },
+        imageCounts: { portrait: 0, costume: 0, pose: 0 },
+      }),
+    ).toBe(NO_IMAGE_SLOT_HINT)
+  })
+
+  it('text 模式但对应类碎片为空 → 逐槽返回「文本模式需要至少选择 1 条碎片」', () => {
+    const empty = createEmptyRecipeTextFragments()
+
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'text', costume: 'image', pose: 'image' },
+        fragments: empty,
+        imageCounts: { portrait: 0, costume: 1, pose: 1 },
+      }),
+    ).toBe(`人像槽：${TEXT_MODE_FRAGMENT_REQUIRED_HINT}`)
+
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'text', pose: 'image' },
+        fragments: empty,
+        imageCounts: { portrait: 1, costume: 0, pose: 1 },
+      }),
+    ).toBe(`服装槽：${TEXT_MODE_FRAGMENT_REQUIRED_HINT}`)
+
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'image', pose: 'text' },
+        fragments: empty,
+        imageCounts: { portrait: 1, costume: 1, pose: 0 },
+      }),
+    ).toBe(`姿势槽：${TEXT_MODE_FRAGMENT_REQUIRED_HINT}`)
+  })
+
+  it('text 模式有对应碎片时通过', () => {
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'text', pose: 'image' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+        },
+        imageCounts: { portrait: 1, costume: 0, pose: 1 },
+      }),
+    ).toBe('')
+  })
+
+  it('素体展示 + 服装文本 → 阻止', () => {
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'text', pose: 'image' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+        },
+        imageCounts: { portrait: 1, costume: 0, pose: 1 },
+        bodyMode: 'bare',
+      }),
+    ).toContain('素体展示与服装文本冲突')
+
+    // 即使服装槽不是 text 模式，只要残留碎片非空也会进入提交体（文本始终按映射发送）。
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'empty', pose: 'image' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+        },
+        imageCounts: { portrait: 1, costume: 0, pose: 1 },
+        bodyMode: 'bare',
+      }),
+    ).toContain('素体展示与服装文本冲突')
+  })
+
+  it('姿势文本 + 当前 / 上次是 pair 双人姿势 → 阻止', () => {
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'image', pose: 'text' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          姿态动作: [{ type: '姿态动作', content: '自然站立' }],
+        },
+        imageCounts: { portrait: 1, costume: 1, pose: 0 },
+        poseId: 'pair-01',
+      }),
+    ).toBe(POSE_TEXT_PAIR_CONFLICT_HINT)
+
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'image', costume: 'image', pose: 'text' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          姿态动作: [{ type: '姿态动作', content: '自然站立' }],
+        },
+        imageCounts: { portrait: 1, costume: 1, pose: 0 },
+        poseId: 'single-01',
+      }),
+    ).toBe('')
+  })
+
+  it('第 4 张上传图也算 1 张参考图', () => {
+    expect(
+      describeAlternateModeConflicts({
+        modes: { portrait: 'text', costume: 'empty', pose: 'empty' },
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物面部: [{ type: '人物面部', content: '圆脸' }],
+        },
+        imageCounts: { portrait: 0, costume: 0, pose: 0 },
+        extraFilled: true,
+      }),
+    ).toBe('')
   })
 })
 
@@ -555,6 +904,116 @@ describe('提示词 dry-run 预览', () => {
       new RecipeSubmitError('获取提示词预览失败', 200, '响应不是有效的 JSON，或缺少 prompt 字段'),
     )
     expect(message).toContain('下一步：')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// dry-run 预览的最终负向（方案 §11.3：预览必须显示最终正向 + 最终负向）
+// ---------------------------------------------------------------------------
+
+describe('dry-run 预览的最终负向', () => {
+  /**
+   * 在真实组件 setup 中运行 composable（内部注册 `onBeforeUnmount`，
+   * 直接调用会触发 no active component instance 告警）。
+   */
+  async function runRecipeAsync<T>(
+    fn: (recipe: ReturnType<typeof useReferenceRecipe>) => Promise<T>,
+  ): Promise<T> {
+    let pending!: Promise<T>
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          pending = fn(useReferenceRecipe())
+          return () => h('div')
+        },
+      }),
+    )
+    try {
+      return await pending
+    } finally {
+      wrapper.unmount()
+    }
+  }
+
+  /** 一次 dry-run 请求的固定响应；`body` 用来控制返回字段。 */
+  function stubPreviewResponse(body: Record<string, unknown>): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, dry_run: true, ...body }),
+      })),
+    )
+  }
+
+  async function readPreviewState() {
+    return runRecipeAsync(async (recipe) => {
+      await recipe.refreshPreviewPrompt()
+      return {
+        prompt: recipe.previewPrompt.value,
+        negative: recipe.previewNegativePrompt.value,
+        effective: recipe.previewNegativeEffective.value,
+      }
+    })
+  }
+
+  it('响应带 negative_prompt / negative_effective 时写入预览 refs', async () => {
+    stubPreviewResponse({
+      prompt: '编译后的最终正向',
+      negative_prompt: '低质量，文字水印',
+      negative_effective: true,
+      prompt_raw: '编译前的原始正向',
+    })
+
+    await expect(readPreviewState()).resolves.toEqual({
+      prompt: '编译后的最终正向',
+      negative: '低质量，文字水印',
+      effective: true,
+    })
+  })
+
+  it('响应缺 negative_* 字段时按空 / null（旧后端不臆测生效态）', async () => {
+    stubPreviewResponse({ prompt: '只有正向' })
+
+    await expect(readPreviewState()).resolves.toEqual({
+      prompt: '只有正向',
+      negative: '',
+      effective: null,
+    })
+  })
+
+  it('negative_effective=false 原样保留（不能被 || 吞成 null）', async () => {
+    stubPreviewResponse({
+      prompt: '正向',
+      negative_prompt: '',
+      negative_effective: false,
+    })
+
+    await expect(readPreviewState()).resolves.toEqual({
+      prompt: '正向',
+      negative: '',
+      effective: false,
+    })
+  })
+
+  it('预览失败时同时清空最终负向（不残留上一次结果）', async () => {
+    stubPreviewResponse({ prompt: '上一次正向', negative_prompt: '上一次负向', negative_effective: true })
+    await readPreviewState()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ detail: '请至少选择一个参考图或上传一张参考图' }),
+      })),
+    )
+
+    const state = await readPreviewState()
+    expect(state.prompt).toBe('')
+    expect(state.negative).toBe('')
+    expect(state.effective).toBeNull()
   })
 })
 

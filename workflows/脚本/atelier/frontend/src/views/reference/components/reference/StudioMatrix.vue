@@ -16,9 +16,25 @@
 
 import { computed, ref, watch } from 'vue'
 
+import {
+  EMPTY_SLOT_TEXTS,
+  buildRecipeSlotDisplays,
+  resolveSlotModes,
+  slotDisplaysGroupKey,
+  slotDisplaysGroupLabel,
+} from '../../../../composables/recipeTextFragments'
+import type {
+  RecipeSlotDisplaySlot,
+  RecipeSlotKey,
+  RecipeSlotMode,
+  RecipeSlotModes,
+  RecipeSlotTexts,
+  RecipeSupplementFlags,
+
+} from '../../../../composables/recipeTextFragments'
 import type {
   RecipeBatchGroup,
-  RecipeSlots,
+
   StudioWorkflowOption,
 } from '../../../../composables/useReferenceRecipe'
 import { workflowDisplayName } from '../../../../composables/useReferenceRecipe'
@@ -49,6 +65,17 @@ const props = defineProps<{
   poseUseDepth: boolean
   /** 非空槽数（0 = 三槽都为空）。 */
   activeSlotCount: number
+  /**
+   * 当前三槽模式（P2）。
+   *
+   * group 自带同名字段时优先用 group 的（每批可能不同）；这里作为旧批次 / 直接
+   * 构造 groups 时的回退来源。
+   */
+  slotModes?: RecipeSlotModes
+  /** 当前三槽文本（同上，作为 group.slotTexts 的回退）。 */
+  slotTexts?: RecipeSlotTexts
+  /** P4 跨源补充开关：image 槽的补充文本进入组键并在缩略图标「补充」。 */
+  supplementFlags?: RecipeSupplementFlags
 }>()
 
 /** 分组键分隔符：用不可见控制字符避免真实 id 中可能出现的分隔符冲突。 */
@@ -56,9 +83,18 @@ const GROUP_KEY_SEPARATOR = '\u0000'
 
 /** 单槽缩略图展示数据。 */
 interface MatrixThumb {
-  key: 'portrait' | 'costume' | 'pose'
+  key: RecipeSlotKey
   name: string
   url: string | null
+  /** 槽位模式：text 时渲染「文本 · 类型」chip，而不是空图占位。 */
+  mode: RecipeSlotMode
+  /** `文本 · 类型`；image / empty 为空串。 */
+  textLabel: string
+  /** 文本前 12 字；image / empty 为空串。 */
+  textPreview: string
+  /** P4：image 模式 + 补充开关打开时的「补充 · 类型」小标。 */
+  supplementLabel: string
+  supplementPreview: string
 }
 
 /** 一个「槽位组合」分组（= 清单里可折叠的一块）。 */
@@ -83,13 +119,52 @@ const DIMENSION_LABELS: Readonly<Record<ReduceDimension, string>> = {
   pose: '姿势',
 }
 
-/** 槽位三元组 → 稳定的分组键（槽位为空时用空串占位，三段固定顺序）。 */
+/** 空槽缩略图标题（与原矩阵口径一致）。 */
+const EMPTY_THUMB_LABELS: Readonly<Record<RecipeSlotKey, string>> = {
+  portrait: '人像（空）',
+  costume: '服装（空）',
+  pose: '姿势（空）',
+}
+
+/** group 自带模式优先；旧批次没有字段时回退到父级传入 / 全 image。 */
+function modesOf(group: RecipeBatchGroup): RecipeSlotModes {
+  return resolveSlotModes(group.slotModes ?? props.slotModes)
+}
+
+/** group 自带文本优先；旧批次回退到父级 / 全空。 */
+function textsOf(group: RecipeBatchGroup): RecipeSlotTexts {
+  return group.slotTexts ?? props.slotTexts ?? { ...EMPTY_SLOT_TEXTS }
+}
+
+/** 槽位条目 → 组键 / 组名需要的 id + name（空槽为 null）。 */
+function displaySlotOf<T extends { id: string }>(
+  item: T | null,
+  nameOf: (value: T) => string,
+): RecipeSlotDisplaySlot | null {
+  return item ? { id: item.id, name: nameOf(item) } : null
+}
+
+/** 三槽展示片段：image 用条目 id / 名称，text 用文本内容 / 前 12 字。 */
+function displaysOf(group: RecipeBatchGroup) {
+  return buildRecipeSlotDisplays({
+    slots: {
+      portrait: displaySlotOf(group.slots.portrait, portraitSlotName),
+      costume: displaySlotOf(group.slots.costume, costumeSlotName),
+      pose: displaySlotOf(group.slots.pose, poseSlotName),
+    },
+    modes: modesOf(group),
+    texts: textsOf(group),
+    supplements: props.supplementFlags,
+  })
+}
+
+/**
+ * 组键：image 槽用条目 id，text 槽用完整文本内容。
+ *
+ * 不同文本必须落到不同组（方案 §4.4），否则矩阵会把两个替代态合并成一组。
+ */
 function groupKeyOf(group: RecipeBatchGroup): string {
-  return [
-    group.slots.portrait?.id ?? '',
-    group.slots.costume?.id ?? '',
-    group.slots.pose?.id ?? '',
-  ].join(GROUP_KEY_SEPARATOR)
+  return slotDisplaysGroupKey(displaysOf(group))
 }
 
 /** 泛型去重计数（保持简单：只关心「有几个不同值」）。 */
@@ -99,39 +174,41 @@ function countDistinct<T>(items: readonly T[], keyOf: (item: T) => string): numb
   return seen.size
 }
 
-/** 三槽缩略图（24 × 32）；缺槽或缺图时由模板渲染灰底「空」。 */
-function buildThumbs(slots: RecipeSlots): MatrixThumb[] {
-  return [
-    {
-      key: 'portrait',
-      name: portraitSlotName(slots.portrait) || '人像（空）',
-      url: portraitSlotThumb(slots.portrait),
-    },
-    {
-      key: 'costume',
-      name: costumeSlotName(slots.costume) || '服装（空）',
-      url: costumeSlotThumb(slots.costume),
-    },
-    {
-      key: 'pose',
-      name: poseSlotName(slots.pose) || '姿势（空）',
-      url: poseSlotThumb(slots.pose, props.poseUseDepth),
-    },
-  ]
+/** 槽位缩略图地址（text 模式不显示图片，调用方按 mode 忽略）。 */
+function thumbUrlOf(group: RecipeBatchGroup, slot: RecipeSlotKey): string | null {
+  if (slot === 'portrait') return portraitSlotThumb(group.slots.portrait)
+  if (slot === 'costume') return costumeSlotThumb(group.slots.costume)
+  return poseSlotThumb(group.slots.pose, props.poseUseDepth)
 }
 
-/** 组头文案：只列非空槽的名称，全部为空时给通用占位。 */
-function titleOf(slots: RecipeSlots): string {
-  const names = [
-    portraitSlotName(slots.portrait),
-    costumeSlotName(slots.costume),
-    poseSlotName(slots.pose),
-  ].filter((name) => name.length > 0)
-  return names.length ? names.join(' · ') : '未选参考图'
+/** 三槽缩略图；text 槽带 chip 数据，empty 槽由模板渲染灰底「空」。 */
+function buildThumbs(group: RecipeBatchGroup): MatrixThumb[] {
+  return displaysOf(group).map((display) => {
+    const label = display.textLabel
+      ? `${display.textLabel}｜${display.textPreview || '未填写'}`
+      : display.supplementLabel
+        ? `${display.label}｜${display.supplementLabel}：${display.supplementPreview || '未填写'}`
+        : display.label || EMPTY_THUMB_LABELS[display.slot]
+    return {
+      key: display.slot,
+      name: label,
+      url: display.mode === 'image' ? thumbUrlOf(group, display.slot) : null,
+      mode: display.mode,
+      textLabel: display.textLabel,
+      textPreview: display.textPreview,
+      supplementLabel: display.supplementLabel,
+      supplementPreview: display.supplementPreview,
+    }
+  })
+}
+
+/** 组头文案：text 槽用碎片前 12 字代替槽名（方案 §8 P2）。 */
+function titleOf(group: RecipeBatchGroup): string {
+  return slotDisplaysGroupLabel(displaysOf(group))
 }
 
 /**
- * 按槽位三元组分组（Map 保持首次出现顺序 → 组顺序与 `groups` 一致；
+ * 按槽位三元组 + 文本内容分组（Map 保持首次出现顺序 → 组顺序与 `groups` 一致；
  * 组内 `push` 保持原顺序，绝不排序）。
  */
 const groupedGroups = computed<MatrixGroup[]>(() => {
@@ -150,8 +227,8 @@ const groupedGroups = computed<MatrixGroup[]>(() => {
     result.push({
       key,
       rows,
-      thumbs: buildThumbs(first.slots),
-      title: titleOf(first.slots),
+      thumbs: buildThumbs(first),
+      title: titleOf(first),
       workflowCount: countDistinct(rows, (row) => row.workflow),
       sizeCount: countDistinct(rows, (row) => `${row.quality}${GROUP_KEY_SEPARATOR}${row.aspectRatio}`),
     })
@@ -362,17 +439,33 @@ function sizeTextOf(group: RecipeBatchGroup): string {
                   v-for="thumb in group.thumbs"
                   :key="thumb.key"
                   class="matrix__thumb"
-                  :class="{ 'is-empty': !thumb.url }"
+                  :class="{
+                    'is-empty': !thumb.url && thumb.mode !== 'text',
+                    'matrix__thumb--text': thumb.mode === 'text',
+                  }"
                   :title="thumb.name"
+                  :data-testid="`studio-matrix-thumb-${thumb.key}`"
                 >
+                  <!-- text 槽：显示「文本 · 类型」+ 前 12 字，不显示空图占位 -->
+                  <template v-if="thumb.mode === 'text'">
+                    <span class="matrix__text-label">{{ thumb.textLabel }}</span>
+                    <span class="matrix__text-preview">{{ thumb.textPreview || '未填写' }}</span>
+                  </template>
                   <img
-                    v-if="thumb.url"
+                    v-else-if="thumb.url"
                     :src="thumb.url"
                     :alt="thumb.name"
                     class="matrix__thumb-img"
                     loading="lazy"
                   />
                   <span v-else class="matrix__thumb-empty">空</span>
+                  <span
+                    v-if="thumb.mode === 'image' && thumb.supplementLabel"
+                    class="matrix__supplement"
+                    :title="`${thumb.supplementLabel}：${thumb.supplementPreview || '未填写'}`"
+                  >
+                    补充
+                  </span>
                 </span>
               </span>
               <span class="matrix__group-name" :title="group.title">{{ group.title }}</span>
@@ -396,17 +489,33 @@ function sizeTextOf(group: RecipeBatchGroup): string {
                   v-for="thumb in group.thumbs"
                   :key="thumb.key"
                   class="matrix__thumb"
-                  :class="{ 'is-empty': !thumb.url }"
+                  :class="{
+                    'is-empty': !thumb.url && thumb.mode !== 'text',
+                    'matrix__thumb--text': thumb.mode === 'text',
+                  }"
                   :title="thumb.name"
+                  :data-testid="`studio-matrix-thumb-${thumb.key}`"
                 >
+                  <!-- text 槽：显示「文本 · 类型」+ 前 12 字，不显示空图占位 -->
+                  <template v-if="thumb.mode === 'text'">
+                    <span class="matrix__text-label">{{ thumb.textLabel }}</span>
+                    <span class="matrix__text-preview">{{ thumb.textPreview || '未填写' }}</span>
+                  </template>
                   <img
-                    v-if="thumb.url"
+                    v-else-if="thumb.url"
                     :src="thumb.url"
                     :alt="thumb.name"
                     class="matrix__thumb-img"
                     loading="lazy"
                   />
                   <span v-else class="matrix__thumb-empty">空</span>
+                  <span
+                    v-if="thumb.mode === 'image' && thumb.supplementLabel"
+                    class="matrix__supplement"
+                    :title="`${thumb.supplementLabel}：${thumb.supplementPreview || '未填写'}`"
+                  >
+                    补充
+                  </span>
                 </span>
               </span>
               <span class="matrix__workflow" :title="workflowNameOf(row.workflow)">
@@ -632,6 +741,7 @@ function sizeTextOf(group: RecipeBatchGroup): string {
 
 /* 24 × 32；缺槽 / 缺图时灰底「空」 */
 .matrix__thumb {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -643,9 +753,64 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   background: var(--surface-thumb);
 }
 
+/* P4：image 槽带跨源补充文本时，右下角标「补充」 */
+.matrix__supplement {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  padding: 0 2px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--accent-green-text);
+  font-size: 9px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 .matrix__thumb.is-empty {
   background: var(--surface-card);
   color: var(--text-muted);
+}
+
+/*
+ * 文本槽 chip：宽度随内容（上限 150px），高度与三联缩略图对齐。
+ * 两行都保证 12px（--fs-sm），不用 9/10px 小字。
+ */
+.matrix__thumb--text {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  box-sizing: border-box;
+  width: auto;
+  max-width: 150px;
+  height: auto;
+  min-height: var(--matrix-thumb-h, 32px);
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-inset);
+  color: var(--text-body);
+}
+
+.matrix__text-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--accent-link);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix__text-preview {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-body);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .matrix__thumb-img {

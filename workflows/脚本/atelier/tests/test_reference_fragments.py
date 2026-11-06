@@ -110,6 +110,7 @@ def ref_root(tmp_path: Path, monkeypatch) -> Path:
         target.write_bytes(b"img")
 
     monkeypatch.setattr(settings, "reference_root", root)
+    monkeypatch.setattr(settings, "pose_extra_dir", None)
     monkeypatch.setattr(settings, "reference_allow_nsfw", False)
     rl.clear_cache()
     yield root

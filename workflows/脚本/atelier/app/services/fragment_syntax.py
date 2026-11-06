@@ -19,6 +19,22 @@ FRAGMENT_TYPES = [
     "拍摄视角", "场景环境", "光影色调", "画风技术",
 ]
 
+#: 碎片池「安全模式」的启发式关键词（方案 §3 C8）。
+#: 只匹配 `prompts.tags` / `prompts.note`，**不看正文** —— 正文里的正常描述
+#: （如「裸色口红」「成人向？」）一旦被误伤，碎片池会莫名缺条目。
+#: 这是启发式，无法保证全覆盖；命中即整条提示词的所有碎片一起隐藏。
+NSFW_KEYWORDS: tuple[str, ...] = (
+    "nsfw", "18+", "裸体", "裸露", "情色", "成人", "情趣", "内衣", "比基尼", "泳装",
+)
+
+
+def contains_nsfw_keyword(*texts: str | None) -> bool:
+    """tags / note 是否命中 NSFW 启发式关键词（大小写不敏感）。"""
+    haystack = " ".join(text for text in texts if text).lower()
+    if not haystack:
+        return False
+    return any(keyword in haystack for keyword in NSFW_KEYWORDS)
+
 # 标题：任意非空、不含 】 的类型名
 _HEADER_RE = re.compile(r"【([^】]+)】")
 # 块：标题到下一个「行首标题」或文本末尾

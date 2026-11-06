@@ -6,7 +6,7 @@ import re
 
 from app.services.comfyui_client import get_object_info
 from app.services.image_formats import convert_heif_to_png, is_heif
-from app.services.prompt_compiler import compile_prompt
+from app.services.prompt_compiler import CompiledPrompt, compile_prompt
 from app.services.quality_keys import normalize_quality, quality_scale
 
 logger = logging.getLogger("atelier.workflow")
@@ -31,6 +31,9 @@ _SAVE_NODE_TYPES = {
 
 # 可注入宽高的空 latent 节点：SD3/Flux2/Z-Image 用各自的类名，宽高字段一致
 _LATENT_NODE_TYPES = {"EmptyLatentImage", "EmptySD3LatentImage", "EmptyFlux2LatentImage"}
+
+#: 文本编码器直接产出 latent、且用 `resolution` 控制参考图缩放的节点（Qwen 系）。
+_ENCODER_LATENT_NODES = {"TextEncodeQwenImage21"}
 
 #: LoadImage 标题里的业务角色关键词（合成台靠它判定“哪张图放哪个槽”）。
 #: 工作流标题是人工标注，中文/英文、Java 全角冒号都可能出现，统一小写后包含匹配。
@@ -189,6 +192,44 @@ def _loadimage_size(api_workflow: dict, node_id: str | None) -> tuple[int, int] 
     return size
 
 
+def _encoder_latent_info(api_workflow: dict) -> dict | None:
+    """文本编码器自产 latent（Qwen 系）：只可调像素总量，比例跟随参考图。
+
+    这类节点没有 width/height，只有 `resolution`：参考图缩放到约
+    resolution×resolution 面积并保持各自比例，输出 latent 取**第一张参考图**
+    缩放后的尺寸（ComfyUI `TextEncodeQwenImage21.execute`）。
+    因此 `resolution` 的线性倍率等价于面积倍率 scale²，与画质档语义一致；
+    `resolution=0`（各自保持原尺寸）给不出稳定基准，按不可调处理。
+    """
+    for node_id, node in api_workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in _ENCODER_LATENT_NODES:
+            continue
+        inputs = node.get("inputs") or {}
+        resolution = _as_int(inputs.get("resolution"))
+        if not resolution or resolution <= 0:
+            continue
+        used_as_latent = any(
+            key in ("latent_image", "latent")
+            and isinstance(value, (list, tuple))
+            and len(value) == 2
+            and str(value[0]) == str(node_id)
+            and str(value[1]) == "2"
+            for consumer in api_workflow.values()
+            if isinstance(consumer, dict)
+            for key, value in (consumer.get("inputs") or {}).items()
+        )
+        if not used_as_latent:
+            continue
+        return {
+            "mode": "resolution", "id": node_id, "node": node, "src": node,
+            "base_resolution": resolution,
+            "megapixels": (resolution * resolution) / 1_000_000,
+            # 比例由第一张参考图决定，不对外声明
+            "ratio": "", "multiple": 32, "unit": 1_000_000,
+        }
+    return None
+
+
 def _latent_info(api_workflow: dict) -> dict | None:
     """找出空 latent 的真实尺寸来源。
 
@@ -284,7 +325,8 @@ def _latent_info(api_workflow: dict) -> dict | None:
             if placeholder:
                 info["size_source"] = "placeholder"
             return info
-    return None
+    # 没有独立空 latent 时，退回文本编码器自产 latent（Qwen 系，仅像素档）
+    return _encoder_latent_info(api_workflow)
 
 # 文本编码节点：类名 → (正面字段, 负面粉字段 / None)
 # 新模型常带专用编码节点（如 Qwen-Image 2.1 的 TextEncodeQwenImage21，提示词是
@@ -995,6 +1037,9 @@ def detect_workflow_caps(api_workflow: dict) -> dict[str, object]:
             continue
         caps["quality"] = True
         caps["orientation"] = True
+    # 文本编码器自产 latent（Qwen 系）：只有像素总量旋钮，比例跟随参考图。
+    if not caps["quality"] and _encoder_latent_info(api_workflow) is not None:
+        caps["quality"] = True
     return caps
 
 
@@ -1065,6 +1110,15 @@ def detect_workflow_params(api_workflow: dict) -> dict:
 
     info = _latent_info(api_workflow)
     if info is not None and not has_seedvr:
+        if info["mode"] == "resolution":
+            # 编码器的 resolution 只决定像素总量（输出面积 ≈ resolution²），
+            # 比例由第一张参考图决定；复用 megapixels 档位语义，方向保持 none。
+            params["base_megapixels"] = round(float(info["megapixels"]), 3)
+            params["mp_unit"] = "mp"
+            params["post_scale"] = _output_scale(api_workflow, info["id"])
+            params["multiple"] = info["multiple"]
+            params["quality_mode"] = "megapixels"
+            return params
         params["base_width"] = info["width"]
         params["base_height"] = info["height"]
         params["base_megapixels"] = round(float(info["megapixels"]), 3)
@@ -1119,6 +1173,20 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
 
     info = _latent_info(api_workflow)
     if info is None:
+        return
+
+    if info["mode"] == "resolution":
+        # 编码器自产 latent：按线性倍率缩放参考图边长基准（面积 ×scale²）。
+        # 比例只能由第一张参考图决定，请求里的 aspect_ratio 在这里无效。
+        base = int(info["base_resolution"])
+        target = max(32, min(4096, _round_to(base * scale, 32)))
+        info["src"]["inputs"]["resolution"] = target
+        ignored = normalize_aspect_ratio(prompt_data.get("aspect_ratio"))
+        logger.info(
+            "分辨率：%s resolution=%s（基准 %s × %s）%s",
+            info["src"].get("class_type"), target, base, scale,
+            f"，已忽略比例 {ignored}（跟随参考图）" if ignored else "",
+        )
         return
 
     requested = normalize_aspect_ratio(prompt_data.get("aspect_ratio"))
@@ -1221,22 +1289,38 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
         print("[workflow_parser] 警告：未找到文本编码节点（CLIPTextEncode / TextEncodeQwenImage21 等），跳过提示词注入")
     else:
         negative_effective, _negative_cfg = _detect_negative_effectiveness(api_workflow)
-        compiled = compile_prompt(
-            str(prompt_data.get("prompt") or ""),
-            str(prompt_data.get("negative_prompt") or ""),
-            negative_effective=negative_effective,
-        )
+        raw_prompt = str(prompt_data.get("prompt") or "")
+        raw_negative = str(prompt_data.get("negative_prompt") or "")
         _nid, _node, (_pos_field, _neg_field) = text_nodes[0]
-        _node["inputs"][_pos_field] = compiled.positive
+        if prompt_data.get("skip_compile"):
+            # P3 手动改写：前端已编辑完整提示词，正向按原文写入，负向只保留用户填写的内容。
+            # 不跑 compile_prompt，否则「不要军姿」等否定会被二次改写，所见非所得。
+            positive = raw_prompt
+            negative = raw_negative if negative_effective else ""
+            # 与 CompiledPrompt.as_dict() 同形，下游（prompt_params / 重试 / 画廊）读取不报错
+            compiled_dict = CompiledPrompt(
+                positive=positive,
+                negative=raw_negative,
+                negative_effective=negative_effective,
+            ).as_dict()
+        else:
+            compiled = compile_prompt(
+                raw_prompt,
+                raw_negative,
+                negative_effective=negative_effective,
+            )
+            positive = compiled.positive
+            negative = compiled.negative if negative_effective else ""
+            compiled_dict = compiled.as_dict()
+        _node["inputs"][_pos_field] = positive
         # 负向不生效时不提交任何负向内容，避免留下"写了但没用"的假象。
-        _negative = compiled.negative if negative_effective else ""
         if _neg_field:
             # 单节点自带负面字段（如 Qwen-Image 2.1），直接写同一个节点
-            _node["inputs"][_neg_field] = _negative
+            _node["inputs"][_neg_field] = negative
         elif len(text_nodes) >= 2:
             # 旧行为：第二个文本编码节点当负面
-            text_nodes[1][1]["inputs"][text_nodes[1][2][0]] = _negative
-        prompt_data["compiled"] = compiled.as_dict()
+            text_nodes[1][1]["inputs"][text_nodes[1][2][0]] = negative
+        prompt_data["compiled"] = compiled_dict
 
     # 2. 注入种子
     # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0

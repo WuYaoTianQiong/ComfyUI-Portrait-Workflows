@@ -9,7 +9,7 @@
  * - 工作流下拉（`/api/workflows?scope=studio`，自动选中 `default`，展示 input_count）；
  * - M（非空槽数）< N（input_count）时先问 `/api/reference/trim-check`：
  *   可裁剪 → 直接提交 + toast 说明；不可裁剪 → 才弹降级确认框（不做静默切换）；
- * - 尺寸档位 / 比例按 `caps` 渲染；Qwen 系隐藏并显示「跟随参考图」说明；
+ * - 尺寸档位 / 比例按 `caps` 渲染；Qwen21 只显示像素档（resolution），比例仍跟随参考图；
  * - 服装槽为空时自动按素体展示（`bare`）提交并 toast 说明（否则模型会自由发挥出裸体）；
  * - 画风预设（`none` / `realistic`）+ `prompt_suffix`；
  * - `POST /api/reference/recipes` → 轮询 1500ms / 30min → 结果图 / 任务中心；
@@ -25,9 +25,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { isNsfwCostumeItem, isNsfwPoseItem } from '../../api/reference'
+import { apiGet } from '../../api/client'
 import type { HistoryItem } from '../../api/types'
 import { uploadReferenceImages } from '../../api/upload'
 import type { UploadedReference } from '../../api/upload'
+import { FRAGMENT_TYPES } from '../../constants'
+import type { FragmentType } from '../../constants'
 import { withReferenceTab } from './referenceDeepLink'
 import DropZone from '../../components/DropZone.vue'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
@@ -47,14 +50,37 @@ import {
   workflowDisplayName,
 } from '../../composables/useReferenceRecipe'
 import type { RecipeBatch, RecipeBodyMode } from '../../composables/useReferenceRecipe'
+import {
+  BARE_COSTUME_TEXT_CONFLICT_HINT,
+  POSE_TEXT_PAIR_CONFLICT_HINT,
+  RECIPE_SLOT_KEYS,
+  compileActiveSlotTexts,
+  createEmptyRecipeTextFragments,
+  hasStyleFragment,
+  slotFragmentItems,
+} from '../../composables/recipeTextFragments'
+import type {
+
+  RecipeSlotMode,
+  RecipeSlotTexts,
+  RecipeTextFragments,
+} from '../../composables/recipeTextFragments'
 import { useToast } from '../../composables/useToast'
 import Lightbox from '../../components/Lightbox.vue'
 import ReferenceSectionCard from './components/reference/ReferenceSectionCard.vue'
 import StudioActionBar from './components/reference/StudioActionBar.vue'
 import StudioMatrix from './components/reference/StudioMatrix.vue'
 import StudioParamsCard from './components/reference/StudioParamsCard.vue'
+import StudioPromptEditor from './components/reference/StudioPromptEditor.vue'
 import StudioResultBoard from './components/reference/StudioResultBoard.vue'
 import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
+import StudioTextSupplementCard from './components/reference/StudioTextSupplementCard.vue'
+import {
+  desiredPoseFacets,
+  pickMatchedPose,
+  pickPoseForFacet,
+  poseFacetToken,
+} from './components/reference/studioPoseMatch'
 import {
   slotSelectedItemToHistoryItem,
   slotSelectedItemsToHistoryItems,
@@ -83,6 +109,66 @@ const router = useRouter()
 const draft = useReferenceRecipeDraft()
 const { safeMode } = useReferenceSafeMode()
 const toast = useToast()
+
+// ---------------------------------------------------------------------------
+// 文本补充（八类碎片）+ 负向（方案 §4.1 / §5.5）
+// ---------------------------------------------------------------------------
+
+/**
+ * 真源在 `useReferenceRecipeDraft` 单例（跟随 `pb.reference_studio_v1` 持久化），
+ * 这里用可写 computed 让卡片走 `v-model`，避免模板直接操作 `.value`。
+ */
+const textFragments = computed<RecipeTextFragments>({
+  get: () => draft.textFragments.value,
+  set: (value) => {
+    draft.textFragments.value = value
+  },
+})
+
+/** 用户手填负向；最终负向 = 后端自动抽取 + 这里的内容。 */
+const negativePrompt = computed<string>({
+  get: () => draft.negativePrompt.value,
+  set: (value) => {
+    draft.negativePrompt.value = value
+  },
+})
+
+/**
+ * 「画风技术」碎片与画风预设互斥（方案 §5.4）：
+ * 选中即强制 `style='none'` 并禁用下拉；buildRecipeRequest 里再兜底一次。
+ */
+const styleLocked = computed(() => hasStyleFragment(draft.textFragments.value))
+
+/** 三槽模式（真源在草稿单例，与快照的 portraitMode / costumeMode / poseMode 对应）。 */
+const slotModes = computed(() => draft.slotModes.value)
+
+/** P4 跨源补充开关（image 模式 + 打开时才发送对应槽文本）。 */
+const supplementFlags = computed(() => draft.supplementFlags.value)
+
+/** 三槽「本次真正生效」的文本：矩阵组键 / 组标签与提交体共用同一份。 */
+const slotTexts = computed<RecipeSlotTexts>(() =>
+  compileActiveSlotTexts(
+    draft.textFragments.value,
+    draft.slotModes.value,
+    draft.supplementFlags.value,
+  ),
+)
+
+/** 文本模式槽数（素材区摘要展示，避免用户以为选择丢了）。 */
+const textSlotCount = computed(
+  () => RECIPE_SLOT_KEYS.filter((slot) => slotModes.value[slot] === 'text').length,
+)
+
+/** image 模式且打开补充的槽数。 */
+const supplementSlotCount = computed(
+  () =>
+    RECIPE_SLOT_KEYS.filter(
+      (slot) => slotModes.value[slot] === 'image' && supplementFlags.value[slot],
+    ).length,
+)
+
+/** 文本补充卡引用：「去填写」需要展开并滚动到卡片。 */
+const textSupplementRef = ref<InstanceType<typeof StudioTextSupplementCard> | null>(null)
 
 const {
   workflows,
@@ -126,9 +212,12 @@ const {
   clearBodyModeNotice,
   supportsExtraSlot,
   previewPrompt,
+  previewNegativePrompt,
+  previewNegativeEffective,
   previewError,
   previewLoading,
   refreshPreviewPrompt,
+  promptOverride,
 previewWorkflow,
   primaryResultUrl,
   previousResultUrl,
@@ -205,6 +294,87 @@ function onParamsBodyMode(mode: RecipeBodyMode): void {
   onToggleBodyMode(mode === 'bare')
 }
 
+/**
+ * 槽位模式切换（P2 替代态）。
+ *
+ * 组件只 emit，真正的双人 / 素体校验统一在这里做：
+ * - 素体展示下不能把服装槽改成文本（语义 = 不穿衣服却描述衣服）；
+ * - 姿势文本暂不支持双人（后端 C3-3 的防御性限制）。
+ *
+ * 切到 text 时**不删除**已有图片：改回 image 仍能直接复用（需求 §8 P2）。
+ * 对应的碎片为空也允许先切换，提交时由 submit() 统一拦截并提示。
+ */
+function onSlotModeChange(slot: RecipeSlotKey, mode: RecipeSlotMode): void {
+  if (mode === 'text') {
+    if (slot === 'costume' && bodyMode.value === 'bare') {
+      toast.error(
+        `无法改用文本。原因：${BARE_COSTUME_TEXT_CONFLICT_HINT}。下一步：先切回服装模式，或保留服装参考图。`,
+      )
+      return
+    }
+    if (slot === 'pose') {
+      const poseId =
+        draft.pose.value.find((entry) => entry.item.id.startsWith('pair'))?.item.id ??
+        draft.pose.value[0]?.item.id ??
+        draft.lastPoseId.value
+      if (poseId.startsWith('pair')) {
+        toast.error(
+          `无法改用文本。原因：${POSE_TEXT_PAIR_CONFLICT_HINT}。下一步：换单人姿势，或保留姿势参考图。`,
+        )
+        return
+      }
+    }
+  }
+  draft.setSlotMode(slot, mode)
+}
+
+/** 槽位卡「去填写」：展开文本补充卡并滚动到它。 */
+function onFillText(): void {
+  void textSupplementRef.value?.expand()
+}
+
+/**
+ * P4 跨源补充开关：只允许 image 模式且该槽已有文本时打开。
+ *
+ * 这里做父级防御；卡片本身也会在「无图 / 无文本 / text 模式」时禁用开关。
+ */
+function onSlotSupplementChange(slot: RecipeSlotKey, enabled: boolean): void {
+  if (enabled) {
+    if (draft.slotModes.value[slot] !== 'image') return
+    if (slotFragmentItems(draft.textFragments.value, slot).length === 0) {
+      toast.info('该槽还没有文本碎片，先选一条再开启补充')
+      return
+    }
+  }
+  draft.setSlotSupplement(slot, enabled)
+}
+
+/**
+ * 碎片变化时自动把「空槽」升级为文本模式。
+ *
+ * 复刻旧数据推导口径（无图 + 有对应碎片 = text）：用户直接在文本补充卡里为
+ * 空槽选碎片时，槽位卡应同步显示「文本」而不是仍显示「空」。
+ * 反向不自动降级：清空碎片后保持 text，提交时统一提示「文本模式需要至少 1 条碎片」。
+ */
+watch(
+  draft.textFragments,
+  () => {
+    const poseId =
+      draft.pose.value.find((entry) => entry.item.id.startsWith('pair'))?.item.id ??
+      draft.pose.value[0]?.item.id ??
+      draft.lastPoseId.value
+    for (const slot of RECIPE_SLOT_KEYS) {
+      if (draft.slotModes.value[slot] !== 'empty') continue
+      if (slotFragmentItems(draft.textFragments.value, slot).length === 0) continue
+      // 自动升级也要遵守与手动切换相同的守卫，不能绕过素体 / 双人限制。
+      if (slot === 'costume' && bodyMode.value === 'bare') continue
+      if (slot === 'pose' && poseId.startsWith('pair')) continue
+      draft.setSlotMode(slot, 'text')
+    }
+  },
+  { deep: true },
+)
+
 /** ParamsCard 的画风 emit（string）→ 收敛到后端认可的两种值。 */
 function onParamsStyleChange(value: string): void {
   style.value = value === 'realistic' ? 'realistic' : 'none'
@@ -221,11 +391,22 @@ function onParamsStyleChange(value: string): void {
  * 校验，失效时自动回落后端 default，避免恢复出一个磁盘上已删除的工作流。
  */
 const storedSettings = readReferenceStudioSettings()
+
+// 文本补充存的是全文、不依赖库数据：先于三库 hydrate 恢复，
+// 避免「库临时加载失败 → 刷新后文本也被清空」。
+draft.hydrateTextFragments()
+
 if (storedSettings) {
   if (storedSettings.workflow) workflowPath.value = storedSettings.workflow
-  style.value = storedSettings.style
+  // 已选画风技术碎片时 style 必须为 none（互斥，方案 §5.4），避免恢复出冲突组合。
+  style.value = styleLocked.value ? 'none' : storedSettings.style
   baseSeed.value = storedSettings.baseSeed
 }
+
+/** 选中 / 保留画风技术碎片时强制 none；删除碎片后不猜测旧值，由用户手动选回。 */
+watch(styleLocked, (locked) => {
+  if (locked && style.value !== 'none') style.value = 'none'
+})
 
 /** 画风 / 工作流 / 种子 / 画质档 / 比例：任何变更都合并写入（300ms 防抖）。 */
 watch(
@@ -456,6 +637,9 @@ const previewGroups = computed(() =>
     qualityEnabled: caps.value.quality,
     orientationEnabled: caps.value.orientation,
     baseSeed: baseSeed.value,
+    // P2：清单与提交共用模式 / 文本，避免「清单显示图片、提交却发文本」。
+    slotModes: slotModes.value,
+    slotTexts: slotTexts.value,
   }),
 )
 
@@ -610,6 +794,151 @@ function pickRandom<T>(pool: readonly T[]): T | undefined {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
+/** `GET /api/composer/recipes/random` 的响应（P4）。 */
+interface RandomRecipeResponse {
+  prompt_id: number
+  name: string
+  fragments: Array<{ type: FragmentType; content: string }>
+  tags?: string
+  source?: string
+  recipe_count: number
+}
+
+interface AtomicRecipeResponse {
+  bank_version: number
+  combo_id: string
+  fragments: Array<{ type: FragmentType; content: string }>
+  pose_facet: string
+  labels?: Record<string, string>
+  warning?: string
+}
+
+const recipeRandomLoading = ref(false)
+const atomicRandomLoading = ref(false)
+const recipeSourceName = computed(() => draft.recipeSourceName.value)
+
+/**
+ * 同源整套随机（P4）：抽一套完整 8 类配方，用姿势图作唯一图片锚点。
+ *
+ * - 人像 / 服装槽切文本模式，由配方文本驱动；
+ * - 姿势槽保持 image 模式，从姿势库随机取一张；
+ * - 姿势文本默认不生效；用户可手动打开「作为补充」把它作为第 8 条发送。
+ */
+async function randomizeRecipe(): Promise<void> {
+  if (recipeRandomLoading.value) return
+  if (libraryLoading.value) {
+    toast.info('图库仍在加载，请稍候再整套随机')
+    return
+  }
+  if (!posePool.value.some((item) => !item.id.startsWith('pair'))) {
+    toast.error('无法整套随机。原因：姿势库没有单人姿势。下一步：先加载单人姿势库，或手动选择一张姿势图。')
+    return
+  }
+
+  recipeRandomLoading.value = true
+  try {
+    const response = await apiGet<RandomRecipeResponse>('/api/composer/recipes/random', {
+      exclude_id: draft.recipeSourceId.value ?? undefined,
+      safe_mode: safeMode.value,
+    })
+
+    const next = createEmptyRecipeTextFragments()
+    for (const fragment of response.fragments ?? []) {
+      if (!FRAGMENT_TYPES.includes(fragment.type)) continue
+      next[fragment.type] = [{ type: fragment.type, content: fragment.content }]
+    }
+
+    // 姿势文本默认不生效，但用它匹配姿势库 facet，避免「配方说坐、图是站」。
+    const poseText = next.姿态动作[0]?.content ?? ''
+    const poseFacets = desiredPoseFacets(poseText)
+    const nextPose = pickMatchedPose(posePool.value, poseText)
+    if (!nextPose) {
+      toast.error('无法整套随机。原因：姿势库没有可用的单人姿势。下一步：稍后重试，或手动选择一张姿势图。')
+      return
+    }
+    const poseMatched = poseFacets.some((facet) =>
+      (nextPose.分类 || '').includes(facet),
+    )
+
+    draft.textFragments.value = next
+    draft.setPose(nextPose, poseDepthMode.value)
+    // 姿势锚点：人像 / 服装用文本替代，姿势保留图片。
+    draft.setSlotMode('portrait', 'text')
+    draft.setSlotMode('costume', 'text')
+    draft.setSlotMode('pose', 'image')
+    draft.setSlotSupplement('portrait', false)
+    draft.setSlotSupplement('costume', false)
+    draft.setSlotSupplement('pose', false)
+    draft.setRecipeSource(response.prompt_id, response.name)
+
+    toast.success(`已套用《${response.name}》：${poseMatched ? '姿势图按配方姿态匹配' : '使用安全姿势图'}，7 类文本生效；姿势文本可手动开启补充`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    toast.error(
+      `整套随机失败。原因：${message}。下一步：重试；仍失败请检查后端服务。`,
+    )
+  } finally {
+    recipeRandomLoading.value = false
+  }
+}
+
+/**
+ * 跨源实验：从原子碎片库抽一套兼容组合。
+ *
+ * 与同源整套随机的区别只是文本来源；姿势仍用姿势图锚点，姿势文本默认不发。
+ * 实验入口不写数据库，来源标签以「跨源实验 ·」开头，提示需人工复核。
+ */
+async function randomizeAtomic(): Promise<void> {
+  if (atomicRandomLoading.value) return
+  if (libraryLoading.value) {
+    toast.info('图库仍在加载，请稍候再跨源实验')
+    return
+  }
+  if (!posePool.value.some((item) => !item.id.startsWith('pair'))) {
+    toast.error('无法跨源实验。原因：姿势库没有单人姿势。下一步：先加载单人姿势库，或手动选择一张姿势图。')
+    return
+  }
+
+  atomicRandomLoading.value = true
+  try {
+    const response = await apiGet<AtomicRecipeResponse>('/api/composer/recipes/atomic')
+    const next = createEmptyRecipeTextFragments()
+    for (const fragment of response.fragments ?? []) {
+      if (!FRAGMENT_TYPES.includes(fragment.type)) continue
+      next[fragment.type] = [{ type: fragment.type, content: fragment.content }]
+    }
+
+    const nextPose = pickPoseForFacet(posePool.value, response.pose_facet)
+    if (!nextPose) {
+      toast.error('无法跨源实验。原因：姿势库没有可用的单人姿势。下一步：稍后重试，或手动选择一张姿势图。')
+      return
+    }
+    const facetToken = poseFacetToken(response.pose_facet)
+    const poseMatched = Boolean(facetToken) && (nextPose.分类 || '').includes(facetToken)
+
+    draft.textFragments.value = next
+    draft.setPose(nextPose, poseDepthMode.value)
+    draft.setSlotMode('portrait', 'text')
+    draft.setSlotMode('costume', 'text')
+    draft.setSlotMode('pose', 'image')
+    draft.setSlotSupplement('portrait', false)
+    draft.setSlotSupplement('costume', false)
+    draft.setSlotSupplement('pose', false)
+    draft.setRecipeSource(null, `跨源实验 · ${response.combo_id}`)
+
+    toast.info(
+      `已套用跨源实验组合：${poseMatched ? '姿势图按配方姿态匹配' : '使用安全姿势图'}；建议人工复核`,
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    toast.error(
+      `跨源实验失败。原因：${message}。下一步：重试；仍失败请检查后端服务。`,
+    )
+  } finally {
+    atomicRandomLoading.value = false
+  }
+}
+
 /**
  * 随机捏人：三库各随机取一条。
  *
@@ -712,13 +1041,8 @@ function afterSubmit(batch: RecipeBatch | null): void {
 
 async function onGenerate(): Promise<void> {
   showingPrevious.value = false
-  if (activeSlotCount.value === 0) {
-    toast.error(
-      '无法提交。原因：请至少选择一个参考图或上传一张参考图。下一步：从人像 / 服装 / 姿势任一库选择参考图' +
-        (supportsExtraSlot.value ? '，或上传第 4 张后再提交。' : '后再提交。'),
-    )
-    return
-  }
+  // P2：至少 1 图 / 文本碎片 / 素体 + 服装文本 / 双人姿势等校验统一在 submit() 内完成，
+  // 这里只保留超限预检（与可提交性无关，避免把批次打爆）。
   if (batchOverLimit.value) {
     toast.error(`无法提交。原因：${batchLimitMessage.value}。下一步：减少素材或尺寸档位后重试。`)
     return
@@ -745,12 +1069,26 @@ function onCancelDowngrade(): void {
 }
 
 
-/** 复制只读预览文本；剪贴板不可用时退化为手动复制提示。 */
+/**
+ * 是否处于手动改写模式（`prompt_override` 非空）。
+ *
+ * 手动模式下后端不再自动抽取负向，也不再二次编译正向：
+ * 负向块必须如实显示用户填写内容，而不是 dry-run 的旧值。
+ */
+const manualPromptActive = computed(() => promptOverride.value !== null)
+
+/** 负向块要展示的文本：手动模式 = 用户手填；自动模式 = 后端编译后的最终负向。 */
+const displayedNegativePrompt = computed(() =>
+  manualPromptActive.value ? draft.negativePrompt.value.trim() : previewNegativePrompt.value,
+)
+
+/** 复制当前实际会提交的正向：手动改写优先，否则复制自动预览。 */
 async function copyPromptPreview(): Promise<void> {
-  if (!previewPrompt.value) return
+  const text = promptOverride.value ?? previewPrompt.value
+  if (!text.trim()) return
   try {
     if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板 API')
-    await navigator.clipboard.writeText(previewPrompt.value)
+    await navigator.clipboard.writeText(text)
     toast.success('提示词已复制到剪贴板')
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
@@ -860,6 +1198,7 @@ onMounted(async () => {
             :slot-key="slot.key"
             :items="slot.items"
             :hint="slot.hint"
+            :mode="slotModes[slot.key]"
             :show-depth-toggle="slot.showDepthToggle"
             :use-depth="slot.useDepth"
             @select="openSlot(slot.key)"
@@ -867,17 +1206,23 @@ onMounted(async () => {
             @depth-change="changePoseDepth"
             @preview="openSlotPreview(slot.key, $event)"
             @remove="removeSlotItem(slot.key, $event)"
-          />
-          <!-- 本地上传：与库条目同数组、同组合维度，可多张 -->
-          <button
-            type="button"
-            class="slot-upload"
-            :data-testid="`studio-slot-upload-${slot.key}`"
-            :disabled="slotUploading"
-            @click="pickSlotUpload(slot.key)"
+            @update:mode="onSlotModeChange(slot.key, $event)"
+            @fill-text="onFillText"
           >
-            {{ slotUploading ? '上传中…' : '＋ 上传本地图' }}
-          </button>
+            <!-- 与「继续选」同一行（studio-slot-footer）；text 模式不提交图片，不提供入口 -->
+            <template #footer>
+              <button
+                v-if="slotModes[slot.key] !== 'text'"
+                type="button"
+                class="slot-upload"
+                :data-testid="`studio-slot-upload-${slot.key}`"
+                :disabled="slotUploading"
+                @click="pickSlotUpload(slot.key)"
+              >
+                {{ slotUploading ? '上传中…' : '＋ 上传本地图' }}
+              </button>
+            </template>
+          </StudioSlotPanel>
         </div>
 
         <input
@@ -920,6 +1265,20 @@ onMounted(async () => {
 
     </ReferenceSectionCard>
 
+    <!-- 文本补充（八类碎片）+ 负向：素材区之后、组合清单之前（方案 §5.5） -->
+    <StudioTextSupplementCard
+      ref="textSupplementRef"
+      v-model="textFragments"
+      v-model:negative-prompt="negativePrompt"
+      :safe-mode="safeMode"
+      :style-locked="styleLocked"
+      :slot-modes="slotModes"
+      :supplement-flags="supplementFlags"
+      :recipe-source-name="recipeSourceName"
+      @update:slot-mode="onSlotModeChange"
+      @update:supplement="onSlotSupplementChange"
+    />
+
     <div class="studio-grid">
       <!--
         行 B 左（8/12）：生成清单。
@@ -928,7 +1287,7 @@ onMounted(async () => {
       -->
       <section class="studio-cell studio-cell--8 matrix-cell">
         <div class="matrix-head" data-testid="studio-batch-summary">
-          <span data-testid="studio-selected-total">已选 {{ totalSelected }} 张 · 非空槽 {{ activeSlotCount }}</span>
+          <span data-testid="studio-selected-total">已选 {{ totalSelected }} 张 · 图片槽 {{ activeSlotCount }} · 文本槽 {{ textSlotCount }} · 补充 {{ supplementSlotCount }}</span>
           <span class="matrix-head__sep" aria-hidden="true">·</span>
           <span data-testid="studio-batch-total">共 {{ batchTotal }} 组</span>
         </div>
@@ -948,6 +1307,9 @@ onMounted(async () => {
           :workflows="workflows"
           :pose-use-depth="poseUseDepth"
           :active-slot-count="activeSlotCount"
+          :slot-modes="slotModes"
+          :slot-texts="slotTexts"
+          :supplement-flags="supplementFlags"
         />
       </section>
 
@@ -962,6 +1324,7 @@ onMounted(async () => {
           :workflows-error="workflowsError"
           :style="style"
           :style-options="STYLE_OPTIONS"
+          :style-locked="styleLocked"
           :quality-enabled="caps.quality"
           :quality-options="qualityOptions"
           :quality-selection="qualitySelection"
@@ -982,14 +1345,14 @@ onMounted(async () => {
         />
       </ReferenceSectionCard>
 
-      <!-- 行 C 左（7/12）：提示词只读预览（后端 dry_run 组合，与正式提交完全独立） -->
+      <!-- 行 C 左（7/12）：提示词分段直接编辑（P3，方案 §14） -->
       <ReferenceSectionCard class="studio-cell studio-cell--7" title="提示词预览">
           <template #actions>
             <button
               type="button"
               class="studio-btn studio-btn--ghost studio-btn--sm"
               data-testid="studio-prompt-copy"
-              :disabled="!previewPrompt || previewLoading"
+              :disabled="(!previewPrompt && !promptOverride) || previewLoading"
               @click="copyPromptPreview"
             >
               复制提示词
@@ -997,7 +1360,7 @@ onMounted(async () => {
           </template>
 
           <p class="studio-hint">
-            提示词由后端按三槽自动生成，此处仅预览，不可编辑。
+            提示词由碎片生成；每段都可直接编辑，改后按原文提交。
             <template v-if="totalSelected > 1">多选时按每槽第一张生成代表组合。</template>
             <template v-if="workflowSelection.length > 1 && previewWorkflow">
               多工作流时按第一条工作流预览：{{ workflowDisplayName(previewWorkflow.name) }}。
@@ -1011,10 +1374,60 @@ onMounted(async () => {
             <span v-else-if="previewError" class="prompt-preview__error" role="alert">
               {{ previewError }}
             </span>
-            <pre v-else-if="previewPrompt" class="prompt-preview__text">{{ previewPrompt }}</pre>
+            <StudioPromptEditor
+              v-else-if="previewPrompt || promptOverride"
+              :prompt="previewPrompt"
+              v-model="promptOverride"
+              :slot-modes="slotModes"
+              :supplement-flags="supplementFlags"
+              :loading="previewLoading"
+              :error="previewError"
+              @retry="refreshPreviewPrompt"
+            />
             <span v-else class="prompt-preview__state">
               三槽均未选择：选择任一参考图后将在此显示后端组合出的提示词。
             </span>
+          </div>
+
+          <!--
+            最终负向（实际提交）：§11.3 要求预览与真实提交同源。
+            自动模式随后端 dry-run 的 negative_prompt / negative_effective；
+            手动改写时后端不再自动抽取，只显示用户填写的内容（方案 §14.2）。
+          -->
+          <div
+            v-if="previewPrompt || manualPromptActive"
+            class="prompt-preview__negative"
+            data-testid="studio-prompt-negative"
+          >
+            <span class="prompt-preview__negative-label">
+              {{ manualPromptActive ? '负向（已手动修改）' : '最终负向（实际提交）' }}
+            </span>
+            <pre
+              v-if="displayedNegativePrompt"
+              class="prompt-preview__negative-text"
+              data-testid="studio-prompt-negative-text"
+            >{{ displayedNegativePrompt }}</pre>
+            <span
+              v-else
+              class="prompt-preview__negative-empty"
+              data-testid="studio-prompt-negative-empty"
+            >
+              （空）
+            </span>
+            <p
+              v-if="manualPromptActive"
+              class="prompt-preview__negative-note"
+              data-testid="studio-prompt-negative-manual-note"
+            >
+              已手动修改：负向只包含你填写的内容，不再自动抽取
+            </p>
+            <p
+              v-else-if="previewNegativeEffective === false"
+              class="prompt-preview__negative-note"
+              data-testid="studio-prompt-negative-inactive"
+            >
+              当前工作流负向不生效，实际提交为空
+            </p>
           </div>
 
           <button
@@ -1041,7 +1454,7 @@ onMounted(async () => {
           data-testid="studio-prompt-suffix"
         />
         <p class="studio-hint">
-          补充要求是唯一进入提交的自由文本；提示词由后端按三槽自动生成，上方预览只读、不可编辑。
+          每段可直接编辑；改后按原文提交，补充要求不再参与。
         </p>
       </ReferenceSectionCard>
 
@@ -1135,7 +1548,12 @@ onMounted(async () => {
       :can-submit="canSubmit"
       :submitting="submitting"
       :library-loading="libraryLoading"
+      :recipe-loading="recipeRandomLoading"
+      :atomic-loading="atomicRandomLoading"
+      :slot-modes="slotModes"
       @randomize="randomize"
+      @randomize-recipe="randomizeRecipe"
+      @randomize-atomic="randomizeAtomic"
       @submit="onGenerate"
     />
 
@@ -1714,12 +2132,10 @@ onMounted(async () => {
 }
 
 
-/* 提示词只读预览：等宽字体、保留换行、长词可断 */
+/* 提示词预览：分段卡片自适应高度，交给页面滚动，不再嵌套滚动条 */
 .prompt-preview {
   box-sizing: border-box;
   width: 100%;
-  max-height: 320px;
-  overflow-y: auto;
   padding: 10px 12px;
   border-radius: 12px;
   background: var(--surface-code);
@@ -1739,6 +2155,48 @@ onMounted(async () => {
 .prompt-preview__state {
   display: block;
   color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 最终负向（实际提交）：与正向预览分块展示，避免两段文本混在一起 */
+.prompt-preview__negative {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  background: var(--surface-result);
+}
+
+.prompt-preview__negative-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.prompt-preview__negative-text {
+  margin: 0;
+  color: var(--text-body);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prompt-preview__negative-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.prompt-preview__negative-note {
+  margin: 0;
+  color: var(--warn);
   font-size: 12px;
   line-height: 1.6;
 }

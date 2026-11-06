@@ -32,6 +32,12 @@ const props = defineProps<{
   workflowsError: string
   style: string
   styleOptions: readonly { value: string; label: string }[]
+  /**
+   * 画风预设是否被「画风技术」碎片锁定（方案 §5.4）。
+   *
+   * true 时下拉 disabled、提交体强制 `style='none'`，并显示「已用碎片描述画风」。
+   */
+  styleLocked?: boolean
   qualityEnabled: boolean
   qualityOptions: readonly { value: string; label: string }[]
   qualitySelection: string[]
@@ -148,12 +154,20 @@ function onBodyModeChange(event: Event): void {
         class="params-select"
         data-testid="studio-style"
         :value="props.style"
+        :disabled="styleLocked"
         @change="onStyleChange"
       >
         <option v-for="option in styleOptions" :key="option.value" :value="option.value">
           {{ option.label }}
         </option>
       </select>
+      <p
+        v-if="styleLocked"
+        class="params-hint"
+        data-testid="studio-style-locked"
+      >
+        已用碎片描述画风
+      </p>
     </div>
 
     <!-- 基础种子：与画风同一行（都是短控件）；第 i 组 seed = base_seed + i（fixed） -->
@@ -194,6 +208,9 @@ function onBodyModeChange(event: Event): void {
       </div>
       <p v-if="qualitySelection.length === 0" class="params-hint">
         未选：跟随工作流原生尺寸
+      </p>
+      <p class="params-hint" data-testid="studio-quality-time-hint">
+        本机参考：0.75× 约 45s，1.0× 约 60–120s（显存压力时更久），1.5× 约 5–6 分钟；首次与冷启动更慢。
       </p>
     </div>
 
@@ -320,6 +337,13 @@ function onBodyModeChange(event: Event): void {
 .params-select:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
+}
+
+/* 画风被「画风技术」碎片锁定时：保留可读性，但明确不可更改 */
+.params-select:disabled {
+  color: var(--text-disabled);
+  background: var(--surface-inset);
+  cursor: not-allowed;
 }
 
 .params-select--number {

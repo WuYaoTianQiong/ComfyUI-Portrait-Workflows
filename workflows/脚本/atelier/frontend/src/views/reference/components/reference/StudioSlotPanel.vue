@@ -16,6 +16,10 @@
 
 import { computed } from 'vue'
 
+import {
+  SLOT_TEXT_TYPE_HINTS,
+} from '../../../../composables/recipeTextFragments'
+import type { RecipeSlotMode } from '../../../../composables/recipeTextFragments'
 import type { SlotSelectedItem } from './slotView'
 
 const props = defineProps<{
@@ -27,6 +31,13 @@ const props = defineProps<{
   items: readonly SlotSelectedItem[]
   /** 空态主文案（如「＋ 选人像」） */
   hint: string
+  /**
+   * 槽位模式（P2 替代态）：
+   * - image：显示图墙与图片入口；
+   * - text：隐藏图墙，引导到下方「文本补充」卡填写对应类碎片；
+   * - empty：无图无文本（空态）。
+   */
+  mode?: RecipeSlotMode
   /** 姿势槽：是否显示白模 / 深度分段 */
   showDepthToggle?: boolean
   /** 姿势槽：当前是否深度图 */
@@ -34,7 +45,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 点「更换」/ 空态整卡 / 底部「继续选」：跳对应库页 */
+  /** 点「更换」/ 空态主按钮 / 底部「继续选」：跳对应库页 */
   select: []
   /** 清空当前槽位全部条目 */
   clear: []
@@ -44,61 +55,90 @@ const emit = defineEmits<{
   preview: [index: number]
   /** 单项删除；key 即 `SlotSelectedItem.key`（= 条目 id） */
   remove: [key: string]
+  /** 切换图片 / 文本模式（父级负责双人 / 素体校验） */
+  'update:mode': [mode: RecipeSlotMode]
+  /** 文本模式「去填写」：展开并定位到文本补充卡 */
+  fillText: []
 }>()
 
 const selected = computed(() => props.items.length > 0)
+/** 缺省按图片模式渲染，兼容旧调用方。 */
+const mode = computed<RecipeSlotMode>(() => props.mode ?? 'image')
+/** text 模式的安全网：即使还有残留图片也不再展示图墙 / 图片入口。 */
+const textMode = computed(() => mode.value === 'text')
+const textTypeHint = computed(() => SLOT_TEXT_TYPE_HINTS[props.slotKey])
 
 /** 灯箱地址：优先原图，无原图回退缩略图；两者皆无时返回 null 走占位。 */
 function mediaUrl(entry: SlotSelectedItem): string | null {
   return entry.image ?? entry.thumb
 }
+
+/** 卡头分段控件：只在已选图 / 已选文本时出现，避免空态多出两个入口。 */
+const showModeToggle = computed(() => selected.value || textMode.value)
+
+function setMode(next: RecipeSlotMode): void {
+  if (mode.value === next) return
+  emit('update:mode', next)
+}
 </script>
 
 <template>
-  <!-- 空态：整卡就是一个真实 button，点击前往对应库页 -->
-  <button
-    v-if="!selected"
-    type="button"
-    class="slot-panel slot-panel--empty"
-    :aria-label="`${label}槽未选择，点击前往${label}库多选`"
-    :data-testid="`studio-slot-${slotKey}`"
-    @click="emit('select')"
-  >
-    <span
-      class="slot-panel__empty-media"
-      :data-testid="`studio-slot-media-${slotKey}`"
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 16 16">
-        <path
-          d="M8 2.6v10.8M2.6 8h10.8"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.2"
-          stroke-linecap="round"
-        />
-      </svg>
-    </span>
-    <span class="slot-panel__empty-hint">{{ hint }}</span>
-    <span class="slot-panel__empty-note">可多选，选完手动切回合成台</span>
-  </button>
-
-  <!-- 已选态：section 仅作分组容器，不带按钮角色、不整卡点击 -->
+  <!-- 统一用 section 作根：空态内部需要「选图 / 改用文本」两个独立按钮，不能再整卡套 button -->
   <section
-    v-else
     class="slot-panel"
-    :aria-label="`${label}槽，已选 ${items.length} 张`"
+    :class="{ 'slot-panel--empty': !selected && !textMode }"
+    :aria-label="
+      textMode
+        ? `${label}槽使用文本替代，请在文本补充卡填写${textTypeHint}`
+        : selected
+          ? `${label}槽，已选 ${items.length} 张`
+          : `${label}槽未选择，可选择参考图或改用文本`
+    "
     :data-testid="`studio-slot-${slotKey}`"
   >
     <header class="slot-panel__head">
       <div class="slot-panel__head-main">
         <span class="slot-panel__label">{{ label }}</span>
         <span
+          v-if="selected"
           class="slot-panel__count"
           :data-testid="`studio-slot-count-${slotKey}`"
         >
           {{ items.length }}
         </span>
+      </div>
+
+      <!--
+        图片 / 文本分段控件（方案 §8 P2）：
+        只在「已选图」或「已切文本」时出现，空态由下方两个入口承担，
+        避免同一张窄卡里出现四个并列按钮。
+      -->
+      <div
+        v-if="showModeToggle"
+        class="mode-toggle"
+        role="group"
+        :aria-label="`切换${label}槽用参考图还是用文本`"
+      >
+        <button
+          type="button"
+          class="mode-toggle__btn"
+          :class="{ 'is-active': mode === 'image' }"
+          :aria-pressed="mode === 'image'"
+          :data-testid="`studio-slot-mode-${slotKey}-image`"
+          @click="setMode('image')"
+        >
+          图片
+        </button>
+        <button
+          type="button"
+          class="mode-toggle__btn"
+          :class="{ 'is-active': mode === 'text' }"
+          :aria-pressed="mode === 'text'"
+          :data-testid="`studio-slot-mode-${slotKey}-text`"
+          @click="setMode('text')"
+        >
+          文本
+        </button>
       </div>
 
       <!--
@@ -108,7 +148,7 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
         该开关只影响槽位 / 清单 / 灯箱显示哪张图，不影响出图 —— 卡片底部有常驻说明。
       -->
       <div
-        v-if="showDepthToggle && items.length > 0"
+        v-if="showDepthToggle && items.length > 0 && !textMode"
         class="depth-toggle"
         role="group"
         aria-label="切换本槽显示白模或深度图（仅预览，不影响出图）"
@@ -136,7 +176,8 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
         </button>
       </div>
 
-      <div class="slot-panel__head-actions">
+      <!-- text 模式不提供任何图片选择入口（方案 §8 P2） -->
+      <div v-if="!textMode && selected" class="slot-panel__head-actions">
         <button
           type="button"
           class="slot-panel__change"
@@ -156,10 +197,39 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
           清空
         </button>
       </div>
+
+      <!-- text 模式仍允许清空残留图片（只删图，不改模式） -->
+      <div v-else-if="textMode" class="slot-panel__head-actions">
+        <button
+          type="button"
+          class="slot-panel__clear"
+          :aria-label="`清空${label}槽残留参考图`"
+          :data-testid="`studio-slot-clear-${slotKey}`"
+          @click="emit('clear')"
+        >
+          清空
+        </button>
+      </div>
     </header>
 
-    <!-- 竖向图墙：全量渲染 + 内部纵向滚动，约 3 行高度 -->
+    <!-- text 模式：只给说明与「去填写」，不显示图墙 / 选图入口 -->
+    <div v-if="textMode" class="slot-panel__text" :data-testid="`studio-slot-text-${slotKey}`">
+      <p class="slot-panel__text-hint">
+        文本模式：请在下方「文本补充」卡填写 {{ textTypeHint }} 类（当前图片不参与提交）
+      </p>
+      <button
+        type="button"
+        class="slot-panel__fill"
+        :data-testid="`studio-slot-fill-text-${slotKey}`"
+        @click="emit('fillText')"
+      >
+        去填写
+      </button>
+    </div>
+
+    <!-- image 模式且有图：竖向图墙（全量渲染 + 内部滚动） -->
     <div
+      v-else-if="selected"
       class="slot-panel__media"
       :data-testid="`studio-slot-media-${slotKey}`"
     >
@@ -210,19 +280,61 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
       </div>
     </div>
 
-    <!-- 常驻说明：把「仅预览」写在界面上，避免误以为切换会影响出图 -->
-    <p v-if="showDepthToggle" class="slot-panel__note" data-testid="studio-pose-depth-note">
+    <p
+      v-if="showDepthToggle && !textMode && selected"
+      class="slot-panel__note"
+      data-testid="studio-pose-depth-note"
+    >
       白模 / 深度仅影响预览，不影响出图
     </p>
 
-    <button
-      type="button"
-      class="slot-panel__more"
-      :aria-label="`继续选择${label}参考图`"
-      @click="emit('select')"
-    >
-      ＋ 继续选{{ label }}
-    </button>
+    <div v-if="!textMode && selected" class="slot-panel__footer">
+      <button
+        type="button"
+        class="slot-panel__more"
+        :aria-label="`继续选择${label}参考图`"
+        @click="emit('select')"
+      >
+        ＋ 继续选{{ label }}
+      </button>
+      <slot name="footer" />
+    </div>
+
+    <!-- 空态：保留原选图入口，并增加「改用文本 / 上传本地图」（方案 §8 P2） -->
+    <div v-if="!selected && !textMode" class="slot-panel__empty" :data-testid="`studio-slot-media-${slotKey}`">
+      <button
+        type="button"
+        class="slot-panel__empty-main"
+        :aria-label="`前往${label}库多选参考图`"
+        :data-testid="`studio-slot-select-${slotKey}`"
+        @click="emit('select')"
+      >
+        <span class="slot-panel__empty-media" aria-hidden="true">
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M8 2.6v10.8M2.6 8h10.8"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </span>
+        <span class="slot-panel__empty-hint">{{ hint }}</span>
+        <span class="slot-panel__empty-note">可多选，选完手动切回合成台</span>
+      </button>
+      <div class="slot-panel__footer slot-panel__footer--empty">
+        <button
+          type="button"
+          class="slot-panel__empty-switch"
+          :data-testid="`studio-slot-use-text-${slotKey}`"
+          @click="emit('update:mode', 'text')"
+        >
+          改用文本
+        </button>
+        <slot name="footer" />
+      </div>
+    </div>
   </section>
 </template>
 
@@ -246,15 +358,11 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   color: inherit;
 }
 
-/* 空态：虚线边框 + 居中图标 / 主文案 / 副文案，整卡可点 */
+/* 空态：虚线边框；内部「选图」按钮与「改用文本」按钮各自独立 */
 .slot-panel--empty {
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 20px 12px;
+  gap: 0;
+  padding: 10px;
   border: 1px dashed var(--border-stronger);
-  text-align: center;
-  cursor: pointer;
   transition:
     border-color var(--dur-fast) var(--ease),
     background-color var(--dur-fast) var(--ease);
@@ -265,9 +373,62 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   background: var(--fill-faint);
 }
 
-.slot-panel--empty:focus-visible {
+/* 空态容器：主入口在上，改用文本在下 */
+.slot-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 空态主入口：整块可点，视觉上仍是原来的虚线卡 */
+.slot-panel__empty-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 20px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.slot-panel__empty-main:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
+}
+
+/* 空态次级入口：改用文本（与主入口同一张卡，但视觉更轻） */
+.slot-panel__empty-switch {
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.slot-panel__empty-switch:hover {
+  border-color: var(--primary);
+  color: var(--text-strong);
+}
+
+.slot-panel__empty-switch:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
 }
 
 /* 空态占位块 36 × 44、圆角 10（与旧卡同语义，仅放大到可点击卡尺度） */
@@ -411,6 +572,78 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
  * 白模 / 深度分段：位于头部「数量」与「更换 / 清空」之间，靠右排列。
  * 尺寸压到 22px 高，保证 250px 窄卡也不换行（换行时由 head 的 flex-wrap 兜底）。
  */
+/* 图片 / 文本分段：与白模 / 深度同尺寸，放在头部右侧 */
+.mode-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  padding: 1px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--fill-faint);
+}
+
+.mode-toggle__btn {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* 当前模式用卡片底色 + 强文本；非当前段保持可读（不用灰淡色） */
+.mode-toggle__btn.is-active {
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.mode-toggle__btn:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* 文本模式：说明 + 去填写，不渲染图墙 */
+.slot-panel__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) 0;
+}
+
+.slot-panel__text-hint {
+  margin: 0;
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.slot-panel__fill {
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.slot-panel__fill:hover {
+  border-color: var(--primary);
+}
+
+.slot-panel__fill:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .depth-toggle {
   display: inline-flex;
   flex: none;
@@ -619,5 +852,38 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
 .slot-panel__more:focus-visible {
   outline: 1px solid var(--primary);
   outline-offset: 1px;
+}
+
+/* 「继续选」与「上传本地图」同一行：flex 等分，避免上下堆叠 */
+.slot-panel__footer {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.slot-panel__footer .slot-panel__more {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* slotted 内容属于父组件作用域，用 :slotted 覆盖父级的 width:100% */
+.slot-panel__footer :slotted(.slot-upload) {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* 空态：改用文本 + 上传本地图同排，与已选态的 footer 保持一致 */
+.slot-panel__footer--empty {
+  width: 100%;
+}
+
+.slot-panel__footer--empty .slot-panel__empty-switch {
+  flex: 1 1 0;
+  min-height: 28px;
+  padding: 0 8px;
 }
 </style>

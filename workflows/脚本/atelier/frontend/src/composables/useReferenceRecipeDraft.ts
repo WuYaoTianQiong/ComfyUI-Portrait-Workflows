@@ -28,9 +28,27 @@ import { computed, ref, watch } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
 import {
+  RECIPE_SLOT_KEYS,
+  cloneRecipeTextFragments,
+  cloneSupplementFlags,
+  createEmptyRecipeTextFragments,
+  createEmptySlotModes,
+  createEmptySupplementFlags,
+  deriveSlotModes,
+
+} from './recipeTextFragments'
+import type {
+  RecipeSlotKey,
+  RecipeSlotMode,
+  RecipeSlotModes,
+  RecipeSupplementFlags,
+  RecipeTextFragments,
+} from './recipeTextFragments'
+import {
   readReferenceStudioSettings,
   writeReferenceStudioSettings,
 } from './useReferenceStudioSettings'
+import type { ReferenceStudioSettings } from './useReferenceStudioSettings'
 import type { StoredReferenceSlotEntry } from './useReferenceStudioSettings'
 
 /** 姿势槽位的值：条目 + 加入时的图片模式。 */
@@ -40,8 +58,9 @@ export interface PoseSlotSelection {
   useDepth: boolean
 }
 
-/** 槽位键。 */
-export type RecipeSlotKey = 'portrait' | 'costume' | 'pose'
+/** 槽位键（真源在 `recipeTextFragments`，这里重导出保持旧导入路径可用）。 */
+export type { RecipeSlotKey }
+export type { RecipeSlotMode, RecipeSlotModes }
 
 /** 槽位总数（固定三槽）。 */
 export const RECIPE_SLOT_TOTAL = 3
@@ -76,6 +95,57 @@ export type UploadableSlotItem<T> = T & { uploadPath?: string }
 const portrait = ref<PortraitItem[]>([])
 const costume = ref<CostumeItem[]>([])
 const pose = ref<PoseSlotSelection[]>([])
+
+/**
+ * 文本补充八类碎片（2026-11-06）。
+ *
+ * 与三槽不同，它不需要按 id 回查库数据：持久化里存的就是 `{type, content}` 全文，
+ * 因此可以在库加载完成前先读回（见 `hydrateTextFragments`），刷新不丢文本。
+ */
+const textFragments = ref<RecipeTextFragments>(createEmptyRecipeTextFragments())
+/** 用户手填的负向提示词；最终负向 = 后端自动抽取 + 这里的内容。 */
+const negativePrompt = ref('')
+
+/**
+ * 三槽模式（P2 替代态，方案 §4.4）。
+ *
+ * - `image`：提交该槽参考图（碎片存在时作为补充）；
+ * - `text`：不提交图，只提交该槽对应类碎片；
+ * - `empty`：不提交任何内容。
+ *
+ * 真源在这里（与 `pb.reference_studio_v1` 的 portraitMode / costumeMode / poseMode 对应）。
+ */
+const slotModes = ref<RecipeSlotModes>(createEmptySlotModes())
+
+/**
+ * 跨源补充开关（P4）：`image` 模式下是否把对应槽文本追加为「此外需体现」。
+ *
+ * 默认全关；只在 image 模式有意义。切换到 text / empty 时由 `setSlotMode` 归零，
+ * 避免「切回图片后静默继续补充」。
+ */
+const supplementFlags = ref<RecipeSupplementFlags>(createEmptySupplementFlags())
+
+/** 最近一次「同源整套随机」的来源；仅展示 / 防止连续重复，不参与提交。 */
+const recipeSourceId = ref<number | null>(null)
+const recipeSourceName = ref('')
+
+/**
+ * 最近一次非空姿势的 id。
+ *
+ * 姿势槽切文本替代后 items 可能被清空，此时仍要能判断「上次选的是不是双人姿势」，
+ * 因此单独记住最近一次有效选择（`pair*` 前缀 = 双人）。
+ */
+const lastPoseId = ref('')
+
+/**
+ * 文本补充是否已从磁盘恢复过。
+ *
+ * 同一会话只恢复一次：合成台每次进入都会 setup，若每次都从 localStorage 读回，
+ * 会把「刚改、还在 300ms 写盘防抖窗口里」的编辑覆盖成旧值。
+ * `clearDraft()` 会重置它（测试与显式清空草稿都依赖这个语义）。
+ */
+let textFragmentsRestoredFromStorage = false
+/** 模式表是否已按快照恢复过（避免重复 hydrate 覆盖会话内的手动切换）。 */
 
 /** 各槽条目数。 */
 const portraitCount = computed(() => portrait.value.length)
@@ -171,21 +241,34 @@ function removeCostume(id?: string): void {
 // 姿势槽
 // ---------------------------------------------------------------------------
 
+/** 该姿势条目是否有深度变体；多来源里 PSL 没有深度图。 */
+function poseSupportsDepth(item: PoseItem): boolean {
+  return item.hasDepth !== false
+}
+
+/** 无深度条目强制回白模，避免槽位/灯箱去请求不存在的 depth 端点。 */
+function normalizePoseDepth(item: PoseItem, useDepth: boolean): boolean {
+  return Boolean(useDepth && poseSupportsDepth(item))
+}
+
 /** 姿势槽：追加；同 id 已存在时更新其模式（后写覆盖）。 */
 function addPose(item: PoseItem, useDepth = false): void {
+  const normalized = normalizePoseDepth(item, useDepth)
   const index = pose.value.findIndex((entry) => entry.item.id === item.id)
   if (index < 0) {
-    pose.value = [...pose.value, { item, useDepth }]
+    pose.value = [...pose.value, { item, useDepth: normalized }]
     return
   }
   const next = [...pose.value]
-  next[index] = { item, useDepth }
+  next[index] = { item, useDepth: normalized }
   pose.value = next
 }
 
 /** 姿势槽：整体替换为单条（随机捏人 / 旧调用方语义）；传 null 清空。 */
 function setPose(item: PoseItem | null, useDepth = false): void {
-  pose.value = item ? [{ item, useDepth }] : []
+  pose.value = item
+    ? [{ item, useDepth: normalizePoseDepth(item, useDepth) }]
+    : []
 }
 
 /**
@@ -195,17 +278,18 @@ function setPose(item: PoseItem | null, useDepth = false): void {
  * 返回 true 表示操作后该条目仍在槽位中（加入或换模式），false 表示移除。
  */
 function togglePose(item: PoseItem, useDepth = false): boolean {
+  const normalized = normalizePoseDepth(item, useDepth)
   const index = pose.value.findIndex((entry) => entry.item.id === item.id)
   if (index < 0) {
-    pose.value = [...pose.value, { item, useDepth }]
+    pose.value = [...pose.value, { item, useDepth: normalized }]
     return true
   }
-  if (pose.value[index].useDepth === useDepth) {
+  if (pose.value[index].useDepth === normalized) {
     pose.value = pose.value.filter((_, i) => i !== index)
     return false
   }
   const next = [...pose.value]
-  next[index] = { item, useDepth }
+  next[index] = { item, useDepth: normalized }
   pose.value = next
   return true
 }
@@ -219,9 +303,48 @@ function removePose(id?: string): void {
   pose.value = pose.value.filter((entry) => entry.item.id !== id)
 }
 
-/** 把槽位内所有姿势统一改成白模 / 深度图（合成台顶部分段切换）。 */
+/** 把槽位内所有姿势统一改成白模 / 深度图（无深度条目保持白模）。 */
 function setPoseMode(useDepth: boolean): void {
-  pose.value = pose.value.map((entry) => ({ ...entry, useDepth }))
+  pose.value = pose.value.map((entry) => ({
+    ...entry,
+    useDepth: normalizePoseDepth(entry.item, useDepth),
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// 槽位模式（P2 替代态）
+// ---------------------------------------------------------------------------
+
+/**
+ * 设置某一槽的模式（页面统一校验双人 / 素体冲突后再调用）。
+ *
+ * 只改模式，不动碎片与图片：`image` → `text` 保留图片作为「改回图片」的退路，
+ * `text` → `image` 保留碎片作为补充。
+ */
+function setSlotMode(slot: RecipeSlotKey, mode: RecipeSlotMode): void {
+  if (slotModes.value[slot] === mode) return
+  slotModes.value = { ...slotModes.value, [slot]: mode }
+  // 补充只在 image 模式有意义：离开 image 时归零，切回时不静默复活。
+  if (mode !== 'image' && supplementFlags.value[slot]) {
+    supplementFlags.value = { ...supplementFlags.value, [slot]: false }
+  }
+}
+
+/**
+ * 设置某一槽的跨源补充开关（P4）。
+ *
+ * 只允许在 image 模式打开；text / empty 下即使调用也按 false 处理。
+ */
+function setSlotSupplement(slot: RecipeSlotKey, enabled: boolean): void {
+  const next = enabled && slotModes.value[slot] === 'image'
+  if (supplementFlags.value[slot] === next) return
+  supplementFlags.value = { ...supplementFlags.value, [slot]: next }
+}
+
+/** 记录 / 清空「同源整套随机」来源（仅展示与避免连续重复）。 */
+function setRecipeSource(id: number | null, name = ''): void {
+  recipeSourceId.value = id
+  recipeSourceName.value = name
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +439,16 @@ function clearDraft(): void {
   portrait.value = []
   costume.value = []
   pose.value = []
+  // 文本补充与负向同属草稿；清空后允许下次重新从磁盘恢复（测试与显式清空共用）。
+  textFragments.value = createEmptyRecipeTextFragments()
+  negativePrompt.value = ''
+  // 模式与「上次姿势」同属草稿：清空后回到「三槽都是空」的推导起点。
+  slotModes.value = createEmptySlotModes()
+  supplementFlags.value = createEmptySupplementFlags()
+  recipeSourceId.value = null
+  recipeSourceName.value = ''
+  lastPoseId.value = ''
+  textFragmentsRestoredFromStorage = false
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +513,19 @@ function persist(): void {
     portrait: portrait.value.map(storedPortrait),
     costume: costume.value.map(storedCostume),
     pose: pose.value.map(storedPose),
+    // 文本补充存全文（不是只存 id）：恢复时不依赖库数据，也不会因为碎片池改名而丢内容。
+    textFragments: cloneRecipeTextFragments(textFragments.value),
+    negativePrompt: negativePrompt.value,
+    // P2：三槽模式单独持久化（旧数据没有这三个字段时由 hydrate 推导）。
+    portraitMode: slotModes.value.portrait,
+    costumeMode: slotModes.value.costume,
+    poseMode: slotModes.value.pose,
+    // P4：跨源补充开关；只在 image 模式有意义。
+    portraitSupplement: supplementFlags.value.portrait,
+    costumeSupplement: supplementFlags.value.costume,
+    poseSupplement: supplementFlags.value.pose,
+    recipeSourceId: recipeSourceId.value,
+    recipeSourceName: recipeSourceName.value,
   })
 }
 
@@ -470,6 +616,109 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   portrait.value = nextPortrait
   costume.value = nextCostume
   pose.value = nextPose
+  if (nextPose[0]) lastPoseId.value = nextPose[0].item.id
+  // 文本补充与三槽无关：这里一并恢复，保持「同一份快照一次性写进内存」的语义。
+  restoreTextFragmentsFromSettings(stored)
+  // 模式必须在三槽与碎片都恢复后应用：旧快照缺 mode 时按内容推导。
+  applyStoredSlotModes(stored, true)
+  return true
+}
+
+/**
+ * 应用快照里的三槽模式。
+ *
+ * - `inferMissing = true`：三槽已恢复，缺 mode 的槽按「有图 / 有文本」推导；
+ * - `inferMissing = false`：三槽尚未恢复（只恢复了文本），只应用显式字段，
+ *   避免用空 items 把 image 误推导成 empty。
+ */
+function applyStoredSlotModes(
+  stored: Pick<ReferenceStudioSettings, 'portraitMode' | 'costumeMode' | 'poseMode'>,
+  inferMissing: boolean,
+): void {
+  if (!inferMissing) {
+    const next = { ...slotModes.value }
+    if (stored.portraitMode) next.portrait = stored.portraitMode
+    if (stored.costumeMode) next.costume = stored.costumeMode
+    if (stored.poseMode) next.pose = stored.poseMode
+    slotModes.value = next
+    normalizeSupplementFlags()
+    return
+  }
+
+  const derived = deriveSlotModes(
+    {
+      portrait: portrait.value.length,
+      costume: costume.value.length,
+      pose: pose.value.length,
+    },
+    textFragments.value,
+  )
+  slotModes.value = {
+    portrait: stored.portraitMode ?? derived.portrait,
+    costume: stored.costumeMode ?? derived.costume,
+    pose: stored.poseMode ?? derived.pose,
+  }
+  normalizeSupplementFlags()
+}
+
+/** 补充只在 image 模式成立：恢复 / 推导出 text / empty 时把残留开关归零。 */
+function normalizeSupplementFlags(): void {
+  const next = { ...supplementFlags.value }
+  let changed = false
+  for (const slot of RECIPE_SLOT_KEYS) {
+    if (slotModes.value[slot] !== 'image' && next[slot]) {
+      next[slot] = false
+      changed = true
+    }
+  }
+  if (changed) supplementFlags.value = next
+}
+
+/**
+ * 把快照里的文本补充 / 负向写进内存。
+ *
+ * 同一会话只写一次（见 `textFragmentsRestoredFromStorage`）：页面可能多次挂载，
+ * 重复从磁盘恢复会把尚未落盘的最新编辑覆盖成旧值。
+ */
+function restoreTextFragmentsFromSettings(
+  stored: Pick<
+    ReferenceStudioSettings,
+    | 'textFragments'
+    | 'negativePrompt'
+    | 'portraitSupplement'
+    | 'costumeSupplement'
+    | 'poseSupplement'
+    | 'recipeSourceId'
+    | 'recipeSourceName'
+  >,
+): void {
+  if (textFragmentsRestoredFromStorage) return
+  textFragments.value = cloneRecipeTextFragments(stored.textFragments)
+  negativePrompt.value = stored.negativePrompt
+  supplementFlags.value = cloneSupplementFlags({
+    portrait: stored.portraitSupplement,
+    costume: stored.costumeSupplement,
+    pose: stored.poseSupplement,
+  })
+  recipeSourceId.value = stored.recipeSourceId
+  recipeSourceName.value = stored.recipeSourceName
+  textFragmentsRestoredFromStorage = true
+}
+
+/**
+ * 只恢复文本补充 / 负向（不依赖三库加载）。
+ *
+ * 三槽必须按 id 回查库数据，只能等库加载成功；文本补充存的是全文，
+ * 因此页面可以在挂载时先调用本函数，避免「库暂时失败 → 刷新后文本也没了」。
+ *
+ * 返回 true 表示读到了有效快照（无论文本是否为空）。
+ */
+function hydrateTextFragments(): boolean {
+  const stored = readReferenceStudioSettings()
+  if (!stored) return false
+  restoreTextFragmentsFromSettings(stored)
+  // 显式模式字段可以立即恢复（不依赖库数据）；缺字段的槽等三槽 hydrate 后再推导。
+  applyStoredSlotModes(stored, false)
   return true
 }
 
@@ -493,9 +742,114 @@ function persistPose(): void {
   writeReferenceStudioSettings({ pose: pose.value.map(storedPose) })
 }
 
+/**
+ * 选图自动进入 image 模式（P2）。
+ *
+ * 用户在库页选图时不会经过合成台的模式开关，若不自动提升，`empty` 槽会变成
+ * 「有图但模式为空」——槽位卡能显示图墙，提交体却不发图片字段。
+ *
+ * 只处理 `empty → image`：`text` 是用户显式选择的替代态，不因残留图片被改回；
+ * 清空图片也不自动降级（模式由用户 / 校验决定）。
+ */
+watch(
+  [portrait, costume, pose],
+  () => {
+    const next = { ...slotModes.value }
+    let changed = false
+    if (portrait.value.length > 0 && next.portrait === 'empty') {
+      next.portrait = 'image'
+      changed = true
+    }
+    if (costume.value.length > 0 && next.costume === 'empty') {
+      next.costume = 'image'
+      changed = true
+    }
+    if (pose.value.length > 0 && next.pose === 'empty') {
+      next.pose = 'image'
+      changed = true
+    }
+    if (changed) slotModes.value = next
+  },
+  { deep: true, flush: 'sync' },
+)
+
 watch(portrait, persistPortrait, { deep: true, flush: 'sync' })
 watch(costume, persistCostume, { deep: true, flush: 'sync' })
-watch(pose, persistPose, { deep: true, flush: 'sync' })
+watch(
+  pose,
+  () => {
+    // 清空姿势不清 lastPoseId：切换文本替代后仍要能识别「上次是双人姿势」。
+    const id = pose.value[0]?.item.id
+    if (id) lastPoseId.value = id
+    persistPose()
+  },
+  { deep: true, flush: 'sync' },
+)
+
+/**
+ * 三槽模式单独落盘。
+ *
+ * 与三槽分槽写同理：只更新模式字段，不覆盖磁盘上的三槽 / 文本 / 其它设置。
+ */
+watch(
+  slotModes,
+  () => {
+    writeReferenceStudioSettings({
+      portraitMode: slotModes.value.portrait,
+      costumeMode: slotModes.value.costume,
+      poseMode: slotModes.value.pose,
+    })
+  },
+  { deep: true, flush: 'sync' },
+)
+
+/** P4：补充开关单独落盘，不覆盖模式 / 三槽 / 文本。 */
+watch(
+  supplementFlags,
+  () => {
+    writeReferenceStudioSettings({
+      portraitSupplement: supplementFlags.value.portrait,
+      costumeSupplement: supplementFlags.value.costume,
+      poseSupplement: supplementFlags.value.pose,
+    })
+  },
+  { deep: true, flush: 'sync' },
+)
+
+/** 随机整套来源只做展示 / 去重，单独落盘。 */
+watch(
+  [recipeSourceId, recipeSourceName],
+  () => {
+    writeReferenceStudioSettings({
+      recipeSourceId: recipeSourceId.value,
+      recipeSourceName: recipeSourceName.value,
+    })
+  },
+  { flush: 'sync' },
+)
+
+/**
+ * 文本补充 / 负向单独落盘。
+ *
+ * 与三槽分槽写同理：只更新自己那份字段，绝不覆盖磁盘上的三槽选择。
+ * 拷贝一份再写，避免把响应式 Proxy 带进待写补丁。
+ */
+watch(
+  textFragments,
+  () => {
+    writeReferenceStudioSettings({
+      textFragments: cloneRecipeTextFragments(textFragments.value),
+    })
+  },
+  { deep: true, flush: 'sync' },
+)
+watch(
+  negativePrompt,
+  () => {
+    writeReferenceStudioSettings({ negativePrompt: negativePrompt.value })
+  },
+  { flush: 'sync' },
+)
 
 /** 人像槽已选判定；不传 id 时返回「该槽是否非空」。 */
 function isPortraitSelected(id?: string): boolean {
@@ -527,6 +881,18 @@ export function useReferenceRecipeDraft() {
     portrait,
     costume,
     pose,
+    // 文本补充（八类碎片）与负向提示词（2026-11-06）
+    textFragments,
+    negativePrompt,
+    // 三槽模式（P2 替代态）与「上次姿势」（双人校验）
+    slotModes,
+    supplementFlags,
+    recipeSourceId,
+    recipeSourceName,
+    lastPoseId,
+    setSlotMode,
+    setSlotSupplement,
+    setRecipeSource,
     count,
     countLabel,
     totalSelected,
@@ -555,6 +921,7 @@ export function useReferenceRecipeDraft() {
     clearDraft,
     persist,
     hydrate,
+    hydrateTextFragments,
     isPortraitSelected,
     isCostumeSelected,
     isPoseSelected,

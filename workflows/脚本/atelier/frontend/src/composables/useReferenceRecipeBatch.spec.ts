@@ -150,6 +150,73 @@ describe('组合数计算（含空槽 / 尺寸多选）', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// P2 替代态：text / empty 槽在组合阶段折叠为 1 维
+// ---------------------------------------------------------------------------
+
+describe('P2 替代态的组合折叠', () => {
+  const mixedModes = {
+    portrait: 'text',
+    costume: 'image',
+    pose: 'text',
+  } as const
+
+  it('text 槽即使有残留条目也折叠为 null，不参与笛卡尔积', () => {
+    const combos = buildSlotCombinations(
+      [portrait('pt1'), portrait('pt2')],
+      [costume('c1'), costume('c2')],
+      [pose('s1')],
+      mixedModes,
+    )
+
+    expect(combos).toHaveLength(2)
+    expect(combos.every((combo) => combo.portrait === null)).toBe(true)
+    expect(combos.every((combo) => combo.pose === null)).toBe(true)
+    expect(combos.map((combo) => combo.costume?.id)).toEqual(['c1', 'c2'])
+  })
+
+  it('组合数：text 槽按 1 维；三槽全空仍为 0；单独 text 槽算有内容', () => {
+    expect(countSlotCombinations({ portrait: 2, costume: 2, pose: 5 }, mixedModes)).toBe(2)
+    expect(
+      countSlotCombinations(
+        { portrait: 0, costume: 0, pose: 0 },
+        { portrait: 'empty', costume: 'empty', pose: 'empty' },
+      ),
+    ).toBe(0)
+    expect(
+      countSlotCombinations(
+        { portrait: 0, costume: 0, pose: 0 },
+        { portrait: 'text', costume: 'empty', pose: 'empty' },
+      ),
+    ).toBe(1)
+  })
+
+  it('buildBatchGroups 把 slotModes / slotTexts 透传到每组', () => {
+    const slotTexts = { portrait: '长脸，窄下颌', costume: '', pose: '自然站立' }
+    const groups = buildBatchGroups({
+      portrait: [portrait('pt1')],
+      costume: [costume('c1'), costume('c2')],
+      pose: [pose('s1')],
+      workflows: [],
+      qualities: [],
+      ratios: [],
+      qualityEnabled: false,
+      orientationEnabled: false,
+      baseSeed: 100,
+      slotModes: mixedModes,
+      slotTexts,
+    })
+
+    expect(groups).toHaveLength(2)
+    for (const group of groups) {
+      expect(group.slotModes).toEqual(mixedModes)
+      expect(group.slotTexts).toEqual(slotTexts)
+      expect(group.slots.portrait).toBeNull()
+      expect(group.slots.pose).toBeNull()
+    }
+  })
+})
+
 describe('上限 100', () => {
   it('100 张允许、101 张超限', () => {
     expect(MAX_BATCH_RECIPES).toBe(100)

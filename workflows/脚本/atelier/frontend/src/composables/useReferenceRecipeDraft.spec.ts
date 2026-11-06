@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
+import { createEmptyRecipeTextFragments } from './recipeTextFragments'
 import {
   flushReferenceStudioSettings,
   readReferenceStudioSettings,
@@ -48,7 +49,7 @@ import {
   useReferenceRecipeDraft,
 } from './useReferenceRecipeDraft'
 
-function pose(id: string, name = '姿势'): PoseItem {
+function pose(id: string, name = '姿势', withDepth = true): PoseItem {
   return {
     id,
     体系: '体系',
@@ -60,6 +61,11 @@ function pose(id: string, name = '姿势'): PoseItem {
     原图: '',
     检索: '',
     nsfw: false,
+    hasDepth: withDepth,
+    depthThumbUrl: withDepth
+      ? `/api/reference/items/pose/${id}/image?kind=depth_thumb`
+      : null,
+    depthUrl: withDepth ? `/api/reference/items/pose/${id}/image?kind=depth` : null,
   }
 }
 
@@ -219,6 +225,20 @@ describe('加入 / 移除 / 去重', () => {
     expect(draft.isPoseSelected('p1', true)).toBe(true)
   })
 
+  it('无深度条目即使切到深度模式也强制白模', () => {
+    const item = pose('p9', '无深度姿势', false)
+
+    expect(draft.togglePose(item, true)).toBe(true)
+    expect(draft.pose.value[0]).toMatchObject({ useDepth: false })
+
+    draft.setPoseMode(true)
+    expect(draft.pose.value.every((entry) => entry.useDepth === false)).toBe(true)
+
+    // 同 id 同（归一后的）模式再点才移除
+    expect(draft.togglePose(item, true)).toBe(false)
+    expect(draft.pose.value).toEqual([])
+  })
+
   it('setPose(null) / removePose 清空', () => {
     draft.setPose(pose('p1'), true)
     draft.setPose(null)
@@ -357,6 +377,117 @@ describe('清空与持久化（2026-11-05 取代 M3 不持久化）', () => {
 
     expect(restored).toBe(false)
     expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
+  })
+
+  it('P2 槽位模式：setSlotMode 立即落盘，read 可读回', () => {
+    draft.setSlotMode('portrait', 'text')
+    draft.setSlotMode('costume', 'image')
+
+    flushReferenceStudioSettings()
+    const stored = readReferenceStudioSettings()
+
+    expect(stored?.portraitMode).toBe('text')
+    expect(stored?.costumeMode).toBe('image')
+    expect(stored?.poseMode).toBe('empty')
+  })
+
+  it('P2 槽位模式：clearDraft 重置为全空并清掉上次姿势', () => {
+    draft.setSlotMode('pose', 'text')
+    draft.setPose(pose('pair-01'))
+
+    draft.clearDraft()
+
+    expect(draft.slotModes.value).toEqual({
+      portrait: 'empty',
+      costume: 'empty',
+      pose: 'empty',
+    })
+    expect(draft.lastPoseId.value).toBe('')
+  })
+
+  it('P4 补充开关：只在 image 模式打开，切 text 自动归零并落盘', () => {
+    draft.setSlotMode('portrait', 'image')
+    draft.setSlotSupplement('portrait', true)
+    expect(draft.supplementFlags.value.portrait).toBe(true)
+
+    draft.setSlotMode('portrait', 'text')
+    expect(draft.supplementFlags.value.portrait).toBe(false)
+
+    flushReferenceStudioSettings()
+    const stored = readReferenceStudioSettings()
+    expect(stored?.portraitSupplement).toBe(false)
+  })
+
+  it('P4 补充开关：empty 模式下打开会被忽略', () => {
+    draft.setSlotMode('costume', 'empty')
+    draft.setSlotSupplement('costume', true)
+    expect(draft.supplementFlags.value.costume).toBe(false)
+  })
+
+  it('P4 clearDraft 同时清空补充开关', () => {
+    draft.setSlotMode('pose', 'image')
+    draft.setSlotSupplement('pose', true)
+    draft.clearDraft()
+    expect(draft.supplementFlags.value).toEqual({
+      portrait: false,
+      costume: false,
+      pose: false,
+    })
+  })
+
+  it('P2 旧快照缺 mode：按「有图 → image；无图 + 碎片 → text；否则 empty」推导', () => {
+    storeSnapshot({
+      portrait: [{ id: 'pt1', library: 'portrait', name: '发型', thumbnail: '' }],
+      textFragments: {
+        ...createEmptyRecipeTextFragments(),
+        人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+      },
+    })
+
+    draft.hydrate({
+      portrait: [portrait('pt1')],
+      costume: [],
+      pose: [],
+    })
+
+    expect(draft.slotModes.value).toEqual({
+      portrait: 'image',
+      costume: 'text',
+      pose: 'empty',
+    })
+  })
+
+  it('P2 快照有显式 mode 时优先于内容推导', () => {
+    storeSnapshot({
+      textFragments: {
+        ...createEmptyRecipeTextFragments(),
+        人物服饰: [{ type: '人物服饰', content: '白色衬衫' }],
+      },
+      costumeMode: 'image',
+      portraitMode: 'text',
+      poseMode: 'empty',
+    })
+
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    // costume 有碎片但用户显式选择 image：保留用户选择（可能是残留图被删）
+    expect(draft.slotModes.value).toEqual({
+      portrait: 'text',
+      costume: 'image',
+      pose: 'empty',
+    })
+  })
+
+  it('P2 旧快照三槽全空且无碎片 → 全 empty', () => {
+    storeSnapshot({})
+
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(draft.slotModes.value).toEqual({
+      portrait: 'empty',
+      costume: 'empty',
+      pose: 'empty',
+    })
   })
 })
 
