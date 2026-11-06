@@ -1517,6 +1517,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reference/trim-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Reference Trim
+         * @description 提交前能力探测：空槽能否裁掉。
+         *
+         *     与 `/reference/recipes` 共用角色校验与 `_resolve_trim_plan`，
+         *     因此 `all_trimmable=true` 时提交不会再因输入数 400；`false` 时前端才弹确认框。
+         */
+        post: operations["check_reference_trim_api_reference_trim_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reference/uploads": {
         parameters: {
             query?: never;
@@ -3821,6 +3844,53 @@ export interface components {
             fragments?: components["schemas"]["FragmentRef"][] | null;
             /** Name */
             name?: string | null;
+        };
+        /** TrimCheckItem */
+        TrimCheckItem: {
+            /**
+             * Input Count
+             * @default 0
+             */
+            input_count: number;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Slot Count
+             * @default 0
+             */
+            slot_count: number;
+            /**
+             * Trimmable
+             * @default false
+             */
+            trimmable: boolean;
+        };
+        /**
+         * TrimCheckRequest
+         * @description 提交前可裁剪探测：只问「这组已填槽位能否提交进这些工作流」，不产生任务。
+         */
+        TrimCheckRequest: {
+            /** Roles */
+            roles?: string[];
+            /** Workflows */
+            workflows?: string[];
+        };
+        /** TrimCheckResponse */
+        TrimCheckResponse: {
+            /**
+             * All Trimmable
+             * @default true
+             */
+            all_trimmable: boolean;
+            /** Workflows */
+            workflows?: components["schemas"]["TrimCheckItem"][];
         };
         /** TypeOutcome */
         TypeOutcome: {
@@ -6824,6 +6894,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_reference_trim_api_reference_trim_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrimCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrimCheckResponse"];
                 };
             };
             /** @description Validation Error */

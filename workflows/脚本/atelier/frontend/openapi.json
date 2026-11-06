@@ -3551,6 +3551,83 @@
         "title": "TemplateUpdate",
         "type": "object"
       },
+      "TrimCheckItem": {
+        "properties": {
+          "input_count": {
+            "default": 0,
+            "title": "Input Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "slot_count": {
+            "default": 0,
+            "title": "Slot Count",
+            "type": "integer"
+          },
+          "trimmable": {
+            "default": false,
+            "title": "Trimmable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "TrimCheckItem",
+        "type": "object"
+      },
+      "TrimCheckRequest": {
+        "description": "提交前可裁剪探测：只问「这组已填槽位能否提交进这些工作流」，不产生任务。",
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "workflows": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "title": "TrimCheckRequest",
+        "type": "object"
+      },
+      "TrimCheckResponse": {
+        "properties": {
+          "all_trimmable": {
+            "default": true,
+            "title": "All Trimmable",
+            "type": "boolean"
+          },
+          "workflows": {
+            "items": {
+              "$ref": "#/components/schemas/TrimCheckItem"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "title": "TrimCheckResponse",
+        "type": "object"
+      },
       "TypeOutcome": {
         "properties": {
           "action": {
@@ -8494,6 +8571,48 @@
         "summary": "Get Reference Sheet",
         "tags": [
           "参考图库参考板"
+        ]
+      }
+    },
+    "/api/reference/trim-check": {
+      "post": {
+        "description": "提交前能力探测：空槽能否裁掉。\n\n与 `/reference/recipes` 共用角色校验与 `_resolve_trim_plan`，\n因此 `all_trimmable=true` 时提交不会再因输入数 400；`false` 时前端才弹确认框。",
+        "operationId": "check_reference_trim_api_reference_trim_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrimCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrimCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Reference Trim",
+        "tags": [
+          "参考图库"
         ]
       }
     },

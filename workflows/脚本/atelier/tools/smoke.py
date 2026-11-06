@@ -17,6 +17,7 @@
     - /api/reference/items/{lib}/{id}     参考条目详情
     - /api/reference/items/.../image      参考图图片（kind=thumb）
     - /api/reference/recipes              参考库出图（dry_run，不提交任务）
+    - /api/reference/trim-check           提交前可裁剪探测（不提交任务）
     - /api/reference/libraries            四库统计与 allow_nsfw
     - /*.js / *.css / index.html   前端静态资源（带内容断言）
     - /ref-web、/ref-web/poses  旧深链 301 重定向到 /reference?tab=...（不校验 React 产物）
@@ -495,6 +496,29 @@ def main() -> int:
                 except Exception as e:
                     slot_ok, slot_detail = False, f"PARSE_ERR:{e!r}"
                 checks.append(("reference/recipes slots", 200 if slot_ok else -2, slot_detail))
+
+                # 可裁剪探测：三槽齐全时不需要裁剪，任何 studio 工作流都必须回 trimmable
+                code, body = _post(
+                    BASE + "/api/reference/trim-check",
+                    {"roles": ["portrait", "costume", "pose"]},
+                )
+                try:
+                    trim = json.loads(body)
+                    trim_items = trim.get("workflows") or []
+                    trim_ok = (
+                        code == 200
+                        and trim.get("all_trimmable") is True
+                        and bool(trim_items)
+                        and all(item.get("trimmable") is True for item in trim_items)
+                        and all(item.get("input_count", 0) >= 3 for item in trim_items)
+                    )
+                    trim_detail = (
+                        f"HTTP {code} all_trimmable={trim.get('all_trimmable')!r} "
+                        f"workflows={[(i.get('name'), i.get('input_count'), i.get('trimmable')) for i in trim_items]}"
+                    )
+                except Exception as e:
+                    trim_ok, trim_detail = False, f"HTTP {code} PARSE_ERR:{e!r}"
+                checks.append(("reference/trim-check", 200 if trim_ok else -2, trim_detail))
             else:
                 checks.append((
                     "reference/recipes dry_run",

@@ -820,16 +820,21 @@ def test_no_costume_prompt_drops_original_outfit_hint(api, recipe_env):
 
 
 def test_no_costume_pair_prompt_drops_forced_outfit(api, recipe_env):
-    """双人姿势未选服装时不能写「两人各自都有完整服装」。"""
+    """双人姿势未选服装：自动按素体展示，不写「两人各自都有完整服装」。"""
     _seed_pair_pose(recipe_env)
     resp = api.post(
         "/api/reference/recipes",
         json={"portrait_id": "p1", "pose_id": PAIR_ITEM["id"], "dry_run": True},
     )
     assert resp.status_code == 200
-    prompt = resp.json()["prompt"]
+    body = resp.json()
+    prompt = body["prompt"]
     assert "两人各自都有完整服装" not in prompt
-    assert "两人都要完整入镜" in prompt
+    # 2026-11-06：缺服装自动切素体展示（不声明时 Qwen 系会自由发挥出裸体）
+    assert body["body_mode"] == "bare"
+    assert body["body_mode_auto"] is True
+    assert "两位成年女性的素体展示" in prompt
+    assert "两人都完整入镜" in prompt
 
 
 def test_body_mode_validation_errors(api, recipe_env, captured):
@@ -979,3 +984,239 @@ def test_recipe_400_separates_unrecognized_roles_from_missing_slot(
     assert "无法识别角色" not in missing_detail
 
     assert not captured, "校验失败不应进入提交"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/reference/trim-check：提交前可裁剪探测（2026-11-06）
+#
+# 前端只在 M（非空槽数）< N（input_count）时调用：
+# - all_trimmable=true → 直接提交 + toast（不再弹确认框）；
+# - all_trimmable=false → 弹原降级确认框，且框内不再给「仍用当前工作流提交」。
+# 因此探测与提交必须是**同一判定**：探测说能提交，提交就不能再 400。
+# ---------------------------------------------------------------------------
+
+
+def test_trim_check_qwen_single_slot_is_trimmable(api, recipe_env):
+    """Qwen 系缺槽可裁：探测直接放行，不再需要用户确认。"""
+    body = api.post("/api/reference/trim-check", json={"roles": ["pose"]}).json()
+
+    assert body["all_trimmable"] is True
+    item = body["workflows"][0]
+    assert item["name"] == ref_router.DEFAULT_STUDIO_WORKFLOW
+    assert (item["input_count"], item["slot_count"]) == (3, 1)
+    assert item["trimmable"] is True
+    assert item["reason"] == ""
+
+
+def test_trim_check_flux_blocked_reason_matches_submit_400(api, recipe_env):
+    """Flux 系参考图不进文本编码器：探测必须说裁不掉，且原因与提交 400 完全一致。"""
+    flux = "测试_Flux三图_不可裁.api.json"
+    body = api.post(
+        "/api/reference/trim-check",
+        json={"workflows": [flux], "roles": ["portrait", "pose"]},
+    ).json()
+
+    assert body["all_trimmable"] is False
+    item = body["workflows"][0]
+    assert item["trimmable"] is False
+    assert item["reason"] == "该工作流有 3 个输入且无法裁剪到 2 个；请至少提供 3 张参考图"
+
+    rejected = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "P001_front",
+            "workflow": flux,
+            "dry_run": True,
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == item["reason"]
+
+
+def test_trim_check_trimmable_true_means_submit_succeeds(api, recipe_env, captured):
+    """探测 all_trimmable=true 时，同一组合的提交必须真的走到 faceswap_batch。"""
+    body = api.post(
+        "/api/reference/trim-check",
+        json={"roles": ["pose", "costume"]},
+    ).json()
+    assert body["all_trimmable"] is True
+
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"pose_id": "P001_front", "costume_id": "SPR-0001", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    assert len(captured) == 1
+
+
+def test_trim_check_mixed_workflows_reports_each(api, recipe_env):
+    """多选工作流逐条给结论：任一不可裁，整体 all_trimmable=false。"""
+    body = api.post(
+        "/api/reference/trim-check",
+        json={
+            "workflows": [
+                ref_router.DEFAULT_STUDIO_WORKFLOW,
+                "测试_Flux三图_不可裁.api.json",
+            ],
+            "roles": ["pose"],
+        },
+    ).json()
+
+    flags = {item["name"]: item["trimmable"] for item in body["workflows"]}
+    assert flags == {
+        ref_router.DEFAULT_STUDIO_WORKFLOW: True,
+        "测试_Flux三图_不可裁.api.json": False,
+    }
+    assert body["all_trimmable"] is False
+
+
+def test_trim_check_rejects_unknown_role_and_empty_slots(api, recipe_env):
+    unknown = api.post("/api/reference/trim-check", json={"roles": ["face"]})
+    assert unknown.status_code == 400
+    assert "未知槽位" in unknown.json()["detail"]
+
+    empty = api.post("/api/reference/trim-check", json={"roles": []})
+    assert empty.status_code == 400
+    assert "请至少选择一个参考图" in empty.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# 缺服装 → 自动素体展示（2026-11-06 真出图实测结论）
+#
+# 实测（Qwen21 三图、人像+姿势 与 仅姿势）两张连续出裸体：`costume` 模式下服装槽为空时
+# 提示词里没有任何服装约束，模型自由发挥。因此后端统一按 `bare`（中性素体条款）生成，
+# 并在响应里回传生效值供前端 toast 说明。
+# ---------------------------------------------------------------------------
+
+
+def test_empty_costume_auto_switches_to_bare(api, recipe_env):
+    """未声明 bare 但服装槽为空 → 自动素体展示，且不出现裸露/性感词。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"portrait_id": "p1", "pose_id": "P001_front", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert (body["body_mode"], body["body_mode_auto"]) == ("bare", True)
+    prompt = body["prompt"]
+    assert "素体展示" in prompt
+    assert "服装：让人物穿上" not in prompt
+    for word in ("裸露", "性感", "裸体"):
+        assert word not in prompt, f"素体提示词不应出现「{word}」"
+
+
+def test_costume_slot_present_keeps_costume_mode(api, recipe_env):
+    """有服装参考时保持 costume 模式，不做素体兜底。"""
+    resp = api.post("/api/reference/recipes", json=THREE_BODY)
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert (body["body_mode"], body["body_mode_auto"]) == ("costume", False)
+    assert "图3中展示的整套服装" in body["prompt"]
+
+
+def test_trim_resolves_multi_level_conditioning_chain(api, recipe_env, captured):
+    """多级 ReferenceLatent 链必须解析到存活节点，不能留悬空引用。
+
+    真实事故（2026-11-06 实测）：QwenEdit 标准工作流只留姿势时，KSampler.positive
+    仍指向被删的 ReferenceLatent → ComfyUI 返回 prompt_outputs_failed_validation 400。
+    原因：共享 latent 让整条参考链一起进 drop，单层替换只退一步。
+    """
+    studio = recipe_env["library_root"] / "图库专用工作流"
+    _write_json(
+        studio / "多级参考链.api.json",
+        {
+            "1": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "portrait.webp"},
+                "_meta": {"title": "图1：人像参考 (Portrait)"},
+            },
+            "2": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "costume.webp"},
+                "_meta": {"title": "图2：服装参考 (Costume)"},
+            },
+            "3": {
+                "class_type": "LoadImage",
+                "inputs": {"image": "pose.webp"},
+                "_meta": {"title": "图3：姿势参考 (Pose)"},
+            },
+            "8": {"class_type": "CLIPLoader", "inputs": {}},
+            "11": {"class_type": "EmptyLatentImage", "inputs": {}},
+            "12": {
+                "class_type": "TextEncodeQwenImage21",
+                "inputs": {
+                    "clip": ["8", 0],
+                    "prompt": "",
+                    "images.image_1": ["1", 0],
+                    "images.image_2": ["2", 0],
+                    "images.image_3": ["3", 0],
+                },
+            },
+            "13": {
+                "class_type": "TextEncodeQwenImage21",
+                "inputs": {
+                    "clip": ["8", 0],
+                    "prompt": "",
+                    "images.image_1": ["1", 0],
+                    "images.image_2": ["2", 0],
+                    "images.image_3": ["3", 0],
+                },
+            },
+            # 共享 latent：整条参考链会一起被裁（真实工作流就是这样）
+            "21": {
+                "class_type": "VAEEncode",
+                "inputs": {"pixels": ["1", 0], "vae": ["8", 0]},
+            },
+            "24": {
+                "class_type": "ReferenceLatent",
+                "inputs": {"conditioning": ["12", 0], "latent": ["21", 0]},
+            },
+            "25": {
+                "class_type": "ReferenceLatent",
+                "inputs": {"conditioning": ["24", 0], "latent": ["21", 0]},
+            },
+            "26": {
+                "class_type": "ReferenceLatent",
+                "inputs": {"conditioning": ["13", 0], "latent": ["21", 0]},
+            },
+            "27": {
+                "class_type": "ReferenceLatent",
+                "inputs": {"conditioning": ["26", 0], "latent": ["21", 0]},
+            },
+            "14": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "model": ["8", 0],
+                    "positive": ["25", 0],
+                    "negative": ["27", 0],
+                    "latent_image": ["11", 0],
+                    "seed": 1,
+                    "steps": 4,
+                    "cfg": 1.0,
+                    "sampler_name": "euler",
+                    "scheduler": "simple",
+                    "denoise": 1.0,
+                },
+            },
+        },
+    )
+    rl.clear_cache()
+
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"pose_id": "P001_front", "workflow": "多级参考链.api.json", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    trimmed = json.loads(captured[0].workflow_content)
+    node_ids = set(trimmed)
+
+    # 递归解析到存活编码器，而不是停在已删的 ReferenceLatent
+    assert trimmed["14"]["inputs"]["positive"] == ["12", 0]
+    assert trimmed["14"]["inputs"]["negative"] == ["13", 0]
+    for node_id, node in trimmed.items():
+        for key, value in (node.get("inputs") or {}).items():
+            if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
+                assert value[0] in node_ids, f"节点{node_id}.{key} 指向已删节点 {value[0]}"

@@ -424,6 +424,45 @@ def _downstream_consumers(api_workflow: dict, node_id: str) -> list[tuple[str, s
     return out
 
 
+def _live_conditioning(api: dict, value, drop: set[str]) -> object:
+    """把 conditioning 引用沿「被删的透传节点」向上游解析，返回第一个存活引用。
+
+    多级链会整段被裁（人像 / 服装各一级 ReferenceLatent，正负两条），只做一层替换
+    会让 KSampler.positive 指向已删节点，ComfyUI 校验直接 400（KeyError）。
+    """
+    seen: set[str] = set()
+    current = value
+    while isinstance(current, (list, tuple)) and len(current) == 2:
+        source = str(current[0])
+        if source not in drop:
+            return list(current)
+        if source in seen:
+            raise _NotTrimmable(source)
+        seen.add(source)
+        upstream = (api.get(source) or {}).get("inputs") or {}
+        current = upstream.get("conditioning")
+        if current is None:
+            raise _NotTrimmable(source)
+    raise _NotTrimmable(str(current))
+
+
+def _dangling_refs(api: dict, dropped: set[str]) -> list[tuple[str, str, str]]:
+    """裁剪后仍指向「本次删掉的节点」的输入；ComfyUI 会以校验 400 拒绝。
+
+    只查本次删掉的节点：工作流文件本身若已有悬空引用（例如最小 mock 里的 clip），
+    那不是裁剪的责任，交给 ComfyUI 自己的校验去报。
+    """
+    missing: list[tuple[str, str, str]] = []
+    for node_id, node in api.items():
+        if not isinstance(node, dict):
+            continue
+        for key, value in (node.get("inputs") or {}).items():
+            if isinstance(value, (list, tuple)) and len(value) == 2 \
+                    and str(value[0]) in dropped:
+                missing.append((str(node_id), str(key), str(value[0])))
+    return missing
+
+
 def _role_nodes(api_workflow: dict) -> dict[str, str]:
     """按标题把 LoadImage 映射到业务角色；同一角色重复时只认第一个。"""
     out: dict[str, str] = {}
@@ -519,7 +558,9 @@ def _trim_unfilled_slots(api_workflow: dict,
             transparent = key == "conditioning" or key.startswith("conditioning_") \
                 or key in ("positive", "negative")
             if transparent and cond_src is not None:
-                replacements.append((consumer_id, key, cond_src))
+                replacements.append(
+                    (consumer_id, key, _live_conditioning(api, cond_src, drop))
+                )
                 continue
             raise _NotTrimmable(dropped)
 
@@ -532,6 +573,62 @@ def _trim_unfilled_slots(api_workflow: dict,
     for node_id in drop:
         api.pop(node_id, None)
     return api, index_map
+
+
+def _role_support_error(
+    role_nodes: dict[str, str], filled: dict[str, bool], workflow_name: str
+) -> str:
+    """已填槽位的角色能否被工作流识别；返回错误文案（空串=通过）。
+
+    整条工作流一个角色都认不出，与「缺某一个槽」是两回事，文案必须分开，
+    否则用户只会看到「该工作流没有人像输入」，完全猜不到根因（多为 UI 格式 .json）。
+    """
+    if not role_nodes:
+        return (
+            f"该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），"
+            f"请换用 .api.json 工作流：{workflow_name}"
+        )
+    for role in SLOT_ROLES:
+        if filled[role] and role not in role_nodes:
+            return f"该工作流没有{SLOT_LABELS[role]}输入：{workflow_name}"
+    return ""
+
+
+def _resolve_trim_plan(
+    api_workflow: dict, filled: dict[str, bool]
+) -> tuple[dict, dict[str, int], str]:
+    """空槽裁剪方案：返回 `(提交用工作流, 角色→图号映射, 错误文案)`；空文案=可提交。
+
+    `/reference/recipes` 与 `/reference/trim-check` 必须共用本函数：
+    「探测说能提交」与「提交不 400」是同一个判定，否则前端会弹了框却根本不需要弹。
+    """
+    input_count = len(find_loadimage_nodes(api_workflow))
+    total = sum(filled.values())
+    role_nodes = _role_nodes(api_workflow)
+
+    if total >= input_count:
+        return api_workflow, _build_index_map(api_workflow, filled, role_nodes), ""
+
+    try:
+        trimmed_api, index_map = _trim_unfilled_slots(api_workflow, filled)
+    except _NotTrimmable:
+        trimmed_api = api_workflow
+        index_map = _build_index_map(api_workflow, filled, role_nodes)
+    if len(find_loadimage_nodes(trimmed_api)) != total:
+        # 工作流还有本次用不到、又无法安全删除的输入：明确告诉用户需要几张
+        return api_workflow, index_map, (
+            f"该工作流有 {input_count} 个输入且无法裁剪到 {total} 个；"
+            f"请至少提供 {input_count} 张参考图"
+        )
+    # 图位数够了但内部引用断了（裁剪漏改链）→ 推给 ComfyUI 会 400，这里提前拦住
+    dangling = _dangling_refs(trimmed_api, set(api_workflow) - set(trimmed_api))
+    if dangling:
+        broken = "、".join(f"节点{node}.{key}" for node, key, _ in dangling[:3])
+        return api_workflow, index_map, (
+            f"该工作流裁剪空槽后会断链（{broken} 仍引用已删除的节点），无法安全裁剪；"
+            f"请至少提供 {input_count} 张参考图"
+        )
+    return trimmed_api, index_map, ""
 
 
 def _resolve_studio_workflow(requested: str) -> Path:
@@ -563,6 +660,83 @@ def _resolve_studio_workflow(requested: str) -> Path:
     if explicit:
         raise HTTPException(400, "该工作流不属于合成台可用范围")
     raise HTTPException(400, f"默认工作流不可用：{DEFAULT_STUDIO_WORKFLOW}")
+
+
+class TrimCheckRequest(BaseModel):
+    """提交前可裁剪探测：只问「这组已填槽位能否提交进这些工作流」，不产生任务。"""
+
+    #: 合成台工作流（文件名或库内路径）；空列表 = 默认工作流
+    workflows: list[str] = Field(default_factory=list)
+    #: 已填槽位角色（portrait / costume / pose / extra）；重复项忽略
+    roles: list[str] = Field(default_factory=list)
+
+
+class TrimCheckItem(BaseModel):
+    #: 与提交端点的 `workflow` 同形（前端按路径对号入座）
+    name: str
+    path: str
+    input_count: int = 0
+    #: 本次提交的非空槽位数 M
+    slot_count: int = 0
+    #: True = 能按 M 张提交（空槽可安全裁掉，或本来就够）
+    trimmable: bool = False
+    #: 不可提交时的原因（与提交端点的 400 文案同源）
+    reason: str = ""
+
+
+class TrimCheckResponse(BaseModel):
+    workflows: list[TrimCheckItem] = Field(default_factory=list)
+    #: 全部工作流都能按当前非空槽提交（前端据此直接提交、不弹确认框）
+    all_trimmable: bool = True
+
+
+@router.post("/reference/trim-check", response_model=TrimCheckResponse)
+def check_reference_trim(req: TrimCheckRequest):
+    """提交前能力探测：空槽能否裁掉。
+
+    与 `/reference/recipes` 共用角色校验与 `_resolve_trim_plan`，
+    因此 `all_trimmable=true` 时提交不会再因输入数 400；`false` 时前端才弹确认框。
+    """
+    unknown = sorted({role for role in req.roles if role not in SLOT_ROLES})
+    if unknown:
+        raise HTTPException(400, f"未知槽位：{'、'.join(unknown)}")
+    roles = set(req.roles)
+    filled = {role: role in roles for role in SLOT_ROLES}
+    total = len(roles)
+    if total == 0:
+        raise HTTPException(400, "请至少选择一个参考图或上传一张参考图")
+
+    requested = [item.strip() for item in req.workflows if item.strip()] or [""]
+    items: list[TrimCheckItem] = []
+    for requested_workflow in requested:
+        workflow_path = _resolve_studio_workflow(requested_workflow)
+        try:
+            api_wf = load_workflow(str(workflow_path))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, f"工作流加载失败：{exc}") from None
+
+        input_count = len(find_loadimage_nodes(api_wf))
+        reason = _role_support_error(_role_nodes(api_wf), filled, workflow_path.name)
+        if not reason:
+            if total > input_count:
+                reason = f"该工作流只有 {input_count} 个输入，但提交了 {total} 张"
+            else:
+                _, _, reason = _resolve_trim_plan(api_wf, filled)
+        items.append(
+            TrimCheckItem(
+                name=workflow_path.name,
+                path=str(workflow_path),
+                input_count=input_count,
+                slot_count=total,
+                trimmable=not reason,
+                reason=reason,
+            )
+        )
+
+    return TrimCheckResponse(
+        workflows=items,
+        all_trimmable=all(item.trimmable for item in items),
+    )
 
 
 @router.post("/reference/recipes")
@@ -632,36 +806,24 @@ def create_reference_recipe(req: RecipeRequest):
         )
 
     role_nodes = _role_nodes(api_wf)
-    # 整条工作流一个角色都认不出：与"缺某一个槽"是两回事，文案必须分开，
-    # 否则用户只会看到「该工作流没有人像输入」，完全猜不到根因（多为 UI 格式 .json）。
-    if not role_nodes:
-        raise HTTPException(
-            400,
-            f"该工作流的参考图节点无法识别角色（可能是 UI 格式工作流），"
-            f"请换用 .api.json 工作流：{workflow_path.name}",
-        )
-    for role in SLOT_ROLES:
-        if filled[role] and role not in role_nodes:
-            raise HTTPException(
-                400, f"该工作流没有{SLOT_LABELS[role]}输入：{workflow_path.name}",
-            )
+    role_error = _role_support_error(role_nodes, filled, workflow_path.name)
+    if role_error:
+        raise HTTPException(400, role_error)
 
-    if total < input_count:
-        try:
-            trimmed_api, index_map = _trim_unfilled_slots(api_wf, filled)
-        except _NotTrimmable:
-            trimmed_api = api_wf
-            index_map = _build_index_map(api_wf, filled, role_nodes)
-        if len(find_loadimage_nodes(trimmed_api)) != total:
-            # 工作流还有本次用不到、又无法安全删除的输入：明确告诉用户需要几张
-            raise HTTPException(
-                400,
-                f"该工作流有 {input_count} 个输入且无法裁剪到 {total} 个；"
-                f"请至少提供 {input_count} 张参考图",
-            )
-    else:
-        trimmed_api = api_wf
-        index_map = _build_index_map(api_wf, filled, role_nodes)
+    # 空槽裁剪：与 /reference/trim-check 共用同一判定，探测通过即不会在这里 400
+    trimmed_api, index_map, trim_error = _resolve_trim_plan(api_wf, filled)
+    if trim_error:
+        raise HTTPException(400, trim_error)
+
+    # 缺服装时的体态语义（2026-11-06 实测）：`costume` 模式但服装槽为空时，提示词里
+    # 没有任何服装约束，Qwen 系会自由发挥（实测两张连续出裸体）。这里统一按 `bare`
+    # （中性素体展示 + 禁止性化措辞）生成提示词；响应回传生效值，前端据此 toast 说明。
+    # `bare` 与服装同时出现仍在上方直接 400，本兜底只在服装槽为空时生效。
+    body_mode = req.body_mode
+    body_mode_auto = False
+    if body_mode == "costume" and not filled["costume"]:
+        body_mode = "bare"
+        body_mode_auto = True
 
     # 空槽直接传 None（不再用上传占位包装），否则 faceless 分支永远不会触发
     prompt = build_recipe_prompt(
@@ -673,7 +835,7 @@ def create_reference_recipe(req: RecipeRequest):
         prompt_suffix=req.prompt_suffix,
         index_map=index_map,
         # 素体模式透传：提示词据此追加中性素体条款（C-REF-BODY-MODE@1）
-        body_mode=req.body_mode,
+        body_mode=body_mode,
     )
 
     # 提交顺序固定 人像 → 服装 → 姿势 → 附加；节点 id 用工作流真实图位（不重排）
@@ -725,6 +887,9 @@ def create_reference_recipe(req: RecipeRequest):
         "style": req.style,
         "workflow_path": str(workflow_path),
         "input_count": input_count,
+        #: 实际生效的体态模式；`body_mode_auto=True` 表示「服装槽为空 → 自动素体展示」
+        "body_mode": body_mode,
+        "body_mode_auto": body_mode_auto,
         #: 统一溯源：库条目 / 上传图 / 空槽同一形状。`references` 保留兼容。
         "slots": slots,
         "references": {
