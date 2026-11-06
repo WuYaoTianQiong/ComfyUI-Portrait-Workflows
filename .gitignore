@@ -194,3 +194,7 @@ workflows/ai-pose-gallery-zh/
 workflows/uploads/
 # 参考图库 Web 的构建产物随源码一起入库（运行时零 Node 依赖，见 gallery-web/UPSTREAM.md）
 !workflows/脚本/atelier/gallery-web/dist/
+# 验收会话产物（浏览器/构建/探针日志，每轮重写，仅本地留存）
+/.resultverify/
+# Windows 重定向误建的 0 字节文件（`> null` 的产物，不是源码）
+workflows/脚本/atelier/null
