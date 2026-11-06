@@ -258,6 +258,15 @@ function jumpToPrompt(promptId: number) {
   display: none;
 }
 
+/*
+ * 页签按钮不参与收缩：默认 flex-shrink 会把中文压成「画 / 廊」竖排。
+ * 窄屏交给 .tabs 的 overflow-x 横向滚动。
+ */
+.tabs > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
 .job-badge {
   display: inline-grid;
   place-items: center;

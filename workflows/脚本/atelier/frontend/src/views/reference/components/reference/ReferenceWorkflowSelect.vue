@@ -79,10 +79,15 @@ const defaultItem = computed(
 /** 是否 chips 形态：默认 `select` 时下面所有 chips 相关分支都不渲染。 */
 const isChips = computed(() => props.variant === 'chips')
 
-/** chips 短名：> 20 字截断补省略号，避免平铺区被长名撑爆。 */
+/**
+ * chips 显示名：**不再按字数截断**。
+ *
+ * 2026-11-06 改为「一行一条」的纵向列表后，每行都有整行宽度可用，
+ * 截断交给 CSS `text-overflow: ellipsis` 处理（窄卡时自动省略），
+ * 不再因为固定 20 字而在宽卡上提前丢失信息。
+ */
 function chipName(item: StudioWorkflowOption): string {
-  const name = workflowDisplayName(item.name)
-  return name.length > 20 ? `${name.slice(0, 20)}…` : name
+  return workflowDisplayName(item.name)
 }
 
 /** chips 图数徽章：优先后端 `input_count`，旧响应回退 `image_slots`。 */
@@ -332,32 +337,43 @@ onBeforeUnmount(() => {
   max-width: none;
 }
 
-/* 已选 chips 区：可换行，每 chip = 短名 + 图数徽章 + × */
+/*
+ * 已选区：**一行一条**（2026-11-06 用户要求）。
+ *
+ * 旧的 flex-wrap 药丸在 300~400px 的窄栏里会挤成「左一行 1 条、右一行 2 条」，
+ * 名字还被截成 20 字。改成纵向列表后每条占满整行，名字、图数、× 三者对齐。
+ * 选很多时最高 264px 内部滚动，避免把参数卡无限拉长。
+ */
 .wf-chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
+  max-height: 264px;
+  overflow-y: auto;
+  scrollbar-width: thin;
   margin-top: 8px;
 }
 
 .wf-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   box-sizing: border-box;
-  max-width: 100%;
-  min-height: 28px;
-  padding: 3px 4px 3px 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 4px 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 9999px;
+  border-radius: 8px;
   background: var(--surface-card);
   color: var(--text-strong);
   font-size: 12px;
   line-height: 1.4;
 }
 
+/* 名字吃掉整行剩余宽度，超出才省略（不再固定 20 字截断） */
 .wf-chip__name {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

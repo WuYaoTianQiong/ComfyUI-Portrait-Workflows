@@ -357,13 +357,13 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
   color: var(--text-body);
 }
 
-/* 空态：180px 轻量块 */
+/* 空态：96px 单行块（180px 会在没有结果时白占一屏高度） */
 .result-board__empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--result-empty-min, 180px);
-  padding: var(--gap-md);
+  min-height: var(--result-empty-min, 96px);
+  padding: var(--gap);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface-result);

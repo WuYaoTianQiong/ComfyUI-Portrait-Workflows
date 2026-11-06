@@ -101,6 +101,41 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
         </span>
       </div>
 
+      <!--
+        姿势槽：整槽白模 / 深度切换。
+        它是**整槽设置**（`depthChange` → `setPoseMode` 全量），因此放在头部
+        与「更换 / 清空」同一行，而不是贴在图墙上方冒充单图开关。
+        该开关只影响槽位 / 清单 / 灯箱显示哪张图，不影响出图 —— 卡片底部有常驻说明。
+      -->
+      <div
+        v-if="showDepthToggle && items.length > 0"
+        class="depth-toggle"
+        role="group"
+        aria-label="切换本槽显示白模或深度图（仅预览，不影响出图）"
+        title="仅切换本槽显示白模 / 深度图，不影响出图"
+      >
+        <button
+          type="button"
+          class="depth-toggle__btn"
+          :class="{ 'is-active': !useDepth }"
+          :aria-pressed="!useDepth"
+          data-testid="studio-pose-depth-white"
+          @click="emit('depthChange', false)"
+        >
+          白模
+        </button>
+        <button
+          type="button"
+          class="depth-toggle__btn"
+          :class="{ 'is-active': useDepth }"
+          :aria-pressed="useDepth"
+          data-testid="studio-pose-depth-depth"
+          @click="emit('depthChange', true)"
+        >
+          深度
+        </button>
+      </div>
+
       <div class="slot-panel__head-actions">
         <button
           type="button"
@@ -122,31 +157,6 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
         </button>
       </div>
     </header>
-
-    <!-- 姿势槽：白模 / 深度分段（语义与旧卡一致） -->
-    <div
-      v-if="showDepthToggle && items.length > 0"
-      class="depth-toggle"
-      role="group"
-      aria-label="切换素体白模或深度图"
-    >
-      <button
-        type="button"
-        class="depth-toggle__btn"
-        :class="{ 'is-active': !useDepth }"
-        @click="emit('depthChange', false)"
-      >
-        白模
-      </button>
-      <button
-        type="button"
-        class="depth-toggle__btn"
-        :class="{ 'is-active': useDepth }"
-        @click="emit('depthChange', true)"
-      >
-        深度
-      </button>
-    </div>
 
     <!-- 竖向图墙：全量渲染 + 内部纵向滚动，约 3 行高度 -->
     <div
@@ -192,8 +202,18 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
             />
           </svg>
         </button>
+
+        <!-- 白模 / 深度角标：整槽统一，仅提示当前显示的是哪张图 -->
+        <span v-if="showDepthToggle" class="tile__mode" aria-hidden="true">
+          {{ useDepth ? '深' : '白' }}
+        </span>
       </div>
     </div>
+
+    <!-- 常驻说明：把「仅预览」写在界面上，避免误以为切换会影响出图 -->
+    <p v-if="showDepthToggle" class="slot-panel__note" data-testid="studio-pose-depth-note">
+      白模 / 深度仅影响预览，不影响出图
+    </p>
 
     <button
       type="button"
@@ -283,13 +303,15 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   line-height: 1.4;
 }
 
-/* 头部：类型名 + 真实总数徽标 | 更换 + 清空 */
+/* 头部：类型名 + 数量 | 白模/深度 | 更换 + 清空（窄卡时自动换行） */
 .slot-panel__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   min-width: 0;
+  row-gap: 6px;
 }
 
 .slot-panel__head-main {
@@ -305,7 +327,6 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   flex: none;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
 }
 
 /* 类型名 12px / 600 */
@@ -386,36 +407,36 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   outline-offset: 1px;
 }
 
-/* 白模 / 深度分段：12px 起，语义与旧卡一致 */
+/*
+ * 白模 / 深度分段：位于头部「数量」与「更换 / 清空」之间，靠右排列。
+ * 尺寸压到 22px 高，保证 250px 窄卡也不换行（换行时由 head 的 flex-wrap 兜底）。
+ */
 .depth-toggle {
   display: inline-flex;
-  align-self: flex-start;
+  flex: none;
   align-items: center;
-  padding: 2px;
+  margin-left: auto;
+  padding: 1px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--fill-faint);
 }
 
 .depth-toggle__btn {
-  padding: 3px 8px;
+  padding: 2px 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1.2;
 }
 
+/* 两段同色：预览开关是次要控件，不用主色抢「更换 / 清空」的注意力 */
 .depth-toggle__btn.is-active {
-  background: var(--surface-raised);
+  background: var(--surface-card);
   color: var(--text-strong);
-}
-
-.depth-toggle__btn.is-active:last-child {
-  background: var(--primary);
-  color: var(--on-primary);
 }
 
 .depth-toggle__btn:focus-visible {
@@ -546,6 +567,29 @@ function mediaUrl(entry: SlotSelectedItem): string | null {
   .tile__remove {
     opacity: 1;
   }
+}
+
+/* 白 / 深角标：左下角，12px 以内，避免与右上角删除按钮抢位置 */
+.tile__mode {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--surface-overlay);
+  color: var(--text-body-soft);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  pointer-events: none;
+}
+
+/* 姿势槽常驻说明：把「仅预览」明确写给用户 */
+.slot-panel__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 /* 底部整宽「继续选」：虚线按钮，与空态边框同语义 */

@@ -67,9 +67,9 @@
   --panel-thumb-min: 72px;
   --panel-thumb-rows: 3;
 
-  /* 结果区（P2 M5）：网格最小列宽与空态高度（460 → 180）。 */
+  /* 结果区（P2 M5）：网格最小列宽与空态高度（460 → 96，第二轮再压一档）。 */
   --result-card-min: 180px;
-  --result-empty-min: 180px;
+  --result-empty-min: 96px;
 
   /* 门槛修复（2026-11-06）：既有页面里的十六进制收敛为令牌，取值与原值完全一致。 */
   --mix-base-black: #000000;

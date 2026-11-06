@@ -93,7 +93,7 @@ function onBodyModeChange(event: Event): void {
 <template>
   <section class="params-card" data-testid="studio-params-card">
     <!-- 工作流：chips 平铺在触发器下方，下拉只承担「添加」 -->
-    <div class="field" data-testid="studio-workflow-field">
+    <div class="field field--full" data-testid="studio-workflow-field">
       <span class="field__label">工作流（可多选，每项一组任务）</span>
       <ReferenceWorkflowSelect
         variant="chips"
@@ -105,20 +105,23 @@ function onBodyModeChange(event: Event): void {
         @update:model-value="onWorkflowSelectionChange"
       />
 
-      <!-- 未勾选时回落默认项，必须在 UI 明示，避免用户误以为没选就不生效 -->
+      <!--
+        未勾选时回落默认项，必须在 UI 明示，避免用户误以为没选就不生效。
+        文案压到一行：工作流全名已在上方「默认」chip 上，这里只说计数口径。
+      -->
       <p
         v-if="usesDefaultWorkflow && defaultWorkflow"
         class="params-hint"
         data-testid="studio-workflow-default-note"
       >
-        当前使用默认工作流：{{ workflowDisplayName(defaultWorkflow.name) }}（未勾选任何工作流时按 1 条默认项计入全组合）
+        未选工作流：按默认项计 1 组（{{ workflowDisplayName(defaultWorkflow.name) }}）
       </p>
       <p
         v-else-if="workflowSelection.length > 1"
         class="params-hint"
         data-testid="studio-workflow-multi-note"
       >
-        已选 {{ workflowSelection.length }} 个工作流：全组合按每个工作流各展开一组任务。
+        已选 {{ workflowSelection.length }} 个工作流，每个各展开一组任务
       </p>
 
       <p v-if="workflowsError" class="params-error" role="alert">
@@ -153,8 +156,27 @@ function onBodyModeChange(event: Event): void {
       </select>
     </div>
 
+    <!-- 基础种子：与画风同一行（都是短控件）；第 i 组 seed = base_seed + i（fixed） -->
+    <div class="field">
+      <label class="field__label" for="studio-base-seed">基础种子</label>
+      <input
+        id="studio-base-seed"
+        class="params-select params-select--number"
+        type="number"
+        min="0"
+        step="1"
+        :value="baseSeed"
+        data-testid="studio-base-seed"
+        @input="onBaseSeedInput"
+      />
+      <p class="params-hint" data-testid="studio-seed-hint">
+        第 i 组 = {{ baseSeed }} + i（固定种子）
+      </p>
+    </div>
+
     <!-- 尺寸能力：按 caps 渲染；不支持时整块隐藏，提交体也不带对应字段 -->
-    <div v-if="qualityEnabled && qualityOptions.length" class="field" data-testid="studio-quality-field">
+    <!-- 尺寸类 chip 文案长（2.0× · 4.19MP · 2048×2048），必须整行，否则半列会溢出 -->
+    <div v-if="qualityEnabled && qualityOptions.length" class="field field--full" data-testid="studio-quality-field">
       <span class="field__label">画质档位（可多选，每档一组任务）</span>
       <div class="params-chips" data-testid="studio-quality-options">
         <button
@@ -171,11 +193,11 @@ function onBodyModeChange(event: Event): void {
         </button>
       </div>
       <p v-if="qualitySelection.length === 0" class="params-hint">
-        未选择画质档位：本轮不发送 quality，沿用工作流原生尺寸。
+        未选：跟随工作流原生尺寸
       </p>
     </div>
 
-    <div v-if="orientationEnabled && aspectRatios.length" class="field" data-testid="studio-ratio-field">
+    <div v-if="orientationEnabled && aspectRatios.length" class="field field--full" data-testid="studio-ratio-field">
       <span class="field__label">输出比例（可多选，每档一组任务）</span>
       <div class="params-chips" data-testid="studio-ratio-options">
         <button
@@ -192,34 +214,20 @@ function onBodyModeChange(event: Event): void {
         </button>
       </div>
       <p v-if="ratioSelection.length === 0" class="params-hint">
-        未选择比例：本轮不发送 aspect_ratio / orientation。
+        未选：不发送比例
       </p>
     </div>
 
-    <p v-if="followsReferenceSize" class="params-note" data-testid="studio-size-follow-note">
+    <p
+      v-if="followsReferenceSize"
+      class="params-note params-note--full"
+      data-testid="studio-size-follow-note"
+    >
       该工作流输出尺寸跟随参考图
     </p>
 
-    <!-- 基础种子：第 i 组 seed = base_seed + i（fixed），便于按固定种子复现 -->
-    <div class="field">
-      <label class="field__label" for="studio-base-seed">基础种子（第 i 组 = 基础种子 + i）</label>
-      <input
-        id="studio-base-seed"
-        class="params-select params-select--number"
-        type="number"
-        min="0"
-        step="1"
-        :value="baseSeed"
-        data-testid="studio-base-seed"
-        @input="onBaseSeedInput"
-      />
-      <p class="params-hint" data-testid="studio-seed-hint">
-        基础种子 {{ baseSeed }} · 提交时固定为 seed_mode=fixed，第 i 组使用 {{ baseSeed }}+i。
-      </p>
-    </div>
-
     <!-- 素体（无服装）开关：受 18+ 安全模式约束，不写 localStorage -->
-    <div class="field" data-testid="studio-body-mode-field">
+    <div class="field field--full" data-testid="studio-body-mode-field">
       <span class="field__label">体态模式</span>
       <label class="switch-row" :class="{ 'is-disabled': safeMode }">
         <input
@@ -234,9 +242,7 @@ function onBodyModeChange(event: Event): void {
           <span class="switch-row__title">素体展示（无服装）</span>
           <span class="switch-row__hint" data-testid="studio-body-mode-hint">
             {{
-              safeMode
-                ? '安全模式下不可用，请先解锁 18+'
-                : '开启后会清空服装槽，提交体带 body_mode=bare'
+              safeMode ? '安全模式下不可用，请先解锁 18+' : '开启后清空服装槽'
             }}
           </span>
         </span>
@@ -246,11 +252,34 @@ function onBodyModeChange(event: Event): void {
 </template>
 
 <style scoped>
+/*
+ * 参数卡改为两列网格（2026-11-06 空间利用率优化）：
+ * 单列铺满时 1172px 里只有一个 336px 的下拉，71% 是空白。
+ * 两列后控件各占约一半，高度 416 → 约 230。
+ *
+ * 断点约定（跟着页面栅格走）：
+ * - ≥1200：参数卡在 4/12 栏（约 430）→ 2 列；
+ * - 768–1199：参数卡全宽（约 700+）→ 3 列；
+ * - <768：2 列；<480：1 列。
+ */
 .params-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-content: start;
   min-width: 0;
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .params-card {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .params-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* 表单行 */
@@ -259,6 +288,11 @@ function onBodyModeChange(event: Event): void {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* 工作流 chips 与体态开关需要整行宽度 */
+.field--full {
+  grid-column: 1 / -1;
 }
 
 .field__label {
@@ -350,6 +384,11 @@ function onBodyModeChange(event: Event): void {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 说明行独占整行，避免挤在半列里折成两三行 */
+.params-note--full {
+  grid-column: 1 / -1;
 }
 
 .params-btn {

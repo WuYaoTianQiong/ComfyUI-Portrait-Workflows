@@ -346,6 +346,7 @@ function sizeTextOf(group: RecipeBatchGroup): string {
           v-for="group in groupedGroups"
           :key="group.key"
           class="matrix__group"
+          :class="{ 'is-expanded': isExpanded(group.key) }"
           data-testid="studio-matrix-group"
         >
           <div class="matrix__group-head">
@@ -438,6 +439,9 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   border-radius: var(--radius);
   background: var(--surface-raised);
   color: var(--text-body);
+  /* 行内三联缩略图放大到 30 × 40：清单是逐组核对用的，24 × 32 看不清 */
+  --matrix-thumb-w: 30px;
+  --matrix-thumb-h: 40px;
 }
 
 .matrix.is-over {
@@ -513,9 +517,10 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   color: var(--danger-text-soft);
 }
 
+/* 空态只做一行提示，不再用 120px 的大虚线框占位 */
 .matrix__empty {
   margin: 0;
-  padding: var(--gap-md);
+  padding: 10px var(--gap);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -561,10 +566,20 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   list-style: none;
 }
 
+/*
+ * 组卡片两列并排（≥760px）：清单在 8/12 栏时约 900px，单列会让每组一行只占
+ * 左侧一小截、右侧大片空白。展开的组跨全宽，避免把右边的组顶出空洞。
+ */
 .matrix__groups {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* min(340px, 100%)：容器窄于 340 时按容器宽度收，避免 340 撑破 390 屏 */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
   gap: var(--gap-xs);
+  align-items: start;
+}
+
+.matrix__group.is-expanded {
+  grid-column: 1 / -1;
 }
 
 .matrix__group {
@@ -669,14 +684,31 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   border-top: 1px solid var(--border-faint);
 }
 
+/*
+ * 行内固定列对齐（#序号 / 三联图 / 工作流 / 尺寸 / 种子）。
+ * 旧写法是 flex + 工作流 `flex:1 1 auto`，名字一短就把空白全吃在中间，
+ * 视觉上像“右半边没用上”；改成网格后各列位置固定，便于逐行对比。
+ * 窄容器（<760）回落 flex 换行，避免列宽挤压。
+ */
 .matrix__row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 40px auto minmax(0, 1fr) 96px 104px;
   align-items: center;
   gap: var(--gap-sm);
-  min-height: var(--matrix-row-h, 44px);
+  min-height: var(--matrix-row-h, 48px);
   padding: var(--gap-xs) var(--gap-sm);
   border-top: 1px solid var(--border-faint);
+}
+
+.matrix__row:hover {
+  background: var(--fill-faint);
+}
+
+@media (max-width: 760px) {
+  .matrix__row {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 
 .matrix__row:first-child {
