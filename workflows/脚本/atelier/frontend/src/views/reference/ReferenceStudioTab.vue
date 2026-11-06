@@ -1784,7 +1784,7 @@ onMounted(async () => {
 
 /* 后端确认裁不掉：用错误色与前两段说明区分开，避免用户误以为是可尝试项 */
 .studio-modal__message--blocked {
-  color: var(--danger, #d9534f);
+  color: var(--danger-text-soft);
 }
 
 .studio-modal__meta {
