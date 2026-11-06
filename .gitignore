@@ -200,3 +200,16 @@ workflows/uploads/
 workflows/脚本/atelier/null
 # atelier 运行数据（DB / 缩略图 / 上传 / 备份），2026-11-06 从工作流库迁出
 workflows/脚本/atelier/data/
+
+# 仓库根的 IDE 索引（workflows/.codeartsdoer/ 已有单独规则）
+/.codeartsdoer/
+
+# atelier 实测矩阵脚本的临时 DB 副本（每次运行重建，含真实库快照，绝不入库）
+workflows/脚本/atelier/tools/studio_matrix_state/
+
+# vitest/vite 构建期随机命名的临时配置文件
+workflows/脚本/atelier/frontend/vitest.config.ts.timestamp-*.mjs
+
+# 会话内的临时脚本与产物（诊断、探针、一次性的 *_tmp_* 输出）
+workflows/脚本/atelier/_tmp_*
+
