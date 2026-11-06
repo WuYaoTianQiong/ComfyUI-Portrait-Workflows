@@ -249,7 +249,7 @@ class RecipeRequest(BaseModel):
     pose_id: str = ""
     #: 服装槽使用的库：仅 `costume` / `costume-anime`
     costume_library: str = "costume"
-    #: 上传图路径（必须在 `library_root/uploads` 内）；与对应 `*_id` 二选一
+    #: 上传图路径（必须在 `data_dir/uploads` 内）；与对应 `*_id` 二选一
     portrait_path: str = ""
     costume_path: str = ""
     pose_path: str = ""

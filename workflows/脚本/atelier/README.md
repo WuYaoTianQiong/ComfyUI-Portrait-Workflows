@@ -56,7 +56,8 @@ atelier/
 | 名字 | 含义 | 放什么 |
 |---|---|---|
 | `settings.app_root` | 本项目目录 `<库>/脚本/atelier` | `web/`、`logs/` |
-| `settings.library_root` | ComfyUI 工作流库 `<库>`（自动跳过一层「脚本」） | `*.json` 工作流、`文档/提示词收藏.db`、`thumbnails/`、`painted_masks/`、`历史工作流/` |
+| `settings.library_root` | ComfyUI 工作流库 `<库>`（自动跳过一层「脚本」） | `*.json` 工作流、`painted_masks/`、`历史工作流/`、`文档/`（纯文档） |
+| `settings.data_dir` | `脚本/atelier/data`（`ATELIER_DATA_DIR` 覆盖） | 运行数据：`prompts.db`、`thumbnails/`、`uploads/`、`backups/`（2026-11-06 从工作流库迁出） |
 
 > 工作流自动扫描**只覆盖库根目录**；`历史工作流/` 或任意磁盘目录的工作流，在
 > 「分类与标签 → 工作流」里上传自定义 JSON 后即可在下拉中选择（内容存在本机 localStorage）。
@@ -107,8 +108,9 @@ atelier/
 | `ATELIER_COMFYUI_API` | `http://127.0.0.1:8188` | ComfyUI 地址 |
 | `ATELIER_COMFYUI_ROOT_ENV` | 自动向上探测 | 手动指定 ComfyUI 根目录 |
 | `ATELIER_COMFYUI_OUTPUT_DIR` | `<comfyui_root>/output` | 出图根目录；ComfyUI 用 `--output-directory` 时指向同一目录 |
-| `ATELIER_DB_PATH` | `<library_root>/文档/提示词收藏.db` | 主库 |
-| `ATELIER_THUMBNAIL_DIR` | `<library_root>/thumbnails` | 缩略图缓存 |
+| `ATELIER_DATA_DIR` | `脚本/atelier/data` | 运行数据根（DB / 缩略图 / 上传 / 备份） |
+| `ATELIER_DB_PATH` | `<data_dir>/prompts.db` | 主库；显式设置时启动维护（备份/轮转/墓碑回收）会跳过 |
+| `ATELIER_THUMBNAIL_DIR` | `<data_dir>/thumbnails` | 缩略图缓存 |
 | `ATELIER_NO_BROWSER` | 未设置 | 设为 `1` 时启动不自动开浏览器（CI 用） |
 | `ATELIER_REFERENCE_ENABLED` | `1` | `0` = 参考库路由全部 404（整体回滚） |
 | `ATELIER_REFERENCE_ROOT` | `<library_root>/ai-pose-gallery-zh` | 上游只读参考库（junction，勿用 `../custom_nodes/...`） |
@@ -148,8 +150,8 @@ atelier/
 
 ## 数据与备份
 
-- 主库：`<library_root>/文档/提示词收藏.db`（WAL 模式）。
-- 每次启动会**在线备份**（`sqlite3.backup()`，不会漏掉 WAL）到 `文档/backups/`，并按数量轮转；
+- 主库：`<data_dir>/prompts.db`（WAL 模式），默认 `脚本/atelier/data/prompts.db`。
+- 每次启动会**在线备份**（`sqlite3.backup()`，不会漏掉 WAL）到 `<data_dir>/backups/`，并按数量轮转；
   历史手工备份归档在 `backups/legacy/`，不参与轮转。
 - 启动同时回收超过保留期的**墓碑**（`is_deleted=1` 且超期）。活记录一行不碰。
 - 手动备份：`python tools/backup_db.py --tag before_xxx`；清墓碑：`python tools/cleanup_tombstones.py`。

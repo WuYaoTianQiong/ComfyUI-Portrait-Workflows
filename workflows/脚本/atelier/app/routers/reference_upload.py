@@ -1,6 +1,6 @@
 """AI 参考图库 · 上传参考图（M3）。
 
-落盘目录固定为 `library_root/uploads`，文件名由服务端按 sha1 生成，
+落盘目录固定为 `data_dir/uploads`（默认 `脚本/atelier/data/uploads`，2026-11-06 归一），文件名由服务端按 sha1 生成，
 不接受客户端指定目录；具体落盘规则见 `app/services/uploads.py`。
 
 端点：

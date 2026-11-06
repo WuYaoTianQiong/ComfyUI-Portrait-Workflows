@@ -9,7 +9,7 @@
 - `labels=1` 每格顶部画「图N · 类型」+ 名称，`labels=0` 纯图拼接。
 
 顺序固定为 **人像 → 服装 → 姿势 → 附加**，与上游出图的图1/图2/图3/图4 对齐；
-参数里的 `extra` 是第 4 张上传图（M3 落盘在 `library_root/uploads/`），
+参数里的 `extra` 是第 4 张上传图（M3 落盘在 `data_dir/uploads/`），
 只接受该目录内的本地文件，避免端点变成任意文件读取器。
 """
 from __future__ import annotations
@@ -91,7 +91,7 @@ def _library_slot(kind: str, library: str, item_id: str) -> SheetSlot:
 
 
 def _extra_slot(raw: str) -> SheetSlot:
-    """第 4 张上传图：只允许 `library_root/uploads` 内的本地图片。"""
+    """第 4 张上传图：只允许 `data_dir/uploads` 内的本地图片。"""
     base = resolve_plain(uploads.uploads_dir())
     candidate = resolve_under(base, raw)
 
