@@ -14,7 +14,6 @@ from pathlib import Path
 from app.config import settings
 from app.models import GenJob, Prompt
 from app.services import job_state
-from app.services.fragment_syntax import strip_headers
 from app.services.generation import submit_generation
 from app.services.image_inputs import clean_dest_name, compose_masked_target, dest_name
 from app.services.output_location import (
@@ -91,7 +90,14 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
     pp = _prompt_params(item)
 
     injected = pp.get("injected_prompt")
-    prompt_text = injected if injected is not None else pp.get("prompt")
+    raw_prompt = pp.get("prompt")
+    # 优先用原文重编译：批次记录里的 injected_prompt 是剥离标题后的快照，
+    # 用它重试会丢掉【避免】段；原文不在时再退回快照。
+    prompt_text = (
+        raw_prompt
+        if isinstance(raw_prompt, str) and raw_prompt
+        else injected
+    )
     negative = pp.get("negative_prompt", "")
     steps = pp.get("steps")
     cfg_scale = pp.get("cfg_scale")
@@ -111,12 +117,11 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
         raw_seed = raw_seed or prompt.seed
 
     prompt_text = prompt_text or ""
-    if injected is None:
-        injected = strip_headers(prompt_text)
     seed = resolve_seed(raw_seed)
 
     inject_prompt(api_wf, {
-        "prompt": injected,
+        "prompt": prompt_text,
+        "strip_fragment_headers": True,
         "negative_prompt": negative or "",
         "seed": seed,
         "steps": steps,

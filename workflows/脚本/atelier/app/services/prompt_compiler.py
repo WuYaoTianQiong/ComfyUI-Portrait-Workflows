@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from app.services.fragment_syntax import strip_headers
 
 
 @dataclass(frozen=True)
@@ -693,22 +695,28 @@ def compile_for_submission(
     *,
     negative_effective: bool = True,
     skip_compile: bool = False,
+    strip_fragment_headers: bool = False,
 ) -> CompiledPrompt:
     """提交前的唯一编译入口。
 
-    只负责「跳过编译 / 正常编译」这一层决策；`【类型】` 标题是否提前剥离
-    仍由各入口按现有口径决定（主提示词链路先剥离，编辑器/参考库保持原样），
-    这样预览、快照与真实注入不会因为顺序不同而分叉。
+    只负责「跳过编译 / 正常编译」这一层决策。`strip_fragment_headers=True`
+    时在**编译之后**再去掉【类型】标题：这样【避免】段落在剥离前已经进入
+    负向，不会被提前抹掉标题后当作正向正文留下。编辑器/参考库仍保持原样，
+    由各入口自行决定是否启用该口径。
     """
     if skip_compile:
         # P3 手动改写：正向按原文写入，负向只保留用户填写的内容。
-        return CompiledPrompt(
+        compiled = CompiledPrompt(
             positive=str(text or ""),
             negative=str(negative or ""),
             negative_effective=negative_effective,
         )
-    return compile_prompt(
-        str(text or ""),
-        str(negative or ""),
-        negative_effective=negative_effective,
-    )
+    else:
+        compiled = compile_prompt(
+            str(text or ""),
+            str(negative or ""),
+            negative_effective=negative_effective,
+        )
+    if strip_fragment_headers:
+        compiled = replace(compiled, positive=strip_headers(compiled.positive))
+    return compiled

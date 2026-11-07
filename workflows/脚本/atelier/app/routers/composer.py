@@ -27,7 +27,7 @@ from app.routers.jobs import (
 )
 from app.config import settings
 from app.services.fragment_syntax import (
-    FRAGMENT_TYPES, contains_nsfw_keyword, parse, strip_headers,
+    FRAGMENT_TYPES, contains_nsfw_keyword, parse,
 )
 from app.services import atomic_pilot
 from app.services.costume_policy import (
@@ -279,10 +279,11 @@ def composer_run(
             quality=req.quality, orientation=req.orientation,
         )
         api_wf = load_workflow(workflow_path, req.workflow_content)
-        # 与 comfyui.py 的各出图入口保持一致：【类型】标题只用于组合器里给人看，
-        # 不能作为正文注入 CLIP（否则会多出 8 段中文标签文本）。
+        # 与 comfyui.py 的各出图入口保持一致：先编译让【避免】进入负向，
+        # 编译后再剥离【类型】标题（否则标题会作为正文注入 CLIP）。
         prompt_data = {
-            "prompt": strip_headers(req.prompt),
+            "prompt": req.prompt or "",
+            "strip_fragment_headers": True,
             "negative_prompt": req.negative_prompt,
             "orientation": req.orientation,
             "quality": req.quality,
@@ -451,9 +452,10 @@ def composer_batch_random_run(
         for item in job_items:
             params = json.loads(item["prompt_params"])
             compiled = compile_for_submission(
-                strip_headers(params.get("prompt") or ""),
+                params.get("prompt") or "",
                 params.get("negative_prompt") or "",
                 negative_effective=negative_effective,
+                strip_fragment_headers=True,
             )
             params["compiled"] = compiled.as_dict()
             item["prompt_params"] = json.dumps(params, ensure_ascii=False)
@@ -469,8 +471,9 @@ def composer_batch_random_run(
             api_wf = load_workflow(workflow_path, req.workflow_content)
             task_seed = resolve_seed(item.get("seed"))
             prompt_data = {
-                # 同一入口同样去掉【类型】标题；prompt_params 里仍保留原文
-                "prompt": strip_headers(json.loads(item["prompt_params"])["prompt"]),
+                # 同一入口先编译、后剥离【类型】标题；prompt_params 里仍保留原文
+                "prompt": json.loads(item["prompt_params"])["prompt"],
+                "strip_fragment_headers": True,
                 "negative_prompt": req.negative_prompt,
                 "seed": task_seed,
                 "orientation": req.orientation,

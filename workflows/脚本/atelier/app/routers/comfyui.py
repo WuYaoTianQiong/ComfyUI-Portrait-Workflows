@@ -335,9 +335,10 @@ def compile_prompt_preview(req: CompilePromptRequest):
 
     caps = detect_workflow_caps(api_wf)
     effective = bool(caps.get("negative_effective"))
-    # 与真正的提交入口一致：只去掉【类型】标题，预览看到的才是实际注入的正文。
+    # 与真正的提交入口一致：先编译（让【避免】进入负向），编译后再去掉【类型】标题。
     compiled = compile_for_submission(
-        strip_headers(req.prompt), req.negative_prompt, negative_effective=effective,
+        req.prompt, req.negative_prompt, negative_effective=effective,
+        strip_fragment_headers=True,
     )
     body = compiled.as_dict()
     body["negative_cfg"] = caps.get("negative_cfg")
@@ -378,10 +379,12 @@ def run_prompt(
         # 加载并解析工作流
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
-        # 注入提示词：传 ComfyUI 时去掉【】碎片标题
+        # 注入提示词：编译前保留【类型】标题，让【避免】先进入负向；
+        # 标题本身在编译完成后由 inject_prompt 剥离。
         clean_prompt = strip_headers(p.prompt)
         prompt_data = {
-            "prompt": clean_prompt,
+            "prompt": p.prompt or "",
+            "strip_fragment_headers": True,
             "negative_prompt": p.negative_prompt or "",
             "seed": req.seed if req.seed is not None else p.seed,
             "orientation": req.orientation,
@@ -474,7 +477,8 @@ def run_text_prompt(
         api_wf = load_workflow(workflow_path, req.workflow_content)
 
         prompt_data = {
-            "prompt": strip_headers(req.prompt),
+            "prompt": req.prompt or "",
+            "strip_fragment_headers": True,
             "negative_prompt": req.negative_prompt or "",
             "seed": req.seed,
             "orientation": req.orientation,
@@ -656,12 +660,13 @@ def batch_generate(
         p = prompts[index]
         api_wf = load_workflow(workflow_path, req.workflow_content)
         prompt_text = (
-            strip_headers(item.prompt_override)
+            item.prompt_override
             if item.prompt_override
-            else strip_headers(p.prompt)
+            else (p.prompt or "")
         )
         inject_prompt(api_wf, {
             "prompt": prompt_text,
+            "strip_fragment_headers": True,
             "negative_prompt": p.negative_prompt or "",
             "seed": items_raw[index]["seed"],
             "steps": p.steps,

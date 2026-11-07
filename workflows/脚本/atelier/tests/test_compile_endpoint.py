@@ -73,6 +73,19 @@ def test_compile_preview_strips_fragment_headers(api):
     assert "【人物面部】" not in resp.json()["positive"]
 
 
+def test_compile_preview_moves_avoid_section_to_negative(api):
+    resp = api.post("/api/prompts/compile", json={
+        "prompt": "【人物面部】\n她穿白衬衫\n\n【避免】\n错字、乱码",
+        "workflow_path": "custom://zit",
+        "workflow_content": _zit(),
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "【人物面部】" not in body["positive"]
+    assert "错字" not in body["positive"]
+    assert "错字" in body["negative"]
+
+
 def test_compile_preview_requires_workflow(api):
     resp = api.post("/api/prompts/compile", json={"prompt": "x"})
     assert resp.status_code == 400

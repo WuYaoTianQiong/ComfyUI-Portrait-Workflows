@@ -1419,6 +1419,7 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
             raw_negative,
             negative_effective=negative_effective,
             skip_compile=bool(prompt_data.get("skip_compile")),
+            strip_fragment_headers=bool(prompt_data.get("strip_fragment_headers")),
         )
         positive = compiled.positive
         negative = compiled.negative if negative_effective else ""
