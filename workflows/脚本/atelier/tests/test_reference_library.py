@@ -161,6 +161,55 @@ def _image_response(request: httpx.Request, content: bytes = b"remote-image") ->
     )
 
 
+HAIR_ITEMS = [
+    {
+        "id": "char-hair-001",
+        "标题": "低位双团髻",
+        "分区": "双髻",
+        "标签": ["双髻", "角色创作库"],
+        "缩略图": "thumbs/char-hair-001.webp",
+        "原图": "images/char-hair-001.webp",
+        "正面": "front/char-hair-001.webp",
+        "背面": "back/char-hair-001.webp",
+        "视图": "正背",
+        "可用于发型槽": True,
+        "检索": "hair-001 低位双团髻 双髻 角色创作库 发型",
+    },
+    {
+        "id": "char-atlas2k-1201",
+        "标题": "自然短寸",
+        "分区": "男式发型 · 单面",
+        "标签": ["男性发型", "角色创作库"],
+        "缩略图": "thumbs/char-atlas2k-1201.webp",
+        "原图": "images/char-atlas2k-1201.webp",
+        "正面": "",
+        "背面": "",
+        "视图": "单面",
+        "可用于发型槽": False,
+        "检索": "atlas2k-1201 自然短寸 男式发型 · 单面 角色创作库 发型",
+    },
+]
+
+
+@pytest.fixture()
+def hair_root(tmp_path: Path, monkeypatch, ref_root: Path) -> Path:
+    root = tmp_path / "character-ref-hair"
+    _write_json(root / "meta.json", HAIR_ITEMS)
+    for rel in (
+        "thumbs/char-hair-001.webp",
+        "images/char-hair-001.webp",
+        "front/char-hair-001.webp",
+        "back/char-hair-001.webp",
+        "thumbs/char-atlas2k-1201.webp",
+        "images/char-atlas2k-1201.webp",
+    ):
+        _write_bytes(root / rel, b"hair")
+    monkeypatch.setattr(settings, "hair_character_dir", root)
+    rl.clear_cache()
+    yield root
+    rl.clear_cache()
+
+
 @pytest.fixture()
 def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     root = tmp_path / "ai-pose-gallery-zh"
@@ -184,6 +233,7 @@ def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     # 隔离本机真实安装的第二来源，避免合并条数污染既有用例
     monkeypatch.setattr(settings, "pose_extra_dir", None)
     monkeypatch.setattr(settings, "costume_character_dir", None)
+    monkeypatch.setattr(settings, "hair_character_dir", None)
     monkeypatch.setattr(settings, "reference_allow_nsfw", False)
     monkeypatch.setattr(settings, "reference_page_size", 60)
     rl.clear_cache()
@@ -375,10 +425,12 @@ def test_library_counts_and_availability(api, ref_root):
     resp = api.get("/api/reference/libraries")
     assert resp.status_code == 200
     stats = {row["library"]: row for row in resp.json()["libraries"]}
-    assert set(stats) == {"pose", "costume", "portrait", "costume-anime"}
+    assert set(stats) == {"pose", "costume", "portrait", "hair", "costume-anime"}
     assert stats["pose"]["total"] == 3
     assert stats["costume"]["total"] == 2
     assert stats["portrait"]["total"] == 1
+    assert stats["hair"]["total"] == 0
+    assert stats["hair"]["available"] is False
     assert stats["costume-anime"]["total"] == 1
     assert stats["costume-anime"]["remote"] == 1
     assert stats["pose"]["local"] == 3
@@ -1140,6 +1192,65 @@ def test_pagination_shape(api, ref_root):
 def test_unknown_library_returns_404(api, ref_root):
     assert api.get("/api/reference/items", params={"library": "nope"}).status_code == 404
     assert api.get("/api/reference/items/nope/x").status_code == 404
+
+
+def test_hair_library_stats_and_items(api, hair_root):
+    stats = {
+        row["library"]: row
+        for row in api.get("/api/reference/libraries").json()["libraries"]
+    }
+    assert stats["hair"]["total"] == 2
+    assert stats["hair"]["visible"] == 2
+    assert stats["hair"]["available"] is True
+    assert stats["hair"]["sources"] == [
+        {
+            "key": "character-ref",
+            "label": "角色创作库 @62656456",
+            "total": 2,
+            "available": True,
+            "has_depth": False,
+        }
+    ]
+    facets = {row["value"]: row["count"] for row in stats["hair"]["facets"]}
+    assert facets == {"正背": 1, "单面": 1}
+
+    dual = api.get("/api/reference/items/hair/char-hair-001").json()
+    assert dual["name"] == "低位双团髻"
+    assert dual["subtitle"] == "正背"
+    assert dual["hair_usable"] is True
+    assert dual["hair_back_url"] == (
+        "/api/reference/items/hair/char-hair-001/image?kind=back"
+    )
+    assert dual["hair_front_url"] == (
+        "/api/reference/items/hair/char-hair-001/image?kind=front"
+    )
+
+    single = api.get("/api/reference/items/hair/char-atlas2k-1201").json()
+    assert single["subtitle"] == "单面"
+    assert single["hair_usable"] is False
+    assert single["hair_back_url"] is None
+    assert single["hair_front_url"] is None
+
+
+def test_hair_image_kinds_and_slot_resolution(api, hair_root):
+    for kind in ("thumb", "image", "front", "back"):
+        resp = api.get(
+            "/api/reference/items/hair/char-hair-001/image", params={"kind": kind}
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"hair"
+
+    missing = api.get(
+        "/api/reference/items/hair/char-atlas2k-1201/image", params={"kind": "back"}
+    )
+    assert missing.status_code == 404
+
+    from app.routers import reference_library as router_module
+
+    item, path = router_module._recipe_entry("hair", "char-hair-001", "第 4 张参考")
+    assert item["id"] == "char-hair-001"
+    assert path.parent.name == "back"
+    assert path.name == "char-hair-001.webp"
 
 
 def test_real_library_scale(monkeypatch):

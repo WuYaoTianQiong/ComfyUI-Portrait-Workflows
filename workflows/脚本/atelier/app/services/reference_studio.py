@@ -18,7 +18,8 @@ from app.services.workflow_parser import (
 
 #: 合成台默认工作流：2026-11-05 T0 三候选实测对比后定为 Qwen21 + VNCCS
 #: （三槽齐全 + 姿势 LoRA，25 步单人链路）；空请求一律用它，不再按张数硬绑三图/四图。
-DEFAULT_STUDIO_WORKFLOW = "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json"
+#: 默认合成台工作流：四图可选发型（空第 4 槽自动裁成三图，实测 84–97s）。
+DEFAULT_STUDIO_WORKFLOW = "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json"
 
 #: 槽位固定顺序：提示词编号、提交顺序、错误文案都以它为准。
 SLOT_ROLES = ("portrait", "costume", "pose", "extra")

@@ -32,7 +32,7 @@ from app.services.paths import (
     strip_extended_prefix,
 )
 
-LIBRARIES: tuple[str, ...] = ("pose", "costume", "portrait", "costume-anime")
+LIBRARIES: tuple[str, ...] = ("pose", "costume", "portrait", "hair", "costume-anime")
 
 logger = logging.getLogger("atelier.reference")
 
@@ -41,6 +41,7 @@ BASELINE_COUNTS: dict[str, int] = {
     "pose": 1439,
     "costume": 1407,
     "portrait": 1499,
+    "hair": 489,
     "costume-anime": 440,
 }
 BASELINE_TOLERANCE = 0.05
@@ -56,6 +57,7 @@ LIBRARY_LABELS: dict[str, str] = {
     "pose": "姿势库",
     "costume": "服装库",
     "portrait": "人像库",
+    "hair": "发型库",
     "costume-anime": "外链服装",
 }
 
@@ -101,8 +103,14 @@ class CostumeSource:
 
 COSTUME_SOURCE_BASELINES = {
     COSTUME_SOURCE_UPSTREAM: 1407,
-    COSTUME_SOURCE_CHARACTER: 60,
+    # 精选包按批扩充（60 → 120 → …），不设固定基线，避免每次扩库都报“偏离基线”。
+    COSTUME_SOURCE_CHARACTER: None,
 }
+
+#: 发型库（角色创作库全量包）来源标识。
+HAIR_SOURCE_KEY = "character-ref"
+HAIR_LABEL = COSTUME_CHARACTER_LABEL
+HAIR_CACHE_KEY = ("__hair__", "hair")
 
 #: 姿势库 canonical 分类（三轴：来源 / 分级 / 构图；类型与风格独立）。
 COMPOSITION_FULL = "full"
@@ -260,6 +268,15 @@ FIELD_MAP: dict[str, dict[str, str | None]] = {
         "image": "原图",
         "search": "检索",
     },
+    "hair": {
+        "name": "标题",
+        "group": "分区",
+        "facet": "视图",
+        "angle": None,
+        "thumb": "缩略图",
+        "image": "原图",
+        "search": "检索",
+    },
     "costume-anime": {
         "name": "服装名称",
         "group": "一级分类",
@@ -271,7 +288,7 @@ FIELD_MAP: dict[str, dict[str, str | None]] = {
     },
 }
 
-IMAGE_KINDS: tuple[str, ...] = ("thumb", "image", "depth", "depth_thumb")
+IMAGE_KINDS: tuple[str, ...] = ("thumb", "image", "depth", "depth_thumb", "front", "back")
 
 
 class ReferenceImageError(Exception):
@@ -340,6 +357,8 @@ def _subtitle(library: str, obj: dict[str, Any]) -> str:
         return " · ".join(p for p in parts if p)
     if library == "portrait":
         return _text(obj, "发型名称")
+    if library == "hair":
+        return _text(obj, "视图")
     if library == "costume-anime":
         return _text(obj, "日文名称")
     return ""
@@ -448,6 +467,9 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
 
     thumb_upstream = _text(obj, mapping["thumb"])
     image_upstream = _text(obj, mapping["image"])
+    back_rel = _text(obj, "背面") if library == "hair" else ""
+    front_rel = _text(obj, "正面") if library == "hair" else ""
+    hair_usable = bool(obj.get("可用于发型槽")) if library == "hair" else False
     thumb_rel = "" if remote else thumb_upstream
     image_rel = "" if remote else image_upstream
     if remote:
@@ -481,11 +503,17 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "remote": remote,
         #: 仅 costume-anime 映射上游「来源地址」；其他库恒 None
         "source_url": (_text(obj, "来源地址") or None) if remote else None,
+        #: 仅 hair：正/背面裁切端点与是否可用于第 4 槽
+        "hair_front_url": _image_url(library, item_id, "front") if front_rel else None,
+        "hair_back_url": _image_url(library, item_id, "back") if back_rel else None,
+        "hair_usable": hair_usable,
         #: 与后端过滤一致的预拼检索串（小写前的原文），前端「检索」字段直接取此值
         "search_text": search_text,
         "_search": search_text.lower(),
         "_thumb_rel": thumb_rel,
         "_image_rel": image_rel,
+        "_front_rel": front_rel,
+        "_back_rel": back_rel,
         #: 外链原始 URL（仅服务端内部使用，`_public` 不会下发）
         "_remote_thumb": thumb_upstream or image_upstream,
         "_remote_image": image_upstream or None,
@@ -810,6 +838,61 @@ def _load_costume_merged() -> list[dict[str, Any]]:
     return items
 
 
+def _hair_pack() -> Path | None:
+    extra = settings.hair_character_dir
+    if extra is None:
+        return None
+    return Path(extra).expanduser().absolute()
+
+
+def _load_hair_pack() -> list[dict[str, Any]]:
+    """加载角色创作库发型全量包；未安装时返回空列表。"""
+    pack = _hair_pack()
+    if pack is None:
+        return []
+    metadata = pack / "meta.json"
+    mtime = _mtime_ns(metadata)
+    if mtime is None:
+        logger.info("发型来源未安装，已跳过：%s", metadata)
+        return []
+    with _LOCK:
+        cached = _CACHE.get(HAIR_CACHE_KEY)
+        if cached and cached.mtime_ns == mtime:
+            return cached.items
+
+    try:
+        raw = json.loads(metadata.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("发型来源读取/解析失败：%s", exc)
+        return []
+    if not isinstance(raw, list):
+        logger.warning("发型来源顶层不是数组：%s", metadata)
+        return []
+
+    records: list[dict[str, Any]] = []
+    for obj in raw:
+        if not isinstance(obj, dict):
+            continue
+        record = _to_record("hair", obj)
+        if record is None:
+            continue
+        record["_root"] = pack
+        record["_source"] = HAIR_SOURCE_KEY
+        record["source"] = HAIR_SOURCE_KEY
+        record["source_label"] = HAIR_LABEL
+        record["source_url"] = COSTUME_CHARACTER_SITE
+        records.append(record)
+
+    _log_loaded_count("hair", len(records))
+    with _LOCK:
+        _CACHE[HAIR_CACHE_KEY] = _CacheEntry(
+            mtime_ns=mtime,
+            items=records,
+            by_id={record["id"]: record for record in records},
+        )
+    return records
+
+
 def _log_loaded_count(library: str, count: int) -> None:
     """成功打 info；空库或明显偏离上游基线打 warning，避免"0 条且可用"无从排查。"""
     baseline = BASELINE_COUNTS.get(library)
@@ -833,12 +916,14 @@ def _load(library: str) -> list[dict[str, Any]]:
 
     `pose` 是唯一的多来源库：上游 + pose-studio-lite，在内存里合并。
     """
-    if library not in LIBRARY_FILES:
+    if library not in LIBRARIES:
         return []
     if library == "pose":
         return _load_pose_merged()
     if library == "costume":
         return _load_costume_merged()
+    if library == "hair":
+        return _load_hair_pack()
     path = _library_path(library)
     mtime = _mtime_ns(path)
     key = (str(path), library)
@@ -968,6 +1053,21 @@ def library_stats() -> list[dict[str, Any]]:
                         "has_depth": False,
                     }
                 )
+        elif library == "hair":
+            pack = _hair_pack()
+            try:
+                available = bool(pack and (pack / "meta.json").is_file())
+            except OSError:
+                available = False
+            source_stats = [
+                {
+                    "key": HAIR_SOURCE_KEY,
+                    "label": HAIR_LABEL,
+                    "total": len(all_items),
+                    "available": available,
+                    "has_depth": False,
+                }
+            ]
         else:
             path = _library_path(library)
             try:
@@ -1053,13 +1153,15 @@ def resolve_remote_url(library: str, item_id: str, kind: str) -> str | None:
 
 
 def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
-    if library not in LIBRARY_FILES or not item_id:
+    if library not in LIBRARIES or not item_id:
         return None
     _load(library)  # 确保缓存已按 mtime 填充
     if library == "pose":
         key = ("__pose_merged__", "pose")
     elif library == "costume":
         key = ("__costume_merged__", "costume")
+    elif library == "hair":
+        key = HAIR_CACHE_KEY
     else:
         key = (str(_library_path(library)), library)
     with _LOCK:
@@ -1123,6 +1225,10 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
         rel = f"thumbs/depth/{record['id']}.webp"
     elif kind == "thumb":
         rel = record["_thumb_rel"]
+    elif kind in ("front", "back"):
+        if library != "hair":
+            raise ReferenceImageError(404, "该库没有正/背面图")
+        rel = record.get(f"_{kind}_rel") or ""
     else:
         rel = record["_image_rel"]
 

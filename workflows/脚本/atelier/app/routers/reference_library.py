@@ -90,6 +90,11 @@ class ReferenceItem(BaseModel):
     remote: bool = False
     #: 仅 costume-anime 且上游有「来源地址」时非空
     source_url: str | None = None
+    #: 仅 hair：正/背面裁切图端点；单面发型两者均为 None
+    hair_front_url: str | None = None
+    hair_back_url: str | None = None
+    #: 仅 hair：是否有背面无脸图可用于第 4 槽
+    hair_usable: bool = False
     #: 与后端过滤一致的预拼检索串原文（前端「检索」字段直接取此值）
     search_text: str = ""
 
@@ -156,7 +161,7 @@ def list_reference_libraries():
 
 @router.get("/reference/items", response_model=ReferenceItemListResponse)
 def list_reference_items(
-    library: str = Query("pose", description="pose / costume / portrait / costume-anime"),
+    library: str = Query("pose", description="pose / costume / portrait / hair / costume-anime"),
     search: str = Query("", description="直接匹配上游预拼好的「检索」串"),
     group: str = Query(""),
     facet: str = Query(""),
@@ -165,7 +170,7 @@ def list_reference_items(
     page: int = Query(1),
     page_size: int = Query(0, description="0 表示使用 ATELIER_REFERENCE_PAGE_SIZE"),
 ):
-    if library not in reference_library.LIBRARY_FILES:
+    if library not in reference_library.LIBRARIES:
         raise HTTPException(404, f"未知参考库：{library}")
     return reference_library.query_items(
         library=library,
@@ -322,7 +327,7 @@ def _recipe_entry(library: str, item_id: str, label: str) -> tuple[dict, Path]:
     """
     if not item_id:
         raise HTTPException(400, f"缺少{label}")
-    if library not in reference_library.LIBRARY_FILES:
+    if library not in reference_library.LIBRARIES:
         raise HTTPException(404, f"未知参考库：{library}")
     item = reference_library.get_item(library, item_id)
     if item is None:
@@ -347,7 +352,8 @@ def _recipe_entry(library: str, item_id: str, label: str) -> tuple[dict, Path]:
         return item, path
 
     try:
-        path = reference_library.resolve_image(library, item_id, "image")
+        kind = "back" if library == "hair" else "image"
+        path = reference_library.resolve_image(library, item_id, kind)
     except reference_library.ReferenceImageError as exc:
         raise HTTPException(exc.status_code, f"{label}：{exc.detail}") from None
     return item, path

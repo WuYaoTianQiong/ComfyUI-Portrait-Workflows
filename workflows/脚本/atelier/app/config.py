@@ -89,6 +89,34 @@ def _resolve_pose_extra_dir(library_root: Path, explicit: Path | None) -> Path |
     return None
 
 
+def _resolve_hair_character_dir(
+    library_root: Path, explicit: Path | None
+) -> Path | None:
+    """角色创作库发型全量包（489 件）来源。
+
+    显式 `ATELIER_HAIR_CHARACTER_DIR` 优先；未配置时按 `reference-assets/
+    character-ref-hair` 常见落点自动探测；都没有则禁用发型库。
+    """
+    if explicit is not None:
+        path = Path(explicit).expanduser()
+        if not path.is_absolute():
+            path = library_root / path
+        return path.absolute()
+
+    candidates = (
+        library_root.parent / "reference-assets" / "character-ref-hair",
+        library_root.parent.parent / "reference-assets" / "character-ref-hair",
+        library_root / "reference-assets" / "character-ref-hair",
+    )
+    for path in candidates:
+        try:
+            if (path / "meta.json").is_file():
+                return path.absolute()
+        except OSError:
+            continue
+    return None
+
+
 def _resolve_costume_character_dir(
     library_root: Path, explicit: Path | None
 ) -> Path | None:
@@ -242,9 +270,12 @@ class Settings(BaseSettings):
     #: 第二姿势来源（pose-studio-lite）根；None = 禁用。
     #: `ATELIER_POSE_EXTRA_DIR` 显式覆盖；未配置时按 reference-assets 常见落点自动探测。
     pose_extra_dir: Path | None = None
-    #: 角色创作库精选服装（60 件）根；None = 禁用。
+    #: 角色创作库精选服装（全量 783 件）根；None = 禁用。
     #: `ATELIER_COSTUME_CHARACTER_DIR` 显式覆盖；未配置时自动探测。
     costume_character_dir: Path | None = None
+    #: 角色创作库发型全量包（489 件）根；None = 禁用。
+    #: `ATELIER_HAIR_CHARACTER_DIR` 显式覆盖；未配置时自动探测。
+    hair_character_dir: Path | None = None
     reference_allow_nsfw: bool = False
 
     reference_page_size: int = 60
@@ -288,6 +319,9 @@ class Settings(BaseSettings):
         self.pose_extra_dir = _resolve_pose_extra_dir(self.library_root, self.pose_extra_dir)
         self.costume_character_dir = _resolve_costume_character_dir(
             self.library_root, self.costume_character_dir
+        )
+        self.hair_character_dir = _resolve_hair_character_dir(
+            self.library_root, self.hair_character_dir
         )
         self.reference_cache_dir = _validate_reference_cache_dir(
             self.reference_cache_dir,
@@ -358,4 +392,5 @@ print(f"[config]   db_path = {settings.db_path}")
 print(f"[config]   reference_root = {settings.reference_root} (enabled={settings.reference_enabled})")
 print(f"[config]   pose_extra_dir = {settings.pose_extra_dir}")
 print(f"[config]   costume_character_dir = {settings.costume_character_dir}")
+print(f"[config]   hair_character_dir = {settings.hair_character_dir}")
 print(f"[config]   reference_cache_dir = {settings.reference_cache_dir}")
