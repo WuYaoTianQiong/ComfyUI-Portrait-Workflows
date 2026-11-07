@@ -1,17 +1,18 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
-import {
-  detectCapsFromContent,
-  detectParamsFromContent,
-  useWorkflowCaps,
+import { useWorkflowCaps } from './useWorkflowCaps'
+import type {
+  SizePreview,
+  WorkflowCaps,
+  WorkflowParams,
 } from './useWorkflowCaps'
-import type { WorkflowCaps, WorkflowParams } from './useWorkflowCaps'
 import type { WorkflowRow } from './useWorkflows'
 
 /**
- * 档位是模块私有的（`qualityOptionsFor` 不再对外），只能通过 composable 观测：
- * 给一行"后端已经给出 caps/params"的工作流，取它算出来的档位。
+ * 尺寸计算已经搬到后端；这里只验证「后端预演 → 界面文案」的格式化，
+ * 以及档位过滤 / 去重 / 缺省回退。预览与实际注入的一致性由
+ * `tests/test_workflow_inspect.py` 逐档逐比例断言。
  */
 const ALL_CAPS: WorkflowCaps = {
   prompt: true,
@@ -22,298 +23,128 @@ const ALL_CAPS: WorkflowCaps = {
   orientation: true,
 }
 
-function optionsFor(params: WorkflowParams, ratio = '') {
+const SCALE_PARAMS: WorkflowParams = {
+  quality_mode: 'scale',
+  orientation_mode: 'swap',
+  base_width: 832,
+  base_height: 1216,
+  base_megapixels: 1.01,
+  mp_unit: 'mp',
+  post_scale: 1,
+  default_ratio: '2:3',
+  aspect_ratios: ['1:1', '2:3', '9:16'],
+  multiple: 16,
+}
+
+const SCALE_PREVIEW: SizePreview = {
+  '4K': {
+    '2:3': {
+      width: 832, height: 1216, final_width: 832, final_height: 1216,
+      megapixels: 1.01, scale: 1, native: true,
+    },
+    '9:16': {
+      width: 752, height: 1344, final_width: 752, final_height: 1344,
+      megapixels: 1.01, scale: 1, native: false,
+    },
+  },
+  '6K': {
+    '2:3': {
+      width: 1056, height: 1536, final_width: 1056, final_height: 1536,
+      megapixels: 1.62, scale: 1.25, native: false,
+    },
+  },
+}
+
+function optionsFor(
+  params: WorkflowParams,
+  preview?: SizePreview,
+  ratio = '',
+) {
   const path = 'wf/a.json'
-  const rows = ref<WorkflowRow[]>([{ path, name: 'a', caps: ALL_CAPS, params }])
+  const rows = ref<WorkflowRow[]>([
+    { path, name: 'a', caps: ALL_CAPS, params, size_preview: preview },
+  ])
   const { qualityOptions } = useWorkflowCaps(ref(path), rows, ref(ratio))
   return qualityOptions.value
 }
 
-function capsOf(obj: unknown) {
-  return detectCapsFromContent(JSON.stringify(obj))
-}
-
-describe('工作流能力探测', () => {
-  it('API 格式文生图：提示词 / 负向 / 画质 / 横竖都支持', () => {
-    const caps = capsOf({
-      1: { class_type: 'CLIPTextEncode', inputs: { clip: ['4', 1], text: '正' } },
-      2: { class_type: 'CLIPTextEncode', inputs: { clip: ['4', 1], text: '负' } },
-      3: { class_type: 'EmptyLatentImage', inputs: { width: 832, height: 1216 } },
-    })
-    expect(caps).toEqual({
-      prompt: true,
-      negative: true,
-      negative_effective: false,
-      negative_cfg: null,
-      quality: true,
-      orientation: true,
-    })
+describe('档位文案来自后端预演', () => {
+  it('原生档 + 非原生比例 + 倍率档', () => {
+    const options = optionsFor(SCALE_PARAMS, SCALE_PREVIEW)
+    expect(options.find((o) => o.value === '4K')?.label)
+      .toBe('原生 1.0× · 1.01MP · 832×1216')
+    expect(optionsFor(SCALE_PARAMS, SCALE_PREVIEW, '9:16').find((o) => o.value === '4K')?.label)
+      .toBe('1.0× · 1.01MP · 752×1344')
+    expect(options.find((o) => o.value === '6K')?.label)
+      .toBe('1.25× · 1.62MP · 1056×1536')
   })
 
-  it('方图也能在统一比例契约下切到非方图', () => {
-    const caps = capsOf({
-      1: { class_type: 'CLIPTextEncode', inputs: { clip: ['4', 1], text: '正' } },
-      2: { class_type: 'EmptyLatentImage', inputs: { width: 1024, height: 1024 } },
-    })
-    expect(caps.quality).toBe(true)
-    expect(caps.orientation).toBe(true)
-  })
-
-  it('尺寸由上游预设节点决定：预设档位可作为画质/比例注入', () => {
-    const caps = capsOf({
-      1: { class_type: 'CLIPTextEncode', inputs: { clip: ['4', 1], text: '正' } },
-      2: { class_type: 'EmptyLatentImage', inputs: { width: ['9', 0], height: ['9', 1] } },
-      9: { class_type: 'ResolutionPresetPicker', inputs: { preset: '640x960 （2:3）' } },
-    })
-    expect(caps.orientation).toBe(true)
-    expect(caps.quality).toBe(true)
-  })
-
-  it('超分工作流：没有提示词注入，但有画质', () => {
-    const caps = capsOf({
-      1: { class_type: 'SeedVR2VideoUpscaler', inputs: { resolution: 2560 } },
-    })
-    expect(caps).toEqual({
-      prompt: false,
-      negative: false,
-      negative_effective: false,
-      negative_cfg: null,
-      quality: true,
-      orientation: false,
-    })
-  })
-
-  it('UI 格式按节点类型乐观判定', () => {
-    const caps = capsOf({
-      nodes: [{ type: 'CLIPTextEncode' }, { type: 'EmptyLatentImage' }],
-    })
-    expect(caps).toEqual({
-      prompt: true,
-      negative: false,
-      negative_effective: false,
-      negative_cfg: null,
-      quality: true,
-      orientation: true,
-    })
-  })
-
-  it('解析失败时保持旧行为（全部可用）', () => {
-    expect(detectCapsFromContent('not json')).toEqual(ALL_CAPS)
-  })
-})
-
-describe('负向是否真的生效', () => {
-  it('Qwen：负向字段存在，但 CFG=1 时不参与采样', () => {
-    const caps = capsOf({
-      5: {
-        class_type: 'TextEncodeQwenImage21',
-        inputs: { clip: ['2', 0], prompt: '正', negative_prompt: '负' },
-      },
-      7: {
-        class_type: 'KSampler',
-        inputs: {
-          model: ['4', 0], positive: ['5', 0], negative: ['5', 1],
-          latent_image: ['6', 0], cfg: 1,
+  it('后置放大时标签写出成品尺寸', () => {
+    const preview: SizePreview = {
+      '4K': {
+        '2:3': {
+          width: 640, height: 960, final_width: 1088, final_height: 1632,
+          megapixels: 0.61, scale: 1, native: true,
         },
       },
-    })
-    expect(caps.negative).toBe(true)
-    expect(caps.negative_effective).toBe(false)
-    expect(caps.negative_cfg).toBe(1)
+    }
+    const options = optionsFor(
+      { ...SCALE_PARAMS, post_scale: 1.7, base_width: 640, base_height: 960 },
+      preview,
+    )
+    expect(options.find((o) => o.value === '4K')?.label)
+      .toBe('原生 1.0× · 0.61MP · 640×960 → 成品 1088×1632')
   })
 
-  it('ZIT：第一程 CFG=3 且负向接文本节点，第二程 CFG=1 不影响结论', () => {
-    const caps = capsOf({
-      7: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '正' } },
-      8: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '负' } },
-      9: {
-        class_type: 'KSamplerAdvanced',
-        inputs: { positive: ['7', 0], negative: ['8', 0], cfg: 3 },
-      },
-      11: {
-        class_type: 'KSamplerAdvanced',
-        inputs: { positive: ['7', 0], negative: ['8', 0], cfg: 1 },
-      },
-    })
-    expect(caps.negative_effective).toBe(true)
-    expect(caps.negative_cfg).toBe(3)
+  it('只有像素总量的档位不写宽高', () => {
+    const preview: SizePreview = {
+      '4K': { '*': { megapixels: 1.05, scale: 1, native: true } },
+    }
+    const options = optionsFor(
+      { quality_mode: 'megapixels', orientation_mode: 'knob', default_ratio: '9:16' },
+      preview,
+    )
+    expect(options.find((o) => o.value === '4K')?.label).toBe('原生 1.0× · 1.05MP')
   })
 
-  it('Flux：两个文本节点，但负向被 ConditioningZeroOut 清零', () => {
-    const caps = capsOf({
-      4: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '正' } },
-      5: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '负' } },
-      6: { class_type: 'ConditioningZeroOut', inputs: { conditioning: ['5', 0] } },
-      11: {
-        class_type: 'CFGGuider',
-        inputs: { positive: ['4', 0], negative: ['6', 0], cfg: 1 },
-      },
-    })
-    expect(caps.negative).toBe(true)
-    expect(caps.negative_effective).toBe(false)
-    expect(caps.negative_cfg).toBeNull()
-  })
-
-  it('Krea2/Porn：单文本节点 + 清零，没有负向通道', () => {
-    const caps = capsOf({
-      6: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: '正' } },
-      8: { class_type: 'ConditioningZeroOut', inputs: { conditioning: ['6', 0] } },
-      9: {
-        class_type: 'KSamplerAdvanced',
-        inputs: { positive: ['6', 0], negative: ['8', 0], cfg: 1 },
-      },
-    })
-    expect(caps.negative).toBe(false)
-    expect(caps.negative_effective).toBe(false)
-    expect(caps.negative_cfg).toBeNull()
+  it('SeedVR 用真实输出分辨率，比例无关', () => {
+    const preview: SizePreview = {
+      '4K': { '*': { width: 2560, height: 4096, final_width: 2560, final_height: 4096, scale: 1 } },
+    }
+    const options = optionsFor(
+      { quality_mode: 'seedvr', orientation_mode: 'none' },
+      preview,
+    )
+    expect(options.find((o) => o.value === '4K')?.label).toBe('2560×4096')
   })
 })
 
-describe('画质参数与真实档位', () => {
-  const paramsOf = (obj: unknown) => detectParamsFromContent(JSON.stringify(obj))
-
-  it('字面尺寸工作流：默认比例 + 1.0× 保持原生尺寸', () => {
-    const params = paramsOf({
-      1: { class_type: 'EmptyLatentImage', inputs: { width: 832, height: 1216 } },
-    })
-    expect(params.default_ratio).toBe('2:3')
-    expect(params.aspect_ratios).toEqual([
-      '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', '9:21',
-    ])
-    expect(optionsFor(params).find((o) => o.value === '4K')?.label)
-      .toBe('原生 1.0× · 1.01MP · 832×1216')
-    expect(optionsFor(params, '9:16').find((o) => o.value === '4K')?.label)
-      .toBe('1.0× · 1.01MP · 752×1344')
-  })
-
-  it('字面尺寸工作流：倍率缩放后的真实像素', () => {
-    const params = paramsOf({
-      1: { class_type: 'EmptyLatentImage', inputs: { width: 1128, height: 2008 } },
-    })
-    expect(params.quality_mode).toBe('scale')
-    expect(params.base_width).toBe(1128)
-    expect(params.base_height).toBe(2008)
-
-    const options = optionsFor(params)
-    expect(options.find((o) => o.value === '4K')?.label).toBe('原生 1.0× · 2.27MP · 1128×2008')
-    expect(options.find((o) => o.value === '6K')?.label).toBe('1.25× · 3.54MP · 1408×2512')
-    expect(options.find((o) => o.value === '12K')?.label).toBe('2.0× · 9.06MP · 2256×4016')
-  })
-
-  it('上游 megapixels 工作流：按 MiP 换算，并保留横竖旋钮', () => {
-    const params = paramsOf({
-      2: { class_type: 'EmptyLatentImage', inputs: { width: ['9', 0], height: ['9', 1] } },
-      9: { class_type: 'ResolutionSelector', inputs: { aspect_ratio: '9:16', megapixels: 1 } },
-    })
-    expect(params.quality_mode).toBe('megapixels')
-    expect(params.base_megapixels).toBe(1)
-    expect(params.mp_unit).toBe('mip')
-    expect(params.orientation_mode).toBe('knob')
-
-    const options = optionsFor(params)
-    expect(options.find((o) => o.value === '4K')?.label).toBe('原生 1.0× · 1.05MP · 768×1368')
-    expect(options.find((o) => o.value === '12K')?.label).toBe('2.0× · 4.19MP · 1536×2728')
-  })
-
-  it('后置 LatentUpscaleBy：标签写出成品尺寸', () => {
-    const zit = optionsFor({
-      quality_mode: 'scale',
-      orientation_mode: 'knob',
-      base_width: 640,
-      base_height: 960,
-      base_megapixels: 0.614,
-      mp_unit: 'mp',
-      post_scale: 1.7,
-      default_ratio: '2:3',
-      aspect_ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', '9:21'],
-      multiple: 16,
-    })
-    expect(zit.find((o) => o.value === '4K')?.label)
-      .toBe('原生 1.0× · 0.61MP · 640×960 → 成品 1088×1632')
-    expect(zit.find((o) => o.value === '6K')?.label)
-      .toBe('1.25× · 0.96MP · 800×1200 → 成品 1360×2040')
-  })
-
-  it('预设 + 后置放大：只给预设真实比例，不含 9:21', () => {
-    const params = paramsOf({
-      1: { class_type: 'ResolutionPresetPicker', inputs: { preset: '640x960 （2:3）', base_name: 'ZIT' } },
-      2: { class_type: 'EmptyLatentImage', inputs: { width: ['1', 0], height: ['1', 1] } },
-      3: { class_type: 'KSampler', inputs: { latent_image: ['2', 0] } },
-      4: { class_type: 'LatentUpscaleBy', inputs: { samples: ['3', 0], upscale_method: 'bislerp', scale_by: 1.7 } },
-      5: { class_type: 'KSampler', inputs: { latent_image: ['4', 0] } },
-      6: { class_type: 'VAEDecode', inputs: { samples: ['5', 0] } },
-      7: { class_type: 'SaveImage', inputs: { images: ['6', 0], filename_prefix: 'x' } },
-    })
-    expect(params.post_scale).toBe(1.7)
-    expect(params.aspect_ratios).toEqual([
-      '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9',
-    ])
-  })
-
-  it('旋钮 + 后置放大：只给旋钮真实比例，不含 9:21', () => {
-    const params = paramsOf({
-      1: { class_type: 'ResolutionSelector', inputs: { aspect_ratio: '9:16', megapixels: 2.16, multiple: 8 } },
-      2: { class_type: 'EmptyLatentImage', inputs: { width: ['1', 0], height: ['1', 1] } },
-      3: { class_type: 'LatentUpscaleBy', inputs: { samples: ['2', 0], upscale_method: 'bislerp', scale_by: 1.7 } },
-      4: { class_type: 'VAEDecode', inputs: { samples: ['3', 0] } },
-      5: { class_type: 'SaveImage', inputs: { images: ['4', 0], filename_prefix: 'x' } },
-    })
-    expect(params.post_scale).toBe(1.7)
-    expect(params.aspect_ratios).toEqual([
-      '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
-    ])
-  })
-
-  it('第二程长边上限：1.5× + 9:16 的成品不超过 2048', () => {
-    const options = optionsFor({
-      quality_mode: 'scale',
-      orientation_mode: 'knob',
-      base_width: 640,
-      base_height: 960,
-      base_megapixels: 0.614,
-      mp_unit: 'mp',
-      post_scale: 1.7,
-      default_ratio: '2:3',
-      aspect_ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
-      multiple: 16,
-    }, '9:16')
-    const q15 = options.find((o) => o.value === '8K')
-    expect(q15).toBeTruthy()
-    const match = q15?.label.match(/成品 (\d+)×(\d+)/)
-    expect(match).toBeTruthy()
-    expect(Math.max(Number(match?.[1]), Number(match?.[2]))).toBeLessThanOrEqual(2048 + 8)
-  })
-
+describe('档位过滤与回退', () => {
   it('工作流声明的档位会过滤掉低档', () => {
-    const params = paramsOf({
-      1: { class_type: 'EmptyLatentImage', inputs: { width: 832, height: 1216 } },
-    })
-    params.quality_tiers = ['6K', '8K', '12K']
-    expect(optionsFor(params).map((o) => o.value)).toEqual(['6K', '8K', '12K'])
-  })
-
-  it('超分工作流：档位写真实输出分辨率', () => {
-    const params = paramsOf({
-      1: { class_type: 'SeedVR2VideoUpscaler', inputs: { resolution: 2560 } },
-    })
-    expect(params.quality_mode).toBe('seedvr')
-    expect(optionsFor(params).find((o) => o.value === '4K')?.label).toBe(
-      '2560×4096',
+    const options = optionsFor(
+      { ...SCALE_PARAMS, quality_tiers: ['6K', '8K', '12K'] },
+      SCALE_PREVIEW,
     )
+    expect(options.map((o) => o.value)).toEqual(['6K', '8K', '12K'])
   })
 
-  it('没有尺寸旋钮的工作流不产生画质档位', () => {
-    const params = paramsOf({ 1: { class_type: 'CLIPTextEncode', inputs: {} } })
-    expect(params.quality_mode).toBe('none')
-    expect(optionsFor(params)).toEqual([])
+  it('没有尺寸旋钮的工作流不产生档位', () => {
+    expect(optionsFor({ quality_mode: 'none', orientation_mode: 'none' })).toEqual([])
   })
 
-  it('每个倍率按目标 MP 重新算尺寸，标签保持唯一', () => {
-    const params = paramsOf({
-      1: { class_type: 'EmptyLatentImage', inputs: { width: 4096, height: 4096 } },
-    })
-    const options = optionsFor(params)
-    expect(options.map((o) => o.value)).toEqual(['2K', '4K', '6K', '8K', '12K'])
-    expect(new Set(options.map((o) => o.label)).size).toBe(options.length)
+  it('预演尚未返回时只写倍率，不隐藏控件', () => {
+    const options = optionsFor(SCALE_PARAMS)
+    expect(options.find((o) => o.value === '4K')?.label).toBe('原生 1.0×')
+    expect(options.find((o) => o.value === '6K')?.label).toBe('1.25×')
+  })
+
+  it('相同文案只保留一档', () => {
+    const preview: SizePreview = {
+      '8K': { '2:3': { width: 2048, height: 2048, megapixels: 4.19, scale: 1.5 } },
+      '12K': { '2:3': { width: 2048, height: 2048, megapixels: 4.19, scale: 2 } },
+    }
+    const options = optionsFor(SCALE_PARAMS, preview)
+    const labels = options.map((o) => o.label)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 })

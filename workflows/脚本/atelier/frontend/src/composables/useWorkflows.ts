@@ -3,25 +3,17 @@ import { computed, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
-import { apiGet } from '../api/client'
-import { useSettings } from './useSettings'
 import {
-  detectCapsFromContent,
-  detectParamsFromContent,
-  type WorkflowCaps,
-  type WorkflowParams,
-} from './useWorkflowCaps'
+  inspectWorkflow,
+  listWorkflows,
+  validateWorkflow,
+  type WorkflowInspection,
+  type WorkflowRow,
+} from '../api/workflows'
+import { useSettings } from './useSettings'
+import type { SizePreview } from './useWorkflowCaps'
 
-export interface WorkflowRow {
-  path: string
-  name: string
-  /** 后端探测的注入能力；自定义工作流由前端本地探测 */
-  caps?: WorkflowCaps
-  /** 画质/方向参数的作用方式；自定义工作流由前端本地探测 */
-  params?: WorkflowParams
-  /** 自定义上传的工作流（内容存在本地，不在后端磁盘上） */
-  custom?: boolean
-}
+export type { WorkflowRow }
 
 interface CustomWorkflow extends WorkflowRow {
   content: string
@@ -59,6 +51,38 @@ const customWorkflows = ref<CustomWorkflow[]>(readJson<CustomWorkflow[]>(CUSTOM_
 const hiddenPaths = ref<string[]>(readJson<string[]>(HIDDEN_KEY, []))
 const workflowOrder = ref<string[]>(readJson<string[]>(ORDER_KEY, []))
 
+/** 自定义工作流的能力探测缓存：内容哈希 → 后端 inspect 结果。 */
+const inspectionCache = ref<Record<string, WorkflowInspection>>({})
+const inspecting = new Set<string>()
+let inspectionStarted = false
+
+/** FNV-1a：只用于缓存键，碰撞概率足够低，不需要密码学哈希。 */
+function contentKey(content: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `${content.length}:${(hash >>> 0).toString(36)}`
+}
+
+async function ensureInspection(workflow: CustomWorkflow) {
+  const key = contentKey(workflow.content)
+  if (inspectionCache.value[key] || inspecting.has(key)) return
+  inspecting.add(key)
+  try {
+    const result = await inspectWorkflow({
+      workflow_path: workflow.path,
+      workflow_content: workflow.content,
+    })
+    inspectionCache.value = { ...inspectionCache.value, [key]: result }
+  } catch {
+    // 后端不可用时保持旧行为：caps/params 留空，由 useWorkflowCaps 回退默认值
+  } finally {
+    inspecting.delete(key)
+  }
+}
+
 /**
  * 取自定义工作流的 JSON 内容。
  *
@@ -84,11 +108,23 @@ export function useWorkflows(defaultTarget?: Ref<string>) {
   // 工作流按页独立后，默认值要写到调用方自己的那份，而不是固定写提示词页
   const target = defaultTarget ?? workflowPath
 
-  const { data } = useQuery<{ workflows: WorkflowRow[]; default: string }>({
+  const { data } = useQuery({
     queryKey: ['workflows'],
-    queryFn: () => apiGet('/api/workflows'),
+    queryFn: listWorkflows,
     staleTime: 60_000,
   })
+
+  // 自定义工作流只在浏览器里，必须把内容发给后端做一次统一探测（含尺寸预演）
+  if (!inspectionStarted) {
+    inspectionStarted = true
+    watch(
+      customWorkflows,
+      (list) => {
+        for (const workflow of list) void ensureInspection(workflow)
+      },
+      { deep: true, immediate: true },
+    )
+  }
 
   watch(
     () => data.value?.default,
@@ -105,15 +141,17 @@ export function useWorkflows(defaultTarget?: Ref<string>) {
     for (const w of [...(data.value?.workflows ?? []), ...customWorkflows.value]) {
       if (seen.has(w.path)) continue
       seen.add(w.path)
-      // 自定义工作流的内容只存在本地，能力只能在这里算；磁盘工作流用后端 caps
+      // 自定义工作流的内容只存在本地，能力来自后端 inspect；磁盘工作流直接用列表结果
+      const inspection = 'content' in w
+        ? inspectionCache.value[contentKey(String(w.content))]
+        : undefined
       merged.push({
         path: w.path,
         name: w.name,
         custom: w.custom,
-        caps: w.caps ?? ('content' in w ? detectCapsFromContent(String(w.content)) : undefined),
-        params:
-          w.params ??
-          ('content' in w ? detectParamsFromContent(String(w.content)) : undefined),
+        caps: w.caps ?? inspection?.caps,
+        params: w.params ?? inspection?.params,
+        size_preview: (w.size_preview ?? inspection?.size_preview) as SizePreview | undefined,
       })
     }
     return merged
@@ -200,11 +238,6 @@ export function useWorkflows(defaultTarget?: Ref<string>) {
     moveWorkflow,
   }
 }
-export interface WorkflowValidation {
-  valid: boolean
-  error?: string
-  name?: string
-}
 
 /**
  * 校验当前选中的工作流文件。
@@ -214,9 +247,9 @@ export interface WorkflowValidation {
  * 免得提交后才报错。
  */
 export function useWorkflowValidation(path: Ref<string>) {
-  return useQuery<WorkflowValidation>({
+  return useQuery({
     queryKey: computed(() => ['validate-workflow', path.value]),
-    queryFn: () => apiGet('/api/validate_workflow', { path: path.value }),
+    queryFn: () => validateWorkflow(path.value),
     // 自定义工作流不在后端磁盘上，校验必然报"文件不存在"；出图时内容会随请求带上
     enabled: computed(() => !!path.value && !path.value.startsWith('custom://')),
     staleTime: 30_000,
