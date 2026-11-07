@@ -658,7 +658,7 @@ describe('终态与进度', () => {
     expect(urls[0]).toBe(
       '/api/media/image?filename=a.png&subfolder=2026-11&type=output',
     )
-    expect(urls[1]).toBe('/api/media/image?filename=b.png&subfolder=&type=temp')
+    expect(urls[1]).toBe('/api/media/image?filename=b.png&type=temp')
     // 零直连：不出现 8188 / prompt / comfy
     for (const url of urls) {
       expect(url).not.toContain('8188')

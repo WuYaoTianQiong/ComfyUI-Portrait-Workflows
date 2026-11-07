@@ -94,32 +94,33 @@ interface ImageRef {
   img_type?: string | null
 }
 
+export type AssetKind = 'thumb' | 'raw'
+
 /**
- * 缩略图访问地址（画廊/工作台共用，避免各处手拼 query 串）。
+ * 图片资产地址的唯一构造器。
  *
  * `v` 是内容版本：优先用后端 `/api/images` 返回的 `version`（源文件 st_mtime_ns 字符串），
  * 缺失时回落记录 id。前者让"同名覆盖"也会换 URL（配合后端 immutable 缓存头），
  * 后者只保证不同记录不撞 URL。注意空串要按"没给"处理（`||` 而非 `??`），
  * 否则后端缺源文件时的空串会顶掉 id 回落，让 URL 彻底失去 cache-busting。
  */
-export function thumbnailUrl(
+export function assetUrl(
   item: ImageRef & { id?: number; version?: string | null },
+  kind: AssetKind = 'raw',
   size = 600,
 ): string {
-  return (
-    '/api/media/thumbnail' +
-    buildQuery({
-      filename: item.filename,
-      subfolder: item.subfolder ?? '',
-      type: item.img_type ?? 'output',
-      size,
-      v: item.version || item.id,
-    })
-  )
-}
-
-/** 原图地址 */
-export function viewUrl(item: ImageRef): string {
+  if (kind === 'thumb') {
+    return (
+      '/api/media/thumbnail' +
+      buildQuery({
+        filename: item.filename,
+        subfolder: item.subfolder ?? '',
+        type: item.img_type ?? 'output',
+        size,
+        v: item.version || item.id,
+      })
+    )
+  }
   return (
     '/api/media/image' +
     buildQuery({
@@ -128,4 +129,15 @@ export function viewUrl(item: ImageRef): string {
       type: item.img_type ?? 'output',
     })
   )
+}
+
+export function thumbnailUrl(
+  item: ImageRef & { id?: number; version?: string | null },
+  size = 600,
+): string {
+  return assetUrl(item, 'thumb', size)
+}
+
+export function viewUrl(item: ImageRef): string {
+  return assetUrl(item, 'raw')
 }

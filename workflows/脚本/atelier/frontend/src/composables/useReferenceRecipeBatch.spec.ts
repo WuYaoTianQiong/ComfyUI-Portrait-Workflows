@@ -825,7 +825,7 @@ describe('多批次并发（轮询期间可继续提交）', () => {
 
     expect(recipe.batches.value[0].status).toBe('success')
     expect(recipe.batches.value[0].results).toEqual([
-      '/api/media/image?filename=first.png&subfolder=&type=output',
+      '/api/media/image?filename=first.png&type=output',
     ])
     expect(recipe.batches.value[1].status).toBe('polling')
     expect(recipe.batches.value[1].results).toEqual([])
@@ -860,7 +860,7 @@ describe('多批次并发（轮询期间可继续提交）', () => {
     expect(recipe.batches.value[1].status).toBe('success')
     expect(recipe.batches.value[1].errorMessage).toBe('')
     expect(recipe.batches.value[1].results).toEqual([
-      '/api/media/image?filename=second.png&subfolder=&type=output',
+      '/api/media/image?filename=second.png&type=output',
     ])
   })
 
@@ -879,11 +879,11 @@ describe('多批次并发（轮询期间可继续提交）', () => {
 
     const [batchOne, batchTwo] = recipe.batches.value
     expect(batchOne.results).toEqual([
-      '/api/media/image?filename=batch-one.png&subfolder=&type=output',
+      '/api/media/image?filename=batch-one.png&type=output',
     ])
     expect(batchTwo.results).toEqual([
-      '/api/media/image?filename=batch-two-a.png&subfolder=&type=output',
-      '/api/media/image?filename=batch-two-b.png&subfolder=&type=output',
+      '/api/media/image?filename=batch-two-a.png&type=output',
+      '/api/media/image?filename=batch-two-b.png&type=output',
     ])
     // 兼容视图 = 最近一批（第二批）的结果，绝不混入第一批
     expect(recipe.resultUrls.value).toEqual(batchTwo.results)

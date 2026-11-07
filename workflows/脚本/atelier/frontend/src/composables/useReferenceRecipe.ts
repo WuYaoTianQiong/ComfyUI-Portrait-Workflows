@@ -52,6 +52,7 @@ import type {
   SelectedFragment,
 } from './recipeTextFragments'
 import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { viewUrl } from '../api/client'
 import {
   useWorkflowCaps,
   type QualityOption,
@@ -1199,12 +1200,11 @@ export function recipeJobResultUrls(snapshot: RecipeJobSnapshot): string[] {
   for (const item of snapshot?.items ?? []) {
     for (const image of item?.images ?? []) {
       if (!image?.filename) continue
-      const query = new URLSearchParams({
+      const url = viewUrl({
         filename: image.filename,
         subfolder: image.subfolder ?? '',
-        type: image.type || 'output',
+        img_type: image.type || 'output',
       })
-      const url = `/api/media/image?${query.toString()}`
       if (seen.has(url)) continue
       seen.add(url)
       urls.push(url)
