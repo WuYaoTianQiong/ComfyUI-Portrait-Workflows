@@ -100,7 +100,7 @@ def test_thumbnail_cache_hit_is_immutable(api):
 
 def test_thumbnail_remote_fallback_is_short_lived(api, monkeypatch):
     """本地没有原图、远程即时生成 → 只给 5 分钟，避免长期缓存旧图。"""
-    import app.routers.media as media
+    import app.services.assets as assets
 
     import io
 
@@ -108,7 +108,9 @@ def test_thumbnail_remote_fallback_is_short_lived(api, monkeypatch):
     with PILImage.new("RGB", (16, 16), (10, 120, 200)) as img:
         img.save(buf, "PNG")
 
-    monkeypatch.setattr(media, "_fetch_remote_image", lambda *a, **kw: buf.getvalue())
+    monkeypatch.setattr(
+        assets, "fetch_remote", lambda ref: (buf.getvalue(), "image/png"),
+    )
 
     resp = api.get(
         "/api/media/thumbnail",

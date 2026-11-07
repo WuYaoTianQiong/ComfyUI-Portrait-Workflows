@@ -13,35 +13,27 @@ P3 之前前者是裸动词 `/api/media/image`、`/api/media/thumbnail`，后者
 from __future__ import annotations
 
 import hashlib
-import mimetypes
 import os
 import re
 import shutil
-from io import BytesIO
 from pathlib import Path
-from urllib.parse import quote
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image as PILImage, ImageOps
 
 from app.config import settings
-from app.services.comfyui_client import get_sync_client
+from app.services import assets
 from app.services.image_formats import is_heif
 from app.services.paths import (
     IMAGE_EXTENSIONS,
     _resolve_if_reparse,
     is_safe_image_ref,
     missing_image_response,
-    resolve_image_path,
     resolve_local_image,
 )
-from app.services.thumbnail import generate_thumbnail
 
 router = APIRouter(tags=["媒体与文件浏览"])
-
-COMFYUI_API = settings.comfyui_api
 
 IMAGE_EXT = IMAGE_EXTENSIONS
 MAX_ITEMS = 800          # 单个目录最多返回多少个子目录 / 图片，避免超大目录把前端卡死
@@ -52,6 +44,28 @@ MAX_ITEMS = 800          # 单个目录最多返回多少个子目录 / 图片�
 # ---------------------------------------------------------------------------
 
 
+def _asset_response(payload: assets.AssetPayload):
+    if payload.kind == "missing":
+        return missing_image_response()
+    headers = {"Cache-Control": payload.cache_control}
+    if payload.kind == "file" and payload.path is not None:
+        return FileResponse(
+            str(payload.path), media_type=payload.media_type, headers=headers,
+        )
+    return StreamingResponse(
+        iter([payload.data or b""]), media_type=payload.media_type, headers=headers,
+    )
+
+
+def _load_asset(loader):
+    try:
+        return loader()
+    except assets.AssetTimeoutError as e:
+        raise HTTPException(504, str(e)) from None
+    except assets.AssetFetchError as e:
+        raise HTTPException(500, str(e)) from None
+
+
 @router.get("/media/image")
 def proxy_image(
     filename: str = Query(...),
@@ -60,66 +74,10 @@ def proxy_image(
 ):
     if not is_safe_image_ref(filename, subfolder, type):
         raise HTTPException(400, "非法的图片路径")
-    # 优先读本地文件（ComfyUI 离线也能用）
-    local = resolve_image_path(filename, subfolder, type)
-    if local:
-        mt, _ = mimetypes.guess_type(str(local))
-        return FileResponse(
-            str(local),
-            media_type=mt or "image/png",
-            headers={"Cache-Control": "no-cache"},
-        )
-
-    # 本地没有，代理到 ComfyUI（带超时，避免阻塞整个服务）
-    url = (
-        f"{COMFYUI_API}/view"
-        f"?filename={quote(filename)}"
-        f"&subfolder={quote(subfolder)}"
-        f"&type={quote(type)}"
+    payload = _load_asset(
+        lambda: assets.raw_payload(assets.AssetRef(filename, subfolder, type))
     )
-    try:
-        resp = get_sync_client().get(url, timeout=15)
-        if resp.status_code in (400, 404):
-            # 本地没有 + ComfyUI 也没有 = 文件真的没了 → 给占位图，不再刷 404
-            return missing_image_response()
-        resp.raise_for_status()
-        content = resp.content
-        media_type = resp.headers.get("Content-Type", "image/png")
-    except httpx.ConnectError:
-        # ComfyUI 没开，本地也没有这个文件 → 同样属于"取不到图"
-        return missing_image_response()
-    except httpx.TimeoutException:
-        raise HTTPException(504, "获取图片超时（ComfyUI 响应过慢）")
-    except Exception as e:
-        raise HTTPException(500, f"获取图片失败: {e}")
-
-    # 只读代理，不把结果写回 output：output 是画廊的扫描源，
-    # 读接口落盘会让同一张图在下次同步时被当成新图入库。
-    return StreamingResponse(
-        iter([content]),
-        media_type=media_type,
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
-def _fetch_remote_image(filename: str, subfolder: str, img_type: str) -> bytes | None:
-    """从 ComfyUI /view 代理取回原图字节（带超时，失败返回 None）。"""
-    url = (
-        f"{COMFYUI_API}/view"
-        f"?filename={quote(filename)}"
-        f"&subfolder={quote(subfolder)}"
-        f"&type={quote(img_type)}"
-    )
-    try:
-        resp = get_sync_client().get(url, timeout=15)
-        if resp.status_code in (404, 400):
-            return None
-        resp.raise_for_status()
-        return resp.content
-    except (httpx.ConnectError, httpx.TimeoutException):
-        return None
-    except Exception:
-        return None
+    return _asset_response(payload)
 
 
 @router.get("/media/thumbnail")
@@ -132,44 +90,10 @@ def serve_thumbnail(
 ):
     if not is_safe_image_ref(filename, subfolder, type):
         raise HTTPException(400, "非法的图片路径")
-    thumb_path = generate_thumbnail(filename, subfolder, type, size)
-    if thumb_path is not None:
-        # 命中本地缩略图缓存（也可能本次才生成，但生成后立刻落盘）：
-        # 缓存键含原图 st_size + st_mtime_ns，前端 URL 又带同源内容版本 `v`，
-        # 只要内容不变，同一 URL 永远对应同一张图 → 可以放心 immutable，
-        # 让画廊首屏 40 个缩略图请求在第二次刷新时全部走浏览器磁盘缓存。
-        return FileResponse(
-            str(thumb_path),
-            media_type="image/webp",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
-        )
-
-    # 本地原图不存在：回退到 ComfyUI 代理取图并即时生成缩略图
-    # （与 /api/media/image 一致，解决历史图片已不在本地磁盘时缩略图裂图的问题）
-    raw = _fetch_remote_image(filename, subfolder, type)
-    if raw is None:
-        # 文件确实没了：返回「文件缺失」占位图（200），避免画廊/工作台里刷一屏 404。
-        # missing_image_response 自带 no-store —— 占位图绝不能被缓存，
-        # 否则原图恢复后浏览器仍会一直显示裂图。
-        return missing_image_response()
-    try:
-        with PILImage.open(BytesIO(raw)) as img:
-            img.thumbnail((size, size), PILImage.LANCZOS)
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            buf = BytesIO()
-            img.save(buf, "WEBP", quality=80)
-            buf.seek(0)
-        # 远程回退每次都要重新取图+PIL 编码，且结果不落缩略图缓存：
-        # 只给 5 分钟短缓存，既不重复压 ComfyUI，也不会长期看不到更新后的图。
-        return StreamingResponse(
-            buf,
-            media_type="image/webp",
-            headers={"Cache-Control": "public, max-age=300"},
-        )
-    except Exception:
-        # 远程拿到的是坏图 / 不支持的格式 → 同样退回占位图（no-store）
-        return missing_image_response()
+    payload = _load_asset(
+        lambda: assets.thumbnail_payload(assets.AssetRef(filename, subfolder, type), size)
+    )
+    return _asset_response(payload)
 
 
 @router.post("/media/thumbnail/clear")
