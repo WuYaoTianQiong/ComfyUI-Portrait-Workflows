@@ -4,10 +4,12 @@ from app.schemas import TagListResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from app.models import EntityTag, Tag, Prompt
+from app.models import Prompt, Tag
 from app.services.tagging import (
     add_prompt_tag_by_name,
+    delete_tag_with_refs,
     remove_prompt_tag_by_name,
+    rename_tag,
     tag_image_counts,
     tag_prompt_counts,
 )
@@ -77,7 +79,13 @@ def update_tag(tag_id: int, data: TagUpdate):
     if not updates:
         raise HTTPException(400, "没有需要更新的字段")
     try:
-        Tag.update(**updates).where(Tag.id == tag_id).execute()
+        if "name" in updates:
+            # 改名必须同步所有提示词文本，否则旧名会在下次保存时复活。
+            rename_tag(tag_id, str(updates["name"]))
+        if "color" in updates:
+            Tag.update(color=updates["color"]).where(Tag.id == tag_id).execute()
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     except Exception as e:
         raise HTTPException(400, f"更新失败: {e}")
     return {"success": True}
@@ -85,13 +93,10 @@ def update_tag(tag_id: int, data: TagUpdate):
 
 @router.delete("/tags/{tag_id}")
 def delete_tag(tag_id: int):
-    t = Tag.get_or_none(Tag.id == tag_id)
-    if t is None:
-        raise HTTPException(404, "标签不存在")
-    # 关联关系一起清掉，避免留下悬空 entity_tags（旧实现只删 prompt_tags，
-    # image_tags 与 entity_tags 里的关联会变成孤儿）
-    EntityTag.delete().where(EntityTag.tag == tag_id).execute()
-    t.delete_instance(recursive=False)
+    try:
+        delete_tag_with_refs(tag_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from None
     return {"success": True}
 
 

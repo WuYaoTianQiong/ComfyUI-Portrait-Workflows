@@ -23,7 +23,7 @@ import re
 
 from peewee import IntegrityError
 
-from app.models import EntityTag, Tag, db
+from app.models import EntityTag, Prompt, Tag, db
 
 # 逗号（中/英）与分号（中/英）。刻意不含空格：会切坏 "Moody Photography"。
 _TAG_SEP_RE = re.compile(r"[,，;；]")
@@ -114,6 +114,71 @@ def sync_prompt_tags(prompt_id: int, text: str | None) -> dict:
             & (EntityTag.tag.in_(list(to_remove)))
         ).execute()
     return {"added": len(to_add), "removed": len(to_remove)}
+
+
+def _rewrite_tag_text(text: str | None, old: str, new: str) -> tuple[str, bool]:
+    """把标签文本里的 old 精确替换成 new；new 为空表示删除。"""
+    parts: list[str] = []
+    changed = False
+    for raw in _TAG_SEP_RE.split(text or ""):
+        name = raw.strip()
+        if not name:
+            continue
+        if name == old:
+            changed = True
+            if new:
+                parts.append(new)
+        else:
+            parts.append(name)
+    return ", ".join(parts), changed
+
+
+def _sync_prompt_tag_texts(old: str, new: str) -> int:
+    """改写所有提示词的标签文本并重算关联；返回受影响条数。"""
+    changed = 0
+    for prompt in Prompt.select():
+        text, hit = _rewrite_tag_text(prompt.tags, old, new)
+        if not hit:
+            continue
+        Prompt.update(tags=text).where(Prompt.id == prompt.id).execute()
+        sync_prompt_tags(prompt.id, text)
+        changed += 1
+    return changed
+
+
+def rename_tag(tag_id: int, new_name: str) -> int:
+    """重命名标签，并把所有提示词文本里的旧名同步改掉。
+
+    否则下次保存提示词时，旧文本会经 `sync_prompt_tags` 把旧标签重新创建出来。
+    """
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("标签名不能为空")
+    if _TAG_SEP_RE.search(new_name):
+        raise ValueError("标签名不能包含逗号或分号")
+    tag = Tag.get_or_none(Tag.id == tag_id)
+    if tag is None:
+        raise ValueError("标签不存在")
+    if tag.name == new_name:
+        return 0
+    if Tag.get_or_none(Tag.name == new_name) is not None:
+        raise ValueError("标签已存在")
+    old_name = tag.name
+    with db.atomic():
+        Tag.update(name=new_name).where(Tag.id == tag_id).execute()
+        return _sync_prompt_tag_texts(old_name, new_name)
+
+
+def delete_tag_with_refs(tag_id: int) -> int:
+    """删除标签，同时清掉所有提示词文本与关联表中的引用。"""
+    tag = Tag.get_or_none(Tag.id == tag_id)
+    if tag is None:
+        raise ValueError("标签不存在")
+    with db.atomic():
+        changed = _sync_prompt_tag_texts(tag.name, "")
+        EntityTag.delete().where(EntityTag.tag == tag_id).execute()
+        tag.delete_instance(recursive=False)
+    return changed
 
 
 def add_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
