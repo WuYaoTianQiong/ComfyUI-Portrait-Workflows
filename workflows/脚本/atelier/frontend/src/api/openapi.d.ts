@@ -4240,6 +4240,11 @@ export interface components {
         WorkflowRowWithSlots: {
             caps?: components["schemas"]["WorkflowCaps"];
             /**
+             * Extra Kind
+             * @default
+             */
+            extra_kind: string;
+            /**
              * Image Slots
              * @default 0
              */

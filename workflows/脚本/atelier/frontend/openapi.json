@@ -4224,6 +4224,11 @@
           "caps": {
             "$ref": "#/components/schemas/WorkflowCaps"
           },
+          "extra_kind": {
+            "default": "",
+            "title": "Extra Kind",
+            "type": "string"
+          },
           "image_slots": {
             "default": 0,
             "title": "Image Slots",
