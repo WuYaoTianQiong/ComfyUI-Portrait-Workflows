@@ -3,13 +3,14 @@
 # 用法（任意目录）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci.ps1
 #
-# 六道关，缺一不可：
+# 七道关，缺一不可：
 #   1) pytest            —— 后端契约/行为用例（迁移、标签、CRUD、upsert 语义）
 #   2) 硬编码颜色守护    —— frontend/src/**/*.vue 的 <style> 块里十六进制色值必须为 0
-#   3) vue-tsc --noEmit  —— 前端类型检查（TS strict 只在编辑器里生效过，命令行没人跑）
-#   4) vitest            —— 前端单测/组件测试
-#   5) vite build        —— 构建产物（构建失败 = 部署不了）
-#   6) tools/smoke.py    —— 真起一个 uvicorn（库副本 + 临时端口），打关键接口并扫日志
+#   3) 契约类型同步      —— 重新生成 openapi.json/openapi.d.ts，工作区必须无差异
+#   4) vue-tsc --noEmit  —— 前端类型检查（TS strict 只在编辑器里生效过，命令行没人跑）
+#   5) vitest            —— 前端单测/组件测试
+#   6) vite build        —— 构建产物（构建失败 = 部署不了）
+#   7) tools/smoke.py    —— 真起一个 uvicorn（库副本 + 临时端口），打关键接口并扫日志
 # 附加：run_e2e.py      —— 前端端到端：库副本 + 临时服务 + Playwright 跑五个页签
 #
 # 为什么不能只留第 1 道：静态检查发现不了"启动期崩溃""运行期 500""页面整体白屏"。
@@ -41,14 +42,14 @@ function Step($index, $total, $title) {
     Write-Host "=== $index/$total $title ===" -ForegroundColor Cyan
 }
 
-Step '1' '6' 'pytest'
+Step '1' '7' 'pytest'
 & $PY -m pytest -q
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'FAILED: pytest' -ForegroundColor Red
     exit 1
 }
 
-Step '2' '6' '硬编码颜色守护'
+Step '2' '7' '硬编码颜色守护'
 $colorBaseline = 0
 $vueRoot = Join-Path $root 'frontend\src'
 $hardcodedColors = 0
@@ -86,7 +87,39 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     # 前端三道关都不需要这个 shim，统一在这里清掉。
     $env:NODE_OPTIONS = ''
 
-    Step '3' '6' 'vue-tsc --noEmit'
+    Step '3' '7' '契约类型同步'
+    # openapi.json 已有 pytest 快照兜底；这里把生成物 openapi.d.ts 也纳入：
+    # 只改 schemas/路由、忘记重新生成时，CI 直接红，而不是等用户点到 undefined。
+    # 用生成前后的哈希比较，而不是 git diff —— 本地未提交时也能正确判断"是否已同步"。
+    $snapshotFiles = @(
+        (Join-Path $root 'frontend\openapi.json'),
+        (Join-Path $root 'frontend\src\api\openapi.d.ts')
+    )
+    $beforeHashes = @{}
+    foreach ($f in $snapshotFiles) {
+        $beforeHashes[$f] = if (Test-Path -LiteralPath $f) {
+            (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
+        } else { '' }
+    }
+    & $PY (Join-Path $root 'tools\gen_api_types.py')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'FAILED: 生成 OpenAPI 类型' -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    $drifted = @()
+    foreach ($f in $snapshotFiles) {
+        $after = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
+        if ($after -ne $beforeHashes[$f]) { $drifted += (Split-Path -Leaf $f) }
+    }
+    if ($drifted.Count -gt 0) {
+        Write-Host "FAILED: 契约类型未同步（生成后发生变化：$($drifted -join ', ')）" -ForegroundColor Red
+        Write-Host '  改法：运行 python tools/gen_api_types.py 并提交生成物' -ForegroundColor Yellow
+        Pop-Location
+        exit 1
+    }
+
+    Step '4' '7' 'vue-tsc --noEmit'
     & npx vue-tsc --noEmit
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vue-tsc' -ForegroundColor Red
@@ -94,7 +127,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
         exit 1
     }
 
-    Step '4' '6' 'vitest'
+    Step '5' '7' 'vitest'
     & npx vitest run --reporter=basic
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: vitest' -ForegroundColor Red
@@ -102,7 +135,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
         exit 1
     }
 
-    Step '5' '6' 'vite build'
+    Step '6' '7' 'vite build'
     # 1) 清 NODE_OPTIONS：IDE 注入的 safe-delete shim 会让 vite 的 emptyOutDir 报
     #    "trash operation failed" 而构建失败（等价于"代码没问题但 CI 红了"）。
     $env:NODE_OPTIONS = ''
@@ -125,7 +158,7 @@ if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
 
     Pop-Location
 
-    Step '6' '6' 'smoke'
+    Step '7' '7' 'smoke'
     & $PY tools\smoke.py
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'FAILED: smoke' -ForegroundColor Red
