@@ -257,6 +257,55 @@ def test_person_b_fragment_fields_ignored_for_single_pose():
     assert "人物B" not in prompt
 
 
+B_IMAGE = RecipeEntry(id="f000fa12e8d", name="人物B参考")
+
+
+def test_person_b_image_uses_image_for_face_and_keeps_only_costume_text():
+    """v2-A：第 4 槽 = 人物B身份图时，B 的脸/发型以图为准，文字只保留服装/年龄。"""
+    psl_pair = RecipeEntry(
+        id="psl-D026", name="双臂前伸扶腰", composition="pair",
+    )
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        psl_pair,
+        extra=B_IMAGE,
+        extra_kind="person_b",
+        style="none",
+        person_b_portrait_text="冷白皮，鹅蛋脸，深棕高马尾",
+        person_b_costume_text="浅蓝衬衫，米色长裙",
+        person_b_text="棕色乐福鞋",
+    )
+    # 双人主句按图4取脸与发型；B 面容文字被图像取代
+    assert "人物B按图4的脸型、发型与下方文字设定" in prompt
+    assert "• 人物B（服装/年龄文字设定）：浅蓝衬衫，米色长裙；棕色乐福鞋。" in prompt
+    assert "冷白皮，鹅蛋脸，深棕高马尾" not in prompt
+    # A 的条款逐字不变
+    assert (
+        "人物A：脸型、五官、发型严格沿用图1中的人物，"
+        "穿图2中展示的整套服装与配饰"
+    ) in prompt
+    # 图像参考条款只服务 B，并明确禁止回流到 A
+    assert "• 人物B（图像参考）：图4是人物B的脸型与发型参考" in prompt
+    assert "图4的脸与发型绝对不要用于人物A" in prompt
+
+
+def test_person_b_image_ignored_for_single_pose():
+    """单人姿势下第 4 槽仍按普通附加参考，不写任何 B 条款。"""
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        extra=B_IMAGE,
+        extra_kind="person_b",
+        style="none",
+        person_b_text="金色齐肩短发",
+    )
+    assert "人物B（图像参考）" not in prompt
+    assert "人物B（服装/年龄文字设定）" not in prompt
+    assert "人物B" not in prompt
+
+
 def test_only_changing_b_keeps_a_prompt_identical():
     """隔离回归：只改 B 碎片时，A 的提示词（含双人要求前半段）必须逐字不变。"""
     psl_pair = RecipeEntry(

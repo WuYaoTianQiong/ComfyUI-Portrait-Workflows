@@ -533,11 +533,15 @@ def check_reference_trim(req: TrimCheckRequest):
 
 
 def _extra_kind(api_workflow: dict) -> str:
-    """第 4 张的业务语义：标题带「发型/Hair」时按发型参考生成专用提示词。"""
+    """第 4 张的业务语义：标题带「人物B/PersonB」→ B 身份参考；「发型/Hair」→ 发型参考。"""
     for _node_id, title in find_loadimage_nodes(api_workflow):
-        if loadimage_role(title) == "extra" and (
-            "发型" in title or "hair" in title.lower()
-        ):
+        if loadimage_role(title) != "extra":
+            continue
+        lower = title.lower()
+        # v2-A：人物B 身份图优先于发型（两者互斥，标题不会同时出现）。
+        if "人物b" in lower or "personb" in lower or "person_b" in lower:
+            return "person_b"
+        if "发型" in title or "hair" in lower:
             return "hair"
     return ""
 
