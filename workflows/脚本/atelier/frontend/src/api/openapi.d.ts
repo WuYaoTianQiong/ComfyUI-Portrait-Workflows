@@ -3976,9 +3976,25 @@ export interface components {
              */
             prompt_count: number;
             /** Top Tags */
-            top_tags?: {
-                [key: string]: unknown;
-            }[];
+            top_tags?: components["schemas"]["StatsTopTag"][];
+        };
+        /** StatsTopTag */
+        StatsTopTag: {
+            /**
+             * Color
+             * @default
+             */
+            color: string;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
         };
         /** TagCreate */
         TagCreate: {

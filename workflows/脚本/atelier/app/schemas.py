@@ -264,12 +264,18 @@ class JobListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class StatsTopTag(BaseModel):
+    name: str = ""
+    count: int = 0
+    color: str = ""
+
+
 class StatsResponse(BaseModel):
     prompt_count: int = 0
     history_count: int = 0
     job_count: int = 0
     fragment_count: int = 0
-    top_tags: list[dict[str, Any]] = Field(default_factory=list)
+    top_tags: list[StatsTopTag] = Field(default_factory=list)
 
 
 class WorkflowCaps(BaseModel):

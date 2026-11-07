@@ -3571,14 +3571,34 @@
           },
           "top_tags": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/StatsTopTag"
             },
             "title": "Top Tags",
             "type": "array"
           }
         },
         "title": "StatsResponse",
+        "type": "object"
+      },
+      "StatsTopTag": {
+        "properties": {
+          "color": {
+            "default": "",
+            "title": "Color",
+            "type": "string"
+          },
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "StatsTopTag",
         "type": "object"
       },
       "TagCreate": {
