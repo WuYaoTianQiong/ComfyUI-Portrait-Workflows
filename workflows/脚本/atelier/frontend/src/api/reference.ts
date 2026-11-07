@@ -38,6 +38,10 @@ export interface ReferenceItemDto {
   nsfw: boolean
   /** 该条目是否有深度变体；旧响应缺字段按 true 兼容 */
   has_depth?: boolean
+  /** 仅 pose：可用性标记；`false` = 实测姿势不跟随（仍可手动选） */
+  usable?: boolean
+  /** 仅 pose：不可用原因；可用时为空串 */
+  usable_note?: string
   remote: boolean
   /** 仅 pose 非空：上游「姿势编号」 */
   number: string
@@ -101,6 +105,10 @@ export interface PoseItem {
   depthThumbUrl?: string | null
   /** 该条目是否有深度变体；缺省按 true 兼容旧持久化数据 */
   hasDepth?: boolean
+  /** 可用性标记；缺省按 true 兼容旧响应。`false` = 实测姿势不跟随 */
+  usable?: boolean
+  /** 不可用原因；可用时为空串 */
+  usableNote?: string
 }
 
 /** 姿势分组：同一「体系 + 姿势编号」的多个角度归一组。 */
@@ -371,6 +379,9 @@ export function toPoseItem(dto: ReferenceItemDto): PoseItem {
     hasDepth: dto.has_depth !== false,
     depthUrl: text(dto.depth_url) || null,
     depthThumbUrl: text(dto.depth_thumb_url) || null,
+    // v1.5：缺字段按可用兼容旧后端；`usable_note` 只在不可用时才有内容。
+    usable: dto.usable !== false,
+    usableNote: text(dto.usable_note),
   }
 }
 
