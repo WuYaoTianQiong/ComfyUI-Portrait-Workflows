@@ -217,10 +217,11 @@ def run_browser_checks() -> None:
 
         thumbs = page.locator('img[src*="/api/reference/items/pose/"]')
         check(thumbs.count() > 0, "参考图库网格渲染出姿势卡片", f"{thumbs.count()} 张缩略图")
+        # 三轴分类重构后，姿势页首屏是「构图」药丸（体系药丸已并入筛选器）。
         check(
-            page.locator('[data-testid="pose-system-pills"]').count() >= 1,
-            "体系药丸已渲染",
-            f"{page.locator('[data-testid=\"pose-system-pills\"]').count()} 组",
+            page.locator('[data-testid="pose-composition-pills"]').count() >= 1,
+            "构图药丸已渲染",
+            f"{page.locator('[data-testid=\"pose-composition-pills\"]').count()} 组",
         )
 
         decoded = page.evaluate(
