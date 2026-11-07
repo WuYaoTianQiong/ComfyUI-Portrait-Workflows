@@ -23,7 +23,6 @@ import type {
   PoseGroup,
   PoseItem,
   PortraitItem,
-  ReferenceQueryFilters,
 } from '@/api/reference'
 
 /** 组内角度展示顺序（与 React 版 `ANGLES` 一致）。 */
@@ -128,12 +127,14 @@ function createLibraryState<T>(loadItems: () => Promise<T[]>): LibraryState<T> {
   const loading = ref(false)
   const error = ref<string | null>(null)
   let inflight: Promise<void> | null = null
+  let loaded = false
 
   async function run(): Promise<void> {
     loading.value = true
     error.value = null
     try {
       items.value = await loadItems()
+      loaded = true
     } catch (cause) {
       // 数据层错误已带「加载参考库 X 第 N 页失败」前缀，这里原样透出给视图。
       error.value = cause instanceof Error ? cause.message : String(cause)
@@ -142,7 +143,9 @@ function createLibraryState<T>(loadItems: () => Promise<T[]>): LibraryState<T> {
     }
   }
 
+  /** 首次挂载加载一次；已加载就直接复用，多个页签不会各拉一遍整库。 */
   function load(): Promise<void> {
+    if (loaded) return Promise.resolve()
     if (inflight) return inflight
     inflight = run().finally(() => {
       inflight = null
@@ -150,13 +153,38 @@ function createLibraryState<T>(loadItems: () => Promise<T[]>): LibraryState<T> {
     return inflight
   }
 
-  return { items, loading, error, load, retry: load }
+  /** 用户主动刷新：强制重拉。 */
+  function retry(): Promise<void> {
+    loaded = false
+    return load()
+  }
+
+  return { items, loading, error, load, retry }
 }
 
-/** 姿势库：拉取 + 映射 + 分组。 */
-export function useReferencePoses(filters?: Ref<ReferenceQueryFilters | undefined>) {
-  const state = createLibraryState(() =>
-    fetchAllReferenceItems('pose', filters?.value).then((dtos) => dtos.map(toPoseItem)),
+/** 四页签共享的模块级库状态；key 固定为库名。 */
+const libraryStores = new Map<string, LibraryState<unknown>>()
+
+function sharedLibraryState<T>(
+  key: string,
+  loadItems: () => Promise<T[]>,
+): LibraryState<T> {
+  const existing = libraryStores.get(key) as LibraryState<T> | undefined
+  if (existing) return existing
+  const state = createLibraryState(loadItems)
+  libraryStores.set(key, state as LibraryState<unknown>)
+  return state
+}
+
+/** 测试或手动刷新时清空共享缓存；生产代码不需要调用。 */
+export function resetReferenceLibraryState(): void {
+  libraryStores.clear()
+}
+
+/** 姿势库：拉取 + 映射 + 分组。四页签共享同一份数据。 */
+export function useReferencePoses(): PoseLibraryState {
+  const state = sharedLibraryState('pose', () =>
+    fetchAllReferenceItems('pose').then((dtos) => dtos.map(toPoseItem)),
   )
   const built = computed(() => buildPoseGroups(state.items.value))
   const groups = computed(() => built.value.groups)
@@ -170,21 +198,20 @@ export function useReferencePoses(filters?: Ref<ReferenceQueryFilters | undefine
  * 两个库各自分页并发 ≤6；合并顺序固定「现实在前、二次元在后」，
  * 与 React 版 `Promise.all([fetchAll('costume'), fetchAll('costume-anime')])` 一致。
  */
-export function useReferenceCostumes(filters?: Ref<ReferenceQueryFilters | undefined>) {
-  return createLibraryState(async () => {
-    const query = filters?.value
+export function useReferenceCostumes(): CostumeLibraryState {
+  return sharedLibraryState('costume', async () => {
     const [local, anime] = await Promise.all([
-      fetchAllReferenceItems('costume', query),
-      fetchAllReferenceItems('costume-anime', query),
+      fetchAllReferenceItems('costume'),
+      fetchAllReferenceItems('costume-anime'),
     ])
     return [...local.map(toCostumeItem), ...anime.map(toCostumeItem)]
   })
 }
 
-/** 人像库。 */
-export function useReferencePortraits(filters?: Ref<ReferenceQueryFilters | undefined>) {
-  return createLibraryState(() =>
-    fetchAllReferenceItems('portrait', filters?.value).then((dtos) => dtos.map(toPortraitItem)),
+/** 人像库。四页签共享同一份数据。 */
+export function useReferencePortraits(): PortraitLibraryState {
+  return sharedLibraryState('portrait', () =>
+    fetchAllReferenceItems('portrait').then((dtos) => dtos.map(toPortraitItem)),
   )
 }
 

@@ -6,7 +6,7 @@
  * 以及 items/loading/error/retry 状态机。
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PoseItem, ReferenceItemDto } from '@/api/reference'
 
@@ -14,6 +14,7 @@ import {
   ANGLES,
   PREFERRED_POSE_LINE_ORDER,
   buildPoseGroups,
+  resetReferenceLibraryState,
   useReferenceCostumes,
   useReferencePortraits,
   useReferencePoses,
@@ -83,6 +84,10 @@ function listBody(items: ReferenceItemDto[], total = items.length): unknown {
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+beforeEach(() => {
+  resetReferenceLibraryState()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -280,6 +285,22 @@ describe('composable 状态', () => {
     await state.retry()
     expect(state.error.value).toBeNull()
     expect(state.items.value.map((item) => item.id)).toEqual(['portrait-1'])
+  })
+
+  it('多个页签共享同一份库状态，已加载后不再重复请求', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(listBody([dto({ id: 'p1' })])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = useReferencePoses()
+    const second = useReferencePoses()
+    expect(first.items).toBe(second.items)
+
+    await first.load()
+    await second.load()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(second.items.value.map((item) => item.id)).toEqual(['p1'])
   })
 
   it('并发调用 load 复用同一批请求，不重复打后端', async () => {
