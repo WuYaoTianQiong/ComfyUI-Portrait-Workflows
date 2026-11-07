@@ -15,7 +15,7 @@ from app.models import (
 )
 from app.services.fragment_syntax import parse
 from app.services.image_meta import get_image_metadata
-from app.services.tagging import sync_prompt_tags
+from app.services.tagging import set_prompt_tags_by_ids, split_tags, sync_prompt_tags
 
 router = APIRouter(tags=["提示词"])
 
@@ -64,6 +64,8 @@ class PromptCreate(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     tags: str = ""
+    #: 标签 ID 列表优先；未传时兼容旧的 tags 文本。
+    tag_ids: Optional[list[int]] = None
     note: str = ""
     # ======== Phase 1 新增 ========
     is_favorite: bool = False
@@ -86,6 +88,8 @@ class PromptUpdate(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     tags: Optional[str] = None
+    #: 显式传 null 表示“不改标签”；传 [] 表示清空。
+    tag_ids: Optional[list[int]] = None
     note: Optional[str] = None
     # ======== Phase 1 新增 ========
     is_favorite: Optional[bool] = None
@@ -156,6 +160,16 @@ def _fragment_matched_ids(fragment_types: str, fragment_match: str, fragment_kw:
     return matched
 
 
+def _prompt_ids_with_tag_text(value: str, exact: bool = False):
+    """按标签名查提示词 id；标签的读路径也走 entity_tags，不读文本缓存。"""
+    query = (
+        EntityTag.select(EntityTag.entity_id)
+        .join(Tag, on=(EntityTag.tag == Tag.id))
+        .where(EntityTag.entity_type == "prompt")
+    )
+    return query.where(Tag.name == value) if exact else query.where(Tag.name.contains(value))
+
+
 def _build_prompt_query(
     search, tag, category_id, tag_ids, sort, order, tag_match="all",
     fragment_types="", fragment_match="has", fragment_kw="",
@@ -166,11 +180,11 @@ def _build_prompt_query(
         query = query.where(
             (Prompt.prompt.contains(search))
             | (Prompt.name.contains(search))
-            | (Prompt.tags.contains(search))
+            | (Prompt.id.in_(_prompt_ids_with_tag_text(search)))
             | (Prompt.note.contains(search))
         )
     if tag:
-        query = query.where(Prompt.tags.contains(tag))
+        query = query.where(Prompt.id.in_(_prompt_ids_with_tag_text(tag, exact=True)))
 
     # 碎片级筛选：没有索引表，先在内存里算 id 集合再回填条件
     frag_ids = _fragment_matched_ids(fragment_types, fragment_match, fragment_kw)
@@ -460,6 +474,7 @@ def create_prompt(data: PromptCreate):
     # ======== Phase 1: 处理新字段 ========
     data_dict = data.model_dump()
     auto_categorize = data_dict.pop("auto_categorize", False)  # 提取并移除该字段
+    tag_ids = data_dict.pop("tag_ids", None)
     # 确保布尔字段有默认值
     if "is_favorite" not in data_dict:
         data_dict["is_favorite"] = False
@@ -473,11 +488,14 @@ def create_prompt(data: PromptCreate):
         r = Prompt.create(**data_dict)
         # 自动类型分类
         auto_classify_prompt(r.id)
-        # 标签文本 → entity_tags（文本是唯一事实来源，写文本就要同步关联表）
-        sync_prompt_tags(r.id, data_dict.get("tags"))
+        # entity_tags 是唯一事实来源；tag_ids 优先，旧文本仅作兼容入口。
+        try:
+            sync_prompt_tags(r.id, data_dict.get("tags"), tag_ids=tag_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
 
         # 自动分类到"组合创作"（按 system_key 取，改名后仍指向同一个分类）
-        if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
+        if auto_categorize or "组合创作" in split_tags(data_dict.get("tags")):
             cat = get_or_create_system_category(COMPOSE_CATEGORY)
             PromptCategory.get_or_create(prompt=r.id, category=cat.id)
 
@@ -492,7 +510,11 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
         raise HTTPException(404, "提示词不存在")
 
     updates = data.model_dump(exclude_unset=True)
-    if not updates:
+    tag_ids = updates.pop("tag_ids", None)
+    if tag_ids is not None:
+        # 以 ID 为准时不能先把旧文本写回去，否则保存瞬间会出现一次“回魂”。
+        updates.pop("tags", None)
+    if not updates and tag_ids is None:
         raise HTTPException(400, "没有需要更新的字段")
 
     updates["updated_at"] = datetime.now()
@@ -502,8 +524,13 @@ def update_prompt(prompt_id: int, data: PromptUpdate):
         # 如果更新了 prompt 内容，重新自动分类
         if "prompt" in updates:
             auto_classify_prompt(prompt_id)
-        # 标签文本变了就重算关联表，否则标签筛选会与界面显示脱节
-        if "tags" in updates:
+        # 标签：ID 优先，文本仅作旧调用兼容；两者都会回写只读缓存。
+        if tag_ids is not None:
+            try:
+                set_prompt_tags_by_ids(prompt_id, tag_ids)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+        elif "tags" in updates:
             sync_prompt_tags(prompt_id, updates.get("tags"))
 
     return {"success": True}

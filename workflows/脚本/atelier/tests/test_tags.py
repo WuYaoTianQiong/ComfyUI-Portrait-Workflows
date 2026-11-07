@@ -52,6 +52,65 @@ def test_tag_filter_uses_entity_tags(api):
     assert [p["id"] for p in body["prompts"]] == [hit]
 
 
+def test_tag_ids_take_priority_and_write_text_cache(api):
+    """显式传 tag_ids 时不再解析 tags 文本；文本只是派生缓存。"""
+    from app.models import Prompt, Tag
+
+    first = Tag.create(name="甲")
+    second = Tag.create(name="乙")
+
+    pid = api.post("/api/prompts", json={
+        "name": "by-ids", "prompt": "x",
+        "tag_ids": [second.id, first.id],
+        "tags": "不该出现的标签",
+    }).json()["id"]
+
+    assert Prompt.get_by_id(pid).tags == "乙, 甲"
+    assert _prompt_tag_names(pid) == {"甲", "乙"}
+    assert Tag.get_or_none(Tag.name == "不该出现的标签") is None
+
+
+def test_update_prompt_tag_ids_replaces_relations(api):
+    from app.models import Prompt, Tag
+
+    first = Tag.create(name="甲")
+    second = Tag.create(name="乙")
+    pid = api.post("/api/prompts", json={
+        "name": "update-ids", "prompt": "x", "tag_ids": [first.id],
+    }).json()["id"]
+
+    api.put(f"/api/prompts/{pid}", json={"tag_ids": [second.id]})
+
+    assert Prompt.get_by_id(pid).tags == "乙"
+    assert _prompt_tag_names(pid) == {"乙"}
+
+
+def test_invalid_tag_id_is_rejected_without_partial_write(api):
+    from app.models import Prompt
+
+    resp = api.post("/api/prompts", json={
+        "name": "bad-id", "prompt": "x", "tag_ids": [999999],
+    })
+    assert resp.status_code == 400
+    assert Prompt.get_or_none(Prompt.name == "bad-id") is None
+
+
+def test_tag_filter_does_not_read_stale_text_cache(api):
+    """有人手工改了 prompts.tags 文本，也不能凭文本命中标签筛选。"""
+    from app.models import Prompt, Tag
+
+    tag = Tag.create(name="真实标签")
+    pid = api.post("/api/prompts", json={
+        "name": "real", "prompt": "x", "tag_ids": [tag.id],
+    }).json()["id"]
+    Prompt.update(tags="伪造标签").where(Prompt.id == pid).execute()
+
+    assert api.get("/api/prompts?tag=伪造标签").json()["prompts"] == []
+    assert [p["id"] for p in api.get(
+        f"/api/prompts?tag_ids={tag.id}"
+    ).json()["prompts"]] == [pid]
+
+
 def test_image_inherits_prompt_tags(api, seed_history):
     """图片继承来源提示词的标签后，画廊按标签筛选能命中。"""
     from app.models import Tag

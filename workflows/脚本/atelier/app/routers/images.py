@@ -41,6 +41,12 @@ from app.services.output_location import (
     expand_subfolder,
 )
 from app.services.thumbnail import _get_image_path, clear_thumbnails_for, prewarm_thumbnail
+from app.services.tombstones import (
+    clear_tombstone,
+    mark_tombstone,
+    tombstone_key,
+    tombstoned_keys,
+)
 
 router = APIRouter(tags=["图片"])
 
@@ -185,6 +191,7 @@ def _sync_comfyui_history() -> int:
 
     added = 0
     skipped = 0
+    blocked = tombstoned_keys()
     for pid, data in hist.items():
         outputs = data.get("outputs", {})
         # 尝试从 ComfyUI history 的 extra_data 提取 prompt_id
@@ -201,6 +208,9 @@ def _sync_comfyui_history() -> int:
                 try:
                     subfolder = img.get("subfolder", "")
                     img_type = img.get("type", "output")
+                    if tombstone_key(filename, subfolder, img_type) in blocked:
+                        skipped += 1
+                        continue
                     # ComfyUI 的 /history 会长期保留「文件已被手动删除」的条目。照单建记录
                     # 会让画廊堆满坏图：缩略图一律 404、控制台刷屏、点进去也看不到东西。
                     # 所以先确认文件真的在磁盘上，不在就跳过。
@@ -393,10 +403,13 @@ def _sync_disk_orphans(force: bool = False) -> int:
     except Exception:
         return 0
 
-    # 收集 DB 中已有的所有 (filename, subfolder, img_type) 组合
+    # 收集 DB 中已有的所有 (filename, subfolder, img_type) 组合。
+    # 必须包含软删除行：否则只删记录、保留文件的软删除会在下一轮扫描被重新入库。
     existing = set()
-    for r in Image.select(Image.filename, Image.subfolder, Image.img_type).where(Image.is_deleted == False).tuples():
+    for r in Image.select(Image.filename, Image.subfolder, Image.img_type).tuples():
         existing.add((r[0], r[1] or "", r[2] or "output"))
+    # 行被墓碑回收后仍要拦住同一路径。
+    blocked = tombstoned_keys()
 
     _build_job_index()
     added = 0
@@ -406,6 +419,8 @@ def _sync_disk_orphans(force: bool = False) -> int:
         for fpath, subfolder in candidates:
             fname = fpath.name
             if (fname, subfolder, "output") in existing:
+                continue
+            if tombstone_key(fname, subfolder, "output") in blocked:
                 continue
             try:
                 sz = fpath.stat().st_size
@@ -998,6 +1013,10 @@ def cleanup_missing_files(
         Image.update(is_deleted=True).where(Image.id.in_(ids)).execute()
         # 只清理这些记录自己的缩略图缓存，绝不整体清空（那会让幸存图片全部重算）
         for r in missing:
+            mark_tombstone(
+                r.filename or "", r.subfolder or "", r.img_type or "output",
+                reason="cleanup_missing",
+            )
             _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
 
     return {
@@ -1029,11 +1048,26 @@ def delete_history_item(
         r.filename or "", r.subfolder or "", r.img_type or "output"
     ):
         files_deleted = 1
-    # 软删除：标记而非真删，防止 sync 重新导入
+    # 软删除：标记而非真删；墓碑保证 gen_history 行被回收后也不会被扫描复活
+    mark_tombstone(
+        r.filename or "", r.subfolder or "", r.img_type or "output", reason="delete",
+    )
     Image.update(is_deleted=True).where(Image.id == item_id).execute()
     # 清理缩略图
     _cleanup_thumbnails(r.filename or "", r.subfolder or "", r.img_type or "output")
     return {"success": True, "files_deleted": files_deleted}
+
+
+@router.post("/images/{item_id}/restore", include_in_schema=False)
+def restore_history_item(item_id: int):
+    """恢复软删除记录并清掉墓碑；文件已不在时仍可恢复记录（由巡检标记缺失）。"""
+    r = Image.get_or_none(Image.id == item_id)
+    if r is None:
+        raise HTTPException(404, "历史记录不存在")
+    clear_tombstone(r.filename or "", r.subfolder or "", r.img_type or "output")
+    Image.update(is_deleted=False).where(Image.id == item_id).execute()
+    clear_thumbnails_for(r.filename or "", r.subfolder or "", r.img_type or "output")
+    return {"success": True, "id": item_id}
 
 
 # ---------------------------------------------------------------------------
@@ -1047,6 +1081,10 @@ def batch_delete_history(body: BatchDeleteRequest):
         return {"success": True, "deleted": 0, "files_deleted": 0}
     # 先取出行快照，避免依赖 update 之后的查询结果
     rows = list(Image.select().where(Image.id.in_(ids)))
+    for r in rows:
+        mark_tombstone(
+            r.filename or "", r.subfolder or "", r.img_type or "output", reason="batch_delete",
+        )
     cnt = Image.update(is_deleted=True).where(Image.id.in_(ids)).execute()
     files_deleted = 0
     for r in rows:
@@ -1265,15 +1303,20 @@ def clear_history(confirm: bool = Query(False)):
             "total": live,
             "message": "未执行：这是全库软删除，必须显式传 confirm=true",
         }
+    for r in Image.select(Image.filename, Image.subfolder, Image.img_type).where(
+        Image.is_deleted == False
+    ):
+        mark_tombstone(
+            r.filename or "", r.subfolder or "", r.img_type or "output", reason="clear_history",
+        )
     Image.update(is_deleted=True).execute()
-    # 清理全部缩略图
+    # 只清理缩略图 *.webp；不要 rmtree，避免连带删掉同目录下的浏览器缓存。
     try:
-        import shutil
         td = settings.thumbnail_dir
         if td.exists():
-            shutil.rmtree(td)
-            td.mkdir(parents=True, exist_ok=True)
-    except Exception:
+            for path in td.glob("*.webp"):
+                path.unlink(missing_ok=True)
+    except OSError:
         pass
     return {"success": True, "total": live}
 
@@ -1289,7 +1332,7 @@ class ProcessImageRequest(BaseModel):
     workflow_path: str
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     output_subfolder: str = ""
     idempotency_key: str = ""
@@ -1338,7 +1381,7 @@ def process_history_image(
         load_workflow, inject_prompt, inject_input_image, resolve_seed,
     )
     from app.routers.jobs import build_job_extra
-    from app.services.generation import submit_generation
+    from app.services.generation import SubmitSpec, submit_spec
 
     src_path = resolve_image_path(
         r.filename or "", r.subfolder or "", r.img_type or "output"
@@ -1392,7 +1435,7 @@ def process_history_image(
         }, ensure_ascii=False),
     }]
     try:
-        outcome = submit_generation(
+        outcome = submit_spec(SubmitSpec(
             job_type="single", title=f"图片处理: {r.filename[:30]}", items=items,
             workflow_path=workflow_path, workflow_content=data.workflow_content,
             orientation=data.orientation, quality=data.quality,
@@ -1406,7 +1449,7 @@ def process_history_image(
                 **({"idempotency_key": idem_key, "idempotency_scope": SCOPE_IMAGE_PROCESS}
                    if idem_key else {}),
             },
-        )
+        ))
         return {
             "success": True, "job_id": outcome["job_id"],
             "result": outcome["result"], "seed": seed_effective,

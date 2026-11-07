@@ -68,7 +68,10 @@ watch(
   () => {
     if (!props.caps.quality || !options.value.length) return
     if (options.value.some((o) => o.value === props.quality)) return
-    const fallback = options.value.find((o) => o.value === '4K') ?? options.value[0]
+    const fallback =
+      options.value.find((o) => o.value === '1.0x') ??
+      options.value.find((o) => o.value === '4K') ??
+      options.value[0]
     emit('update:quality', fallback.value)
   },
   { immediate: true },

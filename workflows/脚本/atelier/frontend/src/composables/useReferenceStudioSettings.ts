@@ -71,11 +71,40 @@ export interface StoredReferenceSlotEntry {
   path?: string
 }
 
+/**
+ * 第 4 槽（发型库背面图 / 上传单图 + 文字补充）的持久化形状。
+ *
+ * `text` 只在有图时生效（后端「图为主 + 文本补充」口径）；`source=empty` 时
+ * 其余字段一律为空串，避免把残留 id 当成已选。
+ */
+export interface StoredReferenceExtraSlot {
+  source: 'empty' | 'library' | 'upload'
+  library: 'hair' | ''
+  id: string
+  path: string
+  name: string
+  text: string
+}
+
+/** 空第 4 槽；新建草稿 / 清空草稿 / 旧快照缺字段都用它。 */
+export function createEmptyExtraSlot(): StoredReferenceExtraSlot {
+  return {
+    source: 'empty',
+    library: '',
+    id: '',
+    path: '',
+    name: '',
+    text: '',
+  }
+}
+
 /** `pb.reference_studio_v1` 的完整结构。 */
 export interface ReferenceStudioSettings {
   portrait: StoredReferenceSlotEntry[]
   costume: StoredReferenceSlotEntry[]
   pose: StoredReferenceSlotEntry[]
+  /** 第 4 槽；旧快照缺字段按空处理。 */
+  extra: StoredReferenceExtraSlot
   /** 画风预设；后端只认 none / realistic。 */
   style: RecipeStyle
   /** 工作流文件名 / 库内路径；空串表示沿用后端默认工作流。 */
@@ -102,6 +131,8 @@ export interface ReferenceStudioSettings {
   textFragments: RecipeTextFragments
   /** 用户手填的负向提示词；最终负向 = 后端自动抽取 + 这里的内容。 */
   negativePrompt: string
+  /** 双人姿势的人物 B 文字设定；空串 = 不启用 B 文字。 */
+  personBText: string
   /**
    * 三槽模式（P2 替代态，方案 §4.4）。
    *
@@ -129,6 +160,7 @@ const LIBRARY_IDS: ReadonlySet<string> = new Set<ReferenceLibraryId>([
   'costume',
   'costume-anime',
   'portrait',
+  'hair',
 ])
 
 /** 隐私模式下访问 `globalThis.localStorage` 可能直接抛错，统一吞掉。 */
@@ -183,6 +215,32 @@ function parseSlotEntries(value: unknown): StoredReferenceSlotEntry[] | null {
     entries.push(entry)
   }
   return entries
+}
+
+/**
+ * 第 4 槽校验：缺字段 / 脏数据一律回落空槽，不丢整份快照。
+ *
+ * 只有 `library`（hair + id）与 `upload`（path）两种有效来源；任一必填项
+ * 为空即视为未选，避免刷新后出现「有名字但没有图」的幽灵槽位。
+ */
+function parseExtraSlot(value: unknown): StoredReferenceExtraSlot {
+  const empty = createEmptyExtraSlot()
+  if (!isRecord(value)) return empty
+  const source = value.source
+  if (source !== 'library' && source !== 'upload') return empty
+  const library = value.library === 'hair' ? 'hair' : ''
+  const id = typeof value.id === 'string' ? value.id : ''
+  const path = typeof value.path === 'string' ? value.path : ''
+  if (source === 'library' && (!id || library !== 'hair')) return empty
+  if (source === 'upload' && !path) return empty
+  return {
+    source,
+    library,
+    id: source === 'library' ? id : '',
+    path: source === 'upload' ? path : '',
+    name: typeof value.name === 'string' ? value.name : '',
+    text: typeof value.text === 'string' ? value.text : '',
+  }
 }
 
 /** 画风校验；后端只认这两项。 */
@@ -252,11 +310,14 @@ export function parseReferenceStudioSettings(
   const textFragments = cloneRecipeTextFragments(value.textFragments)
   const negativePrompt =
     typeof value.negativePrompt === 'string' ? value.negativePrompt : ''
+  const personBText =
+    typeof value.personBText === 'string' ? value.personBText : ''
 
   return {
     portrait,
     costume,
     pose,
+    extra: parseExtraSlot(value.extra),
     style,
     workflow,
     baseSeed,
@@ -265,6 +326,7 @@ export function parseReferenceStudioSettings(
     sizesConfigured: value.sizesConfigured === true,
     textFragments,
     negativePrompt,
+    personBText,
     // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
     portraitMode: parseSlotMode(value.portraitMode),
     costumeMode: parseSlotMode(value.costumeMode),
@@ -289,6 +351,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     portrait: [],
     costume: [],
     pose: [],
+    extra: createEmptyExtraSlot(),
     style: 'realistic',
     workflow: '',
     baseSeed: DEFAULT_REFERENCE_STUDIO_BASE_SEED,
@@ -297,6 +360,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     sizesConfigured: false,
     textFragments: createEmptyRecipeTextFragments(),
     negativePrompt: '',
+    personBText: '',
     // 默认没有模式记录：旧数据同样走「有图 / 有文本」推导。
     portraitMode: null,
     costumeMode: null,

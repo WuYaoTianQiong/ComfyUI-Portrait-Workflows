@@ -1141,7 +1141,7 @@ def detect_workflow_params(api_workflow: dict) -> dict:
     return params
 
 
-DEFAULT_QUALITY_TIERS = ("2K", "4K", "6K", "8K", "12K")
+DEFAULT_QUALITY_TIERS = ("0.75x", "1.0x", "1.25x", "1.5x", "2.0x")
 
 #: SeedVR 档位直接对应真实输出分辨率；与 _inject_resolution 的表保持一致。
 _SEEDVR_SIZE_BY_QUALITY = {
@@ -1162,9 +1162,14 @@ def apply_quality_tiers(params: dict, raw_workflow: dict | None) -> dict:
         return params
     tiers = atelier.get("quality_tiers")
     if isinstance(tiers, list) and tiers:
-        params["quality_tiers"] = [str(t) for t in tiers]
+        normalized: list[str] = []
+        for tier in tiers:
+            key = normalize_quality(str(tier))
+            if key not in normalized:
+                normalized.append(key)
+        params["quality_tiers"] = normalized
     if isinstance(atelier.get("default_quality"), str):
-        params["default_quality"] = atelier["default_quality"]
+        params["default_quality"] = normalize_quality(atelier["default_quality"])
     return params
 
 

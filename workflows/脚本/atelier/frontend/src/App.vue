@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 
@@ -7,6 +7,8 @@ import ToastHost from './components/ToastHost.vue'
 import OutputLocationField from './components/OutputLocationField.vue'
 import { listJobs } from './api/jobs'
 import { getSystemStatus, type SystemStatus } from './api/system'
+import { useJobStream } from './composables/useJobStream'
+import type { JobSnapshot } from './api/types'
 import { setupNaive } from './utils/naive'
 import {
   applyInitialTheme,
@@ -42,17 +44,37 @@ function switchTheme() {
 /**
  * 顶栏的「进行中任务」角标。
  *
- * 只查 active 的任务、每 5 秒一次 —— 任务中心页面自己走 SSE 实时推送，
- * 这里只需要一个粗粒度计数，不值得再开一条长连接。
+ * 首次用 GET 补齐，之后完全由同一条 SSE 更新 —— 不再每 5 秒轮询，
+ * 避免与任务中心/组合器各自开连接。
  */
+const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
+const activeJobIds = ref(new Set<number>())
+
 const { data: activeJobs } = useQuery({
   queryKey: ['jobs', 'active-badge'],
   queryFn: () => listJobs({ active: true, limit: 50 }),
-  refetchInterval: 5_000,
-  staleTime: 2_000,
+  staleTime: 30_000,
 })
 
-const activeCount = computed(() => activeJobs.value?.jobs?.length ?? 0)
+watch(
+  activeJobs,
+  (data) => {
+    const next = new Set<number>()
+    for (const job of data?.jobs ?? []) next.add(job.id)
+    activeJobIds.value = next
+  },
+  { immediate: true },
+)
+
+const stream = useJobStream((snapshot: JobSnapshot) => {
+  const next = new Set(activeJobIds.value)
+  if (TERMINAL.has(snapshot.status)) next.delete(snapshot.id)
+  else next.add(snapshot.id)
+  activeJobIds.value = next
+})
+stream.open()
+
+const activeCount = computed(() => activeJobIds.value.size)
 
 /** ComfyUI 在线状态：离线时不该让用户以为能出图（历史上因此白跑 27 个任务）。 */
 const { data: status } = useQuery({

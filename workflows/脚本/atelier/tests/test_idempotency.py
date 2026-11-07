@@ -1,6 +1,9 @@
 """批量提交幂等：同一把键只创建一次任务。"""
 import json
 
+import pytest
+from peewee import IntegrityError
+
 
 def _workflow():
     return json.dumps(
@@ -62,6 +65,23 @@ def test_header_key_wins_and_sync_text_run_is_idempotent(api, monkeypatch):
     assert first.json()["job_id"] == second.json()["job_id"]
     assert second.json()["idempotent"] is True
     assert GenJob.select().count() == 1
+
+
+def test_unique_index_blocks_concurrent_duplicate_jobs(api):
+    """查后再建仍有并发窗口；唯一索引必须让第二个 INSERT 失败。"""
+    from app.services import job_state
+
+    extra = {"idempotency_key": "race-key", "idempotency_scope": "runs_batch"}
+    first = job_state.create_job(
+        "batch", "第一次", [{"status": "pending"}], "x.json", "portrait", "1.0x", extra,
+    )
+
+    with pytest.raises(IntegrityError):
+        job_state.create_job(
+            "batch", "第二次", [{"status": "pending"}], "x.json", "portrait", "1.0x", extra,
+        )
+
+    assert job_state.find_job_by_idempotency("race-key", "runs_batch")["id"] == first
 
 
 def test_composer_batch_idempotency_scope(api, monkeypatch):

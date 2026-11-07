@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import type { HairItem } from '../../api/reference'
 import { useReferenceHairs } from '../../composables/useReferenceLibrary'
+import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
+import { useToast } from '../../composables/useToast'
 import {
   clampPage,
   loadReferencePageSize,
@@ -16,6 +18,8 @@ import ReferenceGrid from './components/ReferenceGrid.vue'
 import ReferenceLightbox from './components/ReferenceLightbox.vue'
 
 const { items, loading, error, load, retry } = useReferenceHairs()
+const draft = useReferenceRecipeDraft()
+const toast = useToast()
 
 const view = ref('')
 const group = ref('')
@@ -73,6 +77,42 @@ const currentItem = computed<HairItem | null>(() => {
   if (index === null) return null
   return filtered.value[index] ?? null
 })
+
+/** 当前灯箱条目是否就是第 4 槽已选发型（只按库 + id 匹配）。 */
+const isExtraSelected = computed(() => {
+  const item = currentItem.value
+  const extra = draft.extra.value
+  return Boolean(
+    item && extra.source === 'library' && extra.library === 'hair' && extra.id === item.id,
+  )
+})
+
+/** 灯箱主按钮文案：不可用于发型槽的条目明确说明原因。 */
+const extraSelectLabel = computed(() =>
+  currentItem.value?.可用于发型槽 === false ? '仅正面 · 不可加入第 4 槽' : '加入第 4 槽',
+)
+
+/**
+ * 灯箱「加入第 4 槽」：与合成台共用同一份草稿；再点已选条目即移除。
+ * 不可用于发型槽的条目（只有正面）直接拒绝，不写进草稿。
+ */
+function toggleExtraFromHair(): void {
+  const item = currentItem.value
+  if (!item) return
+  if (!item.可用于发型槽) {
+    toast.error(
+      '无法加入第 4 槽。原因：该发型只有正面图，没有背面无脸图。下一步：选择标有「背面可用」的发型，或到合成台上传本地图。',
+    )
+    return
+  }
+  if (draft.extra.value.source === 'library' && draft.extra.value.id === item.id) {
+    draft.clearExtra()
+    toast.success('已从第 4 槽移除该发型')
+    return
+  }
+  draft.setExtraLibrary('hair', item.id, item.标题)
+  toast.success(`已将「${item.标题}」加入第 4 槽，提交时使用背面无脸图`)
+}
 
 watch(
   () => filtered.value.length,
@@ -162,7 +202,7 @@ onMounted(() => {
     <header class="hair-head">
       <h1 class="hair-head__title tab-placeholder__title">发型库</h1>
       <p class="hair-head__hint">
-        全量 489 款 · 正背双视图 311 款可拆出背面无脸图用于第 4 槽
+        全量 489 款 · 正背双视图 311 款可拆出背面无脸图用于第 4 槽；点灯箱「加入第 4 槽」即可与合成台共用
       </p>
     </header>
 
@@ -279,8 +319,12 @@ onMounted(() => {
       :download-name="viewerDownloadName"
       :copy-value="currentItem?.id ?? ''"
       copy-toast="已复制发型 ID"
+      :selected="isExtraSelected"
+      :select-label="extraSelectLabel"
+      selected-label="已加入第 4 槽（点击移除）"
       :can-prev="filtered.length > 1"
       :can-next="filtered.length > 1"
+      @toggle-select="toggleExtraFromHair"
       @close="closeViewer"
       @prev="stepViewer(-1)"
       @next="stepViewer(1)"

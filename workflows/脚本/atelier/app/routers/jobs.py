@@ -34,23 +34,37 @@ def _is_terminal(job: dict) -> bool:
 # 事件流（SSE）—— 必须注册在 /jobs/{job_id} 之前，否则 "events" 会被当成 job_id
 # ---------------------------------------------------------------------------
 
-def _sse(event: str, payload: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+def _sse(event: str, payload: dict, event_id: int | None = None) -> str:
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.get("/jobs/events")
-def job_events(ids: str = Query("", description="逗号分隔的 job id；为空则订阅全部")):
+def job_events(
+    ids: str = Query("", description="逗号分隔的 job id；为空则订阅全部"),
+    since: int | None = Query(None, description="只补发序号大于 since 的事件"),
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+):
     wanted = {int(x) for x in ids.split(",") if x.strip().lstrip("-").isdigit()}
+    resume_from = since
+    if last_event_id and last_event_id.strip().lstrip("-").isdigit():
+        resume_from = int(last_event_id)
 
     def stream():
-        q = job_state.subscribe()
+        q = job_state.subscribe(since=resume_from)
         try:
-            # 首帧：把当前状态补齐，避免前端连上后还要等下一次刷新
-            if wanted:
+            # 首帧：把当前状态补齐，避免前端连上后还要等下一次刷新。
+            # 断线重连（带 since / Last-Event-ID）时只补事件，避免“最新快照 → 旧事件”
+            # 把客户端状态倒退回去。
+            if wanted and resume_from is None:
+                terminal_snapshot = False
                 for job_id in sorted(wanted):
                     snapshot = job_state.read_snapshot(job_id)
                     if snapshot:
                         yield _sse("snapshot", snapshot)
+                        terminal_snapshot = terminal_snapshot or _is_terminal(snapshot)
+                if len(wanted) == 1 and terminal_snapshot:
+                    return
             yield ": connected\n\n"
 
             while True:
@@ -62,7 +76,7 @@ def job_events(ids: str = Query("", description="逗号分隔的 job id；为空
                 job = event.get("job") or {}
                 if wanted and job.get("id") not in wanted:
                     continue
-                yield _sse("job", job)
+                yield _sse("job", job, event.get("seq"))
                 if _is_terminal(job):
                     # 单任务订阅：发完终态就结束；多任务订阅由前端按 id 关闭
                     if len(wanted) == 1:
@@ -104,6 +118,11 @@ def get_job_detail(job_id: int):
 
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: int):
+    snapshot = job_state.read_snapshot(job_id)
+    if snapshot is None:
+        raise HTTPException(404, "任务不存在")
+    if snapshot.get("status") in job_state.TERMINAL:
+        raise HTTPException(409, "任务已结束，无法取消")
     if not job_state.cancel_job(job_id):
         raise HTTPException(404, "任务不存在")
     return {"success": True, "job_id": job_id}

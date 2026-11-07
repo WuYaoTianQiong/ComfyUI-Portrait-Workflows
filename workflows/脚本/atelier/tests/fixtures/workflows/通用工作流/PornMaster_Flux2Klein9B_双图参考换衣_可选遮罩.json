@@ -1,0 +1,22 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "mode": 0,
+      "inputs": [],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": []}],
+      "widgets_values": ["subject.png"],
+      "_meta": {"title": "图像"}
+    },
+    {
+      "id": 2,
+      "type": "SaveImage",
+      "mode": 0,
+      "inputs": [{"name": "images", "type": "IMAGE", "link": null}],
+      "outputs": [],
+      "widgets_values": ["fixture"]
+    }
+  ],
+  "links": []
+}

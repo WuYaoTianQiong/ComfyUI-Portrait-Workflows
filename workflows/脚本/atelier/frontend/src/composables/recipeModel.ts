@@ -122,6 +122,8 @@ export interface RecipeSubmitRequest {
   extra_id?: string
   /** 第 4 张库标识（当前仅 hair）；与 `extra_id` 配套。 */
   extra_library?: string
+  /** 第 4 张文字补充；只在 extra 图片存在时发送（后端对“有文本无图”返回 400）。 */
+  extra_text?: string
   /** 合成台工作流文件名 / 库内路径；空 = 后端默认 Qwen21+VNCCS。 */
   workflow?: string
   /** 画质档位；`caps.quality === false` 时不发送。 */
@@ -137,6 +139,8 @@ export interface RecipeSubmitRequest {
   prompt_suffix?: string
   seed: number
   seed_mode: 'fixed' | 'random'
+  /** 双人姿势的人物 B 文字设定；空不发送。 */
+  person_b_text?: string
   /** 人像补充文本（人物面部 + 人物身材）；空不发送。 */
   portrait_text?: string
   /** 服装补充文本（人物服饰）；空不发送。 */
@@ -316,6 +320,10 @@ export interface RecipeRequestOptions {
   extraId?: string
   /** 第 4 张库标识（当前仅 hair）。 */
   extraLibrary?: string
+  /** 第 4 张文字补充；空串不发送，有文本无图也绝不发送。 */
+  extraText?: string
+  /** 双人姿势的人物 B 文字设定；只在选中 composition=pair 姿势时发送。 */
+  personBText?: string
   /** 所选工作流路径 / 文件名；空串不发送（后端用默认工作流）。 */
   workflow?: string
   /** 画质档位；空串不发送。 */
@@ -539,8 +547,21 @@ export function buildRecipeRequest(
     }
   }
 
+  // 第 4 槽文字补充：只随图片一起发送；手动改写（prompt_override）不参与。
+  const extraText = options.extraText?.trim() ?? ''
+  if (
+    !promptOverride &&
+    extraText &&
+    (request.extra_path || request.extra_id)
+  ) {
+    request.extra_text = extraText
+  }
+
   const workflow = options.workflow?.trim()
   if (workflow) request.workflow = workflow
+
+  const personBText = options.personBText?.trim()
+  if (personBText) request.person_b_text = personBText
 
   const quality = options.quality?.trim()
   if (quality) request.quality = quality
@@ -1065,7 +1086,10 @@ export function reconcileQualitySelection(
   const available = new Set(options.map((option) => option.value))
   const kept = selected.filter((value) => available.has(value))
   if (kept.length) return [...kept]
-  const preferred = options.find((option) => option.value === '4K') ?? options[0]
+  const preferred =
+    options.find((option) => option.value === '1.0x') ??
+    options.find((option) => option.value === '4K') ??
+    options[0]
   return preferred ? [preferred.value] : []
 }
 

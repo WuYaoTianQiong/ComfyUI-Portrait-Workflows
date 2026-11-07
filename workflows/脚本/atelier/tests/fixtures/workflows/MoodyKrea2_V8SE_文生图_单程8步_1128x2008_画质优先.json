@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    {
+      "id": 9,
+      "type": "KSamplerAdvanced",
+      "mode": 0,
+      "inputs": [],
+      "outputs": [{"name": "LATENT", "type": "LATENT", "links": [1]}],
+      "widgets_values": [1, "fixed", 8, 1, "euler", "simple", 0, 1]
+    },
+    {
+      "id": 10,
+      "type": "LatentUpscaleBy",
+      "mode": 4,
+      "inputs": [{"name": "samples", "type": "LATENT", "link": 1}],
+      "outputs": [{"name": "LATENT", "type": "LATENT", "links": [2]}],
+      "widgets_values": ["bicubic", 1.5]
+    },
+    {
+      "id": 11,
+      "type": "KSampler",
+      "mode": 4,
+      "inputs": [{"name": "latent_image", "type": "LATENT", "link": 2}],
+      "outputs": [{"name": "LATENT", "type": "LATENT", "links": [3]}],
+      "widgets_values": [1, "fixed", 4, 1, "euler", "simple", 0.39]
+    },
+    {
+      "id": 12,
+      "type": "VAEDecode",
+      "mode": 0,
+      "inputs": [{"name": "samples", "type": "LATENT", "link": 3}],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": []}],
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [1, 9, 0, 10, 0, "LATENT"],
+    [2, 10, 0, 11, 0, "LATENT"],
+    [3, 11, 0, 12, 0, "LATENT"]
+  ]
+}

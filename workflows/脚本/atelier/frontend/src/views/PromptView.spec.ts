@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 
 import PromptView from './PromptView.vue'
 import { apiDelete, apiGet, apiPost } from '../api/client'
+import { useSettings } from '../composables/useSettings'
 
 const stub = { template: '<div />' }
 const router = createRouter({
@@ -16,6 +17,7 @@ const router = createRouter({
 })
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string) => {
     if (path.includes('/api/categories')) {
       return {
@@ -446,5 +448,89 @@ describe('PromptView 外部跳转与草稿恢复', () => {
 
     const saved = JSON.parse(localStorage.getItem('pb.session.prompt') ?? '{}')
     expect(saved.selectedIds).toEqual([1])
+  })
+})
+
+describe('PromptView 出图（所见即所得 + 张数即变体）', () => {
+  const store = new Map<string, string>()
+
+  class FakeEventSource {
+    onerror: unknown = null
+    constructor(public url: string) {}
+    addEventListener() {}
+    close() {}
+  }
+
+  beforeEach(() => {
+    store.clear()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    })
+    vi.stubGlobal('EventSource', FakeEventSource)
+    vi.mocked(apiPost).mockClear()
+    vi.mocked(apiPost).mockResolvedValue({ success: true, job_id: 7 })
+    useSettings().workflowPath.value = '/wf/a.json'
+  })
+
+  async function mountAndSelect() {
+    const wrapper = await mountView()
+    await wrapper.find('.row').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  const runCalls = () => vi.mocked(apiPost).mock.calls.filter((c) => c[0] === '/api/runs')
+
+  it('出图把编辑框当前文本作为 override 提交', async () => {
+    const wrapper = await mountAndSelect()
+    await wrapper.find('.editor.pos').setValue('改过的草稿文本')
+    await wrapper.findAll('button').find((b) => b.text().includes('出图'))!.trigger('click')
+    await flushPromises()
+
+    const calls = runCalls()
+    expect(calls.length).toBe(1)
+    expect(calls[0][1]).toMatchObject({
+      id: 1,
+      prompt_override: '改过的草稿文本',
+      negative_prompt_override: '',
+    })
+    expect(wrapper.text()).toContain('含未保存修改')
+  })
+
+  it('张数选 3 + 种子 100：提交 3 次，种子依次 +1', async () => {
+    const wrapper = await mountAndSelect()
+    await wrapper.findAll('.run-counts button').find((b) => b.text() === '3')!.trigger('click')
+    await wrapper.find('.seed-input').setValue('100')
+    await wrapper.findAll('button').find((b) => b.text().includes('出图'))!.trigger('click')
+    await flushPromises()
+
+    const calls = runCalls()
+    expect(calls.length).toBe(3)
+    expect(calls.map((c) => (c[1] as Record<string, unknown>).seed)).toEqual([100, 101, 102])
+  })
+
+  it('空种子出多张：底种子随机但依次 +1，不会 N 张同种子', async () => {
+    const wrapper = await mountAndSelect()
+    await wrapper.findAll('.run-counts button').find((b) => b.text() === '2')!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('出图'))!.trigger('click')
+    await flushPromises()
+
+    const seeds = runCalls().map((c) => (c[1] as Record<string, unknown>).seed as number)
+    expect(seeds.length).toBe(2)
+    expect(seeds[0]).toBeGreaterThan(0)
+    expect(seeds[1]).toBe(seeds[0] + 1)
+  })
+
+  it('单张空种子不传种子，沿用后端回退（提示词种子/随机）', async () => {
+    const wrapper = await mountAndSelect()
+    await wrapper.findAll('button').find((b) => b.text().includes('出图'))!.trigger('click')
+    await flushPromises()
+
+    const calls = runCalls()
+    expect(calls.length).toBe(1)
+    expect((calls[0][1] as Record<string, unknown>).seed).toBeNull()
   })
 })

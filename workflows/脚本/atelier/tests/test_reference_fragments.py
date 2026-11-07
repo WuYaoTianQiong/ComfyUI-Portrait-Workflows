@@ -130,12 +130,12 @@ def test_pose_fragment_uses_standard_type_and_body(api, ref_root):
     assert body["fragment_type"] == "姿态动作"
     assert body["prompt"] == "【姿态动作】\n正面站姿，正面"
     assert body["note"] == "ref:pose/P001_front"
-    assert body["tags"] == "参考库,姿势库"
+    assert body["tags"] == "参考库, 姿势库"
 
     row = Prompt.get_by_id(body["id"])
     assert row.prompt == body["prompt"]
     assert row.note == body["note"]
-    assert row.tags == "参考库,姿势库"
+    assert row.tags == "参考库, 姿势库"
     assert row.name == "正面站姿"
 
 
@@ -168,7 +168,7 @@ def test_remote_anime_item_only_converts_text(api, ref_root):
     assert body["prompt"] == "【人物服饰】\n藏青水手服，セーラー服(紺)"
     # 只写文字，不落外链 URL
     assert "http" not in body["prompt"]
-    assert body["tags"] == "参考库,外链服装"
+    assert body["tags"] == "参考库, 外链服装"
 
 
 def test_nsfw_item_is_hidden_when_gate_closed(api, ref_root):

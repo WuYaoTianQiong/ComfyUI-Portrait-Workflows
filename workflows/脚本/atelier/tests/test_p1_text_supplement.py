@@ -109,6 +109,50 @@ def test_no_text_means_no_supplement_clause():
     assert "此外需体现" not in prompt
 
 
+def test_extra_text_appends_after_extra_master_sentence():
+    """第 4 槽文字补充：图为主，文字只作「此外需体现」，不覆盖发型主句。"""
+    hair = RecipeEntry(id="", name="上传的发型参考")
+    extra_text = "发尾浅金色挑染，前额留碎刘海"
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        hair,
+        extra_kind="hair",
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+        extra_text=extra_text,
+    )
+    assert "• 发型：" in prompt
+    assert "不要使用图4中人物的脸、服装或背景" in prompt
+    assert f"• 此外需体现：{extra_text}。" in prompt
+    assert "。；" not in prompt
+
+    generic = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        RecipeEntry(id="x", name="配饰"),
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+        extra_text="金属链条与铆钉",
+    )
+    assert "• 附加参考" in generic
+    assert "• 此外需体现：金属链条与铆钉。" in generic
+
+    # 无文字时不追加任何分句
+    no_text = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        hair,
+        extra_kind="hair",
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+    )
+    assert "此外需体现" not in no_text
+
+
 # ---------------------------------------------------------------------------
 # 2. 修饰层插入位置
 # ---------------------------------------------------------------------------
@@ -417,3 +461,18 @@ def test_fragments_safe_mode_filters_tags_and_note_only(api, seed_prompt):
         params={"fragment_type": "场景环境", "safe_mode": "1"},
     ).json()
     assert _fragment_contents(safe_scene, "场景环境") == set()
+
+def test_hair_extra_text_is_appended_as_supplement():
+    hair = RecipeEntry(id="", name="上传的发型参考")
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        hair,
+        extra_kind="hair",
+        extra_text="发色改为冷棕色，刘海偏分",
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+    )
+    assert "• 发型：" in prompt
+    assert "此外需体现：发色改为冷棕色，刘海偏分" in prompt

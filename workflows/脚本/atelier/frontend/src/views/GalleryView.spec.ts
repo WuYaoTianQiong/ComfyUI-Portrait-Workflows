@@ -10,6 +10,7 @@ import { useToast } from '../composables/useToast'
 import { useSettings } from '../composables/useSettings'
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string) => {
     if (path.includes('/api/images/ids')) {
       return { ids: [1, 2, 3], total: 3 }

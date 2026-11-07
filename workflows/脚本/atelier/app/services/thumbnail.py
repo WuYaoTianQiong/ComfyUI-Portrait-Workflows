@@ -1,4 +1,5 @@
 """缩略图生成与缓存"""
+import hashlib
 import queue
 import threading
 from pathlib import Path
@@ -12,21 +13,30 @@ from app.services.paths import resolve_image_path
 
 THUMBNAIL_DIR = settings.thumbnail_dir
 
+#: 改缩略图算法/尺寸策略时递增，旧缓存自然失效。
+THUMB_VERSION = 2
+
 
 def _get_image_path(filename: str, subfolder: str, img_type: str) -> Optional[Path]:
     """兼容入口：统一走 `paths.resolve_image_path`（含越界校验与 temp 口径）。"""
     return resolve_image_path(filename, subfolder, img_type)
 
 
+def _thumb_prefix(filename: str, subfolder: str, img_type: str) -> str:
+    """按完整路径身份生成哈希前缀。
+
+    旧实现用下划线拼前缀，`a_b/c` 与 `a/b_c` 会得到同一个前缀而互相误删。
+    """
+    raw = "\x1f".join((filename or "", subfolder or "", img_type or "output"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def clear_thumbnails_for(filename: str, subfolder: str = "", img_type: str = "output") -> int:
     """删除某张图的缩略图缓存；返回删除数量。"""
-    safe_filename = (filename or "").replace("/", "_").replace("\\", "_").replace(":", "_")
-    safe_subfolder = (subfolder or "").replace("/", "_").replace("\\", "_").replace(":", "_")
-    safe_type = (img_type or "output").replace("/", "_").replace("\\", "_").replace(":", "_")
-    prefix = f"{safe_filename}_{safe_subfolder}_{safe_type}_"
+    prefix = _thumb_prefix(filename, subfolder, img_type)
     deleted = 0
     try:
-        for path in THUMBNAIL_DIR.glob(prefix + "*"):
+        for path in THUMBNAIL_DIR.glob(prefix + "_*"):
             path.unlink(missing_ok=True)
             deleted += 1
     except OSError:
@@ -52,10 +62,12 @@ def generate_thumbnail(
         return None
 
     file_stat = img_path.stat()
-    # 用 st_size + st_mtime_ns 共同标识文件版本，二者同时碰撞的概率极低
-    cache_key = f"{filename}_{subfolder}_{img_type}_{file_stat.st_size}_{file_stat.st_mtime_ns}_{size}"
-    safe_key = cache_key.replace("/", "_").replace("\\", "_").replace(":", "_")
-    thumb_path = THUMBNAIL_DIR / f"{safe_key}.webp"
+    # 路径身份用哈希，避免分隔符碰撞；文件版本与处理版本一起进 key。
+    cache_key = (
+        f"{_thumb_prefix(filename, subfolder, img_type)}"
+        f"_{size}_{file_stat.st_size}_{file_stat.st_mtime_ns}_v{THUMB_VERSION}"
+    )
+    thumb_path = THUMBNAIL_DIR / f"{cache_key}.webp"
 
     if thumb_path.exists():
         return thumb_path

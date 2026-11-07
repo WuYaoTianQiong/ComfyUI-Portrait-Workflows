@@ -859,7 +859,7 @@ def test_refresh_keeps_no_pid_items_pending_during_submission(api):
     snapshot = job_state.refresh_job(job.id)
     assert snapshot is not None
     assert snapshot["status"] == "pending"
-    assert snapshot["items"][0]["status"] == "pending"
+    assert snapshot["items"][0]["status"] == "queued"
 
 
 def test_refresh_keeps_pids_written_during_slow_compute(api, monkeypatch):

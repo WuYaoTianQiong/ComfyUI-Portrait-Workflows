@@ -6,6 +6,7 @@ import MissingImageRunPanel from './MissingImageRunPanel.vue'
 import { apiPost } from '../api/client'
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string) => {
     if (path.includes('/api/generate_missing/list')) {
       return {

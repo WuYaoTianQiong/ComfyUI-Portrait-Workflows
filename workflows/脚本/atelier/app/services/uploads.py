@@ -19,7 +19,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services import image_formats
-from app.services.paths import IMAGE_EXTENSIONS
+from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 
 #: 单文件上限 25MB；超限由调用方（路由）在读取阶段截断，这里再做一次兜底。
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -103,6 +103,22 @@ def _store_bytes(dest: Path, temp: Path) -> None:
         os.replace(temp, dest)
     except OSError as exc:
         raise UploadError(f"保存图片失败：{exc}") from None
+
+
+def resolve_upload(raw: str, root: Path | None = None) -> Path | None:
+    """把绝对/相对路径解析成 uploads 内的真实图片文件；越界或不存在返回 None。"""
+    if not raw:
+        return None
+    base = resolve_plain(uploads_dir(root))
+    candidate = resolve_under(base, raw)
+    if candidate is None:
+        return None
+    if candidate.suffix.lower() not in IMAGE_EXTENSIONS:
+        return None
+    try:
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
 
 
 def save_upload(filename: str, data: bytes, root: Path | None = None) -> dict:

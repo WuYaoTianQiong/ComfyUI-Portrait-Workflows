@@ -105,6 +105,16 @@
       },
       "BatchItem": {
         "properties": {
+          "aspect_ratio": {
+            "default": "",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
+          "orientation": {
+            "default": "",
+            "title": "Orientation",
+            "type": "string"
+          },
           "prompt_id": {
             "title": "Prompt Id",
             "type": "integer"
@@ -120,6 +130,11 @@
             ],
             "title": "Prompt Override"
           },
+          "quality": {
+            "default": "",
+            "title": "Quality",
+            "type": "string"
+          },
           "seed": {
             "anyOf": [
               {
@@ -130,6 +145,22 @@
               }
             ],
             "title": "Seed"
+          },
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
           }
         },
         "required": [
@@ -208,7 +239,7 @@
             "type": "string"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -311,7 +342,7 @@
             "type": "string"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -645,7 +676,7 @@
             "type": "string"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -1006,7 +1037,7 @@
             "title": "Prompt Ids"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -1640,6 +1671,17 @@
       },
       "JobItem": {
         "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
           "comfyui_prompt_id": {
             "anyOf": [
               {
@@ -1669,6 +1711,17 @@
             "title": "Images",
             "type": "array"
           },
+          "orientation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orientation"
+          },
           "prompt_id": {
             "anyOf": [
               {
@@ -1690,6 +1743,17 @@
               }
             ],
             "title": "Prompt Preview"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality"
           },
           "seed": {
             "anyOf": [
@@ -1713,7 +1777,7 @@
             ],
             "title": "Status"
           },
-          "submit_state": {
+          "workflow_path": {
             "anyOf": [
               {
                 "type": "string"
@@ -1722,7 +1786,7 @@
                 "type": "null"
               }
             ],
-            "title": "Submit State"
+            "title": "Workflow Path"
           }
         },
         "title": "JobItem",
@@ -1960,7 +2024,7 @@
             "type": "string"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -2087,6 +2151,20 @@
               }
             ],
             "title": "Steps"
+          },
+          "tag_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Ids"
           },
           "tags": {
             "default": "",
@@ -2519,6 +2597,20 @@
             ],
             "title": "Steps"
           },
+          "tag_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Ids"
+          },
           "tags": {
             "anyOf": [
               {
@@ -2662,6 +2754,11 @@
             "title": "Extra Path",
             "type": "string"
           },
+          "extra_text": {
+            "default": "",
+            "title": "Extra Text",
+            "type": "string"
+          },
           "modifier_fragments": {
             "default": "",
             "title": "Modifier Fragments",
@@ -2680,6 +2777,11 @@
           "output_subfolder": {
             "default": "",
             "title": "Output Subfolder",
+            "type": "string"
+          },
+          "person_b_text": {
+            "default": "",
+            "title": "Person B Text",
             "type": "string"
           },
           "portrait_id": {
@@ -3366,6 +3468,17 @@
             "title": "Idempotency Key",
             "type": "string"
           },
+          "negative_prompt_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt Override"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
@@ -3376,8 +3489,19 @@
             "title": "Output Subfolder",
             "type": "string"
           },
+          "prompt_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Override"
+          },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -3448,7 +3572,7 @@
             "type": "string"
           },
           "quality": {
-            "default": "4K",
+            "default": "1.0x",
             "title": "Quality",
             "type": "string"
           },
@@ -6877,6 +7001,40 @@
               "description": "逗号分隔的 job id；为空则订阅全部",
               "title": "Ids",
               "type": "string"
+            }
+          },
+          {
+            "description": "只补发序号大于 since 的事件",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只补发序号大于 since 的事件",
+              "title": "Since"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
             }
           }
         ],

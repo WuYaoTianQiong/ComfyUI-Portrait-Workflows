@@ -53,6 +53,8 @@ class RecipeEntry:
     subtitle: str = ""
     facet: str = ""
     angle: str = ""
+    #: 仅姿势：`pair` 表示双人构图；上游 pair* 与 pose-studio-lite 都靠它判双人。
+    composition: str = ""
 
 
 #: 补充态（P1）固定句式：图片主句保留，文本只作额外特征追加。
@@ -155,6 +157,14 @@ def _figure_no(index_map: dict[str, int] | None, role: str, default: int) -> int
     return default
 
 
+def _ensure_period(text: str) -> str:
+    """给人物 B 的自由文字补齐句末标点；已有标点不重复追加。"""
+    text = text.strip()
+    if not text:
+        return ""
+    return text if text[-1] in "。！？!?；;" else f"{text}。"
+
+
 def build_recipe_prompt(
     portrait: RecipeEntry | None,
     costume: RecipeEntry | None,
@@ -170,6 +180,8 @@ def build_recipe_prompt(
     pose_text: str = "",
     modifier_fragments: str = "",
     negative_prompt: str = "",
+    person_b_text: str = "",
+    extra_text: str = "",
 ) -> str:
     """按上游顺序拼出完整提示词；未知画风/素体模式抛 ValueError（由路由转成 400）。
 
@@ -189,6 +201,8 @@ def build_recipe_prompt(
       含「拍摄视角」时不写库条目角度，含「画风技术」时不追加固定风格段。
     - `negative_prompt`：本函数不渲染负向；签名与 `RecipeRequest` 对齐，负向统一由
       提交层 `compile_prompt` / `inject_prompt` 处理。
+    - `extra_text`（第 4 槽文字补充，2026-11-07）：仅在 `extra` 图片存在时生效，
+      在发型 / 附加参考主句后追加「此外需体现」分句；无图时不渲染（路由层已 400）。
 
     P2 替代态（方案 §5.1 / §4.4）：对应槽**无图**且文本非空时，用文本句替换图片主句
     （`portrait is None` 等），三槽要么图片句、要么文本句，二选一。
@@ -214,10 +228,12 @@ def build_recipe_prompt(
     clauses: list[str] = []
     #: 图号计数只在有图时递增（文本槽不占图号）；`index_map` 存在时以真实图位为准。
     idx = 1
+    portrait_idx = 0
     costume_idx = 0
 
     if portrait:
         num = _figure_no(index_map, "portrait", idx)
+        portrait_idx = num
         # bare 模式下没有服装，"服装镂空处露出的皮肤"无从谈起；同时避免出现
         # 「裸露」等词，统一改成中性的「全身皮肤」表述。
         skin = (
@@ -296,17 +312,37 @@ def build_recipe_prompt(
         # 「严格复现图N」与「图N只是动作示意」两句必须整体消失，否则模型会去找不存在的图。
         clauses.append(f"• 姿势：{pose_text}{POSE_REPLACEMENT_TAIL}")
 
-    # 双人姿势（库内 id 统一为 `pair*`）：必须显式声明人数与两人的服装归属。
-    # 实测（2026-11-04）：只写「按图3摆姿势」时，无论 Edit 还是 VNCCS 都只出一个；
-    # 且第二人容易没衣服。这里把人数、两人的衣装、禁止合并都写死。
+    # 双人姿势：上游 `pair*` 与 pose-studio-lite 的 `composition=pair` 都必须识别。
+    # 2026-11-07 实测：自动模式只有一张人像时模型会克隆 A；B 的文字设定必须显式写出，
+    # 且要声明 B 的脸与 A 不同，否则两人会变成同一张脸。
     # 未选服装时不再写「两人各自都有完整服装」：那是凭空捏造衣装。
-    is_pair = bool(pose and pose.id.startswith("pair"))
+    is_pair = bool(
+        pose and (pose.composition == "pair" or pose.id.startswith("pair"))
+    )
+    b_text = person_b_text.strip()
     if is_pair:
         if body_mode == "bare":
             clauses.append(
-                "• 双人要求：画面中为两位成年女性的素体展示，两人都完整入镜，保持中性、非性化姿态。"
-                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
+                "• 双人要求：画面中为恰好两位成年女性的素体展示，两人都完整入镜，保持中性、非性化姿态。"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
+        elif b_text:
+            a_parts: list[str] = []
+            if portrait_idx:
+                a_parts.append(f"脸型、五官、发型严格沿用图{portrait_idx}中的人物")
+            if costume_idx:
+                a_parts.append(f"穿图{costume_idx}中展示的整套服装与配饰")
+            a_desc = "，".join(a_parts) or "沿用前面的人物描述"
+            clauses.append(
+                "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都完整入镜；"
+                f"人物A：{a_desc}；人物B按下方文字设定；任何一位都不允许裸露或半裸。"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
+                "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
+            clauses.append(
+                f"• 人物B（文字设定）：{_ensure_period(b_text)}"
+                "人物B的脸型、五官必须与人物A明显不同，不要复用人物A的脸。"
             )
         else:
             pair_costume = (
@@ -315,9 +351,9 @@ def build_recipe_prompt(
                 else ""
             )
             clauses.append(
-                "• 双人要求：画面中必须同时出现两位成年女性，两人都要完整入镜；"
+                "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都要完整入镜；"
                 f"{pair_costume}任何一位都不允许裸露或半裸。"
-                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形，"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
 
@@ -346,16 +382,22 @@ def build_recipe_prompt(
                 if extra.name and "上传" not in extra.name
                 else ""
             )
-            clauses.append(
+            clause = (
                 f"• 发型：严格复现图{extra_num}中的发型{name_hint}"
                 "（长度、轮廓、分缝、发色、盘发/编发结构）"
                 f"{face_hint}。图{extra_num}只提供发型背面/无脸参考，"
                 f"不要使用图{extra_num}中人物的脸、服装或背景。"
             )
         else:
-            clauses.append(
+            clause = (
                 f"• 附加参考：融合图{extra_num}（{extra.name or '补充元素'}）中的元素、配饰、背景或光影细节。"
             )
+        clauses.append(clause)
+        # 图为主 + 文本补充：单独成句，避免编译器抽走「不要使用图N…」后
+        # 留下「，；此外需体现」的拼接标点；文字不覆盖图片主句。
+        extra_note = _replacement_text(extra_text)
+        if extra_note:
+            clauses.append(f"• 此外需体现：{extra_note}。")
         idx += 1
 
     if not clauses:

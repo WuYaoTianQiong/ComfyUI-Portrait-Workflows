@@ -139,6 +139,8 @@ def create_reference_fragment(req: ReferenceFragmentRequest):
         # 并把标签文本同步到 entity_tags（标签筛选以关联表为准）。
         auto_classify_prompt(prompt.id)
         sync_prompt_tags(prompt.id, tags)
+        # 响应返回派生缓存，而不是请求里的原始拼接串，保持与 DB/筛选一致。
+        tags = Prompt.get_by_id(prompt.id).tags
 
     return {
         "success": True,

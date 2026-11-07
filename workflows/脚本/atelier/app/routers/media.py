@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -24,6 +23,7 @@ from PIL import Image as PILImage, ImageOps
 
 from app.config import settings
 from app.services import assets
+from app.services.asset_store import AssetStore, ComfyAssetRef
 from app.services.image_formats import is_heif
 from app.services.paths import (
     IMAGE_EXTENSIONS,
@@ -37,6 +37,7 @@ router = APIRouter(tags=["媒体与文件浏览"])
 
 IMAGE_EXT = IMAGE_EXTENSIONS
 MAX_ITEMS = 800          # 单个目录最多返回多少个子目录 / 图片，避免超大目录把前端卡死
+ASSETS = AssetStore()
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ def proxy_image(
     if not is_safe_image_ref(filename, subfolder, type):
         raise HTTPException(400, "非法的图片路径")
     payload = _load_asset(
-        lambda: assets.raw_payload(assets.AssetRef(filename, subfolder, type))
+        lambda: ASSETS.resolve(ComfyAssetRef(filename, subfolder, type))
     )
     return _asset_response(payload)
 
@@ -91,7 +92,7 @@ def serve_thumbnail(
     if not is_safe_image_ref(filename, subfolder, type):
         raise HTTPException(400, "非法的图片路径")
     payload = _load_asset(
-        lambda: assets.thumbnail_payload(assets.AssetRef(filename, subfolder, type), size)
+        lambda: ASSETS.thumbnail(ComfyAssetRef(filename, subfolder, type), size)
     )
     return _asset_response(payload)
 
@@ -102,9 +103,10 @@ def clear_thumbnail_cache():
     td = settings.thumbnail_dir
     count = 0
     if td.exists():
-        count = len(list(td.glob("*.webp")))
-        shutil.rmtree(td)
-        td.mkdir(parents=True, exist_ok=True)
+        # 只删缩略图本身；rmtree 会连带清掉同目录下的浏览器缓存。
+        for path in td.glob("*.webp"):
+            path.unlink(missing_ok=True)
+            count += 1
     return {"success": True, "deleted": count}
 
 

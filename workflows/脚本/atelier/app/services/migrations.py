@@ -17,10 +17,41 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+from pathlib import Path
 
 logger = logging.getLogger("atelier.migrations")
 
 VERSION_TABLE = "schema_version"
+
+
+def pending_versions(db_path: str | Path, migrations) -> list[int]:
+    """在 init_db 之前只读判断还有哪些迁移未应用。
+
+    启动备份必须先于迁移执行，而那时还没有可用的 Peewee 连接，也不应该为了
+    读版本号去建表。这里直接以只读方式打开 SQLite：库不存在或还没有版本表，
+    都按 v0 处理；读取失败则保守地认为全部迁移都待应用。
+    """
+    path = Path(db_path)
+    if not path.exists():
+        return [int(ver) for ver, _, _ in migrations]
+    try:
+        with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5) as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (VERSION_TABLE,),
+            ).fetchone()
+            if not exists:
+                current = 0
+            else:
+                row = conn.execute(
+                    f"SELECT MAX(version) FROM {VERSION_TABLE}"
+                ).fetchone()
+                current = int(row[0]) if row and row[0] is not None else 0
+    except sqlite3.Error:
+        logger.warning("读取迁移版本失败，按全部待迁移处理: %s", path, exc_info=True)
+        return [int(ver) for ver, _, _ in migrations]
+    return [int(ver) for ver, _, _ in migrations if int(ver) > current]
 
 
 def ensure_version_table(db) -> None:

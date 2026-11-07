@@ -10,44 +10,84 @@ interface JobStreamOptions {
   closeOnError?: boolean
 }
 
+interface Subscriber {
+  handler: (snapshot: JobSnapshot) => void
+  ids: Set<number> | null
+  active: boolean
+  onError?: () => void
+  closeOnError?: boolean
+}
+
 /**
- * 任务 SSE 的唯一入口。
+ * 任务 SSE 的唯一连接。
  *
- * 后端 `/api/jobs/events` 会先推 `snapshot`，之后推 `job`，两者结构一致。
- * 不传 ids = 订阅所有任务；传 ids = 只订阅指定任务（单任务/队列模式）。
+ * 多个页面/组合式同时订阅时只保留一个 EventSource（订阅全部任务），
+ * 每个订阅者按自己的 id 集合过滤。断线重连由浏览器带 Last-Event-ID 完成，
+ * 后端会补发缺口事件。
  */
+const subscribers = new Set<Subscriber>()
+let source: EventSource | null = null
+
+function dispatch(snapshot: JobSnapshot) {
+  for (const sub of Array.from(subscribers)) {
+    if (!sub.active) continue
+    if (sub.ids && !sub.ids.has(snapshot.id)) continue
+    sub.handler(snapshot)
+  }
+}
+
+function ensureSource() {
+  if (source) return
+  const es = new EventSource(jobEventsUrl())
+  source = es
+  const parse = (event: Event) => {
+    try {
+      dispatch(JSON.parse((event as MessageEvent).data) as JobSnapshot)
+    } catch {
+      /* 心跳/异常帧忽略 */
+    }
+  }
+  es.addEventListener('snapshot', parse)
+  es.addEventListener('job', parse)
+  es.onerror = () => {
+    for (const sub of Array.from(subscribers)) {
+      if (!sub.active) continue
+      sub.onError?.()
+      if (sub.closeOnError) subscribers.delete(sub)
+    }
+    maybeClose()
+  }
+}
+
+function maybeClose() {
+  if (subscribers.size) return
+  source?.close()
+  source = null
+}
+
 export function useJobStream(
   onSnapshot: (snapshot: JobSnapshot) => void,
   options: JobStreamOptions = {},
 ) {
-  let source: EventSource | null = null
-
-  function close() {
-    if (source) {
-      source.close()
-      source = null
-    }
+  const sub: Subscriber = {
+    handler: onSnapshot,
+    ids: null,
+    active: false,
+    onError: options.onError,
+    closeOnError: options.closeOnError,
   }
+  subscribers.add(sub)
 
   function open(ids: number[] | null = null) {
-    close()
     if (ids && !ids.length) return
-    const es = new EventSource(jobEventsUrl(ids))
-    source = es
+    sub.ids = ids ? new Set(ids) : null
+    sub.active = true
+    ensureSource()
+  }
 
-    const parse = (event: Event) => {
-      try {
-        onSnapshot(JSON.parse((event as MessageEvent).data) as JobSnapshot)
-      } catch {
-        /* 心跳/异常帧忽略 */
-      }
-    }
-    es.addEventListener('snapshot', parse)
-    es.addEventListener('job', parse)
-    es.onerror = () => {
-      options.onError?.()
-      if (options.closeOnError) close()
-    }
+  function close() {
+    subscribers.delete(sub)
+    maybeClose()
   }
 
   onBeforeUnmount(close)

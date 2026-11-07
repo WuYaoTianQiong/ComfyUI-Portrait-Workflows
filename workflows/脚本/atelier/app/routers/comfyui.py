@@ -33,7 +33,7 @@ from app.services.output_location import (
     OutputLocationError,
     expand_subfolder,
 )
-from app.services.generation import submit_generation
+from app.services.generation import SubmitSpec, submit_spec
 from app.services.idempotency import (
     SCOPE_RUN_BATCH,
     SCOPE_RUN_SINGLE,
@@ -56,9 +56,12 @@ class RunRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     seed: int | None = None
+    # 跑编辑框所见文本：传了就覆盖库里的文本，不写回提示词库（与 BatchItem 同义）
+    prompt_override: str | None = None
+    negative_prompt_override: str | None = None
     output_subfolder: str = ""
     idempotency_key: str = ""
 
@@ -69,7 +72,7 @@ class RunTextRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     seed: int | None = None
     source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
@@ -96,6 +99,12 @@ class BatchItem(BaseModel):
     seed: int | None = None
     # 批量替换碎片用：只替换本次注入的文本，不写回提示词库
     prompt_override: str | None = None
+    # 条目级覆盖：同一批里可以混用不同工作流/画质/比例；空值回落到 job 级。
+    workflow_path: str = ""
+    workflow_content: str | None = None
+    quality: str = ""
+    orientation: str = ""
+    aspect_ratio: str = ""
 
 
 class BatchRequest(BaseModel):
@@ -103,7 +112,7 @@ class BatchRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     title: str = "批量生成"
     output_subfolder: str = ""
@@ -115,7 +124,7 @@ class GenerateMissingRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     prompt_ids: list[int] | None = None  # 可选：仅补全指定提示词（与缺图集合取交集）
     output_subfolder: str = ""
@@ -381,11 +390,17 @@ def run_prompt(
 
         # 注入提示词：编译前保留【类型】标题，让【避免】先进入负向；
         # 标题本身在编译完成后由 inject_prompt 剥离。
-        clean_prompt = strip_headers(p.prompt)
+        effective_prompt = req.prompt_override if req.prompt_override is not None else p.prompt
+        effective_negative = (
+            req.negative_prompt_override
+            if req.negative_prompt_override is not None
+            else p.negative_prompt
+        )
+        clean_prompt = strip_headers(effective_prompt)
         prompt_data = {
-            "prompt": p.prompt or "",
+            "prompt": effective_prompt or "",
             "strip_fragment_headers": True,
-            "negative_prompt": p.negative_prompt or "",
+            "negative_prompt": effective_negative or "",
             "seed": req.seed if req.seed is not None else p.seed,
             "orientation": req.orientation,
             "quality": req.quality,
@@ -397,7 +412,7 @@ def run_prompt(
         # 创建任务记录
         prompt_params = {
             "prompt": clean_prompt,
-            "negative_prompt": p.negative_prompt or "",
+            "negative_prompt": effective_negative or "",
             "seed": seed_effective,
             "steps": p.steps, "cfg_scale": p.cfg_scale,
             "sampler": p.sampler or "", "model": p.model or "",
@@ -409,7 +424,7 @@ def run_prompt(
         items = [{
             "prompt_id": req.id,
             "seed": seed_effective,
-            "prompt_preview": (p.name or p.prompt or "")[:40],
+            "prompt_preview": (req.prompt_override or p.name or p.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
         extra = build_job_extra(
@@ -418,13 +433,13 @@ def run_prompt(
         )
         if key:
             extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_RUN_SINGLE})
-        outcome = submit_generation(
+        outcome = submit_spec(SubmitSpec(
             job_type="single", title="单图生成", items=items,
             workflow_path=workflow_path, workflow_content=req.workflow_content,
             orientation=req.orientation, quality=req.quality,
             aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
             prepare=lambda _index, _ctx: api_wf, extra=extra,
-        )
+        ))
 
         dims = ""
         if p.width and p.height:
@@ -511,13 +526,13 @@ def run_text_prompt(
         )
         if key:
             extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_TEXT_RUN})
-        outcome = submit_generation(
+        outcome = submit_spec(SubmitSpec(
             job_type="single", title="文本跑图", items=items,
             workflow_path=workflow_path, workflow_content=req.workflow_content,
             orientation=req.orientation, quality=req.quality,
             aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
             prepare=lambda _index, _ctx: api_wf, extra=extra,
-        )
+        ))
         return {
             "success": True, "job_id": outcome["job_id"],
             "result": outcome["result"], "seed": seed_effective,
@@ -581,19 +596,31 @@ def batch_generate(
         record = {
             "prompt_id": item.prompt_id,
             "seed": item.seed or 0,
-            "status": "pending",
-            "submit_state": "queued",
+            "status": "queued",
         }
+        for key in ("workflow_path", "workflow_content", "quality", "orientation", "aspect_ratio"):
+            value = getattr(item, key)
+            if value not in (None, ""):
+                record[key] = value
+        item_quality = item.quality or req.quality
+        item_orientation = item.orientation or req.orientation
+        item_aspect = item.aspect_ratio or req.aspect_ratio
+        item_workflow = item.workflow_path or workflow_path
+        item_content = (
+            item.workflow_content
+            if item.workflow_content is not None
+            else req.workflow_content
+        )
         pid = item.prompt_id
         if not pid:
-            record.update(status="error", submit_state="failed", error="缺少 prompt_id")
+            record.update(status="error", error="缺少 prompt_id")
             errors.append({"index": i, "error": "缺少 prompt_id"})
             items_raw.append(record)
             continue
 
         p = Prompt.get_or_none(Prompt.id == pid)
         if p is None:
-            record.update(status="error", submit_state="failed", error=f"提示词 {pid} 不存在")
+            record.update(status="error", error=f"提示词 {pid} 不存在")
             errors.append({"index": i, "prompt_id": pid, "error": f"提示词 {pid} 不存在"})
             items_raw.append(record)
             continue
@@ -623,7 +650,9 @@ def batch_generate(
                 "model": p.model or "",
                 "width": p.width,
                 "height": p.height,
-                "aspect_ratio": req.aspect_ratio,
+                "aspect_ratio": item_aspect,
+                "quality": item_quality,
+                "orientation": item_orientation,
                 "source_prompt_id": pid,
                 "source_prompt_name": p.name or "",
             }, ensure_ascii=False)
@@ -640,7 +669,9 @@ def batch_generate(
                 "model": p.model or "",
                 "width": p.width,
                 "height": p.height,
-                "aspect_ratio": req.aspect_ratio,
+                "aspect_ratio": item_aspect,
+                "quality": item_quality,
+                "orientation": item_orientation,
                 "source_prompt_id": pid,
                 "source_prompt_name": p.name or "",
             }, ensure_ascii=False)
@@ -655,10 +686,14 @@ def batch_generate(
     if idem_key:
         extra["idempotency_key"] = idem_key
         extra["idempotency_scope"] = SCOPE_RUN_BATCH
-    def prepare(index: int, _ctx) -> dict:
+    def prepare(index: int, ctx) -> dict:
         item = req.items[index]
         p = prompts[index]
-        api_wf = load_workflow(workflow_path, req.workflow_content)
+        # item 级覆盖优先；同一个 job 里可以混用不同工作流/画质/比例。
+        api_wf = load_workflow(
+            ctx.workflow_path or workflow_path,
+            ctx.workflow_content if ctx.workflow_content is not None else req.workflow_content,
+        )
         prompt_text = (
             item.prompt_override
             if item.prompt_override
@@ -672,19 +707,19 @@ def batch_generate(
             "steps": p.steps,
             "cfg_scale": p.cfg_scale,
             "sampler": p.sampler,
-            "orientation": req.orientation,
-            "quality": req.quality,
-            "aspect_ratio": req.aspect_ratio,
+            "orientation": ctx.orientation or req.orientation,
+            "quality": ctx.quality or req.quality,
+            "aspect_ratio": ctx.aspect_ratio or req.aspect_ratio,
         })
         return api_wf
 
-    outcome = submit_generation(
+    outcome = submit_spec(SubmitSpec(
         job_type="batch", title=req.title, items=items_raw,
         workflow_path=workflow_path, workflow_content=req.workflow_content,
         orientation=req.orientation, quality=req.quality,
         aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
-        prepare=prepare, mode="queue", indexes=indexes, extra=extra,
-    )
+        prepare=prepare, mode="queue", indexes=tuple(indexes), extra=extra,
+    ))
 
     return {
         "success": bool(indexes), "job_id": outcome["job_id"], "results": [], "errors": errors,

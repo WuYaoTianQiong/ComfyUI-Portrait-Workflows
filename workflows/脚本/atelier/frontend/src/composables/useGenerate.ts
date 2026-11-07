@@ -1,10 +1,12 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
-import { apiGet, apiPost } from '../api/client'
+import { apiGet, apiPost, newIdempotencyKey } from '../api/client'
+import { submitBatch, submitRun, submitTextRun } from '../api/runs'
 import { customWorkflowContent } from './useWorkflows'
 import { useJobStream } from './useJobStream'
 import { useSettings } from './useSettings'
+import { formatApiError } from '../utils/errors'
 import type { JobSnapshot } from '../api/types'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
@@ -203,7 +205,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     const placeholder = {
       id: jobId,
       job_type: 'batch',
-      status: 'pending',
+      status: 'queued',
       title: '',
       total: 0,
       done_count: 0,
@@ -224,9 +226,30 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     stream.open(Array.from(tracked))
   }
 
+  /**
+   * 提交成功后的统一登记：队列模式登记进队列（提交请求结束即放行），
+   * 否则沿用单任务订阅（busy 一直挂到终态）。
+   */
+  function trackSubmitted(jobId: number) {
+    if (queueMode) {
+      trackQueued(jobId)
+      busy.value = false
+      return
+    }
+    subscribe(jobId)
+  }
+
   async function run(
     promptId: number,
-    options: { workflowPath: string; quality: string; orientation: string; aspectRatio?: string },
+    options: {
+      workflowPath: string
+      quality: string
+      orientation: string
+      aspectRatio?: string
+      seed?: number | null
+      promptOverride?: string
+      negativePromptOverride?: string
+    },
   ) {
     error.value = ''
     if (!options.workflowPath) {
@@ -235,7 +258,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     }
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs', {
+      const result = await submitRun({
         id: promptId,
         workflow_path: options.workflowPath,
         // 自定义工作流不在后端磁盘上，内容必须一起带过去
@@ -243,6 +266,10 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         quality: options.quality,
         orientation: options.orientation,
         aspect_ratio: options.aspectRatio ?? '',
+        seed: options.seed ?? null,
+        // 所见即所得：跑编辑框当前文本，不写回提示词库
+        prompt_override: options.promptOverride,
+        negative_prompt_override: options.negativePromptOverride,
         output_subfolder: outputSubfolder.value,
       })
       if (!result.success) {
@@ -250,9 +277,9 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         busy.value = false
         return
       }
-      subscribe(result.job_id)
+      trackSubmitted(result.job_id)
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatApiError(e)
       busy.value = false
     }
   }
@@ -273,7 +300,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     if (!promptIds.length) return
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/batch', {
+      const result = await submitBatch({
         // 不传 seed：后端按「提示词保存的种子 → 随机」解析，item 记录与实际提交一致
         items: promptIds.map((id) => ({ prompt_id: id })),
         workflow_path: options.workflowPath,
@@ -285,9 +312,9 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         title: options.title ?? `批量生成 ${promptIds.length} 条`,
         output_subfolder: outputSubfolder.value,
       })
-      subscribe(result.job_id)
+      trackSubmitted(result.job_id)
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatApiError(e)
       busy.value = false
     }
   }
@@ -309,7 +336,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     if (!items.length) return
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/batch', {
+      const result = await submitBatch({
         items: items.map((it) => ({
           prompt_id: it.promptId,
           seed: it.seed,
@@ -323,10 +350,10 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         title: options.title ?? `批量替换碎片 ${items.length} 条`,
         output_subfolder: outputSubfolder.value,
       })
-      subscribe(result.job_id)
+      trackSubmitted(result.job_id)
       return result.job_id
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatApiError(e)
       busy.value = false
     }
   }
@@ -355,7 +382,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     }
     try {
       busy.value = true
-      const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
+      const result = await submitTextRun({
         prompt: options.prompt,
         negative_prompt: options.negative_prompt ?? '',
         workflow_path: options.workflowPath,
@@ -369,7 +396,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
       })
       subscribe(result.job_id)
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatApiError(e)
       busy.value = false
     }
   }
@@ -392,14 +419,12 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         body && typeof body === 'object' && !Array.isArray(body)
           ? { ...(body as Record<string, unknown>), output_subfolder: outputSubfolder.value }
           : body
-      const result = await apiPost<T>(path, payload)
-      if (result.job_id) {
-        if (queueMode) trackQueued(result.job_id)
-        else subscribe(result.job_id)
-      } else busy.value = false
+      const result = await apiPost<T>(path, payload, {}, { idempotencyKey: newIdempotencyKey() })
+      if (result.job_id) trackSubmitted(result.job_id)
+      else busy.value = false
       return result
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatApiError(e)
       throw e
     } finally {
       // 队列模式：提交请求一结束就放行，让用户接着提交下一组（任务本身由 ComfyUI 排队）

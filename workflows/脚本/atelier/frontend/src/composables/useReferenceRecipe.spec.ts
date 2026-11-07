@@ -275,6 +275,57 @@ describe('buildRecipeRequest', () => {
     expect(both.extra_library).toBeUndefined()
   })
 
+  it('第 4 槽文字补充只随图片发送，手动改写不发送', () => {
+    const withImage = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: 'F:/lib/uploads/hair.png',
+        extraText: '  发尾浅金色挑染  ',
+      },
+    )
+    expect(withImage.extra_text).toBe('发尾浅金色挑染')
+
+    const noImage = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '', extraText: '发尾浅金色挑染' },
+    )
+    expect('extra_text' in noImage).toBe(false)
+
+    const manual = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: 'F:/lib/uploads/hair.png',
+        extraText: '发尾浅金色挑染',
+        promptOverride: '手动改写后的提示词',
+      },
+    )
+    expect(manual.prompt_override).toBe('手动改写后的提示词')
+    expect('extra_text' in manual).toBe(false)
+  })
+
+  it('双人姿势的 B 文字设定写入 person_b_text，空串不发送', () => {
+    const withB = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        personBText: '金色齐肩短发，酒红色西装外套',
+      },
+    )
+    expect(withB.person_b_text).toBe('金色齐肩短发，酒红色西装外套')
+
+    const blank = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '', personBText: '   ' },
+    )
+    expect('person_b_text' in blank).toBe(false)
+  })
+
   it('八类碎片按归属映射到 4 个文本字段（同类以「；」连接）', () => {
     const fragments: RecipeTextFragments = {
       ...createEmptyRecipeTextFragments(),

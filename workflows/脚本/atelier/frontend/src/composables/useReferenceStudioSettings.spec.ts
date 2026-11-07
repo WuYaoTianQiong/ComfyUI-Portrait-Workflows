@@ -75,6 +75,14 @@ function validSnapshot(): ReferenceStudioSettings {
         useDepth: true,
       },
     ],
+    extra: {
+      source: 'library',
+      library: 'hair',
+      id: 'hair-1',
+      path: '',
+      name: '发型参考 A',
+      text: '发尾浅金色挑染',
+    },
     style: 'none',
     workflow: 'Qwen21+VNCCS.json',
     baseSeed: 123456,
@@ -87,6 +95,7 @@ function validSnapshot(): ReferenceStudioSettings {
       场景环境: [{ type: '场景环境', content: '黄昏街道' }],
     },
     negativePrompt: '低质量，多余手指',
+    personBText: '金色齐肩短发，酒红色西装外套',
     portraitMode: 'image',
     costumeMode: 'image',
     poseMode: 'image',
@@ -129,6 +138,7 @@ describe('默认值', () => {
       portrait: [],
       costume: [],
       pose: [],
+      extra: { source: 'empty', library: '', id: '', path: '', name: '', text: '' },
       style: 'realistic',
       workflow: '',
       baseSeed: DEFAULT_REFERENCE_STUDIO_BASE_SEED,
@@ -137,6 +147,7 @@ describe('默认值', () => {
       sizesConfigured: false,
       textFragments: createEmptyRecipeTextFragments(),
       negativePrompt: '',
+      personBText: '',
       portraitMode: null,
       costumeMode: null,
       poseMode: null,
@@ -178,6 +189,31 @@ describe('写入后读回', () => {
     const dirty = parseReferenceStudioSettings(raw)
     expect(dirty?.portraitSupplement).toBe(false)
     expect(dirty?.recipeSourceId).toBeNull()
+  })
+
+  it('第 4 槽：缺字段按空槽读回，脏数据不整体丢弃', () => {
+    const raw = validSnapshot() as unknown as Record<string, unknown>
+    delete raw.extra
+    expect(parseReferenceStudioSettings(raw)?.extra).toEqual({
+      source: 'empty',
+      library: '',
+      id: '',
+      path: '',
+      name: '',
+      text: '',
+    })
+
+    // 无 id 的 library 来源 → 视为未选；上传来源必须有 path
+    raw.extra = { source: 'library', library: 'hair', id: '', path: '', name: 'x', text: 'y' }
+    expect(parseReferenceStudioSettings(raw)?.extra.source).toBe('empty')
+    raw.extra = { source: 'upload', library: '', id: '', path: '', name: 'x', text: 'y' }
+    expect(parseReferenceStudioSettings(raw)?.extra.source).toBe('empty')
+    raw.extra = { source: 'upload', library: '', id: '', path: '/up/a.png', name: 'x', text: 'y' }
+    expect(parseReferenceStudioSettings(raw)?.extra).toMatchObject({
+      source: 'upload',
+      path: '/up/a.png',
+      text: 'y',
+    })
   })
 
   it('多次写入合并成一份，不丢其它字段', () => {

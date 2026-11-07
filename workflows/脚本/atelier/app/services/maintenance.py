@@ -22,6 +22,7 @@ from pathlib import Path
 
 from app.models import EntityTag, Image, ImageCategory, ImageTag, db
 from app.config import settings
+from app.services.migrations import pending_versions
 from app.services.tagging import recalc_usage_counts
 from app.services.thumbnail import clear_thumbnails_for
 
@@ -88,10 +89,35 @@ def backup_database(tag: str = "bak", stamp: str | None = None) -> Path:
         raise FileNotFoundError(f"数据库不存在: {src}")
     stamp = stamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     dst = backup_dir() / f"{src.stem}.db.{tag}_{stamp}"
-    with sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=15) as s:
+    with sqlite3.connect(f"{src.as_uri()}?mode=ro", uri=True, timeout=15) as s:
         with sqlite3.connect(str(dst)) as d:
             s.backup(d)
     return dst
+
+
+def backup_before_migrations(migrations) -> Path | None:
+    """在 init_db 之前为待应用的迁移打恢复点。
+
+    与普通启动备份不同，这里**失败必须中止启动**：破坏性迁移（DROP/重建索引）
+    一旦在没有恢复点的情况下执行，失败后只能靠人工翻旧备份。只在生产库、
+    库已存在且确有 pending 时执行；返回 None 表示没有需要额外备份的迁移。
+    """
+    if not _is_production_db():
+        return None
+    src = Path(settings.db_path)
+    if not src.exists():
+        return None
+    pending = pending_versions(src, migrations)
+    if not pending:
+        return None
+    tag = f"pre_v{max(pending)}"
+    try:
+        path = backup_database(tag)
+    except Exception as exc:
+        logger.exception("迁移前备份失败，拒绝继续启动（待应用 v%s）", pending)
+        raise RuntimeError(f"迁移前备份失败: {exc}") from exc
+    logger.info("迁移前备份完成: %s（待应用 v%s）", path.name, pending)
+    return path
 
 
 def rotate_backups(keep: int = BACKUP_KEEP) -> dict:
@@ -196,23 +222,28 @@ def run_startup_maintenance(
     keep_days: int = TOMBSTONE_KEEP_DAYS,
     backup_keep: int = BACKUP_KEEP,
     backup_tag: str = "startup",
+    backup: bool = True,
 ) -> None:
     """启动时跑一次：在线备份 → 归档/轮转 → 回收墓碑。
 
     任何一步失败都只记日志，绝不阻断启动（维护任务是辅助，不是必需品）。
     只在生产库上执行：冒烟测试用临时库启动服务时若也跑维护，会把临时库的备份
     写进真实 backups/ 目录，还可能把真实备份挤出轮转窗口。
-    """
-    import os
 
+    `backup=False` 用于“迁移前已经打过恢复点”的场景，避免同一次启动打两份备份；
+    轮转与墓碑回收仍然执行。
+    """
     if not _is_production_db():
         logger.info("当前不是生产库（%s），跳过启动维护", settings.db_path)
         return
-    try:
-        path = backup_database(backup_tag)
-        logger.info("启动备份完成: %s", path.name)
-    except Exception:
-        logger.exception("启动备份失败，本次跳过墓碑回收")
+    if backup:
+        try:
+            path = backup_database(backup_tag)
+            logger.info("启动备份完成: %s", path.name)
+        except Exception:
+            logger.exception("启动备份失败，本次跳过墓碑回收")
+    else:
+        logger.info("迁移前已备份，跳过启动备份")
 
     try:
         rot = rotate_backups(backup_keep)

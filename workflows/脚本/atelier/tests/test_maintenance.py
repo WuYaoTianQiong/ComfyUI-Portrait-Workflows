@@ -1,11 +1,12 @@
 """墓碑回收：关联表、缩略图、标签计数都要一起清干净。"""
+import sqlite3
 from datetime import datetime
 
 
 def test_purge_tombstones_cleans_entity_tags_thumbnails_and_counts(api, seed_history):
     from app.models import EntityTag, Image, Tag
     from app.services import maintenance
-    from app.services.thumbnail import THUMBNAIL_DIR
+    from app.services.thumbnail import THUMBNAIL_DIR, _thumb_prefix
 
     old = seed_history(filename="old.png")
     live = seed_history(filename="live.png")
@@ -19,7 +20,7 @@ def test_purge_tombstones_cleans_entity_tags_thumbnails_and_counts(api, seed_his
     Tag.update(usage_count=99).where(Tag.id == tag.id).execute()
 
     THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
-    thumb = THUMBNAIL_DIR / "old.png__output_999_1_100.webp"
+    thumb = THUMBNAIL_DIR / f"{_thumb_prefix('old.png', '', 'output')}_300_999_1_v2.webp"
     thumb.write_bytes(b"x")
     try:
         result = maintenance.purge_tombstones(keep_days=7, dry_run=False)
@@ -30,6 +31,35 @@ def test_purge_tombstones_cleans_entity_tags_thumbnails_and_counts(api, seed_his
         assert Tag.get_by_id(tag.id).usage_count == 1
     finally:
         thumb.unlink(missing_ok=True)
+
+def test_backup_before_migrations_creates_pre_version_backup(tmp_path, monkeypatch):
+    """有 pending 迁移时先打 pre_vN 恢复点；已是最新版则不重复备份。"""
+    from app.config import settings
+    from app.services import maintenance
+
+    db_path = tmp_path / "prompts.db"
+    with sqlite3.connect(db_path):
+        pass
+    monkeypatch.setattr(settings, "db_path", db_path)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(maintenance, "_is_production_db", lambda: True)
+
+    migrations = [(1, "base", lambda _db: None), (8, "pending", lambda _db: None)]
+    path = maintenance.backup_before_migrations(migrations)
+
+    assert path is not None
+    assert path.name.startswith("prompts.db.pre_v8_")
+    assert path.exists()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            " version INTEGER PRIMARY KEY, applied_at DATETIME, note TEXT)"
+        )
+        conn.execute("INSERT INTO schema_version(version) VALUES (8)")
+
+    assert maintenance.backup_before_migrations(migrations) is None
+
 
 def test_rotate_backups_never_deletes_manual_restore_points(tmp_path, monkeypatch):
     """轮转只作用于 *.db.startup_*；人工恢复点 *.db.pre_* 永不自动删除。"""

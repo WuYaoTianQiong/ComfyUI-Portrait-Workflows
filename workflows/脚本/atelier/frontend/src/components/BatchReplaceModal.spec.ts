@@ -127,6 +127,7 @@ function fakeBatchReplace(body: {
 }
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string, params?: Record<string, unknown>) => {
     if (path.includes('/api/prompts/full')) {
       const ids = params?.ids ? String(params.ids).split(',') : null

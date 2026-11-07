@@ -42,7 +42,8 @@ def test_size_preview_matches_actual_injection():
     )
     preview = build_size_preview(wf, params)
 
-    assert set(preview) == {"4K", "6K"}
+    # 工作流里仍可写旧键；apply_quality_tiers 统一归一成倍率键。
+    assert set(preview) == {"1.0x", "1.25x"}
     for tier, per_ratio in preview.items():
         assert per_ratio, f"{tier} 没有比例尺寸"
         for ratio, expected in per_ratio.items():
@@ -67,8 +68,17 @@ def test_inspect_endpoint_returns_caps_and_preview(api):
     body = resp.json()
     assert body["caps"]["prompt"] is True
     assert body["params"]["quality_mode"] == "scale"
-    assert body["params"]["quality_tiers"] == ["4K"]
-    assert body["size_preview"]["4K"]
+    assert body["params"]["quality_tiers"] == ["1.0x"]
+    assert body["params"]["default_quality"] == "1.0x"
+    assert body["size_preview"]["1.0x"]
+
+
+def test_apply_quality_tiers_normalizes_legacy_keys():
+    params = apply_quality_tiers(
+        {},
+        {"extra": {"atelier": {"quality_tiers": ["4K", "1.0x", "12K"]}}},
+    )
+    assert params["quality_tiers"] == ["1.0x", "2.0x"]
 
 
 def test_inspect_requires_path_or_content(api):

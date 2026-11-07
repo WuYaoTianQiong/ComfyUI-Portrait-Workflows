@@ -10,6 +10,7 @@
 """
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -20,6 +21,15 @@ sys.path.insert(0, str(ROOT))
 _TMP = Path(tempfile.mkdtemp(prefix="atelier_contract_"))
 os.environ["ATELIER_DB_PATH"] = str(_TMP / "contract.db")
 os.environ["ATELIER_THUMBNAIL_DIR"] = str(_TMP / "thumbs")
+# 工作流库也隔离：资产型测试只依赖 tests/fixtures/workflows 的最小样本，
+# 不再取决于开发机磁盘上恰好有哪些真实工作流。
+_LIBRARY = _TMP / "library"
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "workflows"
+if _FIXTURES.is_dir():
+    shutil.copytree(_FIXTURES, _LIBRARY, dirs_exist_ok=True)
+else:
+    _LIBRARY.mkdir(parents=True, exist_ok=True)
+os.environ["ATELIER_LIBRARY_ROOT"] = str(_LIBRARY)
 # 隔离 ComfyUI 根目录：否则 get_image_metadata 会去读本机真实 output，
 # 测试结果就取决于磁盘上恰好存在哪些文件（缺文件判定尤其敏感）
 _COMFY_ROOT = _TMP / "comfyui"
@@ -50,6 +60,7 @@ client = TestClient(app, raise_server_exceptions=False)
 
 _TABLES = [
     # 顺序 = 先删子表再删父表，否则外键约束会拦住（template_fragments → prompts/templates）
+    "file_tombstones",
     "prompt_categories",
     "prompt_tags",
     "entity_tags",
@@ -92,7 +103,13 @@ def seed_prompt():
     def _make(**kw):
         kw.setdefault("name", "测试提示词")
         kw.setdefault("prompt", "【人物面部】测试面部")
-        return Prompt.create(**kw)
+        prompt = Prompt.create(**kw)
+        # entity_tags 是标签的唯一事实来源；直接建库的测试数据也要同步。
+        if kw.get("tags"):
+            from app.services.tagging import sync_prompt_tags
+
+            sync_prompt_tags(prompt.id, kw.get("tags"))
+        return prompt
 
     return _make
 

@@ -11,7 +11,7 @@ from app.services.prompt_compiler import compile_for_submission
 from app.services.workflow_parser import (
     RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt, resolve_seed,
 )
-from app.services.generation import submit_generation
+from app.services.generation import SubmitSpec, submit_spec
 from app.services.idempotency import (
     SCOPE_COMPOSER_BATCH,
     SCOPE_COMPOSER_SINGLE,
@@ -34,10 +34,40 @@ from app.services.costume_policy import (
     costume_covers_lower, costume_coverage_warning, has_explicit_content,
 )
 from app.services.tagging import (
-    RANDOM_EXCLUDE_TAG, RANDOM_EXCLUDE_WARNING, split_tags,
+    RANDOM_EXCLUDE_TAG, RANDOM_EXCLUDE_WARNING,
 )
 
 router = APIRouter(tags=["组合创作"])
+
+
+def _prompt_ids_with_tag_name(name: str, contains: bool = False):
+    query = (
+        EntityTag.select(EntityTag.entity_id)
+        .join(Tag, on=(EntityTag.tag == Tag.id))
+        .where(EntityTag.entity_type == "prompt")
+    )
+    return query.where(Tag.name.contains(name)) if contains else query.where(Tag.name == name)
+
+
+def _sampler_params(api_workflow: dict) -> dict:
+    """快照实际生效的采样参数，供重试复现；工作流文件后续改动也不影响。"""
+    for node in api_workflow.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") not in ("KSampler", "KSamplerAdvanced"):
+            continue
+        inputs = node.get("inputs") or {}
+        return {
+            key: value
+            for key, value in (
+                ("steps", inputs.get("steps")),
+                ("cfg_scale", inputs.get("cfg")),
+                ("sampler", inputs.get("sampler_name")),
+                ("scheduler", inputs.get("scheduler")),
+            )
+            if value is not None
+        }
+    return {}
 
 
 def _get_fragment_data(
@@ -56,7 +86,7 @@ def _get_fragment_data(
         query = query.where(
             Prompt.prompt.contains(search)
             | Prompt.name.contains(search)
-            | Prompt.tags.contains(search)
+            | Prompt.id.in_(_prompt_ids_with_tag_name(search, contains=True))
             | Prompt.note.contains(search)
         )
 
@@ -78,6 +108,9 @@ def _get_fragment_data(
 
     rows = list(query.order_by(Prompt.id.desc()))
     keyword = (search or "").strip().lower()
+    excluded_ids = set(
+        _prompt_ids_with_tag_name(RANDOM_EXCLUDE_TAG).scalars()
+    )
 
     only = fragment_type if fragment_type in FRAGMENT_TYPES else ""
     grouped = {only: []} if only else {t: [] for t in FRAGMENT_TYPES}
@@ -90,7 +123,7 @@ def _get_fragment_data(
         # 安全模式：整条提示词隐藏（其下所有碎片一起消失），只按 tags/note 判定。
         if safe_mode and contains_nsfw_keyword(r.tags, r.note):
             continue
-        excluded = RANDOM_EXCLUDE_TAG in split_tags(r.tags)
+        excluded = r.id in excluded_ids
         fragments = parse(r.prompt)
         costume_text = next(
             (f["content"] for f in fragments if f["type"] == "人物服饰"), "",
@@ -193,12 +226,15 @@ def get_random_recipe(
     若排除后为空则回退到完整候选集，保证不会因为只有一套而 404。
     """
     candidates: list[tuple[Prompt, dict[str, str]]] = []
+    excluded_ids = set(
+        _prompt_ids_with_tag_name(RANDOM_EXCLUDE_TAG).scalars()
+    )
     for row in Prompt.select().order_by(Prompt.id.desc()):
         if safe_mode and contains_nsfw_keyword(row.tags, row.note):
             continue
         if safe_mode and has_explicit_content(row.prompt):
             continue
-        if RANDOM_EXCLUDE_TAG in split_tags(row.tags):
+        if row.id in excluded_ids:
             continue
         fragments = parse(row.prompt)
         if len(fragments) != len(FRAGMENT_TYPES):
@@ -250,7 +286,7 @@ class ComposerRunRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     output_subfolder: str = ""
     idempotency_key: str = ""
@@ -304,6 +340,7 @@ def composer_run(
                 "source": "composer",
                 "seed": seed_effective,
                 "compiled": prompt_data.get("compiled"),
+                **_sampler_params(api_wf),
             }, ensure_ascii=False),
         }]
         extra = build_job_extra(
@@ -312,13 +349,13 @@ def composer_run(
         )
         if key:
             extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_COMPOSER_SINGLE})
-        outcome = submit_generation(
+        outcome = submit_spec(SubmitSpec(
             job_type="single", title="组合创作", items=items,
             workflow_path=workflow_path, workflow_content=req.workflow_content,
             orientation=req.orientation, quality=req.quality,
             aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
             prepare=lambda _index, _ctx: api_wf, extra=extra,
-        )
+        ))
         return {
             "success": True, "job_id": outcome["job_id"],
             "result": outcome["result"], "seed": seed_effective,
@@ -341,7 +378,7 @@ class BatchRandomRunRequest(BaseModel):
     workflow_path: str = ""
     workflow_content: str | None = None
     orientation: str = "portrait"
-    quality: str = "4K"
+    quality: str = "1.0x"
     aspect_ratio: str = ""
     negative_prompt: str = ""
     search: str = ""  # 碎片筛选条件
@@ -392,7 +429,7 @@ def composer_batch_random_run(
         job_items = []
         if provided:
             for composed_prompt in provided:
-                task_seed = random.randint(0, 2**32 - 1)
+                task_seed = random.randint(1, 2**32 - 1)
                 job_items.append({
                     "prompt_id": 0,
                     "seed": task_seed,
@@ -425,7 +462,7 @@ def composer_batch_random_run(
 
                 composed_prompt = "\n\n".join(composed_parts)
                 # 每个任务独立随机种子，避免批量时所有图用同一个种子
-                task_seed = random.randint(0, 2**32 - 1)
+                task_seed = random.randint(1, 2**32 - 1)
 
                 job_items.append({
                     "prompt_id": 0,
@@ -449,6 +486,7 @@ def composer_batch_random_run(
         # 批量任务在入队时就编译一次，prompt_params 里留下实际提交的正/负向；
         # 后台 prepare 里的 inject_prompt 会再编译一次（幂等），不会改变结果。
         negative_effective = bool(detect_workflow_caps(api_wf).get("negative_effective"))
+        sampler_params = _sampler_params(api_wf)
         for item in job_items:
             params = json.loads(item["prompt_params"])
             compiled = compile_for_submission(
@@ -458,9 +496,9 @@ def composer_batch_random_run(
                 strip_fragment_headers=True,
             )
             params["compiled"] = compiled.as_dict()
+            params.update(sampler_params)
             item["prompt_params"] = json.dumps(params, ensure_ascii=False)
-            item["status"] = "pending"
-            item["submit_state"] = "queued"
+            item["status"] = "queued"
 
         extra = build_job_extra(workflow_path, req.workflow_content, req.output_subfolder)
         if idem_key:
@@ -483,7 +521,7 @@ def composer_batch_random_run(
             inject_prompt(api_wf, prompt_data)
             return api_wf
 
-        outcome = submit_generation(
+        outcome = submit_spec(SubmitSpec(
             job_type="batch" if len(job_items) > 1 else "single",
             title=f"批量随机组合 ({len(job_items)} 组)",
             items=job_items,
@@ -491,8 +529,8 @@ def composer_batch_random_run(
             orientation=req.orientation, quality=req.quality,
             aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
             prepare=prepare, mode="queue",
-            indexes=list(range(len(job_items))), extra=extra,
-        )
+            indexes=tuple(range(len(job_items))), extra=extra,
+        ))
 
         return {
             "success": True, "job_id": outcome["job_id"], "results": [],

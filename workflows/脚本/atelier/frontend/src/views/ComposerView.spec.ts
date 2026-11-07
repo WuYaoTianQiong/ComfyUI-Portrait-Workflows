@@ -64,6 +64,7 @@ const fixture = vi.hoisted(() => ({
 }))
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string) => {
     if (path.includes('/api/jobs/')) {
       // 按 id 返回同形状的快照，标题带上 id 便于断言"列出的是哪几个任务"

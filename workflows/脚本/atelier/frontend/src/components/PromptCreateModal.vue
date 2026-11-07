@@ -13,7 +13,11 @@ import { FRAGMENT_TYPES } from '../constants'
  * · 完整提示词：正文、负面、标签、备注与四个采样参数
  * · 碎片：选类型 + 填内容，自动拼成 `【类型】\n内容` 存入（α 之后碎片 = 单块 prompt）
  */
-const props = defineProps<{ open: boolean }>()
+/** `initial`：从试跑结果「存为提示词」时预填当次实际文本 / 负向 / 种子。 */
+const props = defineProps<{
+  open: boolean
+  initial?: { prompt?: string; negative_prompt?: string; seed?: number | null } | null
+}>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'created', id: number): void }>()
 
 const toast = useToast()
@@ -40,6 +44,11 @@ watch(
   (open) => {
     if (open) {
       Object.assign(form, blank())
+      if (props.initial) {
+        form.prompt = props.initial.prompt ?? ''
+        form.negative_prompt = props.initial.negative_prompt ?? ''
+        form.seed = props.initial.seed ?? ''
+      }
       mode.value = 'full'
       fragType.value = '人物面部'
       fragContent.value = ''

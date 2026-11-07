@@ -22,6 +22,7 @@ from app.config import settings
 from app.models import init_db, db
 from app.services.paths import _resolve_if_reparse
 from app.services.logging_setup import setup_logging
+from app.services.submission import SubmitContractError
 from app.services.workflow_parser import RatioNotSupported
 
 logger = logging.getLogger("atelier")
@@ -41,12 +42,15 @@ for _ext, _type in (
 async def lifespan(app: FastAPI):
     # === 启动 ===
     setup_logging(settings.app_root / "logs")
+    # 迁移可能包含 DROP/重建索引；恢复点必须先于 init_db。
+    from app.models import MIGRATIONS
+    from app.services.maintenance import backup_before_migrations, run_startup_maintenance
+
+    pre_backup = backup_before_migrations(MIGRATIONS)
     init_db()
     # 启动维护：在线备份 → 备份归档/轮转 → 回收超过保留期的墓碑。
     # 必须在写者线程启动前跑完，避免和同步/巡检抢写锁。
-    from app.services.maintenance import run_startup_maintenance
-
-    run_startup_maintenance()
+    run_startup_maintenance(backup=pre_backup is None)
     print(f"  DB:       {settings.db_path}")
     print(f"  ComfyUI:  {settings.comfyui_api}")
     print(f"  API 文档:  http://{settings.host}:{settings.port}/docs")
@@ -107,6 +111,12 @@ app = FastAPI(
 @app.exception_handler(RatioNotSupported)
 async def _ratio_not_supported(_request, exc: RatioNotSupported):
     """比例超出工作流安全范围时直接拒绝，前端根据 detail 提示换工作流。"""
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(SubmitContractError)
+async def _submit_contract_error(_request, exc: SubmitContractError):
+    """提交参数不合法（例如 sync 模式传多条目）属于请求错误，不是服务故障。"""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 # CORS：前端与后端同源部署，开发期走 Vite 代理，本来不需要跨域。

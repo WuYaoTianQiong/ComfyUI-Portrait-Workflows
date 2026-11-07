@@ -45,11 +45,15 @@ import type {
   RecipeTextFragments,
 } from './recipeTextFragments'
 import {
+  createEmptyExtraSlot,
   readReferenceStudioSettings,
   writeReferenceStudioSettings,
 } from './useReferenceStudioSettings'
 import type { ReferenceStudioSettings } from './useReferenceStudioSettings'
-import type { StoredReferenceSlotEntry } from './useReferenceStudioSettings'
+import type {
+  StoredReferenceExtraSlot,
+  StoredReferenceSlotEntry,
+} from './useReferenceStudioSettings'
 
 /** 姿势槽位的值：条目 + 加入时的图片模式。 */
 export interface PoseSlotSelection {
@@ -97,6 +101,19 @@ const costume = ref<CostumeItem[]>([])
 const pose = ref<PoseSlotSelection[]>([])
 
 /**
+ * 第 4 槽（2026-11-07）：发型库背面图 / 上传单图 + 文字补充。
+ *
+ * 与前三槽的差异：
+ * - 只保留 1 张，**不进入批量笛卡尔积**（一批共用同一张）；
+ * - 不支持纯文字（没有图时文字不生效，后端也会 400）；
+ * - 与三槽一样进 `pb.reference_studio_v1`，跨页签 / 刷新保留。
+ */
+const extra = ref<StoredReferenceExtraSlot>(createEmptyExtraSlot())
+
+/** 第 4 槽是否已选图（`source=empty` 即未选）。 */
+const extraFilled = computed(() => extra.value.source !== 'empty')
+
+/**
  * 文本补充八类碎片（2026-11-06）。
  *
  * 与三槽不同，它不需要按 id 回查库数据：持久化里存的就是 `{type, content}` 全文，
@@ -105,6 +122,8 @@ const pose = ref<PoseSlotSelection[]>([])
 const textFragments = ref<RecipeTextFragments>(createEmptyRecipeTextFragments())
 /** 用户手填的负向提示词；最终负向 = 后端自动抽取 + 这里的内容。 */
 const negativePrompt = ref('')
+/** 双人姿势的人物 B 文字设定；只在选中 composition=pair 姿势时参与提交。 */
+const personBText = ref('')
 
 /**
  * 三槽模式（P2 替代态，方案 §4.4）。
@@ -155,6 +174,14 @@ const poseCount = computed(() => pose.value.length)
 /** 三槽选中的条目总数（多选后的真实数量）。 */
 const totalSelected = computed(
   () => portraitCount.value + costumeCount.value + poseCount.value,
+)
+
+/** 当前姿势里是否有双人构图（上游 pair* 或 pose-studio-lite composition=pair）。 */
+const hasPairPose = computed(() =>
+  pose.value.some(
+    (entry) =>
+      entry.item.composition === 'pair' || entry.item.id.startsWith('pair'),
+  ),
 )
 
 /** 非空槽位数量（0–3）；数组里有内容即视为该槽已选。 */
@@ -431,6 +458,45 @@ function addPoseUpload(input: UploadSlotInput): void {
 }
 
 // ---------------------------------------------------------------------------
+// 第 4 槽（extra，单图 + 可选文字补充）
+// ---------------------------------------------------------------------------
+
+/** 第 4 槽：加入一张上传图（后传覆盖前传，与「只提交 1 张」一致）。 */
+function setExtraUpload(path: string, name: string): void {
+  extra.value = {
+    source: 'upload',
+    library: '',
+    id: '',
+    path,
+    name,
+    text: extra.value.text,
+  }
+}
+
+/** 第 4 槽：改为发型库条目（当前唯一支持的库）。 */
+function setExtraLibrary(library: 'hair', id: string, name: string): void {
+  extra.value = {
+    source: 'library',
+    library,
+    id,
+    path: '',
+    name,
+    text: extra.value.text,
+  }
+}
+
+/** 第 4 槽文字补充；只在有图时随提交发送。 */
+function setExtraText(text: string): void {
+  if (extra.value.text === text) return
+  extra.value = { ...extra.value, text }
+}
+
+/** 清空第 4 槽（图片与文字一起清，避免残留文字被当成纯文字槽）。 */
+function clearExtra(): void {
+  extra.value = createEmptyExtraSlot()
+}
+
+// ---------------------------------------------------------------------------
 // 通用
 // ---------------------------------------------------------------------------
 
@@ -439,9 +505,11 @@ function clearDraft(): void {
   portrait.value = []
   costume.value = []
   pose.value = []
+  extra.value = createEmptyExtraSlot()
   // 文本补充与负向同属草稿；清空后允许下次重新从磁盘恢复（测试与显式清空共用）。
   textFragments.value = createEmptyRecipeTextFragments()
   negativePrompt.value = ''
+  personBText.value = ''
   // 模式与「上次姿势」同属草稿：清空后回到「三槽都是空」的推导起点。
   slotModes.value = createEmptySlotModes()
   supplementFlags.value = createEmptySupplementFlags()
@@ -513,9 +581,12 @@ function persist(): void {
     portrait: portrait.value.map(storedPortrait),
     costume: costume.value.map(storedCostume),
     pose: pose.value.map(storedPose),
+    // 第 4 槽存最小来源信息 + 全文；恢复不依赖发型库是否已加载。
+    extra: { ...extra.value },
     // 文本补充存全文（不是只存 id）：恢复时不依赖库数据，也不会因为碎片池改名而丢内容。
     textFragments: cloneRecipeTextFragments(textFragments.value),
     negativePrompt: negativePrompt.value,
+    personBText: personBText.value,
     // P2：三槽模式单独持久化（旧数据没有这三个字段时由 hydrate 推导）。
     portraitMode: slotModes.value.portrait,
     costumeMode: slotModes.value.costume,
@@ -683,8 +754,10 @@ function normalizeSupplementFlags(): void {
 function restoreTextFragmentsFromSettings(
   stored: Pick<
     ReferenceStudioSettings,
+    | 'extra'
     | 'textFragments'
     | 'negativePrompt'
+    | 'personBText'
     | 'portraitSupplement'
     | 'costumeSupplement'
     | 'poseSupplement'
@@ -693,8 +766,10 @@ function restoreTextFragmentsFromSettings(
   >,
 ): void {
   if (textFragmentsRestoredFromStorage) return
+  extra.value = { ...stored.extra }
   textFragments.value = cloneRecipeTextFragments(stored.textFragments)
   negativePrompt.value = stored.negativePrompt
+  personBText.value = stored.personBText
   supplementFlags.value = cloneSupplementFlags({
     portrait: stored.portraitSupplement,
     costume: stored.costumeSupplement,
@@ -850,6 +925,22 @@ watch(
   },
   { flush: 'sync' },
 )
+watch(
+  personBText,
+  () => {
+    writeReferenceStudioSettings({ personBText: personBText.value })
+  },
+  { flush: 'sync' },
+)
+
+/** 第 4 槽单独落盘：与三槽分槽写同理，不覆盖其它字段。 */
+watch(
+  extra,
+  () => {
+    writeReferenceStudioSettings({ extra: { ...extra.value } })
+  },
+  { deep: true, flush: 'sync' },
+)
 
 /** 人像槽已选判定；不传 id 时返回「该槽是否非空」。 */
 function isPortraitSelected(id?: string): boolean {
@@ -881,6 +972,13 @@ export function useReferenceRecipeDraft() {
     portrait,
     costume,
     pose,
+    // 第 4 槽（单图 + 文字补充；不进入批量笛卡尔积）
+    extra,
+    extraFilled,
+    setExtraUpload,
+    setExtraLibrary,
+    setExtraText,
+    clearExtra,
     // 文本补充（八类碎片）与负向提示词（2026-11-06）
     textFragments,
     negativePrompt,
@@ -890,6 +988,8 @@ export function useReferenceRecipeDraft() {
     recipeSourceId,
     recipeSourceName,
     lastPoseId,
+    personBText,
+    hasPairPose,
     setSlotMode,
     setSlotSupplement,
     setRecipeSource,

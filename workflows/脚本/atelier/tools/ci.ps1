@@ -77,7 +77,9 @@ Write-Host "硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -Fo
 
 $frontend = Join-Path $root 'frontend'
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
-    Write-Host '前端依赖未安装，跳过前端三道关（frontend/node_modules 缺失）' -ForegroundColor Yellow
+    Write-Host 'FAILED: 前端依赖未安装（frontend/node_modules 缺失），无法执行第 3–7 关' -ForegroundColor Red
+    Write-Host '  先运行: cd frontend; npm ci' -ForegroundColor Yellow
+    exit 1
 } else {
     Push-Location $frontend
 

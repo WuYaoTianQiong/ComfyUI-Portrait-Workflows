@@ -410,6 +410,26 @@ def test_four_input_workflow_accepts_extra(api, recipe_env, captured):
     assert "图4" in resp.json()["prompt"]
 
 
+def test_extra_text_appends_to_extra_clause(api, recipe_env, captured):
+    """第 4 槽有图时，文字作为「此外需体现」追加，不替换图片主句。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **THREE_BODY,
+            "workflow": "图库专用_四槽_测试",
+            "extra_library": "costume",
+            "extra_id": "ACC-0001",
+            "extra_text": "金属扣与链条",
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "• 附加参考" in prompt
+    assert "此外需体现：金属扣与链条。" in prompt
+    # 预览与真实提交共用同一份生成结果（同一构建函数，不是两套文本）
+    assert "此外需体现：金属扣与链条。" in captured[0].prompt
+
+
 def test_three_slot_payload_uses_real_nodes(api, recipe_env, captured):
     resp = api.post("/api/reference/recipes", json=THREE_BODY)
     assert resp.status_code == 200
@@ -800,13 +820,49 @@ PAIR_ITEM = {
     "检索": "pair-P900 双人 并肩",
 }
 
+PAIR_PSL_ITEM = {
+    "id": "psl-D026",
+    "体系": "双人",
+    "姿势编号": "D026",
+    "分类": "双人站姿",
+    "姿势名称": "双臂前伸扶腰",
+    "角度": "正面",
+    "缩略图": "thumbs/psl-D026.png",
+    "原图": "img/psl-D026.png",
+    "检索": "psl-D026 双人 双臂前伸扶腰",
+}
+
 
 def _seed_pair_pose(recipe_env) -> None:
-    """给姿势库补一条 `pair*` 条目（双人分支按 id 前缀判定）。"""
-    _write_json(recipe_env["root"] / "data" / "pose-zh.json", POSE_ITEMS + [PAIR_ITEM])
-    _write_bytes(recipe_env["root"] / "img/P900.png")
-    _write_bytes(recipe_env["root"] / "thumbs/P900.png")
+    """补上游 `pair*` 与 pose-studio-lite `psl-*` 两种双人姿势。"""
+    _write_json(
+        recipe_env["root"] / "data" / "pose-zh.json",
+        POSE_ITEMS + [PAIR_ITEM, PAIR_PSL_ITEM],
+    )
+    for name in ("P900", "psl-D026"):
+        _write_bytes(recipe_env["root"] / f"img/{name}.png")
+        _write_bytes(recipe_env["root"] / f"thumbs/{name}.png")
     rl.clear_cache()
+
+
+def test_person_b_text_reaches_prompt_for_composition_pair(api, recipe_env):
+    """psl-* 双人姿势靠 composition 识别；B 文字设定进入自动提示词。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "person_b_text": "金色齐肩短发，酒红色西装外套，黑色阔腿长裤",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "双人要求" in prompt
+    assert "• 人物B（文字设定）：金色齐肩短发，酒红色西装外套，黑色阔腿长裤。" in prompt
+    assert "不要复用人物A的脸" in prompt
 
 
 def test_no_costume_prompt_drops_original_outfit_hint(api, recipe_env):
@@ -1224,3 +1280,16 @@ def test_trim_resolves_multi_level_conditioning_chain(api, recipe_env, captured)
         for key, value in (node.get("inputs") or {}).items():
             if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
                 assert value[0] in node_ids, f"节点{node_id}.{key} 指向已删节点 {value[0]}"
+
+def test_extra_text_requires_extra_image(api, recipe_env):
+    """纯文字第 4 槽不成立：有 extra_text 必须同时有图。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "extra_text": "冷棕色，刘海偏分",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 400
+    assert "第 4 槽文字补充必须同时提供" in resp.json()["detail"]

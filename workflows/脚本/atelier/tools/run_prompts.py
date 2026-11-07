@@ -28,12 +28,26 @@ from app.services import comfyui_client as comfy  # noqa: E402
 from app.services.workflow_parser import ensure_api_format, inject_prompt, set_output_prefix  # noqa: E402
 from tools.prompt_sets import META, SETS  # noqa: E402
 
-WORKFLOW_DIR = ROOT.parents[1]
+WORKFLOW_DIRS = (
+    settings.library_root / "通用工作流",
+    settings.library_root,
+)
 
 WORKFLOWS = {
     "porn": "PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json",
     "moody": "MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json",
 }
+
+
+def workflow_path(model_key: str) -> Path:
+    """按新目录结构找文件；兼容旧库根布局。"""
+    name = WORKFLOWS[model_key]
+    for directory in WORKFLOW_DIRS:
+        candidate = directory / name
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(d) for d in WORKFLOW_DIRS)
+    raise FileNotFoundError(f"找不到工作流 {name}；已查找: {searched}")
 
 
 def drop_bypassed_nodes(workflow: dict) -> int:
@@ -89,7 +103,7 @@ def drop_bypassed_nodes(workflow: dict) -> int:
 
 
 def build_task(set_key: str, prompt_key: str, model_key: str, seed: int) -> dict:
-    path = WORKFLOW_DIR / WORKFLOWS[model_key]
+    path = workflow_path(model_key)
     workflow = json.loads(path.read_text(encoding="utf-8"))
     dropped = drop_bypassed_nodes(workflow)
     api = ensure_api_format(workflow)

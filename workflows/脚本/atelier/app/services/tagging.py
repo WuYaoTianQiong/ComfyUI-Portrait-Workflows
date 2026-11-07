@@ -89,68 +89,111 @@ def image_tag_ids(image_id: int, prompt_id: int | None = None) -> list[int]:
     return sorted(result)
 
 
-def sync_prompt_tags(prompt_id: int, text: str | None) -> dict:
-    """按标签文本全量重算该提示词的 entity_tags，返回 {added, removed}。
-
-    全量重算而非增量：文本是唯一事实来源，重算才能保证"文本里删掉一个标签"
-    在关联表里也真的消失。数据量小（单条提示词最多十几个标签），成本可忽略。
-    """
+def _resolve_names(text: str | None) -> tuple[list[str], set[int]]:
+    names: list[str] = []
     wanted: set[int] = set()
     for name in split_tags(text):
-        wanted.add(get_or_create_tag(name).id)
+        tag = get_or_create_tag(name)
+        wanted.add(tag.id)
+        names.append(tag.name)
+    return names, wanted
+
+
+def _resolve_ids(tag_ids) -> tuple[list[str], set[int]]:
+    ids: list[int] = []
+    for raw in tag_ids or []:
+        tag_id = int(raw)
+        if tag_id not in ids:
+            ids.append(tag_id)
+    if not ids:
+        return [], set()
+    rows = {t.id: t.name for t in Tag.select().where(Tag.id.in_(ids))}
+    missing = [tag_id for tag_id in ids if tag_id not in rows]
+    if missing:
+        raise ValueError(f"标签不存在: {missing}")
+    return [rows[tag_id] for tag_id in ids], set(ids)
+
+
+def _adjust_usage(tag_ids, delta: int) -> None:
+    for tag_id in tag_ids:
+        if delta > 0:
+            db.execute_sql(
+                "UPDATE tags SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id = ?",
+                (tag_id,),
+            )
+        else:
+            db.execute_sql(
+                "UPDATE tags SET usage_count = CASE WHEN COALESCE(usage_count, 0) > 0 "
+                "THEN COALESCE(usage_count, 0) - 1 ELSE 0 END WHERE id = ?",
+                (tag_id,),
+            )
+
+
+def sync_prompt_tags(
+    prompt_id: int, text: str | None = None, tag_ids=None,
+) -> dict:
+    """把提示词的标签关联设成给定集合，并回写 `prompts.tags` 只读缓存。
+
+    - `tag_ids` 优先：UI 走标签 ID 时不再经过文本解析；
+    - `text` 兼容旧调用：解析标签名并自动创建；
+    - 无论哪条路径，`entity_tags` 都是唯一事实来源，文本只是派生缓存。
+    """
+    if tag_ids is not None:
+        names, wanted = _resolve_ids(tag_ids)
+    else:
+        names, wanted = _resolve_names(text)
 
     current = set(prompt_tag_ids(prompt_id))
     to_add = wanted - current
     to_remove = current - wanted
 
-    for tag_id in to_add:
-        EntityTag.get_or_create(
-            entity_type=ENTITY_PROMPT, entity_id=prompt_id, tag=tag_id
-        )
-    if to_remove:
-        EntityTag.delete().where(
-            (EntityTag.entity_type == ENTITY_PROMPT)
-            & (EntityTag.entity_id == prompt_id)
-            & (EntityTag.tag.in_(list(to_remove)))
-        ).execute()
-    return {"added": len(to_add), "removed": len(to_remove)}
+    with db.atomic():
+        for tag_id in to_add:
+            EntityTag.get_or_create(
+                entity_type=ENTITY_PROMPT, entity_id=prompt_id, tag=tag_id
+            )
+        if to_remove:
+            EntityTag.delete().where(
+                (EntityTag.entity_type == ENTITY_PROMPT)
+                & (EntityTag.entity_id == prompt_id)
+                & (EntityTag.tag.in_(list(to_remove)))
+            ).execute()
+        Prompt.update(tags=", ".join(names)).where(Prompt.id == prompt_id).execute()
+        if to_add:
+            _adjust_usage(to_add, +1)
+        if to_remove:
+            _adjust_usage(to_remove, -1)
+
+    return {
+        "added": len(to_add), "removed": len(to_remove), "text": ", ".join(names),
+    }
 
 
-def _rewrite_tag_text(text: str | None, old: str, new: str) -> tuple[str, bool]:
-    """把标签文本里的 old 精确替换成 new；new 为空表示删除。"""
-    parts: list[str] = []
-    changed = False
-    for raw in _TAG_SEP_RE.split(text or ""):
-        name = raw.strip()
-        if not name:
-            continue
-        if name == old:
-            changed = True
-            if new:
-                parts.append(new)
-        else:
-            parts.append(name)
-    return ", ".join(parts), changed
+def set_prompt_tags_by_ids(prompt_id: int, tag_ids) -> dict:
+    return sync_prompt_tags(prompt_id, tag_ids=tag_ids)
 
 
-def _sync_prompt_tag_texts(old: str, new: str) -> int:
-    """改写所有提示词的标签文本并重算关联；返回受影响条数。"""
+def _rebuild_prompt_tag_texts(prompt_ids) -> int:
+    """按 entity_tags 重写这些提示词的标签缓存（改名/删标签后调用）。"""
     changed = 0
-    for prompt in Prompt.select():
-        text, hit = _rewrite_tag_text(prompt.tags, old, new)
-        if not hit:
-            continue
-        Prompt.update(tags=text).where(Prompt.id == prompt.id).execute()
-        sync_prompt_tags(prompt.id, text)
+    for prompt_id in prompt_ids:
+        names = [
+            row.name
+            for row in Tag.select(Tag.name)
+            .join(EntityTag, on=(EntityTag.tag == Tag.id))
+            .where(
+                (EntityTag.entity_type == ENTITY_PROMPT)
+                & (EntityTag.entity_id == prompt_id)
+            )
+            .order_by(EntityTag.id)
+        ]
+        Prompt.update(tags=", ".join(names)).where(Prompt.id == prompt_id).execute()
         changed += 1
     return changed
 
 
 def rename_tag(tag_id: int, new_name: str) -> int:
-    """重命名标签，并把所有提示词文本里的旧名同步改掉。
-
-    否则下次保存提示词时，旧文本会经 `sync_prompt_tags` 把旧标签重新创建出来。
-    """
+    """重命名标签。关联表存的是 id，改名天然全量生效；只需重建文本缓存。"""
     new_name = (new_name or "").strip()
     if not new_name:
         raise ValueError("标签名不能为空")
@@ -163,63 +206,75 @@ def rename_tag(tag_id: int, new_name: str) -> int:
         return 0
     if Tag.get_or_none(Tag.name == new_name) is not None:
         raise ValueError("标签已存在")
-    old_name = tag.name
+    affected = [
+        row.entity_id
+        for row in EntityTag.select(EntityTag.entity_id).where(
+            (EntityTag.entity_type == ENTITY_PROMPT) & (EntityTag.tag == tag_id)
+        )
+    ]
     with db.atomic():
         Tag.update(name=new_name).where(Tag.id == tag_id).execute()
-        return _sync_prompt_tag_texts(old_name, new_name)
+        return _rebuild_prompt_tag_texts(affected)
 
 
 def delete_tag_with_refs(tag_id: int) -> int:
-    """删除标签，同时清掉所有提示词文本与关联表中的引用。"""
+    """删除标签；关联与文本缓存都按 id 清理，不再扫描全库文本。"""
     tag = Tag.get_or_none(Tag.id == tag_id)
     if tag is None:
         raise ValueError("标签不存在")
+    affected = [
+        row.entity_id
+        for row in EntityTag.select(EntityTag.entity_id).where(
+            (EntityTag.entity_type == ENTITY_PROMPT) & (EntityTag.tag == tag_id)
+        )
+    ]
     with db.atomic():
-        changed = _sync_prompt_tag_texts(tag.name, "")
         EntityTag.delete().where(EntityTag.tag == tag_id).execute()
         tag.delete_instance(recursive=False)
-    return changed
+        return _rebuild_prompt_tag_texts(affected)
+
+
+def _current_tag_ids(prompt_id: int) -> list[int]:
+    return list(
+        EntityTag.select(EntityTag.tag)
+        .where(
+            (EntityTag.entity_type == ENTITY_PROMPT)
+            & (EntityTag.entity_id == prompt_id)
+        )
+        .order_by(EntityTag.id)
+        .scalars()
+    )
 
 
 def add_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
-    """把标签追加到提示词（同时改文本与关联表）。返回是否发生变化。
-
-    文本是唯一事实来源：只写关联表不写文本的话，用户下次编辑提示词触发
-    `sync_prompt_tags` 全量重算时，这条关联会被冲掉。
-    """
-    from app.models import Prompt
-
+    """追加标签：先写关联，再按关联回写文本缓存。"""
     name = (name or "").strip()
     if not name:
         return False
-    prompt = Prompt.get_or_none(Prompt.id == prompt_id)
-    if prompt is None:
+    if Prompt.get_or_none(Prompt.id == prompt_id) is None:
         return False
-    names = split_tags(prompt.tags)
-    if name in names:
+    tag = get_or_create_tag(name)
+    current = _current_tag_ids(prompt_id)
+    if tag.id in current:
         return False
-    names.append(name)
-    text = ",".join(names)
-    Prompt.update(tags=text).where(Prompt.id == prompt_id).execute()
-    sync_prompt_tags(prompt_id, text)
+    set_prompt_tags_by_ids(prompt_id, current + [tag.id])
     return True
 
 
 def remove_prompt_tag_by_name(prompt_id: int, name: str) -> bool:
-    """从提示词去掉标签（同时改文本与关联表）。返回是否发生变化。"""
-    from app.models import Prompt
-
+    """移除标签：先解析出 id，再从关联里删掉并回写文本缓存。"""
     name = (name or "").strip()
-    prompt = Prompt.get_or_none(Prompt.id == prompt_id)
-    if prompt is None or not name:
+    if not name:
         return False
-    names = split_tags(prompt.tags)
-    if name not in names:
+    if Prompt.get_or_none(Prompt.id == prompt_id) is None:
         return False
-    names = [n for n in names if n != name]
-    text = ",".join(names)
-    Prompt.update(tags=text).where(Prompt.id == prompt_id).execute()
-    sync_prompt_tags(prompt_id, text)
+    tag = Tag.get_or_none(Tag.name == name)
+    if tag is None:
+        return False
+    current = _current_tag_ids(prompt_id)
+    if tag.id not in current:
+        return False
+    set_prompt_tags_by_ids(prompt_id, [tid for tid in current if tid != tag.id])
     return True
 
 

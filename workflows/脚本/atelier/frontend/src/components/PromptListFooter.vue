@@ -143,6 +143,7 @@ defineEmits<{
 
 .locate-btn {
   justify-self: end;
+  white-space: nowrap;
 }
 
 .page-size {

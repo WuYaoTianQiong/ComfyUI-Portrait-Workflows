@@ -616,7 +616,7 @@ function submit() {
   emit('submit', {
     types: validReplacements.value.map((r) => r.type),
     workflowPath: wfPath.value,
-    quality: caps.value.quality ? quality.value : '4K',
+    quality: caps.value.quality ? quality.value : '1.0x',
     aspectRatio: caps.value.orientation ? (aspectRatio.value || defaultRatio.value) : '',
     items,
   })
@@ -1004,7 +1004,7 @@ function submit() {
               </div>
               <div class="res-meta">
                 <span :class="['res-status', row.status]">
-                  {{ row.submit_state === 'queued' ? '排队中' : statusLabel(row.status) }}
+                  {{ statusLabel(row.status) }}
                 </span>
                 <span v-if="row.seed" class="job-meta">seed {{ row.seed }}</span>
                 <span v-if="row.error" class="res-error">{{ row.error }}</span>

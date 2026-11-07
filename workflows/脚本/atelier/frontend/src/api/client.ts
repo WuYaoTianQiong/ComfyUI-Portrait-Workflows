@@ -56,17 +56,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(resp.status, detail, resp.headers.get('X-Request-ID'))
   }
-  return (await resp.json()) as T
+  // 204 / 空体在代理和未来端点里都可能出现；直接 resp.json() 会抛 SyntaxError，
+  // 绕过 ApiError，让调用方拿不到 status。
+  const text = await resp.text()
+  if (!text) return null as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new ApiError(resp.status, text, resp.headers.get('X-Request-ID'))
+  }
 }
 
 export function apiGet<T>(path: string, params: QueryParams = {}): Promise<T> {
   return request<T>(path + buildQuery(params))
 }
 
-export function apiPost<T>(path: string, body?: unknown, params: QueryParams = {}): Promise<T> {
+export interface PostOptions {
+  headers?: Record<string, string>
+  /** 传了就带 `X-Idempotency-Key`，后端据此保证同一次点击只建一个任务。 */
+  idempotencyKey?: string
+}
+
+export function newIdempotencyKey(): string {
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID()
+  }
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function apiPost<T>(
+  path: string,
+  body?: unknown,
+  params: QueryParams = {},
+  options: PostOptions = {},
+): Promise<T> {
+  const headers: Record<string, string> = {
+    ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(options.headers ?? {}),
+  }
+  if (options.idempotencyKey) headers['X-Idempotency-Key'] = options.idempotencyKey
   return request<T>(path + buildQuery(params), {
     method: 'POST',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 }

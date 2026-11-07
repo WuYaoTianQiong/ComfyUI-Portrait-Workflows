@@ -1,0 +1,54 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "portrait_ref.png"},
+    "_meta": {"title": "图1：人像参考 (Portrait)"}
+  },
+  "5": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {"image": ["1", 0], "megapixels": 1.0}
+  },
+  "38": {
+    "class_type": "GetImageSize",
+    "inputs": {"image": ["5", 0]}
+  },
+  "39": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": ["38", 0],
+      "height": ["38", 1],
+      "batch_size": 1
+    }
+  },
+  "40": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"clip": ["41", 0], "text": ""}
+  },
+  "41": {
+    "class_type": "CLIPLoader",
+    "inputs": {"clip_name": "t5xxl_fp16.safetensors", "type": "flux"}
+  },
+  "42": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["41", 0],
+      "positive": ["40", 0],
+      "negative": ["40", 0],
+      "latent_image": ["39", 0],
+      "seed": 1,
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1
+    }
+  },
+  "43": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["42", 0], "vae": ["41", 0]}
+  },
+  "44": {
+    "class_type": "SaveImage",
+    "inputs": {"images": ["43", 0], "filename_prefix": "fixture"}
+  }
+}

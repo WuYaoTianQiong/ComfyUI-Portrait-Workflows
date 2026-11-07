@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.services import reference_library, reference_remote_cache, reference_studio, uploads
+from app.services.asset_store import AssetStore, LibraryAssetRef
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
 from app.services.prompt_compiler import compile_for_submission
 from app.services.recipe_prompt import (
@@ -228,9 +229,11 @@ async def get_reference_image(
         )
 
     try:
-        path = reference_library.resolve_image(library, item_id, kind)
+        path = AssetStore().path(LibraryAssetRef(library, item_id, kind))
     except reference_library.ReferenceImageError as exc:
         raise HTTPException(exc.status_code, exc.detail) from None
+    if path is None:
+        raise HTTPException(404, "参考图片不存在")
     return FileResponse(
         str(path),
         media_type=reference_library.media_type_for(path),
@@ -259,10 +262,12 @@ class RecipeRequest(BaseModel):
     portrait_path: str = ""
     costume_path: str = ""
     pose_path: str = ""
-    #: 第 4 张（可选）：任意本地库条目或上传图，只补鞋包/配饰/场景
+    #: 第 4 张（可选）：发型库背面图 / 上传单图，只补发型或附加元素
     extra_library: str = ""
     extra_id: str = ""
     extra_path: str = ""
+    #: 第 4 槽文字补充：只在 extra 图片存在时追加「此外需体现」；有文本无图 400
+    extra_text: str = ""
     #: 指定合成台工作流（文件名或库内路径）；空 = 默认 Qwen21+VNCCS 三图
     workflow: str = ""
     #: 尺寸参数（前端透传）：空 = 保持现有默认；工作流 caps 不支持时后端会忽略
@@ -284,6 +289,8 @@ class RecipeRequest(BaseModel):
     portrait_supplement: bool = False
     costume_supplement: bool = False
     pose_supplement: bool = False
+    #: 双人姿势的人物 B 文字设定；仅 `composition=pair` 且自动模式生效
+    person_b_text: str = ""
     #: 修饰层渲染结果（`• 类型：内容` 多行）；始终追加，插在「补充要求」之前
     modifier_fragments: str = ""
     #: 真负向（透传 FaceswapRequest.negative_prompt）；实际提交内容由编译层合并
@@ -395,6 +402,7 @@ def _as_entry(item: dict) -> RecipeEntry:
         subtitle=item.get("subtitle", ""),
         facet=item.get("facet", ""),
         angle=item.get("angle", ""),
+        composition=item.get("composition", ""),
     )
 
 
@@ -581,6 +589,15 @@ def create_reference_recipe(req: RecipeRequest):
     elif req.extra_path.strip():
         extra_path = _upload_path(req.extra_path, "第 4 张参考")
 
+    # 第 4 槽是「图为主 + 文本补充」：没有图片时文字不生效，直接 400，
+    # 避免把一句发型描述当成纯文字第 4 槽提交（与明确不做项一致）。
+    extra_text = req.extra_text.strip()
+    if extra_text and extra_path is None:
+        raise HTTPException(
+            400,
+            "第 4 槽文字补充必须同时提供一张发型参考图（不支持纯文字第 4 槽）",
+        )
+
     paths = {
         "portrait": portrait_path,
         "costume": costume_path,
@@ -657,8 +674,10 @@ def create_reference_recipe(req: RecipeRequest):
     extra_kind = _extra_kind(api_wf)
 
     # 手动改写（P3）：前端已按分段编辑好整段正向，后端不再渲染碎片。
+    # 第 4 槽文字同样不参与（前端手动模式也不发送），与三槽文本口径一致。
     if manual_override:
         prompt = manual_override
+        extra_text = ""
     else:
         # 空槽直接传 None（不再用上传占位包装），否则 faceless 分支永远不会触发
         prompt = build_recipe_prompt(
@@ -680,6 +699,9 @@ def create_reference_recipe(req: RecipeRequest):
             # 修饰层：始终追加，插在「补充要求」/固定风格段之前
             modifier_fragments=req.modifier_fragments,
             negative_prompt=req.negative_prompt,
+            person_b_text=req.person_b_text,
+            # 第 4 槽文字补充：只在 extra 图片存在时渲染「此外需体现」
+            extra_text=extra_text,
         )
 
     # 提交顺序固定 人像 → 服装 → 姿势 → 附加；节点 id 用工作流真实图位（不重排）

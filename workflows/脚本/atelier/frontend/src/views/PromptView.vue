@@ -65,7 +65,7 @@ const {
   run,
   runBatch,
   runBatchReplace,
-} = useGenerate()
+} = useGenerate('', { queue: true })
 
 const {
   pageSize,
@@ -155,18 +155,29 @@ const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
   workflowPath, allWorkflows, aspectRatio,
 )
 
-function generate() {
+function generate(options: { count: number; seed: number | null }) {
   if (!draft.value) return
   if (!caps.value.prompt) {
     toast.error('该工作流不注入提示词（纯图像 / 超分），请换一个工作流')
     return
   }
-  run(draft.value.id, {
-    workflowPath: workflowPath.value,
-    quality: caps.value.quality ? quality.value : '4K',
-    orientation: caps.value.orientation ? orientation.value : 'keep',
-    aspectRatio: aspectRatio.value || defaultRatio.value,
-  })
+  const count = Math.min(4, Math.max(1, options.count))
+  // 多张必须给确定底种子：空输入时取提示词种子或随机数，依次 +1，
+  // 否则后端回退到同一个保存种子，N 张出出来全一样。
+  const base = options.seed ?? (
+    count > 1 ? (draft.value.seed || Math.floor(Math.random() * 2 ** 31)) : null
+  )
+  for (let i = 0; i < count; i++) {
+    run(draft.value.id, {
+      workflowPath: workflowPath.value,
+      quality: caps.value.quality ? quality.value : '1.0x',
+      orientation: caps.value.orientation ? orientation.value : 'keep',
+      aspectRatio: aspectRatio.value || defaultRatio.value,
+      seed: base === null ? null : base + i,
+      promptOverride: draft.value.prompt,
+      negativePromptOverride: draft.value.negative_prompt,
+    })
+  }
 }
 
 /** 单条提示词的「替换碎片出图」入口；批量替换走左侧勾选栏。 */
@@ -415,7 +426,7 @@ function openShot(index: number) {
 
 function regenerateShot() {
   shotOpen.value = false
-  generate()
+  generate({ count: 1, seed: null })
 }
 
 /** 档案里点「来源提示词」：关灯箱并切到那条提示词（沿用未保存修改的确认）。 */
@@ -660,7 +671,7 @@ async function batchGenerate() {
   if (!ok) return
   runBatch(ids, {
     workflowPath: workflowPath.value,
-    quality: caps.value.quality ? quality.value : '4K',
+    quality: caps.value.quality ? quality.value : '1.0x',
     orientation: caps.value.orientation ? orientation.value : 'keep',
     aspectRatio: aspectRatio.value || defaultRatio.value,
   })
@@ -703,7 +714,7 @@ async function onBatchReplace(payload: {
   if (!ok) return
   const jobId = await runBatchReplace(payload.items, {
     workflowPath: payload.workflowPath,
-    quality: payload.quality || (caps.value.quality ? quality.value : '4K'),
+    quality: payload.quality || (caps.value.quality ? quality.value : '1.0x'),
     orientation: caps.value.orientation ? orientation.value : 'keep',
     aspectRatio: payload.aspectRatio || aspectRatio.value || defaultRatio.value,
     title: single
@@ -948,6 +959,9 @@ onBeforeUnmount(() => {
             <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">
               导出
             </button>
+            <button class="btn btn-sm" title="临时试跑：粘贴外来提示词直接出图，不写回提示词库" @click="trialOpen = true">
+              🧪 试跑
+            </button>
             <details ref="moreMenu" class="more-menu">
               <summary class="btn btn-sm" title="更多批量操作">更多 ▾</summary>
               <div class="more-pop">
@@ -1029,6 +1043,7 @@ onBeforeUnmount(() => {
       <button class="btn btn-sm" title="展开侧栏" @click="sidebarCollapsed = false">»</button>
       <span class="rail-count" :title="`共 ${total} 条`">{{ total }}</span>
       <button class="btn btn-sm" title="新建提示词" @click="createOpen = true">＋</button>
+      <button class="btn btn-sm" title="临时试跑" @click="trialOpen = true">🧪</button>
     </aside>
 
     <div v-if="!sidebarCollapsed" class="resizer" title="拖动调整侧栏宽度" @mousedown.prevent="startResize" />
@@ -1059,7 +1074,6 @@ onBeforeUnmount(() => {
       @generate="generate"
       @smart-segment="smartSegment"
       @replace-fragment="openReplaceForCurrent"
-      @trial="trialOpen = true"
       @favorite="favoriteMutation.mutate()"
       @pin="pinMutation.mutate()"
       @revert="revert"
@@ -1087,10 +1101,10 @@ onBeforeUnmount(() => {
     />
     <PromptTrialPanel
       :open="trialOpen"
-      :prompt="draft?.prompt ?? ''"
-      :negative-prompt="draft?.negative_prompt ?? ''"
       :prompt-id="draft?.id ?? null"
+      :prompt-name="draft?.name ?? ''"
       @close="trialOpen = false"
+      @created="onCreated"
     />
     <PromptCreateModal :open="createOpen" @close="createOpen = false" @created="onCreated" />
     <PromptImportModal :open="importOpen" @close="importOpen = false" @imported="onImported" />

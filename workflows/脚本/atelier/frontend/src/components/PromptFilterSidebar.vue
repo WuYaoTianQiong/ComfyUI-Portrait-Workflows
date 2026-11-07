@@ -5,7 +5,6 @@ import CategoryFilter from './CategoryFilter.vue'
 import TagCloud from './TagCloud.vue'
 import { SORT_OPTIONS } from '../composables/usePromptWorkspace'
 import { FRAGMENT_TYPES } from '../constants'
-import { flattenCategories } from '../utils/categories'
 import type { CategoryNode, TagRow } from '../api/types'
 
 /**
@@ -45,12 +44,8 @@ const emit = defineEmits<{
 const tagPanelOpen = ref(false)
 
 const tagById = computed(() => new Map(props.tags.map((t) => [t.id, t])))
-const activeCategory = computed(
-  () => flattenCategories(props.categories).find((c) => c.id === props.categoryId) ?? null,
-)
-const hasActiveFilters = computed(
-  () => props.categoryId !== null || props.tagIds.length > 0 || props.fragmentType !== '',
-)
+/** 分类选中态在分类列表里已经高亮，不再重复出筛选 chip；这里只汇总标签/碎片。 */
+const hasChipFilters = computed(() => props.tagIds.length > 0 || props.fragmentType !== '')
 
 function onSearchInput(event: Event) {
   emit('update:search', (event.target as HTMLInputElement).value)
@@ -95,7 +90,7 @@ function onFragmentTypeChange(event: Event) {
 
   <div class="side-filters">
     <CategoryFilter
-      inline
+      select
       show-count
       all-label="全部分类"
       :categories="categories"
@@ -172,15 +167,7 @@ function onFragmentTypeChange(event: Event) {
     <button class="btn btn-sm full" @click="emit('clear-tags')">清空标签</button>
   </div>
 
-  <div v-if="hasActiveFilters" class="active-filters">
-    <button
-      v-if="activeCategory"
-      class="filter-chip"
-      :title="`清除分类：${activeCategory.name}`"
-      @click="emit('select-category', null)"
-    >
-      {{ activeCategory.name }} ×
-    </button>
+  <div v-if="hasChipFilters" class="active-filters">
     <button
       v-for="id in tagIds"
       :key="id"
@@ -268,6 +255,7 @@ function onFragmentTypeChange(event: Event) {
   color: var(--text);
 }
 
+/* 分类收成下拉后，一行放得下：分类下拉 + 排序 + 筛选 */
 .side-filters {
   display: flex;
   align-items: center;
@@ -277,7 +265,7 @@ function onFragmentTypeChange(event: Event) {
 }
 
 .side-filters :deep(.group) {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 

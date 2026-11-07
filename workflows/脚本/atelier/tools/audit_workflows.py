@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.config import settings  # noqa: E402
+from app.services import workflow_catalog  # noqa: E402
+from app.services.workflow_manifest import MANIFEST_FILENAME  # noqa: E402
 from app.services.workflow_parser import (  # noqa: E402
     CANONICAL_RATIOS,
     detect_workflow_caps,
@@ -39,13 +41,41 @@ def classify(workflow: dict) -> str:
     return "t2i"
 
 
+def _audit_dirs() -> list[Path]:
+    """通用工作流与图库专用工作流都参与审计；同一文件只算一次。"""
+    candidates = [
+        *workflow_catalog.search_dirs(),
+        settings.library_root / "图库专用工作流",
+    ]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for directory in candidates:
+        key = str(directory).lower()
+        if key in seen or not directory.is_dir():
+            continue
+        seen.add(key)
+        out.append(directory)
+    return out
+
+
 def main() -> int:
-    root = settings.library_root
     problems: list[str] = []
     warnings: list[str] = []
     rows: list[tuple[str, str, str]] = []
+    seen_files: set[str] = set()
 
-    for file in sorted(root.glob("*.json")):
+    files = []
+    for directory in _audit_dirs():
+        for file in sorted(directory.glob("*.json")):
+            if file.name == MANIFEST_FILENAME or file.name.startswith("."):
+                continue
+            key = str(file).lower()
+            if key in seen_files:
+                continue
+            seen_files.add(key)
+            files.append(file)
+
+    for file in files:
         try:
             workflow = load_workflow(str(file))
         except Exception as exc:  # noqa: BLE001

@@ -4,10 +4,13 @@
 "版本号推进了 = 结构真的改了"，而不是被 `_migrate_column` 的吞异常悄悄糊过去。
 """
 
+import json
+import sqlite3
+
 import pytest
 
 from app.models import MIGRATIONS, db
-from app.services.migrations import applied_versions, apply_migrations
+from app.services.migrations import applied_versions, apply_migrations, pending_versions
 
 
 def test_schema_version_recorded():
@@ -45,6 +48,53 @@ def test_failed_migration_rolls_back_and_is_not_recorded():
         "SELECT name FROM sqlite_master WHERE name='_mig_probe'"
     ).fetchone()
     assert probe is None, "迁移失败后 DDL 没有回滚"
+
+
+def test_pending_versions_is_read_only(tmp_path):
+    """启动备份发生在 init_db 之前：只能读版本号，不能建表或写库。"""
+    path = tmp_path / "before_migrate.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            " version INTEGER PRIMARY KEY, applied_at DATETIME, note TEXT)"
+        )
+        conn.execute("INSERT INTO schema_version(version) VALUES (3)")
+
+    expected = [version for version, _, _ in MIGRATIONS if version > 3]
+    assert pending_versions(path, MIGRATIONS) == expected
+
+    # 库还不存在：全部迁移都算待应用
+    assert pending_versions(tmp_path / "missing.db", MIGRATIONS) == [
+        version for version, _, _ in MIGRATIONS
+    ]
+
+
+def test_v8_backfills_idempotency_and_dedupes():
+    """历史键回填到列；重复键保留最新一条，其余清空列值但保留任务。"""
+    from app.models import GenJob, _migrate_v8_job_idempotency
+
+    extra = json.dumps({"idempotency_key": "dup-key", "idempotency_scope": "runs_batch"})
+    old = GenJob.create(
+        job_type="batch", status="done", title="旧", total=0,
+        items="[]", extra=extra,
+    )
+    new = GenJob.create(
+        job_type="batch", status="done", title="新", total=0,
+        items="[]", extra=extra,
+    )
+
+    _migrate_v8_job_idempotency(db)
+
+    old_row = GenJob.get_by_id(old.id)
+    new_row = GenJob.get_by_id(new.id)
+    assert old_row.idempotency_key is None
+    assert new_row.idempotency_key == "dup-key"
+    assert new_row.idempotency_scope == "runs_batch"
+
+    index = db.execute_sql(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_gen_jobs_idempotency'"
+    ).fetchone()
+    assert index is not None
 
 
 def test_v5_normalizes_legacy_quality_keys():

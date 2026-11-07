@@ -361,14 +361,19 @@ export function useReferenceRecipe() {
 
   const style = ref<RecipeStyle>('realistic')
   const promptSuffix = ref('')
-  const extraPath = ref('')
-  const extraId = ref('')
-  const extraLibrary = ref('')
-  const extraName = ref('')
+
+  /**
+   * 第 4 槽（2026-11-07）：真源已上提到 `useReferenceRecipeDraft`，
+   * 这里只做只读投影，保证「库页签 → 合成台 → 刷新」共用同一份草稿。
+   */
+  const extra = draft.extra
+  const extraPath = computed(() => extra.value.path)
+  const extraId = computed(() => extra.value.id)
+  const extraLibrary = computed(() => extra.value.library)
+  const extraName = computed(() => extra.value.name)
+  const extraText = computed(() => extra.value.text)
   /** 第 4 槽是否已填（上传路径或发型库条目二选一）。 */
-  const extraFilled = computed(
-    () => Boolean(extraPath.value.trim() || extraId.value.trim()),
-  )
+  const extraFilled = draft.extraFilled
 
   /** 尺寸档位 / 比例均为多选；空数组表示本轮不发对应参数。 */
   const qualitySelection = ref<string[]>([])
@@ -654,7 +659,12 @@ export function useReferenceRecipe() {
       {
         style: style.value,
         promptSuffix: promptSuffix.value,
-        extraPath: '',
+        // 预览与提交共用同一份第 4 槽（图片 + 文字），避免「预览看不到、提交却生效」。
+        extraPath: extraPath.value,
+        extraId: extraId.value,
+        extraLibrary: extraLibrary.value,
+        extraText: extraText.value,
+        personBText: draft.hasPairPose.value ? draft.personBText.value : '',
         workflow: previewWorkflow.value?.path ?? '',
         bodyMode: effectiveBodyMode.value,
         seed: baseSeed.value,
@@ -1002,25 +1012,17 @@ export function useReferenceRecipe() {
 
   /** 第 4 张：只保存 1 张（后传覆盖前传，与「只提交 extraImages[0]」一致）。 */
   function setExtra(path: string, name: string): void {
-    extraPath.value = path
-    extraId.value = ''
-    extraLibrary.value = ''
-    extraName.value = name
+    draft.setExtraUpload(path, name)
   }
 
   /** 第 4 张改为库条目（当前仅发型库）：提交 `extra_id` + `extra_library`。 */
   function setExtraLibrary(library: string, id: string, name: string): void {
-    extraPath.value = ''
-    extraId.value = id
-    extraLibrary.value = library
-    extraName.value = name
+    if (library !== 'hair') return
+    draft.setExtraLibrary(library, id, name)
   }
 
   function clearExtra(): void {
-    extraPath.value = ''
-    extraId.value = ''
-    extraLibrary.value = ''
-    extraName.value = ''
+    draft.clearExtra()
   }
 
   /** 清空上一次的运行结果（重试前调用）。 */
@@ -1084,6 +1086,9 @@ export function useReferenceRecipe() {
           extraPath: extraPath.value,
           extraId: extraId.value,
           extraLibrary: extraLibrary.value,
+          // 第 4 槽不进入批次维度：每组共用同一份 extra / extra_text。
+          extraText: extraText.value,
+          personBText: draft.hasPairPose.value ? draft.personBText.value : '',
           // 每组提交自己的工作流（契约 C-REF-TOTAL@2）；空串由后端用默认工作流。
           workflow: group.workflow,
           quality: group.quality,

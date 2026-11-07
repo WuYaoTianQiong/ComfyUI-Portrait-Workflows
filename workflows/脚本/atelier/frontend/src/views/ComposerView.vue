@@ -877,7 +877,7 @@ async function runOnce() {
       workflow_path: workflowPath.value,
       // 自定义工作流不在后端磁盘上，内容必须一起带过去
       workflow_content: customWorkflowContent(workflowPath.value),
-      quality: caps.value.quality ? quality.value : '4K',
+      quality: caps.value.quality ? quality.value : '1.0x',
       orientation: caps.value.orientation ? orientation.value : 'keep',
       aspect_ratio: aspectRatio.value || defaultRatio.value,
     })
@@ -912,7 +912,7 @@ async function confirmRandomRun() {
       composed_prompts: chosen,
       workflow_path: workflowPath.value,
       workflow_content: customWorkflowContent(workflowPath.value),
-      quality: caps.value.quality ? quality.value : '4K',
+      quality: caps.value.quality ? quality.value : '1.0x',
       orientation: caps.value.orientation ? orientation.value : 'keep',
       aspect_ratio: aspectRatio.value || defaultRatio.value,
       negative_prompt: negativePrompt.value,

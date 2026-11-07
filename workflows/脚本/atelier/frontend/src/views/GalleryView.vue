@@ -489,7 +489,7 @@ async function regenerate(target: HistoryItem) {
     if (target.prompt_id) {
       await run(target.prompt_id, {
         workflowPath: workflowPath.value,
-        quality: caps.value.quality ? quality.value : '4K',
+        quality: caps.value.quality ? quality.value : '1.0x',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
         aspectRatio: aspectRatio.value || defaultRatio.value,
       })
@@ -499,7 +499,7 @@ async function regenerate(target: HistoryItem) {
         negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
         seed: Number(params.seed) || null,
         workflowPath: workflowPath.value,
-        quality: caps.value.quality ? quality.value : '4K',
+        quality: caps.value.quality ? quality.value : '1.0x',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
         aspectRatio: aspectRatio.value || defaultRatio.value,
       })

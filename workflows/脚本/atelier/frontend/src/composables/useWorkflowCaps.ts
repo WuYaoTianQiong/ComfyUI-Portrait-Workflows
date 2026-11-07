@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import type { Ref } from 'vue'
 
 import type { WorkflowRow } from './useWorkflows'
+import { normalizeQualityKey } from './useWorkflowQuality'
 
 /**
  * 工作流「能注入什么」与「档位怎么显示」。
@@ -71,11 +72,11 @@ export const CANONICAL_RATIOS = [
 ] as const
 
 const QUALITY_SCALES = [
-  { value: '2K', scale: 0.75 },
-  { value: '4K', scale: 1.0 },
-  { value: '6K', scale: 1.25 },
-  { value: '8K', scale: 1.5 },
-  { value: '12K', scale: 2.0 },
+  { value: '0.75x', scale: 0.75 },
+  { value: '1.0x', scale: 1.0 },
+  { value: '1.25x', scale: 1.25 },
+  { value: '1.5x', scale: 1.5 },
+  { value: '2.0x', scale: 2.0 },
 ] as const
 
 /** 探测失败时的默认值：宁可保持旧行为，也不要把功能藏掉。 */
@@ -123,7 +124,7 @@ function qualityOptionsFor(
   if (mode === 'none') return []
 
   const allowed = params?.quality_tiers?.length
-    ? new Set(params.quality_tiers)
+    ? new Set(params.quality_tiers.map(normalizeQualityKey))
     : null
   const tiers = allowed
     ? QUALITY_SCALES.filter((tier) => allowed.has(tier.value))

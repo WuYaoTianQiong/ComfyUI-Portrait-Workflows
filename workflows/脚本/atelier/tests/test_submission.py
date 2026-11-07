@@ -77,13 +77,13 @@ def test_batch_endpoint_returns_immediately_then_submits(api, seed_prompt, monke
     assert len(tasks) == 1
 
     items = json.loads(GenJob.get_by_id(body["job_id"]).items)
-    assert items[0]["submit_state"] == "queued"
+    assert items[0]["status"] == "queued"
     assert not items[0].get("comfyui_prompt_id")
 
     submission.submit_task(tasks[0])
     items = json.loads(GenJob.get_by_id(body["job_id"]).items)
     assert len(pushed) == 1
-    assert items[0]["submit_state"] == "submitted"
+    assert items[0]["status"] == "submitted"
     assert items[0]["comfyui_prompt_id"] == "pid-async"
 
 
@@ -119,12 +119,12 @@ def test_recover_queued_submissions_marks_interrupted(api):
 
     job = GenJob.create(
         job_type="batch", status="running", title="中断", total=1,
-        items=json.dumps([{"status": "pending", "submit_state": "queued"}]),
+        items=json.dumps([{"status": "queued"}]),
     )
     assert job_state.recover_queued_submissions() == 1
 
     row = GenJob.get_by_id(job.id)
     items = json.loads(row.items)
     assert items[0]["status"] == "error"
-    assert items[0]["submit_state"] == "failed"
+    assert "submit_state" not in items[0]
     assert "重启" in items[0]["error"]

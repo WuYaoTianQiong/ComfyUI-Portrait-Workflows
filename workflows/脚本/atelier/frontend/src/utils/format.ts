@@ -49,6 +49,8 @@ export function formatDateTime(iso?: string | null, withSeconds = false): string
 
 /** 任务状态中文化：后端返回 pending/running/done/error/cancelled/stopped。 */
 const STATUS_LABEL: Record<string, string> = {
+  queued: '排队中',
+  submitted: '已提交',
   pending: '排队中',
   running: '生成中',
   done: '完成',

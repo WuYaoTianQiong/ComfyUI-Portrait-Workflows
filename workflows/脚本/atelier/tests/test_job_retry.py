@@ -70,7 +70,7 @@ def test_retry_prompt_item_uses_saved_prompt_params(api, monkeypatch):
     submission.submit_task(tasks[0])
     new = GenJob.get_by_id(body["job_id"])
     new_items = json.loads(new.items)
-    assert new_items[0]["status"] == "pending"
+    assert new_items[0]["status"] == "submitted"
     assert new_items[0]["comfyui_prompt_id"] == "pid-retry"
     assert new_items[0]["prompt_params"] == item["prompt_params"]
     assert pushed[0]["2"]["inputs"]["filename_prefix"].startswith("retry-test/orig_atelier_")

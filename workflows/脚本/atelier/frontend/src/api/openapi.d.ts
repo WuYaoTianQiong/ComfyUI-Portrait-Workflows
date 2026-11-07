@@ -2071,12 +2071,34 @@ export interface components {
         };
         /** BatchItem */
         BatchItem: {
+            /**
+             * Aspect Ratio
+             * @default
+             */
+            aspect_ratio: string;
+            /**
+             * Orientation
+             * @default
+             */
+            orientation: string;
             /** Prompt Id */
             prompt_id: number;
             /** Prompt Override */
             prompt_override?: string | null;
+            /**
+             * Quality
+             * @default
+             */
+            quality: string;
             /** Seed */
             seed?: number | null;
+            /** Workflow Content */
+            workflow_content?: string | null;
+            /**
+             * Workflow Path
+             * @default
+             */
+            workflow_path: string;
         };
         /** BatchRandomRunRequest */
         BatchRandomRunRequest: {
@@ -2120,7 +2142,7 @@ export interface components {
             output_subfolder: string;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /**
@@ -2176,7 +2198,7 @@ export interface components {
             output_subfolder: string;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /**
@@ -2337,7 +2359,7 @@ export interface components {
             prompt: string;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /** Workflow Content */
@@ -2556,7 +2578,7 @@ export interface components {
             prompt_ids?: number[] | null;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /** Workflow Content */
@@ -2849,22 +2871,28 @@ export interface components {
         };
         /** JobItem */
         JobItem: {
+            /** Aspect Ratio */
+            aspect_ratio?: string | null;
             /** Comfyui Prompt Id */
             comfyui_prompt_id?: string | null;
             /** Error */
             error?: string | null;
             /** Images */
             images?: components["schemas"]["JobImage"][];
+            /** Orientation */
+            orientation?: string | null;
             /** Prompt Id */
             prompt_id?: number | null;
             /** Prompt Preview */
             prompt_preview?: string | null;
+            /** Quality */
+            quality?: string | null;
             /** Seed */
             seed?: number | null;
             /** Status */
             status?: string | null;
-            /** Submit State */
-            submit_state?: string | null;
+            /** Workflow Path */
+            workflow_path?: string | null;
         };
         /** JobListResponse */
         JobListResponse: {
@@ -2994,7 +3022,7 @@ export interface components {
             output_subfolder: string;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /** Workflow Content */
@@ -3059,6 +3087,8 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+            /** Tag Ids */
+            tag_ids?: number[] | null;
             /**
              * Tags
              * @default
@@ -3255,6 +3285,8 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+            /** Tag Ids */
+            tag_ids?: number[] | null;
             /** Tags */
             tags?: string | null;
             /** Width */
@@ -3358,6 +3390,11 @@ export interface components {
              */
             extra_path: string;
             /**
+             * Extra Text
+             * @default
+             */
+            extra_text: string;
+            /**
              * Modifier Fragments
              * @default
              */
@@ -3377,6 +3414,11 @@ export interface components {
              * @default
              */
             output_subfolder: string;
+            /**
+             * Person B Text
+             * @default
+             */
+            person_b_text: string;
             /**
              * Portrait Id
              * @default
@@ -3774,6 +3816,8 @@ export interface components {
              * @default
              */
             idempotency_key: string;
+            /** Negative Prompt Override */
+            negative_prompt_override?: string | null;
             /**
              * Orientation
              * @default portrait
@@ -3784,9 +3828,11 @@ export interface components {
              * @default
              */
             output_subfolder: string;
+            /** Prompt Override */
+            prompt_override?: string | null;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /** Seed */
@@ -3833,7 +3879,7 @@ export interface components {
             prompt: string;
             /**
              * Quality
-             * @default 4K
+             * @default 1.0x
              */
             quality: string;
             /** Seed */
@@ -5879,8 +5925,12 @@ export interface operations {
             query?: {
                 /** @description 逗号分隔的 job id；为空则订阅全部 */
                 ids?: string;
+                /** @description 只补发序号大于 since 的事件 */
+                since?: number | null;
             };
-            header?: never;
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

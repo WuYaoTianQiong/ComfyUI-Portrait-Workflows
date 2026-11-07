@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, apiGet, buildQuery, thumbnailUrl, viewUrl } from './client'
+import {
+  ApiError,
+  apiDelete,
+  apiGet,
+  apiPost,
+  buildQuery,
+  newIdempotencyKey,
+  thumbnailUrl,
+  viewUrl,
+} from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -28,6 +37,28 @@ describe('ApiError', () => {
     expect((err as ApiError).message).toContain('工作流不存在')
   })
 
+  it('204/空体返回 null，不抛 SyntaxError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    )
+
+    await expect(apiDelete('/api/thing')).resolves.toBeNull()
+  })
+
+  it('成功响应不是 JSON 时抛 ApiError，而不是裸 SyntaxError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not-json', { status: 200 })),
+    )
+
+    const err = await apiGet('/api/thing').catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(200)
+    expect((err as ApiError).detail).toBe('not-json')
+  })
+
   it('非 JSON 错误体保留原文（反向代理 502 等）', async () => {
     vi.stubGlobal(
       'fetch',
@@ -40,6 +71,25 @@ describe('ApiError', () => {
     expect((err as ApiError).status).toBe(502)
     expect((err as ApiError).message).toContain('Bad Gateway')
     expect((err as ApiError).requestId).toBeNull()
+  })
+})
+
+describe('幂等键', () => {
+  it('apiPost 传 idempotencyKey 时带上 X-Idempotency-Key', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response('{}', { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiPost('/api/runs', { prompt_id: 1 }, {}, { idempotencyKey: 'idem-1' })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect((init.headers as Record<string, string>)['X-Idempotency-Key']).toBe('idem-1')
+  })
+
+  it('newIdempotencyKey 每次生成不同值', () => {
+    expect(newIdempotencyKey()).not.toBe(newIdempotencyKey())
   })
 })
 

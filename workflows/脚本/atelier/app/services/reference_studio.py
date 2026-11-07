@@ -40,10 +40,11 @@ SLOT_DESCRIPTORS = (
         "supports_text": True,
     },
     {
-        # 第 4 槽：发型库背面图 / 上传单图。工作流槽位能力由 manifest/slots 决定。
+        # 第 4 槽：发型库背面图 / 上传单图 + 可选文字补充。
+        # 图为主：文字只在图片存在时作为「此外需体现」，不支持纯文字第 4 槽。
         "key": "extra", "label": "第 4 张参考", "multiple": False,
         "sources": ("library:hair", "upload"),
-        "supports_text": False,
+        "supports_text": True,
     },
 )
 

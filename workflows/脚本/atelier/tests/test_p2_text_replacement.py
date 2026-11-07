@@ -184,6 +184,45 @@ def test_pose_text_does_not_trigger_pair_wording():
     assert "双人要求" in pair_prompt
 
 
+def test_pair_composition_triggers_wording_for_psl_ids():
+    """pose-studio-lite 的 `psl-*` 双人姿势没有 pair 前缀，必须靠 composition 识别。"""
+    psl_pair = RecipeEntry(
+        id="psl-D026", name="双臂前伸扶腰", composition="pair",
+    )
+    prompt = build_recipe_prompt(PORTRAIT, COSTUME, psl_pair, style="none")
+    assert "双人要求" in prompt
+    assert "恰好两位成年女性" in prompt
+    assert "禁止合并成一个人" in prompt
+
+
+def test_person_b_text_adds_distinct_b_clause():
+    """B 文字设定要单独成段，并明确 B 不复用 A 的脸。"""
+    psl_pair = RecipeEntry(
+        id="psl-D026", name="双臂前伸扶腰", composition="pair",
+    )
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        psl_pair,
+        style="none",
+        person_b_text="金色齐肩短发，酒红色西装外套，黑色阔腿长裤",
+    )
+    assert "• 人物B（文字设定）：金色齐肩短发，酒红色西装外套，黑色阔腿长裤。" in prompt
+    assert "不要复用人物A的脸" in prompt
+    assert "同色系素色简化款" not in prompt
+
+
+def test_person_b_text_ignored_for_single_pose():
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        style="none",
+        person_b_text="金色齐肩短发",
+    )
+    assert "人物B" not in prompt
+
+
 # ---------------------------------------------------------------------------
 # 4. 三槽全文本无图 → 400（C1：至少留 1 张图）
 # ---------------------------------------------------------------------------

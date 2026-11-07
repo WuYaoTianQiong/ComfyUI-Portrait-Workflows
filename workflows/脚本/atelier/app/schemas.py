@@ -215,8 +215,11 @@ class JobItem(BaseModel):
     status: Optional[str] = None
     error: Optional[str] = None
     comfyui_prompt_id: Optional[str] = None
-    #: queued = 还在后台提交队列里，尚未 push 到 ComfyUI
-    submit_state: Optional[str] = None
+    #: item 级覆盖；为空时回落到 job 级同名字段
+    workflow_path: Optional[str] = None
+    quality: Optional[str] = None
+    orientation: Optional[str] = None
+    aspect_ratio: Optional[str] = None
     images: list[JobImage] = Field(default_factory=list)
 
 

@@ -13,9 +13,13 @@ from typing import Callable
 
 from app.models import GenJob
 from app.services import job_state
-from app.services.comfyui_client import push_prompt
+from app.services.comfyui_client import delete_queue_items, get_queue, interrupt, push_prompt
 
 logger = logging.getLogger("atelier.submit")
+
+
+class SubmitContractError(ValueError):
+    """提交参数违反服务契约；路由层统一映射成 400，而不是 500。"""
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,42 @@ def enqueue_submission(task: SubmitTask) -> None:
     _queue.put(task)
 
 
+def _item_cancelled(snapshot: dict | None, index: int) -> bool:
+    if not snapshot:
+        return True
+    items = snapshot.get("items") or []
+    if index < 0 or index >= len(items):
+        return True
+    return items[index].get("status") == "cancelled"
+
+
+def _abort_prompt(pid: str) -> None:
+    """取消发生在 push 期间时，把它已经从 ComfyUI 换来的任务再撤掉。
+
+    只对确认属于该 pid 的队列项动手；interrupt 前先确认它确实在 running，
+    避免误杀同一时刻的其它任务。
+    """
+    try:
+        qdata = get_queue() or {}
+        running = {
+            str(e[1]) for e in qdata.get("queue_running", [])
+            if isinstance(e, list) and len(e) > 1
+        }
+        pending = {
+            str(e[1]) for e in qdata.get("queue_pending", [])
+            if isinstance(e, list) and len(e) > 1
+        }
+        if pid in pending:
+            delete_queue_items([pid])
+        elif pid in running:
+            interrupt()
+        else:
+            # 可能尚未出现在队列、也可能已经结束；删除是幂等的，不再额外 interrupt。
+            delete_queue_items([pid])
+    except Exception:
+        logger.exception("撤掉已取消条目的 ComfyUI 任务失败: %s", pid)
+
+
 def submit_task(task: SubmitTask) -> None:
     """同步处理一个 SubmitTask；测试直接调用它，生产由 worker 调用。"""
     for index in task.indexes:
@@ -75,17 +115,20 @@ def submit_task(task: SubmitTask) -> None:
             pid = str(result.get("prompt_id", "") or "")
             if not pid:
                 raise RuntimeError("ComfyUI 未返回 prompt_id")
-            job_state.update_job_item(task.job_id, index, {
+            snapshot = job_state.update_job_item(task.job_id, index, {
                 "comfyui_prompt_id": pid,
-                "status": "pending",
-                "submit_state": "submitted",
+                "status": "submitted",
             })
+            # 取消与 push 并发：用户可能刚好在这几毫秒里点了取消，此时 pid
+            # 还没落库，cancel_job 找不到它。push 后必须再确认一次并主动撤回。
+            if _item_cancelled(snapshot, index):
+                _abort_prompt(pid)
+                continue
         except Exception as e:
             logger.exception("提交任务 %s 第 %s 条失败", task.job_id, index)
             job_state.update_job_item(task.job_id, index, {
                 "status": "error",
                 "error": str(e),
-                "submit_state": "failed",
             })
     job_state.finish_submission(task.job_id)
 

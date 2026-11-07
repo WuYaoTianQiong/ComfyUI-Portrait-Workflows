@@ -71,10 +71,12 @@ describe('useJobStream', () => {
 
     const wrapper = mount(Test)
     const source = FakeEventSource.instances[0]
-    expect(source.url).toBe('/api/jobs/events?ids=1,2')
+    // 单连接多路复用：底层始终订阅全部任务，由订阅者按 id 过滤。
+    expect(source.url).toBe('/api/jobs/events')
 
     source.emit('snapshot', snapshot(1))
     source.emit('job', snapshot(2))
+    source.emit('job', snapshot(3))
     expect(received.map((item) => item.id)).toEqual([1, 2])
 
     wrapper.unmount()

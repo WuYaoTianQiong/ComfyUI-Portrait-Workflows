@@ -14,7 +14,7 @@ from pathlib import Path
 from app.config import settings
 from app.models import GenJob, Prompt
 from app.services import job_state
-from app.services.generation import submit_generation
+from app.services.generation import SubmitSpec, submit_spec
 from app.services.image_inputs import clean_dest_name, compose_masked_target, dest_name
 from app.services.output_location import (
     OutputLocationError,
@@ -86,7 +86,10 @@ def _resolve_meta_path(meta: dict) -> Path | None:
 
 def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: str) -> dict:
     extra = _extra(job)
-    api_wf = load_workflow(job.get("workflow_path", ""), extra.get("workflow_content"))
+    workflow_path = item.get("workflow_path") or job.get("workflow_path", "")
+    item_content = item.get("workflow_content")
+    workflow_content = item_content if item_content is not None else extra.get("workflow_content")
+    api_wf = load_workflow(workflow_path, workflow_content)
     pp = _prompt_params(item)
 
     injected = pp.get("injected_prompt")
@@ -127,9 +130,9 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
         "steps": steps,
         "cfg_scale": cfg_scale,
         "sampler": sampler or "",
-        "orientation": job.get("orientation", "portrait"),
-        "quality": job.get("quality", "4K"),
-        "aspect_ratio": extra.get("aspect_ratio", ""),
+        "orientation": item.get("orientation") or job.get("orientation", "portrait"),
+        "quality": item.get("quality") or job.get("quality", "1.0x"),
+        "aspect_ratio": item.get("aspect_ratio") or extra.get("aspect_ratio", ""),
     })
 
     input_image = pp.get("input_image")
@@ -144,7 +147,10 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
 
 def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: str) -> dict:
     extra = _extra(job)
-    api_wf = load_workflow(job.get("workflow_path", ""), extra.get("workflow_content"))
+    workflow_path = item.get("workflow_path") or job.get("workflow_path", "")
+    item_content = item.get("workflow_content")
+    workflow_content = item_content if item_content is not None else extra.get("workflow_content")
+    api_wf = load_workflow(workflow_path, workflow_content)
     pp = _prompt_params(item)
     seed = resolve_seed(item.get("seed"), pp.get("seed"))
 
@@ -152,9 +158,9 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
         "prompt": pp.get("prompt", ""),
         "negative_prompt": pp.get("negative_prompt", ""),
         "seed": seed,
-        "orientation": job.get("orientation", "portrait"),
-        "quality": job.get("quality", "4K"),
-        "aspect_ratio": extra.get("aspect_ratio", ""),
+        "orientation": item.get("orientation") or job.get("orientation", "portrait"),
+        "quality": item.get("quality") or job.get("quality", "1.0x"),
+        "aspect_ratio": item.get("aspect_ratio") or extra.get("aspect_ratio", ""),
     })
 
     inputs = item.get("inputs") or []
@@ -232,7 +238,7 @@ def retry_job(
     try:
         expand_subfolder(
             subfolder_template, workflow_path=workflow_path, job_id=0,
-            quality=job.get("quality", "4K"), orientation=job.get("orientation", "portrait"),
+            quality=job.get("quality", "1.0x"), orientation=job.get("orientation", "portrait"),
         )
     except OutputLocationError as e:
         raise RetryError(str(e))
@@ -240,7 +246,7 @@ def retry_job(
     new_items: list[dict] = []
     for _, old in candidates:
         item = dict(old)
-        item["status"] = "pending"
+        item["status"] = "queued"
         item["comfyui_prompt_id"] = ""
         item.pop("error", None)
         item.pop("progress", None)
@@ -261,22 +267,22 @@ def retry_job(
             return _build_faceswap_workflow(job, old_item, ctx.job_id, ctx.subfolder)
         return _build_prompt_workflow(job, old_item, ctx.job_id, ctx.subfolder)
 
-    outcome = submit_generation(
+    outcome = submit_spec(SubmitSpec(
         job_type=job.get("job_type", "batch"),
         title=f"重试: {job.get('title', '')}",
         items=new_items,
         workflow_path=workflow_path,
         workflow_content=new_extra.get("workflow_content"),
         orientation=job.get("orientation", "portrait"),
-        quality=job.get("quality", "4K"),
+        quality=job.get("quality", "1.0x"),
         aspect_ratio=new_extra.get("aspect_ratio", ""),
         output_subfolder=subfolder_template,
         prepare=prepare,
         mode="queue",
-        indexes=list(range(len(candidates))),
+        indexes=tuple(range(len(candidates))),
         extra=new_extra,
         apply_output=not is_faceswap,
-    )
+    ))
     return {
         "success": True,
         "job_id": outcome["job_id"],

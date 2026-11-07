@@ -16,6 +16,7 @@ import { useImagePreview } from '../composables/useImagePreview'
 import { useWorkflows } from '../composables/useWorkflows'
 import type { JobSnapshot } from '../api/types'
 import { formatDateTime, formatElapsed, statusLabel } from '../utils/format'
+import { formatApiError } from '../utils/errors'
 import { confirmDialog } from '../utils/naive'
 import { readSession, writeSession } from '../composables/useSessionState'
 
@@ -61,7 +62,7 @@ const stopAll = useMutation({
     queryClient.invalidateQueries({ queryKey: ['jobs'] })
   },
   onError: (e) => {
-    toast.error(`停止失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`停止失败：${formatApiError(e)}`)
   },
 })
 
@@ -199,7 +200,7 @@ async function retry(id: number) {
       toast.error(result.errors?.[0]?.error || '没有可重试的条目')
     }
   } catch (e) {
-    toast.error(`重试失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`重试失败：${formatApiError(e)}`)
   } finally {
     retrying.value = null
   }
@@ -217,7 +218,7 @@ async function cancel(id: number) {
   try {
     await cancelJob(id)
   } catch (e) {
-    toast.error(`取消失败：${e instanceof Error ? e.message : String(e)}`)
+    toast.error(`取消失败：${formatApiError(e)}`)
   } finally {
     cancelling.value = null
   }
@@ -462,7 +463,7 @@ function openInGallery(filename: string) {
             <div class="item-preview">{{ item.prompt_preview || '（无预览）' }}</div>
             <div class="item-meta">
               <span :class="['item-status', item.status]">
-                {{ item.submit_state === 'queued' ? '排队中' : statusLabel(item.status) }}
+                {{ statusLabel(item.status) }}
               </span>
               <span v-if="item.seed" class="muted">seed {{ item.seed }}</span>
               <span v-if="item.error" class="err">{{ item.error }}</span>

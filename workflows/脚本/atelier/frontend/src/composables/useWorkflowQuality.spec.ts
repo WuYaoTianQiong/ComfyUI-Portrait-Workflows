@@ -19,10 +19,17 @@ describe('useWorkflowQuality 画质按工作流记忆', () => {
     stubStorage()
   })
 
-  it('首次使用默认 1.0×（4K），不从上一个工作流继承', () => {
+  it('首次使用默认 1.0×，不从上一个工作流继承', () => {
     const path = ref('/wf/a.json')
     const quality = useWorkflowQuality(path)
-    expect(quality.value).toBe('4K')
+    expect(quality.value).toBe('1.0x')
+  })
+
+  it('旧版本存的 2K/4K/8K 读取时归一成倍率键', () => {
+    const store = stubStorage()
+    store.set('pb.quality:/wf/legacy.json', '8K')
+    const quality = useWorkflowQuality(ref('/wf/legacy.json'))
+    expect(quality.value).toBe('1.5x')
   })
 
   it('两个工作流各存各的，切换后互不影响', async () => {
@@ -30,18 +37,18 @@ describe('useWorkflowQuality 画质按工作流记忆', () => {
     const path = ref('/wf/switch-a.json')
     const quality = useWorkflowQuality(path)
 
-    quality.value = '2K'
+    quality.value = '0.75x'
     await nextTick()
     path.value = '/wf/switch-b.json'
-    expect(quality.value).toBe('4K')
+    expect(quality.value).toBe('1.0x')
 
-    quality.value = '8K'
+    quality.value = '1.5x'
     await nextTick()
-    expect(store.get('pb.quality:/wf/switch-a.json')).toBe('2K')
-    expect(store.get('pb.quality:/wf/switch-b.json')).toBe('8K')
+    expect(store.get('pb.quality:/wf/switch-a.json')).toBe('0.75x')
+    expect(store.get('pb.quality:/wf/switch-b.json')).toBe('1.5x')
 
     path.value = '/wf/switch-a.json'
-    expect(quality.value).toBe('2K')
+    expect(quality.value).toBe('0.75x')
   })
 
   it('同一路径的多个组件共用同一个值', () => {
@@ -49,7 +56,7 @@ describe('useWorkflowQuality 画质按工作流记忆', () => {
     const first = useWorkflowQuality(path)
     const second = useWorkflowQuality(path)
 
-    first.value = '6K'
-    expect(second.value).toBe('6K')
+    first.value = '1.25x'
+    expect(second.value).toBe('1.25x')
   })
 })

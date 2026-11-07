@@ -1,4 +1,6 @@
 """Peewee ORM 模型 —— 映射 v3 已有的 SQLite 表结构"""
+import json
+
 from peewee import (
     SqliteDatabase, Model, AutoField, TextField, IntegerField,
     FloatField, DateTimeField, BooleanField, SQL, ForeignKeyField,
@@ -99,6 +101,9 @@ class GenJob(BaseModel):
     orientation = TextField(null=True)
     quality = TextField(null=True)
     extra = TextField(null=True)
+    # 幂等键独立成列 + 唯一索引：旧实现存在 extra JSON 里，查后再建无法防并发双击。
+    idempotency_key = TextField(null=True)
+    idempotency_scope = TextField(null=True)
     created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
     updated_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
 
@@ -138,6 +143,20 @@ class Image(BaseModel):
         # 避免 peewee 创建非部分索引时被 is_deleted=1 的重复行触发 IntegrityError。
         indexes = ()
 
+
+
+class FileTombstone(BaseModel):
+    """已删除文件的墓碑。
+
+    软删除保留磁盘文件，磁盘扫描会把「DB 里没有」当成新图重新入库；墓碑记录
+    在 gen_history 行被回收后仍然存在，保证删除是持久的。显式恢复时清掉墓碑。
+    """
+    asset_key = TextField(primary_key=True)
+    deleted_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+    reason = TextField(default="")
+
+    class Meta:
+        table_name = "file_tombstones"
 
 
 class PromptCategory(BaseModel):
@@ -443,7 +462,7 @@ def _ensure_tables():
     db.create_tables([Prompt, GenJob, Image], safe=True)
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
     db.create_tables([ImageCategory, ImageTag, EntityTag], safe=True)
-    db.create_tables([Template, TemplateFragment], safe=True)
+    db.create_tables([Template, TemplateFragment, FileTombstone], safe=True)
 
 
 # v1 迁移完成后必须存在的列：迁移里所有 `_migrate_column` 都靠"ALTER 报错就算已存在"
@@ -652,6 +671,57 @@ def _migrate_v7_category_system_key(database):
     _backfill_category_system_key(database, COMPOSE_CATEGORY)
 
 
+def _migrate_v8_job_idempotency(database):
+    """v8：幂等键从 extra JSON 升为独立列 + 唯一索引。
+
+    旧实现是「先查后建」，两个并发请求会同时查到空并各建一个 job。这里把
+    历史键回填到列上；重复键只保留最新一条（与旧查询 order_by(id.desc()) 一致），
+    其余清空列值而非删除任务，避免丢失历史。
+    """
+    _migrate_column(database, "gen_jobs", "idempotency_key", "idempotency_key TEXT")
+    _migrate_column(database, "gen_jobs", "idempotency_scope", "idempotency_scope TEXT")
+    # 迁移必须可重复执行：重跑时先卸掉唯一索引，回填/去重后再建。
+    database.execute_sql("DROP INDEX IF EXISTS idx_gen_jobs_idempotency")
+
+    rows = database.execute_sql(
+        "SELECT id, extra FROM gen_jobs WHERE extra IS NOT NULL AND extra != ''"
+    ).fetchall()
+    for job_id, raw in rows:
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        key = data.get("idempotency_key")
+        if not key:
+            continue
+        database.execute_sql(
+            "UPDATE gen_jobs SET idempotency_key=?, idempotency_scope=? WHERE id=?",
+            (str(key), str(data.get("idempotency_scope") or ""), job_id),
+        )
+
+    seen: set[tuple[str, str]] = set()
+    for job_id, scope, key in database.execute_sql(
+        "SELECT id, idempotency_scope, idempotency_key FROM gen_jobs "
+        "WHERE idempotency_key IS NOT NULL AND idempotency_key != '' ORDER BY id DESC"
+    ).fetchall():
+        pair = (str(scope or ""), str(key))
+        if pair in seen:
+            database.execute_sql(
+                "UPDATE gen_jobs SET idempotency_key=NULL, idempotency_scope=NULL WHERE id=?",
+                (job_id,),
+            )
+        else:
+            seen.add(pair)
+
+    database.execute_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_gen_jobs_idempotency "
+        "ON gen_jobs(idempotency_scope, idempotency_key) "
+        "WHERE idempotency_key IS NOT NULL AND idempotency_key != ''"
+    )
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -667,6 +737,8 @@ MIGRATIONS = [
         lambda database: _migrate_v6_drop_fragments(database)),
     (7, "分类 system_key：自动分类不再按名字匹配",
         lambda database: _migrate_v7_category_system_key(database)),
+    (8, "任务幂等键独立成列 + 唯一索引，防并发双击重复建 job",
+        lambda database: _migrate_v8_job_idempotency(database)),
 ]
 
 

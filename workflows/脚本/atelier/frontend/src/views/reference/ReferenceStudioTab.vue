@@ -135,6 +135,15 @@ const negativePrompt = computed<string>({
   },
 })
 
+/** 人物 B 文字设定（双人姿势专用）；与草稿单例同步，换 seed / 画质不会清空。 */
+const hasPairPose = draft.hasPairPose
+const personBText = computed<string>({
+  get: () => draft.personBText.value,
+  set: (value) => {
+    draft.personBText.value = value
+  },
+})
+
 /**
  * 「画风技术」碎片与画风预设互斥（方案 §5.4）：
  * 选中即强制 `style='none'` 并禁用下拉；buildRecipeRequest 里再兜底一次。
@@ -988,6 +997,14 @@ const extraSlotHint = computed(() =>
     : 'PNG/JPG/WebP/HEIC ≤ 25MB',
 )
 
+/** 第 4 槽文字补充（v-model）；真源在 `useReferenceRecipeDraft` 单例。 */
+const extraText = computed<string>({
+  get: () => draft.extra.value.text,
+  set: (value) => {
+    draft.setExtraText(value)
+  },
+})
+
 const hairPickerOpen = ref(false)
 
 function onHairPick(item: HairItem): void {
@@ -1206,7 +1223,7 @@ onMounted(async () => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张为可选的上传附加图</template>。
+        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张为可选发型参考图（可加文字补充，不参与批次组合）</template>。
       </p>
     </header>
 
@@ -1264,19 +1281,33 @@ onMounted(async () => {
         <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads；没有工作流接 extra 时整块不渲染 -->
         <div v-if="supportsExtraSlot" class="extra-block">
           <div v-if="extraFilled" class="extra-item" data-testid="studio-extra-selected">
-            <span class="extra-item__mark" aria-hidden="true">
-              <svg viewBox="0 0 16 16">
-                <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
-                <circle cx="8" cy="8.8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2" />
-              </svg>
-            </span>
-            <span class="extra-item__body">
-              <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
-              <span class="extra-item__meta">
-                {{ extraLibrary ? '来自发型库 · 提交背面无脸裁切图' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
+            <div class="extra-item__row">
+              <span class="extra-item__mark" aria-hidden="true">
+                <svg viewBox="0 0 16 16">
+                  <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+                  <circle cx="8" cy="8.8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2" />
+                </svg>
               </span>
-            </span>
-            <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
+              <span class="extra-item__body">
+                <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
+                <span class="extra-item__meta">
+                  {{ extraLibrary ? '来自发型库 · 提交背面无脸裁切图' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
+                </span>
+              </span>
+              <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
+            </div>
+            <!-- 图为主 + 文本补充：有图时文字作为「此外需体现」，不做纯文字第 4 槽 -->
+            <p v-if="manualPromptActive" class="extra-item__hint" data-testid="studio-extra-text-manual">
+              当前已手动改写提示词，第 4 槽文字补充不参与提交，请直接改下方提示词。
+            </p>
+            <textarea
+              v-else
+              v-model="extraText"
+              class="extra-item__text"
+              rows="2"
+              data-testid="studio-extra-text"
+              placeholder="此外需体现：发色、发饰、发尾弧度…（没有图片时不提交文字）"
+            ></textarea>
           </div>
 
           <div v-else class="extra-actions">
@@ -1306,6 +1337,26 @@ onMounted(async () => {
           />
         </div>
       </div>
+
+      <section v-if="hasPairPose" class="pair-b-card" data-testid="studio-pair-b">
+        <header class="pair-b-card__head">
+          <span class="pair-b-card__title">人物 B 文字设定</span>
+          <span class="pair-b-card__badge">双人姿势</span>
+        </header>
+        <p class="pair-b-card__hint">
+          人物 A 沿用图2的脸型/发型与图3的衣装；人物 B 只按这段文字生成，脸会与 A 区分。
+          不填时 B 只有「同色系简化款」，模型容易画成 A 的克隆。
+          <template v-if="manualPromptActive">当前已手动改写提示词，B 设定不参与提交，请直接改下方提示词。</template>
+        </p>
+        <textarea
+          v-model="personBText"
+          class="pair-b-card__text"
+          rows="3"
+          data-testid="studio-pair-b-text"
+          :disabled="manualPromptActive"
+          placeholder="例如：成年女性，金色齐肩短发，酒红色西装外套，黑色阔腿长裤，白色运动鞋；五官与人物 A 明显不同。"
+        ></textarea>
+      </section>
 
     </ReferenceSectionCard>
 
@@ -1986,15 +2037,101 @@ onMounted(async () => {
   color: var(--accent);
 }
 
-.extra-item {
+.pair-b-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-panel);
+}
+
+.pair-b-card__head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.pair-b-card__title {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pair-b-card__badge {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pair-b-card__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pair-b-card__text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.pair-b-card__text:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.extra-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   box-sizing: border-box;
   min-width: 0;
   padding: 8px 10px;
   border-radius: 12px;
   background: var(--surface-code);
+}
+
+/* 首行：图标 + 名称 / 来源 + 移除，保持与三槽卡片同高的横排 */
+.extra-item__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 文字补充：只在有图时出现（图为主 + 文本补充） */
+.extra-item__text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.extra-item__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .extra-item__mark {

@@ -6,7 +6,7 @@ import ImagePicker from '../components/ImagePicker.vue'
 import DiskPathList from '../components/DiskPathList.vue'
 import FilePicker from '../components/FilePicker.vue'
 import EmptyState from '../components/EmptyState.vue'
-import { apiPost } from '../api/client'
+import { getFaceswapNodes } from '../api/editor'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
@@ -60,8 +60,7 @@ interface NodeInfo {
 /** 探测工作流：批量超分只接受 1 个 LoadImage（多图编辑工作流请走「图像编辑」）。 */
 const { data: nodeInfo, error: nodeError, isFetching: probing } = useQuery<NodeInfo>({
   queryKey: computed(() => ['upscale-nodes', workflowPath.value]),
-  queryFn: () =>
-    apiPost<NodeInfo>('/api/editor/faceswap/nodes', { workflow_path: workflowPath.value }),
+  queryFn: () => getFaceswapNodes(workflowPath.value) as unknown as Promise<NodeInfo>,
   enabled: computed(() => !!workflowPath.value),
   retry: false,
 })
@@ -94,7 +93,7 @@ watch(
     if (!caps.value.quality || !qualityOptions.value.length) return
     if (qualityOptions.value.some((opt) => opt.value === quality.value)) return
     quality.value =
-      qualityOptions.value.find((opt) => opt.value === '4K')?.value ??
+      qualityOptions.value.find((opt) => opt.value === '1.0x')?.value ??
       qualityOptions.value[0].value
   },
   { immediate: true },

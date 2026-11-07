@@ -139,8 +139,7 @@ def test_krea2_single_pass_workflows_do_not_submit_bypassed_second_pass(
     filename, bypassed, vae_id, first_sampler
 ):
     path = settings.library_root / filename
-    if not path.exists():
-        pytest.skip(f"工作流不存在: {filename}")
+    assert path.is_file(), f"测试夹具缺失: {path}"
     api = load_workflow(str(path))
     for node_id in bypassed:
         assert node_id not in api

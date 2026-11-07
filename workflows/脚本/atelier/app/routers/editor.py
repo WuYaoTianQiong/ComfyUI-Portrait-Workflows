@@ -46,7 +46,7 @@ from app.services.output_location import (
     expand_subfolder,
     with_subfolder,
 )
-from app.services.generation import submit_generation
+from app.services.generation import SubmitSpec, submit_spec
 from app.services.idempotency import SCOPE_FACESWAP, request_key
 from app.services.paths import resolve_image_path
 from app.services.quality_keys import QUALITY_SCALES, normalize_quality
@@ -81,7 +81,7 @@ ROLE_ORDER = ("target", "ref1", "ref2", "ref3")
 # 不涂遮罩时走整图重绘；尺寸/画质由工作流自己决定（本项目里多数编辑工作流用 ImageResizeKJ
 # 保持目标图原尺寸，EmptyLatentImage 相关的 quality/orientation 注入对这些工作流是空转）
 ORIENTATION = "portrait"
-QUALITY = "4K"
+QUALITY = "1.0x"
 
 
 class NodesRequest(BaseModel):
@@ -566,8 +566,7 @@ def faceswap_batch(
         })
     counts = "×".join(str(len(group)) for group in source_groups)
     for item in items:
-        item["status"] = "pending"
-        item["submit_state"] = "queued"
+        item["status"] = "queued"
     extra = build_job_extra(
         workflow_path, req.workflow_content, req.output_subfolder,
         nodes=node_info, prompt=prompt_text, seed_mode=req.seed_mode,
@@ -616,14 +615,14 @@ def faceswap_batch(
         set_save_subfolder(api_wf, ctx.subfolder)
         return api_wf
 
-    outcome = submit_generation(
+    outcome = submit_spec(SubmitSpec(
         job_type="faceswap", title=job_title, items=items,
         workflow_path=workflow_path, workflow_content=req.workflow_content,
         orientation=orientation, quality=quality, aspect_ratio=aspect_ratio,
         output_subfolder=req.output_subfolder,
         prepare=prepare, mode="queue",
-        indexes=list(range(len(combos))), extra=extra, apply_output=False,
-    )
+        indexes=tuple(range(len(combos))), extra=extra, apply_output=False,
+    ))
 
     return {
         "success": True,

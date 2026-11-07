@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import WorkflowPicker from './WorkflowPicker.vue'
 import WorkflowParams from './WorkflowParams.vue'
@@ -50,10 +50,9 @@ const emit = defineEmits<{
   'update:orientation': [value: 'portrait' | 'landscape']
   'update:aspect-ratio': [value: string]
   'update:draft-tag-list': [value: string[]]
-  generate: []
+  generate: [options: { count: number; seed: number | null }]
   'smart-segment': []
   'replace-fragment': []
-  trial: []
   favorite: []
   pin: []
   revert: []
@@ -70,10 +69,34 @@ const emit = defineEmits<{
 /** 负面提示词默认收起：空值不该占一大块；有内容时显示单行摘要。 */
 const negativeExpanded = ref(false)
 
+/** 出图张数（>1 即旧"变体"，种子依次 +1）与种子输入（空 = 沿用提示词种子/随机）。 */
+const runCount = ref(1)
+const seedInput = ref('')
+
+function onGenerate() {
+  // input[type=number] 在部分浏览器/测试环境里会把 v-model 值转成 number。
+  const rawSeed = String(seedInput.value ?? '').trim()
+  emit('generate', {
+    count: runCount.value,
+    seed: rawSeed === '' ? null : Number(rawSeed),
+  })
+}
+/** 标签为空时压成一行；展开过一次后先收起（切换条目再重置），避免边填边塌。 */
+const tagsExpanded = ref(false)
+
+const hasTags = computed(() => props.draftTagList.length > 0)
+
+/** 已经动过标签就保持展开：否则删掉最后一个标签时输入框会在光标下消失。 */
+function onTagsUpdate(value: string[]) {
+  tagsExpanded.value = true
+  emit('update:draft-tag-list', value)
+}
+
 watch(
   () => props.draft?.id,
   () => {
     negativeExpanded.value = false
+    tagsExpanded.value = false
   },
 )
 </script>
@@ -133,22 +156,26 @@ watch(
             >
               替换碎片
             </button>
-            <button
-              class="btn btn-sm"
-              title="用当前草稿试跑，不写回提示词库"
-              :disabled="!caps.prompt"
-              @click="emit('trial')"
-            >
-              🧪 试跑
-            </button>
-            <button
-              class="btn btn-sm"
-              title="同一条提示词换种子出多张变体"
-              :disabled="!caps.prompt"
-              @click="emit('trial')"
-            >
-              🎲 变体
-            </button>
+            <span class="run-counts" title="出图张数；多张时种子依次 +1">
+              <button
+                v-for="n in [1, 2, 3, 4]"
+                :key="n"
+                class="btn btn-sm count-btn"
+                :class="{ on: runCount === n }"
+                @click="runCount = n"
+              >
+                {{ n }}
+              </button>
+            </span>
+            <input
+              v-model="seedInput"
+              class="seed-input"
+              type="number"
+              min="0"
+              step="1"
+              :placeholder="draft.seed ? `默认 ${draft.seed}` : '空 = 随机'"
+              title="种子；留空沿用提示词保存的种子，没有则随机"
+            />
             <span v-if="wfValidation && !wfValidation.valid" class="gen-error">
               工作流不可用：{{ wfValidation.error }}
             </span>
@@ -156,11 +183,18 @@ watch(
             <span v-else-if="activeJob" class="job-state" :class="activeJob?.status">
               {{ statusLabel(activeJob?.status) }} {{ activeJob?.done_count ?? 0 }}/{{ activeJob?.total ?? 1 }}
             </span>
+            <span
+              v-if="dirty"
+              class="cap-hint"
+              title="出图跑编辑框当前文本（含未保存修改），不会写回提示词库"
+            >
+              含未保存修改
+            </span>
             <button
               class="btn btn-sm primary"
               :class="{ loading: generating }"
               :disabled="generating || !workflowPath || !caps.prompt"
-              @click="emit('generate')"
+              @click="onGenerate"
             >
               {{ generating ? '生成中…' : '🚀 出图' }}
             </button>
@@ -281,60 +315,62 @@ watch(
           <section class="section">
             <div class="section-head"><span>参数</span></div>
             <div class="params">
-            <label class="param-item">
-              <span class="param-label">步数</span>
-              <input
-                v-model.number="draft.steps"
-                class="param-input"
-                type="number"
-                min="1"
-                placeholder="-"
-              />
-            </label>
-            <label class="param-item">
-              <span class="param-label">CFG</span>
-              <input
-                v-model.number="draft.cfg_scale"
-                class="param-input"
-                type="number"
-                step="0.1"
-                placeholder="-"
-              />
-            </label>
-            <label class="param-item">
-              <span class="param-label">采样器</span>
-              <input v-model="draft.sampler" class="param-input" placeholder="-" />
-            </label>
-            <label class="param-item">
-              <span class="param-label">种子</span>
-              <input
-                v-model.number="draft.seed"
-                class="param-input"
-                type="number"
-                min="0"
-                placeholder="-"
-              />
-            </label>
-            <div class="param-item">
-              <span class="param-label">分辨率</span>
-              <span class="param-value">
-                {{ draft.width && draft.height ? `${draft.width}×${draft.height}` : '-' }}
-              </span>
-            </div>
-            <div class="param-item">
-              <span class="param-label">模型</span>
-              <span class="param-value" :title="draft.model || '-'">{{ draft.model || '-' }}</span>
-            </div>
+              <label class="param-item">
+                <span class="param-label">步数</span>
+                <input
+                  v-model.number="draft.steps"
+                  class="param-input"
+                  type="number"
+                  min="1"
+                  placeholder="-"
+                />
+              </label>
+              <label class="param-item">
+                <span class="param-label">CFG</span>
+                <input
+                  v-model.number="draft.cfg_scale"
+                  class="param-input"
+                  type="number"
+                  step="0.1"
+                  placeholder="-"
+                />
+              </label>
+              <label class="param-item">
+                <span class="param-label">采样器</span>
+                <input v-model="draft.sampler" class="param-input" placeholder="-" />
+              </label>
+              <label class="param-item">
+                <span class="param-label">种子</span>
+                <input
+                  v-model.number="draft.seed"
+                  class="param-input"
+                  type="number"
+                  min="0"
+                  placeholder="-"
+                />
+              </label>
+              <div class="param-item">
+                <span class="param-label">分辨率</span>
+                <span class="param-value">
+                  {{ draft.width && draft.height ? `${draft.width}×${draft.height}` : '-' }}
+                </span>
+              </div>
+              <div class="param-item">
+                <span class="param-label">模型</span>
+                <span class="param-value" :title="draft.model || '-'">{{ draft.model || '-' }}</span>
+              </div>
             </div>
           </section>
 
           <section class="section">
             <div class="section-head"><span>标签</span></div>
             <TagInput
+              v-if="hasTags || tagsExpanded"
               :model-value="draftTagList"
               :suggestions="tags"
-              @update:model-value="emit('update:draft-tag-list', $event)"
+              @update:model-value="onTagsUpdate"
             />
+            <button v-else class="empty-line" @click="tagsExpanded = true">＋ 添加标签</button>
           </section>
 
           <section class="section">
@@ -460,6 +496,26 @@ watch(
   align-items: center;
   gap: var(--gap-sm);
   margin-left: auto;
+}
+
+.run-counts {
+  display: flex;
+  gap: 3px;
+}
+
+.run-counts .count-btn.on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.seed-input {
+  width: 96px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
 }
 
 /* 按钮整组不参与压缩，压缩优先发生在工作流选择器上 */
@@ -671,23 +727,22 @@ watch(
   color: var(--warn);
 }
 
-/* 收起状态只占一行：空值不再吃掉 84px */
+/* 收起状态只占一行：空值不再吃掉 84px；与展开态共用「无外框 + 左侧语义色」 */
 .negative-line {
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 0 6px var(--gap);
   text-align: left;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-left: 3px solid var(--danger);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   color: var(--text);
   font: inherit;
   font-size: var(--fs-sm);
 }
 
 .negative-line:hover {
-  border-color: var(--primary);
-  border-left-color: var(--danger);
+  background: var(--fill-faint);
 }
 
 .negative-line span {
@@ -701,14 +756,16 @@ watch(
   color: var(--muted);
 }
 
+/* 正文不加外框和底色：整页只有提示词本体用左侧 3px 语义色标出 */
 .editor {
   font: inherit;
   font-size: var(--fs-sm);
   color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm);
+  background: transparent;
+  border: none;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0;
+  padding: 4px 0 4px var(--gap);
   outline: none;
   resize: vertical;
 }
@@ -717,19 +774,20 @@ watch(
 .editor.pos {
   min-height: 180px;
   field-sizing: content;
-  border-left: 3px solid var(--primary);
+  border-left-color: var(--primary);
 }
 
 .editor.neg {
   min-height: 72px;
   max-height: 28vh;
   field-sizing: content;
-  border-left: 3px solid var(--danger);
+  border-left-color: var(--danger);
   color: var(--danger-text-field);
 }
 
+.editor:hover,
 .editor:focus {
-  border-color: var(--primary);
+  background: var(--fill-faint);
 }
 
 .params {
@@ -778,20 +836,39 @@ watch(
   background: var(--panel);
 }
 
+/* 备注只有一条下划线：可选项，不与正文抢视觉 */
 .note-input {
   width: 100%;
   font: inherit;
   font-size: var(--fs-sm);
   color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 4px 0;
   outline: none;
 }
 
 .note-input:focus {
-  border-color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* 无数据分区压成一行可点摘要，与「负面提示词」的收起态同一套写法 */
+.empty-line {
+  width: 100%;
+  padding: 3px 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.empty-line:hover {
+  color: var(--text);
 }
 
 .cat-chips {

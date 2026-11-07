@@ -32,6 +32,7 @@ const fixture = vi.hoisted(() => ({
 }))
 
 vi.mock('../api/client', () => ({
+  newIdempotencyKey: () => 'test-idem',
   apiGet: vi.fn(async (path: string) => {
     if (path.includes('/api/workflows')) {
       return {
@@ -144,7 +145,7 @@ describe('UpscaleView 批量超分', () => {
       main_ids: [1, 2],
       main_paths: [],
       workflow_path: WF_PATH,
-      quality: '4K',
+      quality: '1.0x',
       job_label: '批量超分',
       clean_source_name: true,
     })

@@ -62,6 +62,9 @@ def is_safe_image_ref(filename: str, subfolder: str = "", img_type: str = "outpu
         return False
     if not _safe_filename(filename):
         return False
+    # 媒体端点只读图片：不加扩展名白名单时，output 下的 .json/.txt 也能被下载。
+    if Path(filename).suffix.lower() not in IMAGE_EXTENSIONS:
+        return False
     return _relative_parts(subfolder) is not None
 
 

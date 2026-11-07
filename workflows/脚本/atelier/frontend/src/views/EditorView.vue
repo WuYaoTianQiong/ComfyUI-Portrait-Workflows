@@ -8,7 +8,8 @@ import DropZone from '../components/DropZone.vue'
 import FilePicker from '../components/FilePicker.vue'
 import MaskEditorModal from '../components/MaskEditorModal.vue'
 import ReferenceSheetButton from '../components/ReferenceSheetButton.vue'
-import { apiGet, apiPost, thumbnailUrl, viewUrl } from '../api/client'
+import { apiGet, thumbnailUrl, viewUrl } from '../api/client'
+import { createFaceswapMask, getFaceswapNodes } from '../api/editor'
 import type { UploadedReference } from '../api/upload'
 import { useGenerate } from '../composables/useGenerate'
 import { useSettings } from '../composables/useSettings'
@@ -162,7 +163,7 @@ const {
   refetch: refetchNodes,
 } = useQuery<NodeInfo>({
   queryKey: computed(() => ['fs-nodes', workflowPath.value]),
-  queryFn: () => apiPost<NodeInfo>('/api/editor/faceswap/nodes', { workflow_path: workflowPath.value }),
+  queryFn: () => getFaceswapNodes(workflowPath.value) as unknown as Promise<NodeInfo>,
   enabled: computed(() => !!workflowPath.value),
   retry: false,
 })
@@ -343,9 +344,7 @@ async function onMaskSaved(payload: { dataUrl: string | null }) {
   }
   maskSaving.value = true
   try {
-    const result = await apiPost<{ path: string }>('/api/editor/faceswap/mask', {
-      data_url: payload.dataUrl,
-    })
+    const result = await createFaceswapMask({ data_url: payload.dataUrl })
     maskEntries.value = { ...maskEntries.value, [key]: result.path }
   } catch (e) {
     toast.error(`遮罩保存失败：${e instanceof Error ? e.message : String(e)}`)

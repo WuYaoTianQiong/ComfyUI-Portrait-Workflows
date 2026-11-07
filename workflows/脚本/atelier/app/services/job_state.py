@@ -20,6 +20,7 @@ import logging
 import queue
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -121,6 +122,9 @@ _lock = threading.RLock()
 # SSE 订阅者：每个连接一个 Queue；满了就丢旧事件，绝不阻塞写者
 _subscribers: list[queue.Queue] = []
 _sub_lock = threading.Lock()
+#: 单调事件序号 + 有界重放日志。前端断线后用 Last-Event-ID 只补缺口。
+_event_seq = 0
+_event_log: deque = deque(maxlen=500)
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +193,7 @@ def normalize(job: dict) -> dict:
     """把 DB 行变成 API 形状：items 一定是数组，每条都有 status/progress。"""
     items = _parse_items(job.get("items"))
     for item in items:
-        item.setdefault("status", "pending")
+        item.setdefault("status", "queued")
         item.setdefault("progress", None)
     job["items"] = items
     job["total"] = job.get("total") or len(items)
@@ -203,10 +207,26 @@ def normalize(job: dict) -> dict:
 # 事件发布（SSE）
 # ---------------------------------------------------------------------------
 
-def subscribe() -> queue.Queue:
-    q: queue.Queue = queue.Queue(maxsize=200)
+def subscribe(since: int | None = None) -> queue.Queue:
+    """订阅任务事件；`since` 非空时先补发序号大于它的历史事件。
+
+    订阅与补发在同一把锁内完成，避免“补发旧事件”和“发布新事件”交错导致乱序。
+    """
+    q: queue.Queue = queue.Queue(maxsize=500)
     with _sub_lock:
         _subscribers.append(q)
+        if since is not None:
+            for event in _event_log:
+                if int(event.get("seq") or 0) <= int(since):
+                    continue
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    try:
+                        q.get_nowait()
+                        q.put_nowait(event)
+                    except Exception:
+                        pass
     return q
 
 
@@ -217,8 +237,11 @@ def unsubscribe(q: queue.Queue) -> None:
 
 
 def publish(job: dict) -> None:
-    event = {"type": "job", "seq": time.time_ns(), "job": job}
+    global _event_seq
     with _sub_lock:
+        _event_seq += 1
+        event = {"type": "job", "seq": _event_seq, "job": job}
+        _event_log.append(event)
         targets = list(_subscribers)
     for q in targets:
         try:
@@ -264,6 +287,7 @@ def create_job(
     workflow_path: str, orientation: str,
     quality: str, extra: dict | None = None,
 ) -> int:
+    extra = extra or {}
     with _lock:
         r = GenJob.create(
             job_type=job_type,
@@ -275,6 +299,8 @@ def create_job(
             orientation=orientation,
             quality=normalize_quality(quality),
             extra=json.dumps(extra) if extra else None,
+            idempotency_key=extra.get("idempotency_key") or None,
+            idempotency_scope=extra.get("idempotency_scope") or None,
         )
     publish(read_snapshot(r.id))
     return r.id
@@ -301,9 +327,9 @@ def _overall_status(items: list[dict], fallback: str = "running") -> str:
     """按条目状态推进总状态；仍存在 pending/running 时保持 running。"""
     if not items:
         return fallback
-    statuses = [str(i.get("status") or "pending") for i in items]
+    statuses = [str(i.get("status") or "queued") for i in items]
     if not all(s in TERMINAL for s in statuses):
-        return "running"
+        return "running" if any(s == "running" for s in statuses) else "pending"
     if all(s == "done" for s in statuses):
         return "done"
     if all(s in ("cancelled", "stopped") for s in statuses):
@@ -352,10 +378,11 @@ def finish_submission(job_id: int, reason: str = "提交队列中断，请重试
         items = _parse_items(row.items)
         changed = False
         for item in items:
-            if item.get("submit_state") == "queued" and item.get("status") not in TERMINAL:
+            legacy_queued = item.get("submit_state") == "queued"
+            if (item.get("status") == "queued" or legacy_queued) and item.get("status") not in TERMINAL:
                 item["status"] = "error"
                 item["error"] = reason
-                item["submit_state"] = "failed"
+                item.pop("submit_state", None)
                 changed = True
         done = sum(1 for i in items if i.get("status") == "done")
         errors = sum(1 for i in items if i.get("status") in ("error", "cancelled"))
@@ -383,7 +410,10 @@ def recover_queued_submissions(reason: str = "服务重启，提交中断，请�
     )
     for row in rows:
         items = _parse_items(row.items)
-        if any(i.get("submit_state") == "queued" for i in items):
+        if any(
+            i.get("status") == "queued" or i.get("submit_state") == "queued"
+            for i in items
+        ):
             finish_submission(row.id, reason)
             recovered += 1
     return recovered
@@ -399,15 +429,24 @@ def build_job_extra(
     data = {"output_subfolder": output_subfolder or ""}
     if str(workflow_path or "").startswith("custom://") and workflow_content:
         data["workflow_content"] = workflow_content
+    # 身份是元数据：清单缺失/文件读不到都不能阻断提交。
+    try:
+        from app.services.workflow_manifest import identify
+
+        identity = identify(workflow_path, workflow_content)
+        if identity:
+            data["workflow_id"] = identity.id
+            data["workflow_sha256"] = identity.sha256
+            if identity.rel_path:
+                data["workflow_rel_path"] = identity.rel_path
+    except Exception:
+        logger.debug("工作流身份识别失败: %s", workflow_path, exc_info=True)
     data.update(extra)
     return data
 
 
 def find_job_by_idempotency(key: str, scope: str) -> dict | None:
-    """按「幂等键 + 入口范围」找已经创建过的任务；空键直接返回 None。
-
-    键存在 `gen_jobs.extra` JSON 里，不额外加列；任务量很小，json_extract 足够。
-    """
+    """按「幂等键 + 入口范围」找已经创建过的任务；空键直接返回 None。"""
     clean = (key or "").strip()
     if not clean:
         return None
@@ -415,12 +454,23 @@ def find_job_by_idempotency(key: str, scope: str) -> dict | None:
         row = (
             GenJob.select()
             .where(
-                (fn.json_extract(GenJob.extra, "$.idempotency_key") == clean)
-                & (fn.json_extract(GenJob.extra, "$.idempotency_scope") == scope)
+                (GenJob.idempotency_key == clean)
+                & (GenJob.idempotency_scope == scope)
             )
             .order_by(GenJob.id.desc())
             .first()
         )
+        if row is None:
+            # 兼容尚未迁移/测试里手工写的旧行。
+            row = (
+                GenJob.select()
+                .where(
+                    (fn.json_extract(GenJob.extra, "$.idempotency_key") == clean)
+                    & (fn.json_extract(GenJob.extra, "$.idempotency_scope") == scope)
+                )
+                .order_by(GenJob.id.desc())
+                .first()
+            )
     except Exception:
         logger.exception("幂等键查询失败: %s", clean)
         return None
@@ -515,7 +565,7 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
 
     for item in items:
         pid = item.get("comfyui_prompt_id")
-        prev_status = item.get("status", "pending")
+        prev_status = item.get("status", "queued")
         status = prev_status
         iprogress = None
 
@@ -550,7 +600,7 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
             if pid == current_pid and progress_data:
                 iprogress = progress_data
         elif pid and pid in pending:
-            status = "pending"
+            status = "submitted"
         elif prev_status in ("done", "error", "cancelled"):
             status = prev_status
             if prev_status == "done":
@@ -558,12 +608,12 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
             else:
                 error_count += 1
         elif not pid:
-            if item.get("submit_state") == "queued":
+            if item.get("status") == "queued" or item.get("submit_state") == "queued":
                 # 后台提交队列还没轮到这条：不要用宽限期判失败
-                status = "pending"
+                status = "queued"
             elif _job_age_seconds(job) < _SUBMIT_GRACE_SECONDS:
                 # 还在提交窗口里：create_job 之后、update_job_items 之前，pid 还没写回
-                status = "pending"
+                status = "queued"
             else:
                 # 超过宽限期仍没有 pid：提交阶段就失败了
                 status = "error"
@@ -588,12 +638,15 @@ def _compute(job: dict, snapshot: ComfySnapshot | None = None) -> tuple[dict, li
         overall = "done" if error_count == 0 else "error"
     elif any(i.get("status") == "running" for i in items):
         overall = "running"
-    elif any(i.get("status") == "pending" for i in items):
+    elif any(i.get("status") in ("queued", "submitted", "pending") for i in items):
         overall = "pending"
     else:
         # 兜底：保持可推进状态，不落 unknown
         overall = job["status"] if job["status"] in ("pending", "running") else "error"
 
+    # 提交阶段已把 job 置成 running 时，不能被更早算出的 pending 覆盖回去。
+    if overall == "pending" and job.get("status") == "running":
+        overall = "running"
     job.update(
         status=overall,
         done_count=done_count,
@@ -625,8 +678,6 @@ def _merge_items(computed: list[dict], fresh: list[dict]) -> list[dict]:
                 base["comfyui_prompt_id"] = old["comfyui_prompt_id"]
             if not base.get("error") and old.get("error"):
                 base["error"] = old["error"]
-            if old.get("submit_state"):
-                base["submit_state"] = old["submit_state"]
             if not base.get("images") and old.get("images"):
                 base["images"] = old["images"]
             # 提交阶段写回的终态（done/error/cancelled）比基于陈旧队列的推断可信
@@ -649,7 +700,7 @@ def _counts_and_status(items: list[dict], fallback: str, db_status: str) -> tupl
         overall = "done" if errors == 0 else "error"
     elif any(i.get("status") == "running" for i in items):
         overall = "running"
-    elif any(i.get("status") == "pending" for i in items):
+    elif any(i.get("status") in ("queued", "submitted", "pending") for i in items):
         overall = "pending"
     else:
         overall = fallback
@@ -824,6 +875,10 @@ def cancel_job(job_id: int) -> bool:
         return False
 
     job = normalize(row_to_dict(row))
+    # 终态任务不能取消：旧实现会把 done 任务的 job 改成 stopped，并把已失败的
+    # 条目改写成 cancelled，等于篡改历史。
+    if job["status"] in TERMINAL:
+        return True
     pids = {str(it.get("comfyui_prompt_id")) for it in job["items"] if it.get("comfyui_prompt_id")}
 
     # 先看队列里哪些 pid 属于这个任务；ComfyUI 的 interrupt 没有 job 概念，
@@ -841,14 +896,22 @@ def cancel_job(job_id: int) -> bool:
     pending_mine = pending & pids
 
     items = job["items"]
+    changed = False
     for item in items:
-        if item.get("status") != "done":
+        if item.get("status") in ("queued", "submitted", "pending", "running"):
             item["status"] = "cancelled"
             item["error"] = item.get("error") or "已取消"
+            changed = True
+    if not changed:
+        return True
 
+    done = sum(1 for i in items if i.get("status") == "done")
+    errors = sum(1 for i in items if i.get("status") in ("error", "cancelled"))
     with _lock:
         GenJob.update(
             status="stopped",
+            done_count=done,
+            error_count=errors,
             items=json.dumps(items, ensure_ascii=False),
             updated_at=_utcnow(),
         ).where(GenJob.id == job_id).execute()

@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { apiGet, apiPost } from '../api/client'
+import { apiGet } from '../api/client'
+import { submitGenerateMissing } from '../api/runs'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
 import Skeleton from './Skeleton.vue'
@@ -94,17 +95,12 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const result = await apiPost<{
-      success: boolean
-      job_id: number | null
-      count: number
-      message?: string
-    }>('/api/generate_missing', {
+    const result = await submitGenerateMissing({
       prompt_ids: Array.from(selected.value),
       workflow_path: workflowPath.value,
       // 自定义工作流不在后端磁盘上，内容必须一起带过去
       workflow_content: customWorkflowContent(workflowPath.value),
-      quality: caps.value.quality ? quality.value : '4K',
+      quality: caps.value.quality ? quality.value : '1.0x',
       orientation: caps.value.orientation ? orientation.value : 'keep',
       aspect_ratio: aspectRatio.value || defaultRatio.value,
     })

@@ -539,3 +539,65 @@ describe('本地上传图', () => {
     expect(draft.portrait.value[0].缩略图).toBe('/uploads/keep.png')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 第 4 槽（2026-11-07）：单图 + 可选文字补充，不进入批量笛卡尔积
+// ---------------------------------------------------------------------------
+
+describe('第 4 槽（extra）', () => {
+  it('库条目 / 上传图二选一，切换来源保留文字', () => {
+    draft.setExtraLibrary('hair', 'hair-1', '发型 A')
+    expect(draft.extraFilled.value).toBe(true)
+    // 第 4 槽不进入「非空槽数 / 条目总数」口径（批量组合也不按它做维度）
+    expect(draft.count.value).toBe(0)
+    expect(draft.totalSelected.value).toBe(0)
+    expect(draft.extra.value).toEqual({
+      source: 'library',
+      library: 'hair',
+      id: 'hair-1',
+      path: '',
+      name: '发型 A',
+      text: '',
+    })
+
+    draft.setExtraText('发尾浅金色挑染')
+    draft.setExtraUpload('/up/b.png', '上传图')
+    expect(draft.extra.value).toMatchObject({
+      source: 'upload',
+      library: '',
+      id: '',
+      path: '/up/b.png',
+      name: '上传图',
+      text: '发尾浅金色挑染',
+    })
+  })
+
+  it('持久化后 hydrate 恢复；clearDraft 连文字一起清空', () => {
+    draft.setExtraLibrary('hair', 'hair-1', '发型 A')
+    draft.setExtraText('发尾挑染')
+    flushReferenceStudioSettings()
+    expect(readReferenceStudioSettings()?.extra).toEqual({
+      source: 'library',
+      library: 'hair',
+      id: 'hair-1',
+      path: '',
+      name: '发型 A',
+      text: '发尾挑染',
+    })
+
+    draft.clearDraft()
+    expect(draft.extraFilled.value).toBe(false)
+    expect(draft.extra.value.text).toBe('')
+
+    const restored = draft.hydrate({ portrait: [], costume: [], pose: [] })
+    expect(restored).toBe(true)
+    expect(draft.extra.value).toEqual({
+      source: 'library',
+      library: 'hair',
+      id: 'hair-1',
+      path: '',
+      name: '发型 A',
+      text: '发尾挑染',
+    })
+  })
+})

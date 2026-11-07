@@ -8,66 +8,88 @@ import { flattenCategories } from '../utils/categories'
  * 分类筛选（提示词页 / 组合器共用）。
  *
  * 只负责「全部 + 分层分类列表」，不持有查询状态；选中值走 v-model。
- * 分类以 pill 分段控件呈现：选中 `--primary` 实底，未选 `--panel-2`。
- * `inline` 用于提示词页单行横向滚动，避免分类把筛选区撑成多行。
+ * 默认以 pill 分段控件呈现：选中 `--primary` 实底，未选 `--panel-2`。
+ * `select` 用于提示词页侧栏：收成一个下拉，分类再多也不占纵向空间。
  */
 const props = defineProps<{
   categories: CategoryNode[] | undefined
   modelValue: number | null
   allLabel?: string
   showCount?: boolean
-  inline?: boolean
+  select?: boolean
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: number | null] }>()
 
 const flat = computed(() => flattenCategories(props.categories))
 
+function onSelectChange(event: Event) {
+  const raw = (event.target as HTMLSelectElement).value
+  emit('update:modelValue', raw === '' ? null : Number(raw))
+}
+
+/** 两级分类用全角空格缩进，原生下拉里也能看出层级。 */
+function optionLabel(name: string, depth: number) {
+  return `${'　'.repeat(depth)}${name}`
+}
+
 /**
- * 非 inline 模式下「分类」分组可折叠，默认展开。
+ * 「分类」分组可折叠，默认展开。
  * 仅控制展示，不参与 v-model：收起再展开后已选分类保持不变（选中值在父组件）。
- * inline（提示词页横向药丸条）不渲染组头，也不受该状态影响。
  */
 const collapsed = ref(false)
 
 function toggleCollapsed() {
-  if (props.inline) return
   collapsed.value = !collapsed.value
 }
 </script>
 
 <template>
   <section class="group">
-    <button
-      v-if="!inline"
-      type="button"
-      class="group-head"
-      :aria-expanded="!collapsed"
-      @click="toggleCollapsed"
+    <select
+      v-if="select"
+      class="cat-select"
+      :value="modelValue ?? ''"
+      :title="allLabel ?? '全部'"
+      @change="onSelectChange"
     >
-      <span>{{ collapsed ? '▸' : '▾' }} 分类</span>
-    </button>
-    <div v-show="inline || !collapsed" class="cat-list" :class="{ inline }">
+      <option value="">{{ allLabel ?? '全部' }}</option>
+      <option v-for="cat in flat" :key="cat.id" :value="cat.id">
+        {{ optionLabel(cat.name, cat.depth) }}{{ showCount ? ` (${cat.prompt_count})` : '' }}
+      </option>
+    </select>
+
+    <template v-else>
       <button
-        class="cat"
-        :class="{ active: modelValue === null }"
-        @click="emit('update:modelValue', null)"
+        type="button"
+        class="group-head"
+        :aria-expanded="!collapsed"
+        @click="toggleCollapsed"
       >
-        {{ allLabel ?? '全部' }}
+        <span>{{ collapsed ? '▸' : '▾' }} 分类</span>
       </button>
-      <button
-        v-for="cat in flat"
-        :key="cat.id"
-        class="cat"
-        :class="{ active: modelValue === cat.id }"
-        :title="cat.name"
-        @click="emit('update:modelValue', cat.id)"
-      >
-        <span class="dot" :style="{ background: cat.color }" />
-        <span class="cat-name">{{ cat.name }}</span>
-        <i v-if="showCount" class="cat-count">{{ cat.prompt_count }}</i>
-      </button>
-    </div>
+      <div v-show="!collapsed" class="cat-list">
+        <button
+          class="cat"
+          :class="{ active: modelValue === null }"
+          @click="emit('update:modelValue', null)"
+        >
+          {{ allLabel ?? '全部' }}
+        </button>
+        <button
+          v-for="cat in flat"
+          :key="cat.id"
+          class="cat"
+          :class="{ active: modelValue === cat.id }"
+          :title="cat.name"
+          @click="emit('update:modelValue', cat.id)"
+        >
+          <span class="dot" :style="{ background: cat.color }" />
+          <span class="cat-name">{{ cat.name }}</span>
+          <i v-if="showCount" class="cat-count">{{ cat.prompt_count }}</i>
+        </button>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -106,10 +128,17 @@ function toggleCollapsed() {
   gap: var(--gap-xs);
 }
 
-.cat-list.inline {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding-bottom: 2px;
+/* 下拉形态：与侧栏里其它 select 同一套外观 */
+.cat-select {
+  width: 100%;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--fs-sm);
 }
 
 .cat {
