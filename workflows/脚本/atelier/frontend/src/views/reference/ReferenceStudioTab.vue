@@ -806,12 +806,14 @@ const libraryLoading = computed(
   () => poses.loading.value || costumes.loading.value || portraits.loading.value,
 )
 
-/** 安全模式下姿势 / 服装按 nsfw 过滤；人像不过滤（React `randomizeRecipe` 同口径）。 */
-const posePool = computed(() =>
-  safeMode.value
-    ? poses.items.value.filter((item) => !isNsfwPoseItem(item))
-    : poses.items.value,
-)
+/**
+ * 安全模式下姿势 / 服装按 nsfw 过滤；人像不过滤（React `randomizeRecipe` 同口径）。
+ * v1.5：实测不可用的姿势不进入随机候选（仍可在库页手动选择）。
+ */
+const posePool = computed(() => {
+  const usable = poses.items.value.filter((item) => item.usable !== false)
+  return safeMode.value ? usable.filter((item) => !isNsfwPoseItem(item)) : usable
+})
 
 const costumePool = computed(() =>
   safeMode.value
