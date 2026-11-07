@@ -547,11 +547,16 @@ def test_psl_taxonomy_mapping():
     assert rl._psl_pose_type_style(duo, "pair") == ("背向坐位", "性感")
 
 
-def test_pose_usability_note_marks_d046_only():
-    """psl-D046 实测姿势不跟随：标记不可用并带原因；其余姿势默认可用。"""
+def test_pose_usability_notes_mark_known_unstable_poses():
+    """D046（0/3）与 D042（2/4）实测不稳定：标记不可用并带原因；其余默认可用。"""
     usable, note = rl._pose_usability("psl-D046")
     assert usable is False
     assert "姿势不跟随" in note
+
+    usable, note = rl._pose_usability("psl-D042")
+    assert usable is False
+    assert "姿势跟随不稳定" in note
+
     assert rl._pose_usability("psl-D026") == (True, "")
     assert rl._pose_usability("P001_front") == (True, "")
 
