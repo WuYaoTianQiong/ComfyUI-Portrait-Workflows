@@ -145,7 +145,7 @@ function buildRow(type: FragmentType): FragmentRow {
 const columns = computed<FragmentColumn[]>(() => [
   {
     key: 'slot',
-    title: '与参考槽对应',
+    title: '人物A · 与参考槽对应',
     rows: SLOT_FRAGMENT_TYPES.map(buildRow),
   },
   {
