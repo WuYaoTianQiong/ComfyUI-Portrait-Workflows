@@ -52,6 +52,7 @@ import type {
   SelectedFragment,
 } from './recipeTextFragments'
 import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { awaitRecipeJobs } from './recipeJobStream'
 import { viewUrl } from '../api/client'
 import {
   useWorkflowCaps,
@@ -2697,28 +2698,28 @@ export function useReferenceRecipe() {
       batch.done = Math.max(0, done)
     }
 
-    const pollOutcomes = await runWithConcurrency(
-      submitted,
-      MAX_SUBMIT_CONCURRENCY,
-      async (outcome): Promise<PollOutcome> => {
-        const id = outcome.response.job_id
-        try {
-          const snapshot = await pollRecipeJob(id, {
-            onUpdate: (next) => {
-              aggregates.set(id, {
-                total: Number(next.total) || 1,
-                done: Number(next.done_count) || 0,
-              })
-              updateBatchAggregates()
-              syncLatestView(batch)
-            },
-          })
-          return { outcome, snapshot, error: null }
-        } catch (error) {
-          return { outcome, snapshot: null, error }
-        }
+    // 一批任务共用一条 SSE 连接推送进度；浏览器不支持或连接断开时，
+    // awaitRecipeJobs 会退回逐任务轮询（保留原有的单任务失败隔离）。
+    const wait = await awaitRecipeJobs(batch.jobIds, {
+      onUpdate: (next) => {
+        aggregates.set(next.id, {
+          total: Number(next.total) || 1,
+          done: Number(next.done_count) || 0,
+        })
+        updateBatchAggregates()
+        syncLatestView(batch)
       },
-    )
+      pollJob: (id, onUpdate) => pollRecipeJob(id, { onUpdate }),
+      timeoutMs: RECIPE_POLL_TIMEOUT_MS,
+    })
+    const pollOutcomes: PollOutcome[] = submitted.map((outcome) => {
+      const snapshot = wait.snapshots.get(outcome.response.job_id) ?? null
+      return {
+        outcome,
+        snapshot,
+        error: snapshot ? null : (wait.error ?? new Error('任务状态获取失败')),
+      }
+    })
 
     const urls: string[] = []
     const failureMessages: string[] = []
