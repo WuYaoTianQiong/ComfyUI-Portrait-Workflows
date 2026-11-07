@@ -44,7 +44,7 @@ atelier/
 │  ├─ routers/          # 只做 HTTP 入参/出参，不写业务（reference_* 为 AI 参考图库）
 │  └─ services/         # 业务与外部交互（reference_library / reference_sheet / uploads 为参考库链路）
 ├─ frontend/            # Vue3 + TS 源码
-├─ web/                 # 前端构建产物（不入库）
+├─ web/                 # 前端构建产物（随源码入库，见仓库根 .gitignore §175）
 ├─ tests/               # pytest 契约/单元测试；tests/e2e 为 Playwright
 ├─ tools/               # ci.ps1 / smoke.py / gen_api_types.py / backup_db.py / cleanup_tombstones.py / run_prompts.py
 ├─ 启动.bat             # 唯一中文入口（双击即用）
@@ -87,7 +87,7 @@ atelier/
 
 | 顺序 | 目录 | 下拉里的来源标签 | 说明 |
 |---:|---|---|---|
-| 1 | `<库根>/图库专用工作流/` | 图库专用 | 本机适配的三图合成（GGUF Q5_K_M / Nunchaku fp4），见该目录 `README.md` |
+| 1 | `<库根>/图库专用工作流/` | 图库专用 | 本机仅保留 `Qwen21+VNCCS_三图_25步_单人` 一个（25 步 / cfg 2.5），见该目录 `README.md` |
 | 2 | `<库根>/我的工作流/` | 我的工作流 | 用户自己丢进来的编辑类工作流 |
 | 3 | `<参考库>/src/workflows/` | 上游原版 | 开源项目自带（引用本机没有的 2509 fp8，选中会报不匹配） |
 | 4 | `<库根>/历史工作流/画廊旧版/` | 旧版归档 | 旧位置，仅兜底 |
@@ -113,8 +113,8 @@ atelier/
 | `ATELIER_THUMBNAIL_DIR` | `<data_dir>/thumbnails` | 缩略图缓存 |
 | `ATELIER_NO_BROWSER` | 未设置 | 设为 `1` 时启动不自动开浏览器（CI 用） |
 | `ATELIER_REFERENCE_ENABLED` | `1` | `0` = 参考库路由全部 404（整体回滚） |
-| `ATELIER_REFERENCE_ROOT` | `<library_root>/ai-pose-gallery-zh` | 上游只读参考库（junction，勿用 `../custom_nodes/...`） |
-| `ATELIER_REFERENCE_ALLOW_NSFW` | `0` | `1` = 允许查看敏感集合 |
+| `ATELIER_REFERENCE_ROOT` | `<comfyui_root>/custom_nodes/ai-pose-gallery-zh` | 上游只读参考库；旧 `<library_root>/ai-pose-gallery-zh` 仅作存在性回退 |
+| `ATELIER_REFERENCE_ALLOW_NSFW` | `0` | `1` = 允许查看敏感集合；`启动.bat` 会显式设为 `1` |
 | `ATELIER_REFERENCE_PAGE_SIZE` | `60` | 参考库默认分页 |
 | `ATELIER_REFERENCE_NSFW_POSE_SYSTEMS` | `全身单人・性感系,双人缠绵` | 逗号分隔的敏感姿势体系 |
 | `ATELIER_REFERENCE_NSFW_COSTUME_CATEGORIES` | `内衣・睡衣,性感穿搭` | 逗号分隔的敏感服装分类 |
@@ -168,7 +168,7 @@ python tools\smoke.py        # 真起 uvicorn（库副本 + 临时端口），�
 python tests\e2e\run_e2e.py  # Playwright 过主要页签（含批量超分）
 ```
 
-`tools/ci.ps1` 串起五道关：pytest → vue-tsc → vitest → vite build → smoke（+ E2E）。
+`tools/ci.ps1` 串起七道关：pytest → 硬编码颜色守护 → 契约类型同步 → vue-tsc → vitest → vite build → smoke（+ E2E）。
 **静态检查发现不了启动期崩溃和运行期 500，改完后端必须跑 ci.ps1。**
 
 ---
