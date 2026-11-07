@@ -2,6 +2,7 @@
 import json
 import logging
 import math
+import random
 import re
 
 from app.services.comfyui_client import get_object_info
@@ -1267,6 +1268,22 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
     _set_latent_size(info, width, height)
 
 
+def resolve_seed(*candidates) -> int:
+    """把「显式种子 / 提示词保存的种子」收敛成一个确定的种子。
+
+    0、None、空串一律视为「没指定」，按候选顺序取第一个正整数；
+    都没有就随机。这样每个入口只需要传候选值，不再各自解释 seed=0。
+    """
+    for value in candidates:
+        try:
+            seed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if seed > 0:
+            return seed
+    return random.randint(1, 2**32 - 1)
+
+
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     """
     向工作流注入提示词 / 种子 / 方向 / 画质。
@@ -1322,17 +1339,10 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
             text_nodes[1][1]["inputs"][text_nodes[1][2][0]] = negative
         prompt_data["compiled"] = compiled_dict
 
-    # 2. 注入种子
-    # 注意：seed=0 是有效值，不应跳过；seed_override=0 表示强制用 0
-    seed_override = prompt_data.get("seed_override")
-    if seed_override is not None:
-        seed_val = seed_override
-    else:
-        seed_val = prompt_data.get("seed", 0)
-    # 如果 seed_val 仍为 0 且没有显式 override，则生成随机种子
-    if seed_val == 0 and seed_override is None:
-        import random as _rnd
-        seed_val = _rnd.randint(1, 2**32 - 1)
+    # 2. 注入种子：0/None 统一按「未指定」处理，在这里一次性解析成确定值，
+    # 调用方从 prompt_data["seed_effective"] 读回实际提交的种子即可。
+    seed_val = resolve_seed(prompt_data.get("seed"))
+    prompt_data["seed_effective"] = seed_val
 
     # 遍历所有采样器节点：先注种子，再注参数
     for node_id, node in api_workflow.items():

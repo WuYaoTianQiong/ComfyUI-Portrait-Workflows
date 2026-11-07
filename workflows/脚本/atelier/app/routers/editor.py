@@ -26,7 +26,7 @@ import json
 import random
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
@@ -34,9 +34,7 @@ from app.models import Image
 from app.routers.media import IMAGE_EXT
 from app.routers.jobs import (
     build_job_extra,
-    create_job,
     find_job_by_idempotency,
-    update_job_items,
 )
 from app.services.image_inputs import (
     clean_dest_name as _clean_dest_name,
@@ -48,7 +46,8 @@ from app.services.output_location import (
     expand_subfolder,
     with_subfolder,
 )
-from app.services.submission import SubmitTask, enqueue_submission
+from app.services.generation import submit_generation
+from app.services.idempotency import SCOPE_FACESWAP, request_key
 from app.services.paths import resolve_image_path
 from app.services.quality_keys import QUALITY_SCALES, normalize_quality
 from app.services.workflow_parser import (
@@ -59,6 +58,7 @@ from app.services.workflow_parser import (
     inject_input_image,
     inject_prompt,
     load_workflow,
+    resolve_seed,
     normalize_aspect_ratio,
     set_output_prefix,
     set_save_subfolder,
@@ -200,8 +200,8 @@ def _resolve_seed(mode: str, base: int, idx: int) -> int:
     if mode == "random":
         return random.randint(1, 2 ** 32 - 1)
     if mode == "increment":
-        return base + idx
-    return base
+        return resolve_seed(base + idx)
+    return resolve_seed(base)
 
 
 def _resolve_size_params(
@@ -349,7 +349,10 @@ def faceswap_nodes(req: NodesRequest):
 
 
 @router.post("/editor/faceswap/batch")
-def faceswap_batch(req: FaceswapRequest):
+def faceswap_batch(
+    req: FaceswapRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """批量图像编辑：目标图 × 参考图 → 逐条推送 ComfyUI"""
     if not (req.main_ids or req.main_paths):
         raise HTTPException(400, "目标图至少选 1 张")
@@ -389,7 +392,8 @@ def faceswap_batch(req: FaceswapRequest):
         )
     requested_quality = requested_quality or QUALITY
 
-    existing = find_job_by_idempotency(req.idempotency_key, "faceswap")
+    idem_key = request_key(x_idempotency_key, req.idempotency_key)
+    existing = find_job_by_idempotency(idem_key, SCOPE_FACESWAP) if idem_key else None
     if existing is not None:
         return {
             "success": True, "job_id": existing["id"], "total": existing["total"],
@@ -568,31 +572,21 @@ def faceswap_batch(req: FaceswapRequest):
         workflow_path, req.workflow_content, req.output_subfolder,
         nodes=node_info, prompt=prompt_text, seed_mode=req.seed_mode,
     )
-    if req.idempotency_key.strip():
-        extra["idempotency_key"] = req.idempotency_key.strip()
-        extra["idempotency_scope"] = "faceswap"
+    if idem_key:
+        extra["idempotency_key"] = idem_key
+        extra["idempotency_scope"] = SCOPE_FACESWAP
     job_title = f"{req.job_label.strip()} {counts}" if req.job_label.strip() else f"图像编辑 {counts}"
-    job_id = create_job(
-        "faceswap", job_title,
-        items, workflow_path, orientation, quality,
-        extra=extra,
-    )
-    subfolder = expand_subfolder(
-        req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-        quality=quality, orientation=orientation,
-    )
-
     # 5) 构造每条 workflow 的函数交给后台提交线程；请求立即返回 job_id
     input_dir = str(settings.input_dir)
 
-    def prepare(i: int) -> dict:
+    def prepare(i: int, ctx) -> dict:
         combo = combos[i]
         api_wf = load_workflow(workflow_path, req.workflow_content)
         inject_prompt(api_wf, {
             "prompt": prompt_text,
             "negative_prompt": req.negative_prompt or "",
             "skip_compile": req.skip_compile,
-            "seed_override": plan[i]["seed"],
+            "seed": plan[i]["seed"],
             "orientation": orientation,
             "aspect_ratio": aspect_ratio,
             "quality": quality,
@@ -617,17 +611,23 @@ def faceswap_batch(req: FaceswapRequest):
             inject_input_image(api_wf, str(source_path), input_dir,
                                node_id=node_id, dest_name=dest_name)
         set_output_prefix(
-            api_wf, with_subfolder(subfolder, output_prefix(job_id, plan[i]["labels"]))
+            api_wf, with_subfolder(ctx.subfolder, output_prefix(ctx.job_id, plan[i]["labels"]))
         )
-        set_save_subfolder(api_wf, subfolder)
+        set_save_subfolder(api_wf, ctx.subfolder)
         return api_wf
 
-    update_job_items(job_id, items, status="running")
-    enqueue_submission(SubmitTask(job_id, list(range(len(combos))), prepare))
+    outcome = submit_generation(
+        job_type="faceswap", title=job_title, items=items,
+        workflow_path=workflow_path, workflow_content=req.workflow_content,
+        orientation=orientation, quality=quality, aspect_ratio=aspect_ratio,
+        output_subfolder=req.output_subfolder,
+        prepare=prepare, mode="queue",
+        indexes=list(range(len(combos))), extra=extra, apply_output=False,
+    )
 
     return {
         "success": True,
-        "job_id": job_id,
+        "job_id": outcome["job_id"],
         "total": len(combos),
         "submitted": 0,
         "queued": len(combos),

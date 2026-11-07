@@ -156,7 +156,9 @@ def test_run_text_applies_output_subfolder(api, monkeypatch):
         captured["workflow"] = workflow
         return {"prompt_id": "pid-test"}
 
-    monkeypatch.setattr(comfy_router, "push_prompt", fake_push)
+    from app.services import generation
+
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
 
     workflow = {"1": {"class_type": "SaveImage", "inputs": {"filename_prefix": "orig"}}}
     resp = api.post(

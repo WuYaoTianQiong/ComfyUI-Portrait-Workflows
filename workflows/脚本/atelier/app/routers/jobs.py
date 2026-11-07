@@ -9,7 +9,7 @@ B2 之后本文件只做"薄路由"：
 import json
 import queue
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from app.schemas import JobListResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -114,12 +114,16 @@ class RetryRequest(BaseModel):
 
 
 @router.post("/jobs/{job_id}/retry")
-def retry_job(job_id: int, data: RetryRequest | None = None):
+def retry_job(
+    job_id: int,
+    data: RetryRequest | None = None,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """把失败/取消的条目重提成一个新任务；indexes 为空时自动挑失败项。"""
     from app.services.job_retry import RetryError, retry_job as run_retry
 
     try:
-        return run_retry(job_id, data.indexes if data else None)
+        return run_retry(job_id, data.indexes if data else None, x_idempotency_key or "")
     except KeyError:
         raise HTTPException(404, "任务不存在")
     except RetryError as e:

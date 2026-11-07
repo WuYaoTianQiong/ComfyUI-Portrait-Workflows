@@ -2,27 +2,28 @@
 import json
 import traceback
 import random
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
 from app.models import Prompt, Category, Tag, PromptCategory, EntityTag, db
 from app.services.prompt_compiler import compile_prompt
 from app.services.workflow_parser import (
-    RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt,
+    RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt, resolve_seed,
 )
-from app.services.comfyui_client import push_prompt
+from app.services.generation import submit_generation
+from app.services.idempotency import (
+    SCOPE_COMPOSER_BATCH,
+    SCOPE_COMPOSER_SINGLE,
+    request_key,
+)
 from app.services.output_location import (
     OutputLocationError,
-    apply_output_subfolder,
     expand_subfolder,
 )
-from app.services.submission import SubmitTask, enqueue_submission
 from app.routers.jobs import (
     build_job_extra,
-    create_job,
     find_job_by_idempotency,
-    update_job_items,
 )
 from app.config import settings
 from app.services.fragment_syntax import (
@@ -252,11 +253,22 @@ class ComposerRunRequest(BaseModel):
     quality: str = "4K"
     aspect_ratio: str = ""
     output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 @router.post("/composer/run")
-def composer_run(req: ComposerRunRequest):
+def composer_run(
+    req: ComposerRunRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """组合提示词直接跑图（不保存到提示词库）"""
+    key = request_key(x_idempotency_key, req.idempotency_key)
+    existing = find_job_by_idempotency(key, SCOPE_COMPOSER_SINGLE) if key else None
+    if existing is not None:
+        return {
+            "success": True, "job_id": existing["id"], "result": {}, "idempotent": True,
+        }
+
     workflow_path = req.workflow_path or ""
     if not workflow_path:
         raise HTTPException(400, "缺少工作流路径")
@@ -272,46 +284,44 @@ def composer_run(req: ComposerRunRequest):
         prompt_data = {
             "prompt": strip_headers(req.prompt),
             "negative_prompt": req.negative_prompt,
-            "seed": 0,
-            "seed_override": 0,
             "orientation": req.orientation,
             "quality": req.quality,
             "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
+        seed_effective = int(prompt_data["seed_effective"])
 
         import json
         items = [{
             "prompt_id": 0,
-            "seed": 0,
+            "seed": seed_effective,
             "prompt_preview": (req.prompt or "")[:120],
             "prompt_params": json.dumps({
                 "prompt": req.prompt,
                 "negative_prompt": req.negative_prompt,
                 "aspect_ratio": req.aspect_ratio,
                 "source": "composer",
+                "seed": seed_effective,
                 "compiled": prompt_data.get("compiled"),
             }, ensure_ascii=False),
         }]
-        job_id = create_job(
-            "single", "组合创作", items, workflow_path,
-            req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
-                            aspect_ratio=req.aspect_ratio),
+        extra = build_job_extra(
+            workflow_path, req.workflow_content, req.output_subfolder,
+            aspect_ratio=req.aspect_ratio,
         )
-
-        subfolder = expand_subfolder(
-            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-            quality=req.quality, orientation=req.orientation,
+        if key:
+            extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_COMPOSER_SINGLE})
+        outcome = submit_generation(
+            job_type="single", title="组合创作", items=items,
+            workflow_path=workflow_path, workflow_content=req.workflow_content,
+            orientation=req.orientation, quality=req.quality,
+            aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
+            prepare=lambda _index, _ctx: api_wf, extra=extra,
         )
-        apply_output_subfolder(api_wf, subfolder)
-        result = push_prompt(api_wf)
-        comfy_pid = result.get("prompt_id", "")
-        items[0]["comfyui_prompt_id"] = comfy_pid
-        items[0]["status"] = "pending"
-        update_job_items(job_id, items, status="running")
-
-        return {"success": True, "job_id": job_id, "result": result}
+        return {
+            "success": True, "job_id": outcome["job_id"],
+            "result": outcome["result"], "seed": seed_effective,
+        }
     except FileNotFoundError as e:
         raise HTTPException(400, str(e))
     except OutputLocationError as e:
@@ -343,8 +353,12 @@ class BatchRandomRunRequest(BaseModel):
 
 
 @router.post("/composer/batch_random_run")
-def composer_batch_random_run(req: BatchRandomRunRequest):
+def composer_batch_random_run(
+    req: BatchRandomRunRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """批量随机组合碎片并跑图"""
+    idem_key = request_key(x_idempotency_key, req.idempotency_key)
     workflow_path = req.workflow_path or ""
     if not workflow_path:
         raise HTTPException(400, "缺少工作流路径")
@@ -355,7 +369,7 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
             req.output_subfolder, workflow_path=workflow_path, job_id=0,
             quality=req.quality, orientation=req.orientation,
         )
-        existing = find_job_by_idempotency(req.idempotency_key, "composer_batch")
+        existing = find_job_by_idempotency(idem_key, SCOPE_COMPOSER_BATCH) if idem_key else None
         if existing is not None:
             return {
                 "success": True, "job_id": existing["id"], "results": [],
@@ -447,46 +461,38 @@ def composer_batch_random_run(req: BatchRandomRunRequest):
             item["submit_state"] = "queued"
 
         extra = build_job_extra(workflow_path, req.workflow_content, req.output_subfolder)
-        if req.idempotency_key.strip():
-            extra["idempotency_key"] = req.idempotency_key.strip()
-            extra["idempotency_scope"] = "composer_batch"
-        job_id = create_job(
-            "batch" if len(job_items) > 1 else "single",
-            f"批量随机组合 ({len(job_items)} 组)",
-            job_items,
-            workflow_path,
-            req.orientation,
-            req.quality,
-            extra=extra,
-        )
-        subfolder = expand_subfolder(
-            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-            quality=req.quality, orientation=req.orientation,
-        )
-
-        def prepare(index: int) -> dict:
+        if idem_key:
+            extra["idempotency_key"] = idem_key
+            extra["idempotency_scope"] = SCOPE_COMPOSER_BATCH
+        def prepare(index: int, _ctx) -> dict:
             item = job_items[index]
             api_wf = load_workflow(workflow_path, req.workflow_content)
-            task_seed = item.get("seed") or random.randint(0, 2**32 - 1)
+            task_seed = resolve_seed(item.get("seed"))
             prompt_data = {
                 # 同一入口同样去掉【类型】标题；prompt_params 里仍保留原文
                 "prompt": strip_headers(json.loads(item["prompt_params"])["prompt"]),
                 "negative_prompt": req.negative_prompt,
                 "seed": task_seed,
-                "seed_override": task_seed,
                 "orientation": req.orientation,
                 "quality": req.quality,
                 "aspect_ratio": req.aspect_ratio,
             }
             inject_prompt(api_wf, prompt_data)
-            apply_output_subfolder(api_wf, subfolder)
             return api_wf
 
-        update_job_items(job_id, job_items, status="running")
-        enqueue_submission(SubmitTask(job_id, list(range(len(job_items))), prepare))
+        outcome = submit_generation(
+            job_type="batch" if len(job_items) > 1 else "single",
+            title=f"批量随机组合 ({len(job_items)} 组)",
+            items=job_items,
+            workflow_path=workflow_path, workflow_content=req.workflow_content,
+            orientation=req.orientation, quality=req.quality,
+            aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
+            prepare=prepare, mode="queue",
+            indexes=list(range(len(job_items))), extra=extra,
+        )
 
         return {
-            "success": True, "job_id": job_id, "results": [],
+            "success": True, "job_id": outcome["job_id"], "results": [],
             "total": len(job_items), "submitted": 0, "queued": len(job_items),
             "async": True,
         }

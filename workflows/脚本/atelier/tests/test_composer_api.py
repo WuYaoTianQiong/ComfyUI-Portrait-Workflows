@@ -10,7 +10,7 @@ COMBINED = "【人物面部】\n黑色长发\n\n【人物身材】\n纤细高挑
 def _patch_pipeline(monkeypatch):
     """替掉真实工作流加载与提交，只回放注入后的提示词。"""
     from app.routers import composer as composer_router
-    from app.services import submission
+    from app.services import generation, submission
 
     sent: list[str] = []
 
@@ -23,10 +23,10 @@ def _patch_pipeline(monkeypatch):
         return {"prompt_id": f"pid-{len(sent)}"}
 
     monkeypatch.setattr(composer_router, "load_workflow", fake_load)
-    monkeypatch.setattr(composer_router, "push_prompt", fake_push)
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
     monkeypatch.setattr(submission, "push_prompt", fake_push)
     # 测试里同步执行后台任务，避免线程时序
-    monkeypatch.setattr(composer_router, "enqueue_submission", submission.submit_task)
+    monkeypatch.setattr(generation, "enqueue_submission", submission.submit_task)
     return sent
 
 

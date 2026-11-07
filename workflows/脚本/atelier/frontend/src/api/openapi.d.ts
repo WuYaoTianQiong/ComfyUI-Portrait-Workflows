@@ -2121,11 +2121,8 @@ export interface components {
             prompt_id: number;
             /** Prompt Override */
             prompt_override?: string | null;
-            /**
-             * Seed
-             * @default 0
-             */
-            seed: number;
+            /** Seed */
+            seed?: number | null;
         };
         /** BatchRandomRunRequest */
         BatchRandomRunRequest: {
@@ -2362,6 +2359,11 @@ export interface components {
              * @default
              */
             aspect_ratio: string;
+            /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
             /**
              * Negative Prompt
              * @default
@@ -3102,6 +3104,11 @@ export interface components {
              * @default
              */
             aspect_ratio: string;
+            /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
             /**
              * Orientation
              * @default portrait
@@ -3876,6 +3883,11 @@ export interface components {
             /** Id */
             id: number;
             /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
+            /**
              * Orientation
              * @default portrait
              */
@@ -3890,11 +3902,8 @@ export interface components {
              * @default 4K
              */
             quality: string;
-            /**
-             * Seed Override
-             * @default 0
-             */
-            seed_override: number;
+            /** Seed */
+            seed?: number | null;
             /** Workflow Content */
             workflow_content?: string | null;
             /**
@@ -3910,6 +3919,11 @@ export interface components {
              * @default
              */
             aspect_ratio: string;
+            /**
+             * Idempotency Key
+             * @default
+             */
+            idempotency_key: string;
             /**
              * Negative Prompt
              * @default
@@ -3935,11 +3949,8 @@ export interface components {
              * @default 4K
              */
             quality: string;
-            /**
-             * Seed
-             * @default 0
-             */
-            seed: number;
+            /** Seed */
+            seed?: number | null;
             /**
              * Source Prompt Id
              * @default 0
@@ -4680,7 +4691,9 @@ export interface operations {
     composer_batch_random_run_api_composer_batch_random_run_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4813,7 +4826,9 @@ export interface operations {
     composer_run_api_composer_run_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4945,7 +4960,9 @@ export interface operations {
     faceswap_batch_api_editor_faceswap_batch_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5197,7 +5214,9 @@ export interface operations {
     generate_missing_api_generate_missing_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5947,7 +5966,9 @@ export interface operations {
     process_history_image_api_images__item_id__process_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path: {
                 item_id: number;
             };
@@ -6223,7 +6244,9 @@ export interface operations {
     retry_job_api_jobs__job_id__retry_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -7250,7 +7273,9 @@ export interface operations {
     run_prompt_api_runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7283,7 +7308,9 @@ export interface operations {
     batch_generate_api_runs_batch_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7316,7 +7343,9 @@ export interface operations {
     run_text_prompt_api_runs_text_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

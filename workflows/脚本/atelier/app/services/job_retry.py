@@ -14,12 +14,11 @@ from pathlib import Path
 from app.config import settings
 from app.models import GenJob, Prompt
 from app.services import job_state
-from app.services.comfyui_client import push_prompt
 from app.services.fragment_syntax import strip_headers
+from app.services.generation import submit_generation
 from app.services.image_inputs import clean_dest_name, compose_masked_target, dest_name
 from app.services.output_location import (
     OutputLocationError,
-    apply_output_subfolder,
     expand_subfolder,
     with_subfolder,
 )
@@ -28,6 +27,7 @@ from app.services.workflow_parser import (
     inject_input_image,
     inject_prompt,
     load_workflow,
+    resolve_seed,
     set_output_prefix,
     set_save_subfolder,
 )
@@ -96,7 +96,7 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
     steps = pp.get("steps")
     cfg_scale = pp.get("cfg_scale")
     sampler = pp.get("sampler")
-    seed = int(item.get("seed") or pp.get("seed") or 0)
+    raw_seed = item.get("seed") or pp.get("seed")
 
     if prompt_text is None:
         prompt_id = item.get("prompt_id")
@@ -108,17 +108,17 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
         steps = prompt.steps if steps is None else steps
         cfg_scale = prompt.cfg_scale if cfg_scale is None else cfg_scale
         sampler = sampler or prompt.sampler
-        seed = seed or int(prompt.seed or 0)
+        raw_seed = raw_seed or prompt.seed
 
     prompt_text = prompt_text or ""
     if injected is None:
         injected = strip_headers(prompt_text)
+    seed = resolve_seed(raw_seed)
 
     inject_prompt(api_wf, {
         "prompt": injected,
         "negative_prompt": negative or "",
         "seed": seed,
-        "seed_override": seed,
         "steps": steps,
         "cfg_scale": cfg_scale,
         "sampler": sampler or "",
@@ -134,7 +134,6 @@ def _build_prompt_workflow(job: dict, item: dict, new_job_id: int, subfolder: st
             raise RetryError(f"原始输入图已不在 input 目录: {input_image}")
         inject_input_image(api_wf, str(source), str(settings.input_dir), dest_name=source.name)
 
-    apply_output_subfolder(api_wf, subfolder)
     return api_wf
 
 
@@ -142,13 +141,12 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
     extra = _extra(job)
     api_wf = load_workflow(job.get("workflow_path", ""), extra.get("workflow_content"))
     pp = _prompt_params(item)
-    seed = int(item.get("seed") or pp.get("seed") or 0)
+    seed = resolve_seed(item.get("seed"), pp.get("seed"))
 
     inject_prompt(api_wf, {
         "prompt": pp.get("prompt", ""),
         "negative_prompt": pp.get("negative_prompt", ""),
         "seed": seed,
-        "seed_override": seed,
         "orientation": job.get("orientation", "portrait"),
         "quality": job.get("quality", "4K"),
         "aspect_ratio": extra.get("aspect_ratio", ""),
@@ -187,7 +185,11 @@ def _build_faceswap_workflow(job: dict, item: dict, new_job_id: int, subfolder: 
     return api_wf
 
 
-def retry_job(job_id: int, indexes: list[int] | None = None) -> dict:
+def retry_job(
+    job_id: int,
+    indexes: list[int] | None = None,
+    idempotency_key: str = "",
+) -> dict:
     """把失败 / 取消的条目提交成一个新任务，返回新 job_id。"""
     row = GenJob.get_or_none(GenJob.id == job_id)
     if row is None:
@@ -211,7 +213,9 @@ def retry_job(job_id: int, indexes: list[int] | None = None) -> dict:
         raise RetryError("没有失败或取消的条目")
 
     idx_token = ",".join(str(i) for i, _ in candidates)
-    key = f"retry:{job_id}:{idx_token}:{job.get('updated_at', '')}"
+    # 稳定键：同一批失败条目重复点击只建一个任务。
+    # 想再次重试同一批时，调用方传新的 X-Idempotency-Key 即可（见 routers/jobs.py）。
+    key = idempotency_key.strip() or f"retry:{job_id}:{idx_token}"
     existing = job_state.find_job_by_idempotency(key, "retry")
     if existing is not None:
         return {
@@ -244,43 +248,37 @@ def retry_job(job_id: int, indexes: list[int] | None = None) -> dict:
         "idempotency_key": key,
         "idempotency_scope": "retry",
     })
-    new_job_id = job_state.create_job(
-        job.get("job_type", "batch"),
-        f"重试: {job.get('title', '')}",
-        new_items,
-        workflow_path,
-        job.get("orientation", "portrait"),
-        job.get("quality", "4K"),
+    is_faceswap = job.get("job_type") == "faceswap"
+
+    def prepare(n: int, ctx) -> dict:
+        old_item = candidates[n][1]
+        if is_faceswap:
+            return _build_faceswap_workflow(job, old_item, ctx.job_id, ctx.subfolder)
+        return _build_prompt_workflow(job, old_item, ctx.job_id, ctx.subfolder)
+
+    outcome = submit_generation(
+        job_type=job.get("job_type", "batch"),
+        title=f"重试: {job.get('title', '')}",
+        items=new_items,
+        workflow_path=workflow_path,
+        workflow_content=new_extra.get("workflow_content"),
+        orientation=job.get("orientation", "portrait"),
+        quality=job.get("quality", "4K"),
+        aspect_ratio=new_extra.get("aspect_ratio", ""),
+        output_subfolder=subfolder_template,
+        prepare=prepare,
+        mode="queue",
+        indexes=list(range(len(candidates))),
         extra=new_extra,
+        apply_output=not is_faceswap,
     )
-    subfolder = expand_subfolder(
-        subfolder_template, workflow_path=workflow_path, job_id=new_job_id,
-        quality=job.get("quality", "4K"), orientation=job.get("orientation", "portrait"),
-    )
-
-    ok = 0
-    errors: list[dict] = []
-    for n, (old_idx, old_item) in enumerate(candidates):
-        try:
-            if job.get("job_type") == "faceswap":
-                api_wf = _build_faceswap_workflow(job, old_item, new_job_id, subfolder)
-            else:
-                api_wf = _build_prompt_workflow(job, old_item, new_job_id, subfolder)
-            result = push_prompt(api_wf)
-            new_items[n]["comfyui_prompt_id"] = result.get("prompt_id", "")
-            new_items[n]["status"] = "pending"
-            ok += 1
-        except Exception as e:
-            new_items[n]["status"] = "error"
-            new_items[n]["error"] = str(e)
-            errors.append({"index": old_idx, "error": str(e)})
-
-    job_state.update_job_items(new_job_id, new_items, status="running" if ok else "error")
     return {
-        "success": ok > 0,
-        "job_id": new_job_id,
-        "submitted": ok,
+        "success": True,
+        "job_id": outcome["job_id"],
+        "submitted": 0,
+        "queued": outcome["queued"],
         "total": len(candidates),
-        "errors": errors,
+        "errors": [],
         "idempotent": False,
+        "async": True,
     }

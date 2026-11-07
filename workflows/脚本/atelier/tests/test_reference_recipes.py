@@ -765,7 +765,9 @@ def test_size_params_are_passed_to_editor(api, recipe_env, captured):
 
 def test_qwen21_ignores_size_params_when_caps_unsupported(api, recipe_env, monkeypatch):
     """Qwen21 的 caps 是 quality/orientation=false：误传也必须回默认（二次防护）。"""
-    monkeypatch.setattr(editor_router, "enqueue_submission", lambda task: None)
+    from app.services import generation
+
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: None)
     resp = api.post(
         "/api/reference/recipes",
         json={

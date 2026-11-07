@@ -336,7 +336,7 @@ def test_composer_fragments_can_filter_one_type(api, seed_prompt):
 def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     """批量替换只覆盖本次注入的正文，提示词库里的原文不动。"""
     from app.routers import comfyui as comfy_router
-    from app.services import submission
+    from app.services import generation, submission
 
     p = seed_prompt(name="原提示词", prompt="【人物身材】旧\n\n【场景环境】街道")
 
@@ -345,7 +345,7 @@ def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
     monkeypatch.setattr(comfy_router, "inject_prompt", lambda wf, data: captured.update(data))
     monkeypatch.setattr(submission, "push_prompt", lambda wf: {"prompt_id": "pid-1"})
     # 测试里同步执行后台任务，避免线程时序
-    monkeypatch.setattr(comfy_router, "enqueue_submission", submission.submit_task)
+    monkeypatch.setattr(generation, "enqueue_submission", submission.submit_task)
 
     r = api.post("/api/runs/batch", json={
         "items": [{
@@ -366,7 +366,7 @@ def test_batch_generate_uses_prompt_override(api, seed_prompt, monkeypatch):
 
 def test_composer_batch_run_records_compiled_snapshot(api, monkeypatch):
     """批量随机在入队时就写 compiled，灯箱/任务详情才能看到实际正负向。"""
-    from app.routers import composer as composer_router
+    from app.services import generation
 
     wf = {
         "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
@@ -379,7 +379,7 @@ def test_composer_batch_run_records_compiled_snapshot(api, monkeypatch):
             },
         },
     }
-    monkeypatch.setattr(composer_router, "enqueue_submission", lambda task: None)
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: None)
     r = api.post("/api/composer/batch_random_run", json={
         "count": 1,
         "workflow_path": "F:/wf.json",

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from app.schemas import (
     FacetsResponse,
     HistoryIdsResponse,
@@ -38,7 +38,6 @@ from app.services.job_state import to_utc_iso
 from app.services.paths import _resolve_if_reparse, build_view_url, resolve_image_path
 from app.services.output_location import (
     OutputLocationError,
-    apply_output_subfolder,
     expand_subfolder,
 )
 from app.services.thumbnail import _get_image_path, clear_thumbnails_for, prewarm_thumbnail
@@ -1293,6 +1292,7 @@ class ProcessImageRequest(BaseModel):
     quality: str = "4K"
     aspect_ratio: str = ""
     output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 class CleanupBoxModel(BaseModel):
@@ -1309,8 +1309,24 @@ class CleanupRequest(BaseModel):
 
 
 @router.post("/images/{item_id}/process")
-def process_history_image(item_id: int, data: ProcessImageRequest):
+def process_history_image(
+    item_id: int,
+    data: ProcessImageRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """将历史图片作为输入，用指定工作流处理（如超分、重绘等）"""
+    from app.services.idempotency import SCOPE_IMAGE_PROCESS, request_key
+
+    idem_key = request_key(x_idempotency_key, data.idempotency_key)
+    if idem_key:
+        from app.routers.jobs import find_job_by_idempotency
+
+        existing = find_job_by_idempotency(idem_key, SCOPE_IMAGE_PROCESS)
+        if existing is not None:
+            return {
+                "success": True, "job_id": existing["id"], "result": {}, "idempotent": True,
+            }
+
     r = Image.get_or_none(Image.id == item_id)
     if r is None:
         raise HTTPException(404, "历史记录不存在")
@@ -1318,9 +1334,11 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     # 1. 定位源图片
     from pathlib import Path
     from app.config import settings
-    from app.services.workflow_parser import load_workflow, inject_prompt, inject_input_image
-    from app.services.comfyui_client import push_prompt
-    from app.routers.jobs import build_job_extra, create_job, update_job_items
+    from app.services.workflow_parser import (
+        load_workflow, inject_prompt, inject_input_image, resolve_seed,
+    )
+    from app.routers.jobs import build_job_extra
+    from app.services.generation import submit_generation
 
     src_path = resolve_image_path(
         r.filename or "", r.subfolder or "", r.img_type or "output"
@@ -1354,47 +1372,46 @@ def process_history_image(item_id: int, data: ProcessImageRequest):
     # 4. 注入基础参数
     prompt_data = {
         "prompt": "", "negative_prompt": "",
-        "seed": 0, "seed_override": 0,
+        "seed": resolve_seed(None),
         "orientation": data.orientation, "quality": data.quality,
         "aspect_ratio": data.aspect_ratio,
     }
     inject_prompt(api_wf, prompt_data)
+    seed_effective = int(prompt_data["seed_effective"])
 
     # 5. 创建任务
     items = [{
-        "prompt_id": r.prompt_id or 0, "seed": 0,
+        "prompt_id": r.prompt_id or 0, "seed": seed_effective,
         "prompt_preview": f"处理图片: {r.filename}",
         "prompt_params": json.dumps({
             "source": "history_process",
             "history_id": item_id,
             "input_image": img_name,
             "original_filename": r.filename,
+            "seed": seed_effective,
         }, ensure_ascii=False),
     }]
-    job_id = create_job(
-        "single", f"图片处理: {r.filename[:30]}", items,
-        workflow_path, data.orientation, data.quality,
-        extra=build_job_extra(
-            workflow_path, data.workflow_content, data.output_subfolder,
-            source="history_process", aspect_ratio=data.aspect_ratio,
-        ),
-    )
-    subfolder = expand_subfolder(
-        data.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-        quality=data.quality, orientation=data.orientation,
-    )
-    apply_output_subfolder(api_wf, subfolder)
-
-    # 6. 推送 ComfyUI
     try:
-        result = push_prompt(api_wf)
-        comfy_pid = result.get("prompt_id", "")
-        items[0]["comfyui_prompt_id"] = comfy_pid
-        items[0]["status"] = "pending"
-        update_job_items(job_id, items, status="running")
-        return {"success": True, "job_id": job_id, "result": result}
+        outcome = submit_generation(
+            job_type="single", title=f"图片处理: {r.filename[:30]}", items=items,
+            workflow_path=workflow_path, workflow_content=data.workflow_content,
+            orientation=data.orientation, quality=data.quality,
+            aspect_ratio=data.aspect_ratio, output_subfolder=data.output_subfolder,
+            prepare=lambda _index, _ctx: api_wf,
+            extra={
+                **build_job_extra(
+                    workflow_path, data.workflow_content, data.output_subfolder,
+                    source="history_process", aspect_ratio=data.aspect_ratio,
+                ),
+                **({"idempotency_key": idem_key, "idempotency_scope": SCOPE_IMAGE_PROCESS}
+                   if idem_key else {}),
+            },
+        )
+        return {
+            "success": True, "job_id": outcome["job_id"],
+            "result": outcome["result"], "seed": seed_effective,
+        }
     except Exception as e:
-        update_job_items(job_id, items, status="error")
         raise HTTPException(500, f"推送 ComfyUI 失败: {e}")
 
 

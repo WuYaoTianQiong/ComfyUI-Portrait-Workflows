@@ -31,12 +31,13 @@ def _make_job(**kw):
 
 def test_retry_prompt_item_uses_saved_prompt_params(api, monkeypatch):
     from app.models import GenJob
-    from app.services import job_retry
+    from app.services import generation, submission
 
-    pushed = []
-    monkeypatch.setattr(
-        job_retry, "push_prompt", lambda wf: pushed.append(wf) or {"prompt_id": "pid-retry"}
-    )
+    tasks, pushed = [], []
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: tasks.append(task))
+    fake_push = lambda wf: pushed.append(wf) or {"prompt_id": "pid-retry"}
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
+    monkeypatch.setattr(submission, "push_prompt", fake_push)
 
     item = {
         "prompt_id": None,
@@ -63,8 +64,10 @@ def test_retry_prompt_item_uses_saved_prompt_params(api, monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["success"] is True
-    assert body["submitted"] == 1
+    assert body["queued"] == 1
+    assert body["async"] is True
 
+    submission.submit_task(tasks[0])
     new = GenJob.get_by_id(body["job_id"])
     new_items = json.loads(new.items)
     assert new_items[0]["status"] == "pending"
@@ -80,15 +83,16 @@ def test_retry_prompt_item_uses_saved_prompt_params(api, monkeypatch):
 
 def test_retry_faceswap_reinjects_inputs(api, monkeypatch, tmp_path):
     from app.models import GenJob
-    from app.services import job_retry
+    from app.services import generation, submission
 
     source = settings.input_dir / "retry_source.png"
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(b"x")
-    pushed = []
-    monkeypatch.setattr(
-        job_retry, "push_prompt", lambda wf: pushed.append(wf) or {"prompt_id": "pid-fs"}
-    )
+    tasks, pushed = [], []
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: tasks.append(task))
+    fake_push = lambda wf: pushed.append(wf) or {"prompt_id": "pid-fs"}
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
+    monkeypatch.setattr(submission, "push_prompt", fake_push)
 
     item = {
         "prompt_id": 0,
@@ -112,7 +116,8 @@ def test_retry_faceswap_reinjects_inputs(api, monkeypatch, tmp_path):
     try:
         resp = api.post(f"/api/jobs/{old.id}/retry")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["submitted"] == 1
+        assert resp.json()["queued"] == 1
+        submission.submit_task(tasks[0])
         assert pushed[0]["1"]["inputs"]["image"].startswith("atelier_fs_")
         assert pushed[0]["2"]["inputs"]["filename_prefix"].startswith("retry")
     finally:

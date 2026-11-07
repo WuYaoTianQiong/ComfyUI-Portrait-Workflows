@@ -150,10 +150,6 @@ def test_batch_replace_detaches_from_source_prompt(api, seed_prompt, monkeypatch
     from app.services.job_state import _insert_history_for_item
 
     source = seed_prompt(name="原提示词", prompt="【人物面部】old")
-    monkeypatch.setattr(
-        comfy_router, "push_prompt",
-        lambda wf: {"prompt_id": "pid-replace"},
-    )
 
     workflow = {"1": {"class_type": "SaveImage", "inputs": {"filename_prefix": "orig"}}}
     result = comfy_router.batch_generate(

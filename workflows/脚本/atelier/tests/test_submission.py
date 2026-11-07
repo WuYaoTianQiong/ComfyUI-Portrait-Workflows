@@ -10,15 +10,14 @@ def _workflow():
 
 def test_batch_endpoint_returns_immediately_then_submits(api, seed_prompt, monkeypatch):
     from app.models import GenJob
-    from app.routers import comfyui as comfy_router
-    from app.services import submission
+    from app.services import generation, submission
 
     tasks = []
     pushed = []
-    monkeypatch.setattr(comfy_router, "enqueue_submission", lambda task: tasks.append(task))
-    monkeypatch.setattr(
-        submission, "push_prompt", lambda wf: pushed.append(wf) or {"prompt_id": "pid-async"}
-    )
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: tasks.append(task))
+    fake_push = lambda wf: pushed.append(wf) or {"prompt_id": "pid-async"}
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
+    monkeypatch.setattr(submission, "push_prompt", fake_push)
 
     p = seed_prompt()
     resp = api.post("/api/runs/batch", json={
@@ -46,15 +45,14 @@ def test_batch_endpoint_returns_immediately_then_submits(api, seed_prompt, monke
 
 def test_cancelled_before_submit_is_not_pushed(api, seed_prompt, monkeypatch):
     from app.models import GenJob
-    from app.routers import comfyui as comfy_router
-    from app.services import submission
+    from app.services import generation, submission
 
     tasks = []
     pushed = []
-    monkeypatch.setattr(comfy_router, "enqueue_submission", lambda task: tasks.append(task))
-    monkeypatch.setattr(
-        submission, "push_prompt", lambda wf: pushed.append(wf) or {"prompt_id": "pid-late"}
-    )
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: tasks.append(task))
+    fake_push = lambda wf: pushed.append(wf) or {"prompt_id": "pid-late"}
+    monkeypatch.setattr(generation, "push_prompt", fake_push)
+    monkeypatch.setattr(submission, "push_prompt", fake_push)
 
     p = seed_prompt()
     body = api.post("/api/runs/batch", json={

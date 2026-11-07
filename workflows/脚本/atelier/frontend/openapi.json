@@ -121,9 +121,15 @@
             "title": "Prompt Override"
           },
           "seed": {
-            "default": 0,
-            "title": "Seed",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
           }
         },
         "required": [
@@ -612,6 +618,11 @@
           "aspect_ratio": {
             "default": "",
             "title": "Aspect Ratio",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
             "type": "string"
           },
           "negative_prompt": {
@@ -2062,6 +2073,11 @@
             "title": "Aspect Ratio",
             "type": "string"
           },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
@@ -3442,6 +3458,11 @@
             "title": "Id",
             "type": "integer"
           },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
@@ -3457,10 +3478,16 @@
             "title": "Quality",
             "type": "string"
           },
-          "seed_override": {
-            "default": 0,
-            "title": "Seed Override",
-            "type": "integer"
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
           },
           "workflow_content": {
             "anyOf": [
@@ -3492,6 +3519,11 @@
             "title": "Aspect Ratio",
             "type": "string"
           },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
           "negative_prompt": {
             "default": "",
             "title": "Negative Prompt",
@@ -3518,9 +3550,15 @@
             "type": "string"
           },
           "seed": {
-            "default": 0,
-            "title": "Seed",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
           },
           "source_prompt_id": {
             "default": 0,
@@ -4738,6 +4776,24 @@
       "post": {
         "description": "批量随机组合碎片并跑图",
         "operationId": "composer_batch_random_run_api_composer_batch_random_run_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4986,6 +5042,24 @@
       "post": {
         "description": "组合提示词直接跑图（不保存到提示词库）",
         "operationId": "composer_run_api_composer_run_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5152,6 +5226,24 @@
       "post": {
         "description": "批量图像编辑：目标图 × 参考图 → 逐条推送 ComfyUI",
         "operationId": "faceswap_batch_api_editor_faceswap_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5494,6 +5586,24 @@
       "post": {
         "description": "为所有「没有生成过图片」的提示词统一批量出图。\n\n缺图判定（DB 关联）：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。\n每条提示词使用其自身保存的参数（steps/cfg/sampler/seed/分辨率），\n实际出图逻辑完全复用 batch_generate。",
         "operationId": "generate_missing_api_generate_missing_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6806,6 +6916,22 @@
               "title": "Item Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -7189,6 +7315,22 @@
             "schema": {
               "title": "Job Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
             }
           }
         ],
@@ -9004,6 +9146,24 @@
       "post": {
         "description": "单图生成",
         "operationId": "run_prompt_api_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9044,6 +9204,24 @@
       "post": {
         "description": "批量 / 变体生成",
         "operationId": "batch_generate_api_runs_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9084,6 +9262,24 @@
       "post": {
         "description": "直接提交 prompt 文本生成，无需数据库中已有记录",
         "operationId": "run_text_prompt_api_runs_text_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

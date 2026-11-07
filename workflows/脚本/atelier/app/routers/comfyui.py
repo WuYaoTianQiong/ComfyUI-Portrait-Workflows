@@ -9,7 +9,7 @@ import os
 import traceback
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from app.schemas import WorkflowListResponse, WorkflowRow
 from pydantic import BaseModel, Field
 
@@ -26,20 +26,22 @@ from app.services.workflow_catalog import (
 )
 from app.services.workflow_parser import (
     RatioNotSupported, detect_workflow_caps, find_loadimage_nodes,
-    loadimage_role, load_workflow, inject_prompt,
+    loadimage_role, load_workflow, inject_prompt, resolve_seed,
 )
-from app.services.comfyui_client import push_prompt
 from app.services.output_location import (
     OutputLocationError,
-    apply_output_subfolder,
     expand_subfolder,
 )
-from app.services.submission import SubmitTask, enqueue_submission
+from app.services.generation import submit_generation
+from app.services.idempotency import (
+    SCOPE_RUN_BATCH,
+    SCOPE_RUN_SINGLE,
+    SCOPE_TEXT_RUN,
+    request_key,
+)
 from app.routers.jobs import (
     build_job_extra,
-    create_job,
     find_job_by_idempotency,
-    update_job_items,
 )
 
 router = APIRouter(tags=["ComfyUI"])
@@ -55,8 +57,9 @@ class RunRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     aspect_ratio: str = ""
-    seed_override: int = 0
+    seed: int | None = None
     output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 class RunTextRequest(BaseModel):
@@ -67,9 +70,10 @@ class RunTextRequest(BaseModel):
     orientation: str = "portrait"
     quality: str = "4K"
     aspect_ratio: str = ""
-    seed: int = 0
+    seed: int | None = None
     source_prompt_id: int = 0  # 试跑来源提示词 ID，0 表示无来源
     output_subfolder: str = ""
+    idempotency_key: str = ""
 
 
 class CompilePromptRequest(BaseModel):
@@ -81,7 +85,7 @@ class CompilePromptRequest(BaseModel):
 
 class BatchItem(BaseModel):
     prompt_id: int
-    seed: int = 0
+    seed: int | None = None
     # 批量替换碎片用：只替换本次注入的文本，不写回提示词库
     prompt_override: str | None = None
 
@@ -307,8 +311,19 @@ def compile_prompt_preview(req: CompilePromptRequest):
 # ---------- 单图跑图 ----------
 
 @router.post("/runs")
-def run_prompt(req: RunRequest):
+def run_prompt(
+    req: RunRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """单图生成"""
+    key = request_key(x_idempotency_key, req.idempotency_key)
+    existing = find_job_by_idempotency(key, SCOPE_RUN_SINGLE) if key else None
+    if existing is not None:
+        return {
+            "success": True, "job_id": existing["id"], "result": {},
+            "dimensions": "", "idempotent": True,
+        }
+
     p = Prompt.get_or_none(Prompt.id == req.id)
     if p is None:
         raise HTTPException(404, "提示词不存在")
@@ -332,19 +347,19 @@ def run_prompt(req: RunRequest):
         prompt_data = {
             "prompt": clean_prompt,
             "negative_prompt": p.negative_prompt or "",
-            "seed": p.seed or 0,
-            "seed_override": req.seed_override,
+            "seed": req.seed if req.seed is not None else p.seed,
             "orientation": req.orientation,
             "quality": req.quality,
             "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
+        seed_effective = int(prompt_data["seed_effective"])
 
         # 创建任务记录
         prompt_params = {
             "prompt": clean_prompt,
             "negative_prompt": p.negative_prompt or "",
-            "seed": req.seed_override or (p.seed or 0),
+            "seed": seed_effective,
             "steps": p.steps, "cfg_scale": p.cfg_scale,
             "sampler": p.sampler or "", "model": p.model or "",
             "width": p.width, "height": p.height,
@@ -354,33 +369,32 @@ def run_prompt(req: RunRequest):
         }
         items = [{
             "prompt_id": req.id,
-            "seed": req.seed_override or (p.seed or 0),
+            "seed": seed_effective,
             "prompt_preview": (p.name or p.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
-        job_id = create_job(
-            "single", "单图生成", items, workflow_path, req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
-                            aspect_ratio=req.aspect_ratio),
+        extra = build_job_extra(
+            workflow_path, req.workflow_content, req.output_subfolder,
+            aspect_ratio=req.aspect_ratio,
         )
-
-        # 推送 ComfyUI
-        subfolder = expand_subfolder(
-            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-            quality=req.quality, orientation=req.orientation,
+        if key:
+            extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_RUN_SINGLE})
+        outcome = submit_generation(
+            job_type="single", title="单图生成", items=items,
+            workflow_path=workflow_path, workflow_content=req.workflow_content,
+            orientation=req.orientation, quality=req.quality,
+            aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
+            prepare=lambda _index, _ctx: api_wf, extra=extra,
         )
-        apply_output_subfolder(api_wf, subfolder)
-        result = push_prompt(api_wf)
-        comfy_pid = result.get("prompt_id", "")
-        items[0]["comfyui_prompt_id"] = comfy_pid
-        items[0]["status"] = "pending"
-        update_job_items(job_id, items, status="running")
 
         dims = ""
         if p.width and p.height:
             dims = f"{p.width}×{p.height}"
 
-        return {"success": True, "job_id": job_id, "result": result, "dimensions": dims}
+        return {
+            "success": True, "job_id": outcome["job_id"], "result": outcome["result"],
+            "dimensions": dims, "seed": seed_effective,
+        }
 
     except FileNotFoundError as e:
         raise HTTPException(400, str(e))
@@ -400,8 +414,18 @@ def run_prompt(req: RunRequest):
 # ---------- 裸 prompt 跑图（无需 prompt_id） ----------
 
 @router.post("/runs/text")
-def run_text_prompt(req: RunTextRequest):
+def run_text_prompt(
+    req: RunTextRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """直接提交 prompt 文本生成，无需数据库中已有记录"""
+    key = request_key(x_idempotency_key, req.idempotency_key)
+    existing = find_job_by_idempotency(key, SCOPE_TEXT_RUN) if key else None
+    if existing is not None:
+        return {
+            "success": True, "job_id": existing["id"], "result": {}, "idempotent": True,
+        }
+
     workflow_path = req.workflow_path or ""
     if not workflow_path:
         raise HTTPException(400, "缺少工作流路径")
@@ -416,17 +440,18 @@ def run_text_prompt(req: RunTextRequest):
         prompt_data = {
             "prompt": strip_headers(req.prompt),
             "negative_prompt": req.negative_prompt or "",
-            "seed": req.seed or 0,
+            "seed": req.seed,
             "orientation": req.orientation,
             "quality": req.quality,
             "aspect_ratio": req.aspect_ratio,
         }
         inject_prompt(api_wf, prompt_data)
+        seed_effective = int(prompt_data["seed_effective"])
 
         prompt_params = {
             "prompt": req.prompt or "",
             "negative_prompt": req.negative_prompt or "",
-            "seed": req.seed or 0,
+            "seed": seed_effective,
             "aspect_ratio": req.aspect_ratio,
             "source": "text_run",
             "source_prompt_id": req.source_prompt_id or 0,
@@ -436,28 +461,27 @@ def run_text_prompt(req: RunTextRequest):
         linked_prompt_id = req.source_prompt_id or 0
         items = [{
             "prompt_id": linked_prompt_id,
-            "seed": req.seed or 0,
+            "seed": seed_effective,
             "prompt_preview": (req.prompt or "")[:40],
             "prompt_params": json.dumps(prompt_params, ensure_ascii=False),
         }]
-        job_id = create_job(
-            "single", "文本跑图", items, workflow_path, req.orientation, req.quality,
-            extra=build_job_extra(workflow_path, req.workflow_content, req.output_subfolder,
-                            aspect_ratio=req.aspect_ratio),
+        extra = build_job_extra(
+            workflow_path, req.workflow_content, req.output_subfolder,
+            aspect_ratio=req.aspect_ratio,
         )
-
-        subfolder = expand_subfolder(
-            req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-            quality=req.quality, orientation=req.orientation,
+        if key:
+            extra.update({"idempotency_key": key, "idempotency_scope": SCOPE_TEXT_RUN})
+        outcome = submit_generation(
+            job_type="single", title="文本跑图", items=items,
+            workflow_path=workflow_path, workflow_content=req.workflow_content,
+            orientation=req.orientation, quality=req.quality,
+            aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
+            prepare=lambda _index, _ctx: api_wf, extra=extra,
         )
-        apply_output_subfolder(api_wf, subfolder)
-        result = push_prompt(api_wf)
-        comfy_pid = result.get("prompt_id", "")
-        items[0]["comfyui_prompt_id"] = comfy_pid
-        items[0]["status"] = "pending"
-        update_job_items(job_id, items, status="running")
-
-        return {"success": True, "job_id": job_id, "result": result}
+        return {
+            "success": True, "job_id": outcome["job_id"],
+            "result": outcome["result"], "seed": seed_effective,
+        }
 
     except FileNotFoundError as e:
         raise HTTPException(400, str(e))
@@ -475,11 +499,15 @@ def run_text_prompt(req: RunTextRequest):
 # ---------- 批量生成 ----------
 
 @router.post("/runs/batch")
-def batch_generate(req: BatchRequest):
+def batch_generate(
+    req: BatchRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """批量 / 变体生成"""
     if not req.items:
         raise HTTPException(400, "缺少 items")
 
+    idem_key = request_key(x_idempotency_key, req.idempotency_key)
     workflow_path = req.workflow_path or ""
 
     try:
@@ -490,7 +518,7 @@ def batch_generate(req: BatchRequest):
     except OutputLocationError as e:
         raise HTTPException(400, str(e))
 
-    existing = find_job_by_idempotency(req.idempotency_key, "runs_batch")
+    existing = find_job_by_idempotency(idem_key, SCOPE_RUN_BATCH) if idem_key else None
     if existing is not None:
         return {
             "success": True, "job_id": existing["id"], "results": [], "errors": [],
@@ -512,7 +540,7 @@ def batch_generate(req: BatchRequest):
     for i, item in enumerate(req.items):
         record = {
             "prompt_id": item.prompt_id,
-            "seed": item.seed,
+            "seed": item.seed or 0,
             "status": "pending",
             "submit_state": "queued",
         }
@@ -535,6 +563,9 @@ def batch_generate(req: BatchRequest):
             if item.prompt_override
             else strip_headers(p.prompt)
         )
+        # 在请求线程里就把种子定下来，item 记录与实际提交才会一致。
+        seed_value = resolve_seed(item.seed, p.seed)
+        record["seed"] = seed_value
         record["prompt_preview"] = (item.prompt_override or p.name or p.prompt or "")[:40]
         if item.prompt_override:
             # 替换碎片后的图不属于原提示词：解除关联，把实际替换文本存进 prompt_params
@@ -545,7 +576,7 @@ def batch_generate(req: BatchRequest):
                 "prompt": item.prompt_override,
                 "injected_prompt": prompt_text,
                 "negative_prompt": p.negative_prompt or "",
-                "seed": item.seed or p.seed or 0,
+                "seed": seed_value,
                 "steps": p.steps,
                 "cfg_scale": p.cfg_scale,
                 "sampler": p.sampler,
@@ -562,7 +593,7 @@ def batch_generate(req: BatchRequest):
                 "prompt": p.prompt or "",
                 "injected_prompt": prompt_text,
                 "negative_prompt": p.negative_prompt or "",
-                "seed": item.seed or p.seed or 0,
+                "seed": seed_value,
                 "steps": p.steps,
                 "cfg_scale": p.cfg_scale,
                 "sampler": p.sampler,
@@ -581,21 +612,10 @@ def batch_generate(req: BatchRequest):
         workflow_path, req.workflow_content, req.output_subfolder,
         aspect_ratio=req.aspect_ratio,
     )
-    if req.idempotency_key.strip():
-        extra["idempotency_key"] = req.idempotency_key.strip()
-        extra["idempotency_scope"] = "runs_batch"
-    job_id = create_job(
-        "batch", req.title,
-        items_raw, workflow_path,
-        req.orientation, req.quality,
-        extra=extra,
-    )
-    subfolder = expand_subfolder(
-        req.output_subfolder, workflow_path=workflow_path, job_id=job_id,
-        quality=req.quality, orientation=req.orientation,
-    )
-
-    def prepare(index: int) -> dict:
+    if idem_key:
+        extra["idempotency_key"] = idem_key
+        extra["idempotency_scope"] = SCOPE_RUN_BATCH
+    def prepare(index: int, _ctx) -> dict:
         item = req.items[index]
         p = prompts[index]
         api_wf = load_workflow(workflow_path, req.workflow_content)
@@ -607,8 +627,7 @@ def batch_generate(req: BatchRequest):
         inject_prompt(api_wf, {
             "prompt": prompt_text,
             "negative_prompt": p.negative_prompt or "",
-            "seed": p.seed or 0,
-            "seed_override": item.seed,
+            "seed": items_raw[index]["seed"],
             "steps": p.steps,
             "cfg_scale": p.cfg_scale,
             "sampler": p.sampler,
@@ -616,15 +635,18 @@ def batch_generate(req: BatchRequest):
             "quality": req.quality,
             "aspect_ratio": req.aspect_ratio,
         })
-        apply_output_subfolder(api_wf, subfolder)
         return api_wf
 
-    update_job_items(job_id, items_raw, status="running" if indexes else "error")
-    if indexes:
-        enqueue_submission(SubmitTask(job_id, indexes, prepare))
+    outcome = submit_generation(
+        job_type="batch", title=req.title, items=items_raw,
+        workflow_path=workflow_path, workflow_content=req.workflow_content,
+        orientation=req.orientation, quality=req.quality,
+        aspect_ratio=req.aspect_ratio, output_subfolder=req.output_subfolder,
+        prepare=prepare, mode="queue", indexes=indexes, extra=extra,
+    )
 
     return {
-        "success": bool(indexes), "job_id": job_id, "results": [], "errors": errors,
+        "success": bool(indexes), "job_id": outcome["job_id"], "results": [], "errors": errors,
         "total": len(req.items), "submitted": 0, "queued": len(indexes), "async": True,
     }
 
@@ -698,7 +720,10 @@ def generate_missing_list():
 
 
 @router.post("/generate_missing")
-def generate_missing(req: GenerateMissingRequest):
+def generate_missing(
+    req: GenerateMissingRequest,
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
     """为所有「没有生成过图片」的提示词统一批量出图。
 
     缺图判定（DB 关联）：Image 中不存在该 prompt_id 的未删除记录，即视为缺图。
@@ -719,7 +744,7 @@ def generate_missing(req: GenerateMissingRequest):
         }
 
     batch_req = BatchRequest(
-        items=[BatchItem(prompt_id=pid, seed=0) for pid in missing_ids],
+        items=[BatchItem(prompt_id=pid) for pid in missing_ids],
         workflow_path=req.workflow_path,
         workflow_content=req.workflow_content,
         orientation=req.orientation,
@@ -727,7 +752,7 @@ def generate_missing(req: GenerateMissingRequest):
         aspect_ratio=req.aspect_ratio,
         title=f"补全缺图 ({len(missing_ids)} 条)",
         output_subfolder=req.output_subfolder,
-        idempotency_key=req.idempotency_key,
+        idempotency_key=request_key(x_idempotency_key, req.idempotency_key),
     )
     result = batch_generate(batch_req)
     result["count"] = len(missing_ids)

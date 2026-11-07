@@ -75,10 +75,10 @@ def test_faceswap_batch_dry_run_flags_keep_source_name(api, tmp_path):
 
 def test_faceswap_batch_prepare_injects_quality_and_clean_name(api, tmp_path, monkeypatch):
     """真跑提交前的 prepare：档位、input 文件名、保存子目录、任务标题都要生效。"""
-    import app.routers.editor as editor_router
+    from app.services import generation
 
     captured = {}
-    monkeypatch.setattr(editor_router, "enqueue_submission", lambda task: captured.setdefault("task", task))
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: captured.setdefault("task", task))
 
     paths = _write_images(tmp_path)
     resp = api.post(
@@ -143,10 +143,10 @@ def test_combo_limit_is_100(api, tmp_path):
 
 def test_edit_workflow_still_gets_default_prompt(api, tmp_path, monkeypatch):
     """有文本编码节点的编辑工作流，留空提示词时仍要套默认编辑提示。"""
-    import app.routers.editor as editor_router
+    from app.services import generation
 
     captured = {}
-    monkeypatch.setattr(editor_router, "enqueue_submission", lambda task: captured.setdefault("task", task))
+    monkeypatch.setattr(generation, "enqueue_submission", lambda task: captured.setdefault("task", task))
 
     wf = {
         "1": {"class_type": "LoadImage", "inputs": {"image": "example.png"}},
