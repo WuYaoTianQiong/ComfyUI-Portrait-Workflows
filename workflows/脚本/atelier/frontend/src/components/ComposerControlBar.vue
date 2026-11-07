@@ -183,6 +183,11 @@ function onSearchInput(event: Event) {
   color: var(--primary);
 }
 
+.count {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
 .bar-search {
   flex: 1 1 220px;
   min-width: 160px;

@@ -888,6 +888,16 @@ watch(
   color: var(--muted);
 }
 
+.btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: rgb(255 255 255);
+}
+
+.btn.primary:disabled {
+  opacity: 0.4;
+}
+
 .btn.danger {
   border-color: var(--danger);
   color: var(--danger-text-button);
