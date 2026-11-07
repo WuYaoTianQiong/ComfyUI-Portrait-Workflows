@@ -1589,7 +1589,7 @@ export interface paths {
          * Check Reference Trim
          * @description 提交前能力探测：空槽能否裁掉。
          *
-         *     与 `/reference/recipes` 共用角色校验与 `_resolve_trim_plan`，
+         *     与 `/reference/recipes` 共用角色校验与 `reference_studio.resolve_trim_plan`，
          *     因此 `all_trimmable=true` 时提交不会再因输入数 400；`false` 时前端才弹确认框。
          */
         post: operations["check_reference_trim_api_reference_trim_check_post"];
