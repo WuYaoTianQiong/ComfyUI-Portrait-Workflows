@@ -972,21 +972,36 @@ function randomize(): void {
 // 第 4 张（extra）：只保留 1 张，仅 uploads
 // ---------------------------------------------------------------------------
 
+/** 第 4 槽文案：选中发型工作流时显示「发型」，否则保持通用「第 4 张」。 */
+const extraSlotLabel = computed(() => {
+  const flows = effectiveWorkflows.value
+  return flows.length > 0 && flows.every((item) => /发型|hair/i.test(item.name))
+    ? '发型'
+    : '第 4 张'
+})
+const extraSlotHint = computed(() =>
+  extraSlotLabel.value === '发型'
+    ? '只取发型，建议上传背面无脸图；PNG/JPG/WebP/HEIC ≤ 25MB'
+    : 'PNG/JPG/WebP/HEIC ≤ 25MB',
+)
+
 function onExtraUploaded(items: UploadedReference[]): void {
   const first = items[0]
   if (!first) return
   if (!UPLOADS_SEGMENT.test(first.path)) {
     toast.error(
-      '第 4 张参考图被拒绝。原因：上传结果不在 uploads 上传目录内。下一步：用本页的上传入口重新选择图片。',
+      `${extraSlotLabel.value}参考图被拒绝。原因：上传结果不在 uploads 上传目录内。下一步：用本页的上传入口重新选择图片。`,
     )
     return
   }
   setExtra(first.path, first.name)
-  toast.success('已添加第 4 张参考图（只提交这 1 张）')
+  toast.success(`已添加${extraSlotLabel.value}参考图（只提交这 1 张）`)
 }
 
 function onExtraError(message: string): void {
-  toast.error(`第 4 张参考图上传失败。原因：${message}。下一步：换一张图片，或确认文件不超过 25MB 后重试。`)
+  toast.error(
+    `${extraSlotLabel.value}参考图上传失败。原因：${message}。下一步：换一张图片，或确认文件不超过 25MB 后重试。`,
+  )
 }
 
 /**
@@ -1246,7 +1261,7 @@ onMounted(async () => {
             </span>
             <span class="extra-item__body">
               <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
-              <span class="extra-item__meta">来自 uploads · 提交时作为第 4 张</span>
+              <span class="extra-item__meta">来自 uploads · 提交时作为{{ extraSlotLabel }}</span>
             </span>
             <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
           </div>
@@ -1255,8 +1270,8 @@ onMounted(async () => {
             v-else
             variant="tile"
             :multiple="false"
-            label="＋ 上传第 4 张"
-            hint="PNG/JPG/WebP/HEIC ≤ 25MB"
+            :label="`＋ 上传${extraSlotLabel}`"
+            :hint="extraSlotHint"
             @uploaded="onExtraUploaded"
             @error="onExtraError"
           />
