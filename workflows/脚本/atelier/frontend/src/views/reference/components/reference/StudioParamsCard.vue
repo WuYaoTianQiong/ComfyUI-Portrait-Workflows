@@ -284,7 +284,7 @@ function onPairBatchChange(event: Event): void {
       class="field field--full"
       data-testid="studio-pair-batch-field"
     >
-      <span class="field__label">双人配对模式</span>
+      <span class="field__label">双人配对（默认单图）</span>
       <label class="switch-row">
         <input
           type="checkbox"
@@ -294,7 +294,7 @@ function onPairBatchChange(event: Event): void {
           @change="onPairBatchChange"
         />
         <span class="switch-row__text">
-          <span class="switch-row__title">批量展开</span>
+          <span class="switch-row__title">改为批量展开</span>
           <span class="switch-row__hint">
             默认每个图片槽只保留 1 张、人物 B 变体 1 组，不做跨槽笛卡尔积；打开后恢复多选
           </span>

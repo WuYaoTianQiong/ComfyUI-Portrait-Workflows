@@ -305,7 +305,7 @@ function setMode(next: RecipeSlotMode): void {
       <button
         type="button"
         class="slot-panel__empty-main"
-        :aria-label="`前往${label}库多选参考图`"
+        :aria-label="`前往${label}库选择参考图`"
         :data-testid="`studio-slot-select-${slotKey}`"
         @click="emit('select')"
       >
@@ -321,7 +321,7 @@ function setMode(next: RecipeSlotMode): void {
           </svg>
         </span>
         <span class="slot-panel__empty-hint">{{ hint }}</span>
-        <span class="slot-panel__empty-note">可多选，选完手动切回合成台</span>
+        <span class="slot-panel__empty-note">选完手动切回合成台</span>
       </button>
       <div class="slot-panel__footer slot-panel__footer--empty">
         <button

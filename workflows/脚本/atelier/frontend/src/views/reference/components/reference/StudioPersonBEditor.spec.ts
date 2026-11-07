@@ -39,7 +39,7 @@ function mountEditor(
 describe('StudioPersonBEditor', () => {
   it('渲染三行 B 专属碎片与变体页签', () => {
     const wrapper = mountEditor([variantWithFace('b-1', '鹅蛋脸'), variantWithFace('b-2', '圆脸')])
-    expect(wrapper.text()).toContain('人物 B · 文字设定')
+    expect(wrapper.text()).toContain('人物 B 设定')
     expect(wrapper.text()).toContain('2 组变体')
     for (const type of ['人物面部', '人物身材', '人物服饰']) {
       expect(wrapper.find(`[data-testid="studio-person-b-row-${type}"]`).exists()).toBe(true)

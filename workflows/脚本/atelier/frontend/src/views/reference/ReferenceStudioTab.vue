@@ -34,7 +34,10 @@ import type { FragmentType } from '../../constants'
 import { withReferenceTab } from './referenceDeepLink'
 import DropZone from '../../components/DropZone.vue'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
-import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
+import {
+  RECIPE_SLOT_TOTAL,
+  useReferenceRecipeDraft,
+} from '../../composables/useReferenceRecipeDraft'
 import type { RecipeSlotKey } from '../../composables/useReferenceRecipeDraft'
 import {
   flushReferenceStudioSettings,
@@ -613,13 +616,15 @@ interface SlotCardView {
 
 const slotCards = computed<SlotCardView[]>(() => {
   const useDepth = draft.pose.value[0]?.useDepth ?? poseDepthMode.value
+  // 双人配对模式下每槽只保留 1 张，空态提示不能再说「可多选」
+  const selectHint = draft.pairModeActive.value ? '双人配对：仅 1 张' : '可多选'
 
   return [
     {
       key: 'portrait',
       label: '人像',
       items: portraitSlotItems(draft.portrait.value),
-      hint: '+ 选人像（可多选）',
+      hint: `+ 选人像（${selectHint}）`,
       showDepthToggle: false,
       useDepth: false,
     },
@@ -627,7 +632,7 @@ const slotCards = computed<SlotCardView[]>(() => {
       key: 'costume',
       label: '服装',
       items: costumeSlotItems(draft.costume.value),
-      hint: '+ 选服装（可多选）',
+      hint: `+ 选服装（${selectHint}）`,
       showDepthToggle: false,
       useDepth: false,
     },
@@ -635,7 +640,7 @@ const slotCards = computed<SlotCardView[]>(() => {
       key: 'pose',
       label: '姿势',
       items: poseSlotItems(draft.pose.value),
-      hint: '+ 选姿势（可多选）',
+      hint: `+ 选姿势（${selectHint}）`,
       showDepthToggle: true,
       useDepth,
     },
@@ -693,7 +698,21 @@ const previewGroups = computed(() =>
   }),
 )
 
-const countLabel = computed(() => draft.countLabel.value)
+/**
+ * 图片槽计数徽标：按当前工作流支持的槽位口径统计（三槽 + 第4槽 + 第5槽），
+ * 避免五图工作流下仍显示 n/3 让用户以为漏选。
+ */
+const slotCountLabel = computed(() => {
+  const total =
+    RECIPE_SLOT_TOTAL +
+    (supportsExtraSlot.value ? 1 : 0) +
+    (supportsExtraCostumeSlot.value ? 1 : 0)
+  const filled =
+    draft.count.value +
+    (supportsExtraSlot.value && extraFilled.value ? 1 : 0) +
+    (supportsExtraCostumeSlot.value && extraCostumeFilled.value ? 1 : 0)
+  return `${filled}/${total}`
+})
 const totalSelected = computed(() => draft.totalSelected.value)
 
 /** 姿势槽切换白模 / 深度图：同步全局模式与槽内全部姿势。 */
@@ -1368,14 +1387,14 @@ onMounted(async () => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张按工作流声明为发型参考或人物B身份参考（可加文字补充，不参与批次组合）</template>。
+        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张按工作流声明为发型参考或人物B身份参考（可加文字补充，不参与批次组合）</template><template v-if="supportsExtraCostumeSlot">；第 5 张为人物B服装参考（整批共享 1 张，不参与批次组合）</template><template v-if="draft.pairModeActive.value">。当前为双人配对：每个图片槽默认只保留 1 张</template>。
       </p>
     </header>
 
     <!-- 素材区 + 生成清单：全宽（P1 重排，4 列每列约 280px） -->
     <ReferenceSectionCard title="参考图组合">
       <template #actions>
-        <span class="studio-count" data-testid="studio-recipe-count">{{ countLabel }}</span>
+        <span class="studio-count" data-testid="studio-recipe-count">{{ slotCountLabel }}</span>
       </template>
 
       <!-- 素材区：三槽（图墙版）+ 第 4 张上传块；没有工作流支持 extra 时只留三槽 -->
@@ -1511,6 +1530,7 @@ onMounted(async () => {
         :portrait-count="draft.portraitCount.value"
         :single-mode="draft.pairModeActive.value"
         :costume-slot-enabled="supportsExtraCostumeSlot"
+        :pair-pose-selected="hasPairPose"
         :costume-name="extraCostumeName"
         :identity-image-selected="extraKind === 'person_b' && extraFilled"
         :identity-image-name="extraKind === 'person_b' && extraFilled ? extraName : ''"

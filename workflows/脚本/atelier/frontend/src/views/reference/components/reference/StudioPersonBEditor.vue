@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * 合成台「人物 B 文字设定」（v1.5）。
+ * 合成台「人物 B 设定」（v1.5 / V2-C）。
  *
  * 口径：
- * - 只在双人姿势下显示；B 只有文字，不占图片槽、不参与图片笛卡尔积；
+ * - 双人姿势下显示；五图人物B工作流即使未选双人姿势也会显示（入口不隐藏）；
+ * - B 的文字设定不占图片槽、不参与图片笛卡尔积；第 5 槽 B 服装图整批共享 1 张；
  * - B 的三类人物碎片（面部 / 身材 / 服饰）与 A 完全隔离，独立存储；
  * - 支持多条「B 变体」：批量时按序号与 A 人像 1:1 配对，避免 A×B 爆炸；
  * - 纯受控：碎片与自由文字变更都通过 `update:variants` 交回页面。
@@ -55,6 +56,8 @@ const props = defineProps<{
   singleMode?: boolean
   /** V2-C：当前工作流是否支持第 5 槽（人物B服装）。 */
   costumeSlotEnabled?: boolean
+  /** 是否已选双人姿势；否则仅为五图工作流的 B 入口。 */
+  pairPoseSelected?: boolean
   /** 已选人物B服装名；空串 = 未选，人物服饰碎片仍作文字兜底。 */
   costumeName?: string
 }>()
@@ -173,8 +176,8 @@ function previewContent(content: string): string {
 <template>
   <section class="person-b" data-testid="studio-person-b">
     <header class="person-b__head">
-      <span class="person-b__title">人物 B · 文字设定</span>
-      <span class="person-b__badge">双人姿势</span>
+      <span class="person-b__title">人物 B 设定</span>
+      <span class="person-b__badge">{{ pairPoseSelected ? '双人姿势' : '人物B参考' }}</span>
       <span class="person-b__count" data-testid="studio-person-b-count">
         {{ variants.length }} 组变体
       </span>
@@ -442,7 +445,8 @@ function previewContent(content: string): string {
 }
 
 .person-b__costume-upload {
-  max-width: 260px;
+  /* 与上方名称 / 按钮行同宽，避免窄块靠左显得错位 */
+  width: 100%;
   margin-top: 8px;
 }
 
