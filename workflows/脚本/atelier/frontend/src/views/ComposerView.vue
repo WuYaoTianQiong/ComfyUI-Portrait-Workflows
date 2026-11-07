@@ -7,9 +7,10 @@ import { useRouter } from 'vue-router'
 import TagCloud from '../components/TagCloud.vue'
 import CategoryFilter from '../components/CategoryFilter.vue'
 import ComposerResultCenterModal from '../components/ComposerResultCenterModal.vue'
-import WorkflowPicker from '../components/WorkflowPicker.vue'
 import FragmentDetailModal from '../components/FragmentDetailModal.vue'
 import Lightbox from '../components/Lightbox.vue'
+import ComposerReel from '../components/ComposerReel.vue'
+import ComposerControlBar from '../components/ComposerControlBar.vue'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
@@ -17,7 +18,6 @@ import { useSettings } from '../composables/useSettings'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
-import WorkflowParams from '../components/WorkflowParams.vue'
 import { useGenerate } from '../composables/useGenerate'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { FRAGMENT_TYPES } from '../constants'
@@ -114,6 +114,7 @@ const tagIds = ref<number[]>(savedSession.tagIds)
 const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
 const filtersOpen = ref(false)
 const settingsOpen = ref(false)
+const filterCount = computed(() => tagIds.value.length + (categoryId.value !== null ? 1 : 0))
 
 const toast = useToast()
 
@@ -694,30 +695,6 @@ function toggleLock(type: string) {
 
 const keyword = computed(() => search.value.trim())
 
-function isHit(content: string): boolean {
-  const k = keyword.value.toLowerCase()
-  return !!k && content.toLowerCase().includes(k)
-}
-
-/** 把正文按关键词切成片段，命中的片段单独着色（不拼 HTML，避免 XSS）。 */
-function textParts(text: string): Array<{ text: string; hit: boolean }> {
-  const k = keyword.value
-  if (!k) return [{ text, hit: false }]
-  const parts: Array<{ text: string; hit: boolean }> = []
-  const lower = text.toLowerCase()
-  const kl = k.toLowerCase()
-  let from = 0
-  while (from < text.length) {
-    const at = lower.indexOf(kl, from)
-    if (at < 0) break
-    if (at > from) parts.push({ text: text.slice(from, at), hit: false })
-    parts.push({ text: text.slice(at, at + k.length), hit: true })
-    from = at + k.length
-  }
-  if (from < text.length) parts.push({ text: text.slice(from), hit: false })
-  return parts.length ? parts : [{ text, hit: false }]
-}
-
 /** 搜索后把每列第一条命中的卡片滚到可视区。 */
 async function locateFirstHit() {
   if (!keyword.value) return
@@ -1006,97 +983,41 @@ function toggleTag(id: number) {
 </script>
 <template>
   <div class="composer">
-    <div class="composer-bar">
-      <input
-        v-model="search"
-        class="bar-search"
-        type="search"
-        placeholder="检索碎片内容…"
-      />
-      <button
-        class="btn btn-sm"
-        :class="{ on: filtersOpen || tagIds.length || categoryId !== null }"
-        @click="filtersOpen = !filtersOpen"
-      >
-        筛选<template v-if="tagIds.length + (categoryId !== null ? 1 : 0)">
-          · {{ tagIds.length + (categoryId !== null ? 1 : 0) }}
-        </template>
-      </button>
-      <span class="count">
-        碎片 {{ fragmentTotal }}<span v-if="isFetching"> · 加载中</span>
-      </span>
-      <div class="bar-wf">
-        <WorkflowPicker v-model="workflowPath" :workflows="workflows" />
-      </div>
-      <WorkflowParams
-        v-model:quality="quality"
-        v-model:orientation="orientation"
-        v-model:aspect-ratio="aspectRatio"
-        :aspect-ratios="aspectRatios"
-        :default-ratio="defaultRatio"
-        :workflow-path="workflowPath"
-        :caps="caps"
-        :quality-options="qualityOptions"
-      />
-      <button
-        class="btn btn-sm"
-        :class="{ on: canvasCount }"
-        title="查看组合结果（画布 / 随机组 / 任务结果）"
-        @click="openResultCanvas"
-      >
-        组合结果 · {{ canvasCount }} 个碎片
-      </button>
-      <button
-        class="btn btn-sm"
-        :class="{ on: !!negativePrompt.trim(), 'cap-off': !negativeEffective }"
-        :title="negativeTip"
-        @click="settingsOpen = true"
-      >
-        🚫 负面提示词
-        <span v-if="!negativeEffective" class="cap-badge">不生效</span>
-      </button>
-      <button
-        class="btn btn-sm"
-        :disabled="!composedPrompt"
-        title="查看编译后的正向/负向（只编译，不出图）"
-        @click="openCompilePreview"
-      >
-        🧩 编译
-      </button>
-      <button class="btn btn-sm" @click="templateOpen = true">
-        📚 模板 {{ templates.length }}
-      </button>
-      <button class="btn btn-sm" title="随机抽一版并滚动定位，不出图" @click="rollOne">
-        🎲 随机一版
-      </button>
-      <button
-        class="btn btn-sm"
-        :title="pinned.length ? `锁定 ${pinned.length} 列，其余随机` : '预览随机组合，确认后才出图'"
-        @click="openRandomPreview"
-      >
-        🎲 预览
-      </button>
-      <button
-        class="btn btn-sm primary"
-        :class="{ loading: generating }"
-        :disabled="generating || !canvasCount"
-        @click="runOnce"
-      >
-        {{ generating ? '提交中…' : '🚀 试跑' }}
-      </button>
-      <span v-if="generateError" class="gen-error">{{ generateErrorText }}</span>
-      <button
-        v-if="activeCount"
-        class="job-state queue"
-        :title="`${activeCount} 个任务排队中（ComfyUI 顺序出图），点开看进度`"
-        @click="openJobTab"
-      >
-        队列 {{ activeCount }}
-      </button>
-      <span v-if="activeJob" class="job-state" :class="activeJob.status">
-        {{ activeJob.status }} {{ activeJob.done_count ?? 0 }}/{{ activeJob.total ?? 1 }}
-      </span>
-    </div>
+    <ComposerControlBar
+      v-model:search="search"
+      v-model:workflow-path="workflowPath"
+      v-model:quality="quality"
+      v-model:orientation="orientation"
+      v-model:aspect-ratio="aspectRatio"
+      :filters-open="filtersOpen"
+      :filter-count="filterCount"
+      :fragment-total="fragmentTotal"
+      :is-fetching="isFetching"
+      :workflows="workflows"
+      :aspect-ratios="aspectRatios"
+      :default-ratio="defaultRatio"
+      :quality-options="qualityOptions"
+      :caps="caps"
+      :canvas-count="canvasCount"
+      :negative-prompt="negativePrompt"
+      :negative-effective="negativeEffective"
+      :negative-tip="negativeTip"
+      :templates-count="templates.length"
+      :pinned-count="pinned.length"
+      :generating="generating"
+      :generate-error-text="generateErrorText"
+      :active-count="activeCount"
+      :active-job="activeJob"
+      @toggle-filters="filtersOpen = !filtersOpen"
+      @open-result="openResultCanvas"
+      @open-negative="settingsOpen = true"
+      @open-compile="openCompilePreview"
+      @open-templates="templateOpen = true"
+      @roll-one="rollOne"
+      @preview-random="openRandomPreview"
+      @run-once="runOnce"
+      @open-job-tab="openJobTab"
+    />
 
     <Modal
       :open="settingsOpen"
@@ -1189,94 +1110,25 @@ function toggleTag(id: number) {
     </div>
 
     <div class="reels">
-      <section v-for="type in FRAGMENT_TYPES" :key="type" class="reel">
-        <header
-          class="reel-head"
-          :class="{ on: pinned.includes(type) }"
-          :title="
-            pinned.includes(type)
-              ? `已锁定：${type}（随机时保持不变，点击解锁）`
-              : `锁定「${type}」：随机时保持不变`
-          "
-          @click="toggleLock(type)"
-        >
-          <span class="pin-ico">{{ pinned.includes(type) ? '🔒' : '🔓' }}</span>
-          <button
-            class="locate-ico"
-            :title="`定位「${type}」已选碎片到列中间`"
-            :aria-label="`定位「${type}」已选碎片`"
-            @click.stop="locatePicked(type)"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="8" cy="8" r="3.2" />
-              <path d="M8 1v3M8 12v3M1 8h3M12 8h3" />
-            </svg>
-          </button>
-          <span class="reel-type">{{ type }}</span>
-          <span class="reel-count">{{ (grouped[type] ?? []).length }}</span>
-        </header>
-
-        <div v-if="canvas[type]" class="reel-picked" :title="canvas[type].content">
-          <span class="picked-label">已选</span>
-          <span class="picked-text">{{ canvas[type].content }}</span>
-          <button class="picked-x" title="清空这一列" @click="unpick(type)">✕</button>
-        </div>
-
-        <div class="reel-body" :ref="(el) => setReelBody(type, el)">
-          <button
-            v-if="canvas[type]?.source === 'custom'"
-            class="card on custom"
-            @click="openCustom(type)"
-          >
-            <span class="card-text">{{ canvas[type].content }}</span>
-            <span class="card-meta">自定义<span class="tag-self">自</span></span>
-          </button>
-
-          <button
-            v-for="(item, idx) in visibleFrags(type)"
-            :key="`${type}-${item.fragment_id ?? item.prompt_id}-${idx}`"
-            class="card"
-            :class="{
-              on: canvas[type]?.source !== 'custom' && canvas[type]?.content === item.content,
-              hit: isHit(item.content),
-            }"
-            :title="`双击查看全文：${item.content}`"
-            @click="pick(item)"
-            @dblclick.stop="openDetail(item)"
-          >
-            <span class="card-text">
-              <span
-                v-for="(part, pi) in textParts(item.content)"
-                :key="pi"
-                :class="{ mark: part.hit }"
-              >{{ part.text }}</span>
-            </span>
-            <span class="card-meta">
-              {{ item.prompt_name || '提示词' }}
-              <i v-if="item.dup_count > 1">×{{ item.dup_count }}</i>
-            </span>
-          </button>
-
-          <!-- 滚到列底会自动加载下一批；这个按钮是兜底，不要求用户先滚到底 -->
-          <button
-            v-if="hasMore(type)"
-            :ref="(el) => setMoreEl(type, el)"
-            :data-type="type"
-            class="more"
-            @click="loadMore(type)"
-          >
-            加载更多 · 还有 {{ (grouped[type] ?? []).length - limitOf(type) }} 个
-          </button>
-          <EmptyState
-            v-if="!(grouped[type] ?? []).length && !canvas[type]"
-            compact
-            text="暂无碎片"
-            hint="到提示词库为这一栏添加碎片，或点下方「自定义」。"
-          />
-
-          <button class="card add" @click="openCustom(type)">✎ 自定义…</button>
-        </div>
-      </section>
+      <ComposerReel
+        v-for="type in FRAGMENT_TYPES"
+        :key="type"
+        :type="type"
+        :items="visibleFrags(type)"
+        :total-count="(grouped[type] ?? []).length"
+        :pinned="pinned.includes(type)"
+        :slot="canvas[type]"
+        :keyword="keyword"
+        :register-body="(el) => setReelBody(type, el)"
+        :register-more="(el) => setMoreEl(type, el)"
+        @toggle-lock="toggleLock"
+        @locate="locatePicked"
+        @unpick="unpick"
+        @pick="pick"
+        @open-custom="openCustom"
+        @open-detail="openDetail"
+        @load-more="loadMore"
+      />
     </div>
 
     <Modal :open="customOpen" :title="`自定义碎片 · ${customType}`" @close="customOpen = false">
@@ -1409,44 +1261,6 @@ function toggleTag(id: number) {
   position: relative;
 }
 
-.composer-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--gap);
-  padding: 6px var(--gap-lg);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-sm);
-}
-
-.composer-bar .on {
-  color: var(--primary);
-}
-
-.bar-search {
-  flex: 1 1 220px;
-  min-width: 160px;
-}
-
-.bar-select {
-  max-width: 190px;
-}
-
-/* 工作流和画质是出图时始终有效的状态，常驻控制条中段（原来收在设置浮层里，
-   宽屏时控制条中间反而空出一大块）。WorkflowPicker 自带可搜索下拉，比原生 select 好认长文件名。
-   搜索框和它一起做弹性项，把剩余宽度分摊掉，避免行尾留白。 */
-.bar-wf {
-  flex: 1 1 220px;
-  min-width: 150px;
-}
-
-/* 组件自带的 max-width 会在超宽屏下卡住选择器、反而在行尾留白 */
-.bar-wf :deep(.wf-picker) {
-  max-width: none;
-}
-
-/* 筛选改成抽屉：常驻会让首屏少掉 1/3 高度 */
 .filter-drawer {
   position: absolute;
   top: 41px;
@@ -1501,20 +1315,6 @@ function toggleTag(id: number) {
 
 .neg-hint.warn {
   color: var(--warn);
-}
-
-.cap-badge {
-  margin-left: var(--gap-xs);
-  padding: 0 var(--gap-xs);
-  border: 1px solid currentColor;
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-xs);
-  line-height: var(--lh-lg);
-  color: var(--warn);
-}
-
-.btn.cap-off {
-  opacity: 0.75;
 }
 
 .neg-text {
@@ -1601,122 +1401,6 @@ function toggleTag(id: number) {
   overflow-x: auto;
 }
 
-.reel {
-  flex: 1 1 0;
-  min-width: 148px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  overflow: hidden;
-}
-
-.reel-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-sm);
-  cursor: pointer;
-  user-select: none;
-  transition: background-color var(--dur-fast) var(--ease);
-}
-
-/* 整行表头都能切锁定，不必去点小图标 */
-.reel-head:hover {
-  background: var(--panel-2);
-}
-
-.reel-type {
-  font-weight: 600;
-}
-
-.reel-count {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  margin-left: auto;
-}
-
-.pin-ico {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  line-height: 1;
-}
-
-.reel-head.on .pin-ico {
-  color: var(--warn);
-}
-
-/* 列头定位：把已选碎片滚回可视区中间 */
-.locate-ico {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  line-height: 1;
-  transition: color var(--dur-fast) var(--ease);
-}
-
-.locate-ico svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-}
-
-.locate-ico:hover {
-  color: var(--primary);
-}
-
-/* 列头下方：当前选中的碎片，替代旧版底部 8/8 的信息 */
-.reel-picked {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: 2px 6px;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
-
-.picked-label {
-  flex: none;
-  color: var(--primary);
-}
-
-.picked-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.picked-x {
-  flex: none;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  transition: color var(--dur-fast) var(--ease);
-}
-
-.picked-x:hover {
-  color: var(--danger);
-}
-
 .tpl-panel {
   display: flex;
   flex-direction: column;
@@ -1751,134 +1435,6 @@ function toggleTag(id: number) {
   white-space: nowrap;
 }
 
-.reel-body {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  padding: var(--gap-xs);
-}
-
-/* 列尾留白：最后一张卡片也要能滚到列中间。
-   没有这段空白时 scrollIntoView({block:'center'}) 会被容器末端卡住，
-   选中列表末尾那条永远贴在最下面。 */
-.reel-body::after {
-  content: '';
-  flex: 0 0 45%;
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  padding: 5px 7px;
-  transition:
-    color var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
-}
-
-.card:hover {
-  border-color: var(--primary);
-  background: var(--panel-3);
-}
-
-.card.on {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
-
-/* 检索命中：整卡描边 + 关键词着色，便于定位 */
-.card.hit {
-  border-color: var(--warn);
-}
-
-.card-text .mark {
-  color: var(--warn);
-  font-weight: 600;
-}
-
-.card.custom {
-  border-color: var(--warn);
-}
-
-.card-text {
-  font-size: var(--fs-xs);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-meta {
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tag-self {
-  color: var(--primary);
-  border: 1px solid currentColor;
-  border-radius: var(--radius-sm);
-  padding: 0 2px;
-  margin-left: var(--gap-xs);
-}
-
-.more {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  padding: var(--gap-xs);
-  transition:
-    color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease);
-}
-
-.more:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.card.add {
-  color: var(--muted);
-  border-style: dashed;
-}
-
-.gen-error {
-  color: var(--danger);
-  font-size: var(--fs-xs);
-}
-
-.job-state {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-
-/* 「队列 N」是个按钮（点心开结果中心），去掉浏览器默认外观 */
-.job-state.queue {
-  border: 1px solid var(--primary);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--primary);
-  padding: 1px 8px;
-  cursor: pointer;
-  transition:
-    color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease);
-}
-
 .custom-body {
   padding: var(--gap-lg);
 }
@@ -1905,11 +1461,5 @@ function toggleTag(id: number) {
   font-size: var(--fs-xs);
 }
 
-/* 1366 / 1024 收一档：窄屏时控制条自动换行，滚筒再窄一点 */
-@media (max-width: 1280px) {
-  .reel {
-    min-width: 132px;
-  }
-}
 </style>
 
