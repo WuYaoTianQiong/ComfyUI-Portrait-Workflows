@@ -103,8 +103,12 @@ export function buildPoseGroups(items: PoseItem[]): PoseGroups {
     }
   }
 
+  // v1.5：实测不可用的姿势（如 psl-D046）降权到列表末尾，但仍保留在列表中。
+  const usableRank = (group: PoseGroup): number =>
+    group.items[0]?.usable === false ? 1 : 0
   groups.sort(
     (a, b) =>
+      usableRank(a) - usableRank(b) ||
       lines.indexOf(a.system) - lines.indexOf(b.system) ||
       String(a.number).localeCompare(String(b.number)),
   )
