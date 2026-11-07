@@ -81,7 +81,8 @@ export interface StoredReferenceSlotEntry {
  */
 export interface StoredReferenceExtraSlot {
   source: 'empty' | 'library' | 'upload'
-  library: 'hair' | ''
+  /** v2-A：`hair` = 发型背面图；`portrait` = 人物B身份参考图。 */
+  library: 'hair' | 'portrait' | ''
   id: string
   path: string
   name: string
@@ -141,6 +142,8 @@ export interface ReferenceStudioSettings {
    * 旧快照没有该字段 → 空数组；草稿层会把旧 `personBText` 迁移成第一条变体。
    */
   personBVariants: RecipePersonBVariant[]
+  /** 当前编辑 / 预览的 B 变体下标；旧快照缺字段按 0。 */
+  personBVariantIndex: number
   /**
    * 三槽模式（P2 替代态，方案 §4.4）。
    *
@@ -236,10 +239,11 @@ function parseExtraSlot(value: unknown): StoredReferenceExtraSlot {
   if (!isRecord(value)) return empty
   const source = value.source
   if (source !== 'library' && source !== 'upload') return empty
-  const library = value.library === 'hair' ? 'hair' : ''
+  const library: StoredReferenceExtraSlot['library'] =
+    value.library === 'hair' || value.library === 'portrait' ? value.library : ''
   const id = typeof value.id === 'string' ? value.id : ''
   const path = typeof value.path === 'string' ? value.path : ''
-  if (source === 'library' && (!id || library !== 'hair')) return empty
+  if (source === 'library' && (!id || !library)) return empty
   if (source === 'upload' && !path) return empty
   return {
     source,
@@ -268,6 +272,12 @@ function parseSlotMode(value: unknown): RecipeSlotMode | null {
 /** P4 开关容错：只认显式 true；缺字段 / 脏数据按 false，不丢整份快照。 */
 function parseSupplementFlag(value: unknown): boolean {
   return value === true
+}
+
+/** B 变体下标校验：非负有限整数；缺字段 / 脏数据按 0。 */
+function parsePersonBVariantIndex(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0
+  return Math.trunc(value)
 }
 
 /** 种子校验：非负有限数，向下取整（与 `setBaseSeed` 口径一致）。 */
@@ -322,6 +332,7 @@ export function parseReferenceStudioSettings(
     typeof value.personBText === 'string' ? value.personBText : ''
   // v1.5 扩展字段：容错读回；旧快照缺字段 → 空数组（由草稿层迁移旧文本）。
   const personBVariants = clonePersonBVariants(value.personBVariants)
+  const personBVariantIndex = parsePersonBVariantIndex(value.personBVariantIndex)
 
   return {
     portrait,
@@ -338,6 +349,7 @@ export function parseReferenceStudioSettings(
     negativePrompt,
     personBText,
     personBVariants,
+    personBVariantIndex,
     // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
     portraitMode: parseSlotMode(value.portraitMode),
     costumeMode: parseSlotMode(value.costumeMode),
@@ -373,6 +385,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     negativePrompt: '',
     personBText: '',
     personBVariants: [],
+    personBVariantIndex: 0,
     // 默认没有模式记录：旧数据同样走「有图 / 有文本」推导。
     portraitMode: null,
     costumeMode: null,

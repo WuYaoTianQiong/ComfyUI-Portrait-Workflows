@@ -55,6 +55,7 @@ import {
   pruneInapplicableWorkflowSelection,
   readWorkflowSelectionSession,
   recipeJobResultUrls,
+  resolveExtraKindConflict,
   resolveInitialWorkflowPath,
   submitRecipe,
   useReferenceRecipe,
@@ -1388,5 +1389,70 @@ describe('useReferenceRecipe 的会话恢复入口', () => {
     })
 
     expect(selection).toEqual([])
+  })
+})
+
+describe('第 4 槽语义互斥（v2-A 收尾）', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('同时选中 person_b 与 hair 时只保留最新一条，并复用 workflowSelectionNotice 提示', () => {
+    const personB = workflow('/person-b', { extraKind: 'person_b' })
+    const hair = workflow('/hair', { extraKind: 'hair' })
+    const plain = workflow('/plain')
+
+    // 纯函数：勾选总追加到末尾，末尾即最新。
+    expect(
+      resolveExtraKindConflict(['/plain', '/hair', '/person-b'], [personB, hair, plain]),
+    ).toEqual({
+      kind: 'person_b',
+      kept: ['/plain', '/person-b'],
+      removed: ['/hair'],
+    })
+    expect(resolveExtraKindConflict(['/person-b', '/hair'], [personB, hair])).toEqual({
+      kind: 'hair',
+      kept: ['/hair'],
+      removed: ['/person-b'],
+    })
+    // 只有一种语义 / 目录未加载：不处理。
+    expect(resolveExtraKindConflict(['/hair'], [hair])).toEqual({
+      kind: null,
+      kept: ['/hair'],
+      removed: [],
+    })
+    expect(resolveExtraKindConflict(['/person-b', '/hair'], [])).toEqual({
+      kind: null,
+      kept: ['/person-b', '/hair'],
+      removed: [],
+    })
+
+    // 组合入口：watch 必须真的收敛选择并写入既有提示通道。
+    let result!: { selection: string[]; notice: string }
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          const recipe = useReferenceRecipe()
+          recipe.workflows.value = [personB, hair]
+          recipe.workflowSelection.value = ['/hair']
+          recipe.workflowSelection.value = ['/hair', '/person-b']
+          result = {
+            selection: [...recipe.workflowSelection.value],
+            notice: recipe.workflowSelectionNotice.value,
+          }
+          return () => h('div')
+        },
+      }),
+    )
+    wrapper.unmount()
+
+    expect(result.selection).toEqual(['/person-b'])
+    expect(result.notice).toContain('原因：第 4 槽不能同时用作')
+    expect(result.notice).toContain('只保留最新选择的「人物B身份参考」')
+    expect(result.notice).toContain('下一步：')
   })
 })

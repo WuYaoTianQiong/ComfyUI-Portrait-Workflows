@@ -78,7 +78,8 @@ import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
 import StudioTextSupplementCard from './components/reference/StudioTextSupplementCard.vue'
 import StudioPersonBEditor from './components/reference/StudioPersonBEditor.vue'
 import HairPickerModal from './components/reference/HairPickerModal.vue'
-import type { HairItem } from '../../api/reference'
+import PortraitPickerModal from './components/reference/PortraitPickerModal.vue'
+import type { HairItem, PortraitItem } from '../../api/reference'
 import {
   desiredPoseFacets,
   pickMatchedPose,
@@ -1007,16 +1008,27 @@ function randomize(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * 第 4 槽文案由「当前来源」决定，不再按工作流文件名猜：
- * 从发型库选中即显示「发型」，上传图则保持通用「第 4 张」。
+ * 第 4 槽文案由「当前工作流的 extra 语义 + 当前来源」决定：
+ * - 工作流标题声明人物B（v2-A）→ 显示「人物B身份参考」；
+ * - 发型工作流或已选发型库 → 显示「发型」；
+ * - 其余保持通用「第 4 张」。
  * 是否显示该槽位仍由工作流 `slots.includes('extra')` 决定。
  */
-const extraSlotLabel = computed(() => (extraLibrary.value ? '发型' : '第 4 张'))
-const extraSlotHint = computed(() =>
-  extraSlotLabel.value === '发型'
-    ? '可从发型库选背面无脸图，或上传本地图；PNG/JPG/WebP/HEIC ≤ 25MB'
-    : 'PNG/JPG/WebP/HEIC ≤ 25MB',
-)
+const extraKind = computed(() => previewWorkflow.value?.extraKind ?? '')
+const extraSlotLabel = computed(() => {
+  if (extraKind.value === 'person_b') return '人物B身份参考'
+  if (extraKind.value === 'hair' || extraLibrary.value === 'hair') return '发型'
+  return '第 4 张'
+})
+const extraSlotHint = computed(() => {
+  if (extraKind.value === 'person_b') {
+    return '可从人像库选一张人物B参考图，或上传本地图；PNG/JPG/WebP/HEIC ≤ 25MB'
+  }
+  if (extraSlotLabel.value === '发型') {
+    return '可从发型库选背面无脸图，或上传本地图；PNG/JPG/WebP/HEIC ≤ 25MB'
+  }
+  return 'PNG/JPG/WebP/HEIC ≤ 25MB'
+})
 
 /** 第 4 槽文字补充（v-model）；真源在 `useReferenceRecipeDraft` 单例。 */
 const extraText = computed<string>({
@@ -1027,11 +1039,18 @@ const extraText = computed<string>({
 })
 
 const hairPickerOpen = ref(false)
+const portraitPickerOpen = ref(false)
 
 function onHairPick(item: HairItem): void {
   setExtraLibrary('hair', item.id, item.标题)
   hairPickerOpen.value = false
   toast.success(`已选发型「${item.标题}」，提交时使用背面无脸图`)
+}
+
+function onPortraitPick(item: PortraitItem): void {
+  setExtraLibrary('portrait', item.id, item.标题)
+  portraitPickerOpen.value = false
+  toast.success(`已选人物B身份参考「${item.标题}」，提交时使用该人像原图`)
 }
 
 function onExtraUploaded(items: UploadedReference[]): void {
@@ -1061,6 +1080,22 @@ watch(supportsExtraSlot, (enabled) => {
   if (enabled || !extraFilled.value) return
   clearExtra()
   toast.info('当前工作流都不支持第 4 张参考图，已清空该槽位')
+})
+
+/**
+ * v2-A：工作流在第 4 槽语义之间切换（发型 ↔ 人物B）时，已选的库来源不匹配就清空。
+ * 不静默保留：后端按工作流标题编译提示词，留错来源会出现「发型图当人物B」的错配。
+ */
+watch(extraKind, (kind) => {
+  const current = extraLibrary.value
+  if (!current) return
+  if (kind === 'person_b' && current !== 'portrait') {
+    clearExtra()
+    toast.info('已切换到人物B身份参考工作流，原第 4 槽库条目已清空')
+  } else if (kind === 'hair' && current !== 'hair') {
+    clearExtra()
+    toast.info('已切换到发型工作流，原第 4 槽库条目已清空')
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -1244,7 +1279,7 @@ onMounted(async () => {
         合成台
       </h1>
       <p class="ref-studio__desc">
-        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张为可选发型参考图（可加文字补充，不参与批次组合）</template>。
+        AI 角色合成台：人像 / 服装 / 姿势三个库与工作流均可多选，按「槽位组合 × 工作流 × 画质档 × 比例」逐组提交<template v-if="supportsExtraSlot">；第 4 张按工作流声明为发型参考或人物B身份参考（可加文字补充，不参与批次组合）</template>。
       </p>
     </header>
 
@@ -1312,7 +1347,7 @@ onMounted(async () => {
               <span class="extra-item__body">
                 <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
                 <span class="extra-item__meta">
-                  {{ extraLibrary ? '来自发型库 · 提交背面无脸裁切图' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
+                  {{ extraLibrary === 'hair' ? '来自发型库 · 提交背面无脸裁切图' : extraLibrary === 'portrait' ? '来自人像库 · 作为人物B身份参考' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
                 </span>
               </span>
               <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
@@ -1349,12 +1384,26 @@ onMounted(async () => {
             >
               从发型库选择
             </button>
+            <button
+              v-else-if="extraKind === 'person_b'"
+              type="button"
+              class="extra-library"
+              data-testid="studio-extra-portrait-library"
+              @click="portraitPickerOpen = true"
+            >
+              从人像库选择
+            </button>
           </div>
 
           <HairPickerModal
             :open="hairPickerOpen"
             @close="hairPickerOpen = false"
             @select="onHairPick"
+          />
+          <PortraitPickerModal
+            :open="portraitPickerOpen"
+            @close="portraitPickerOpen = false"
+            @select="onPortraitPick"
           />
         </div>
       </div>
@@ -1365,6 +1414,9 @@ onMounted(async () => {
         :active-index="draft.activePersonBVariantIndex.value"
         :safe-mode="safeMode"
         :disabled="manualPromptActive"
+        :portrait-count="draft.portraitCount.value"
+        :identity-image-selected="extraKind === 'person_b' && extraFilled"
+        :identity-image-name="extraKind === 'person_b' && extraFilled ? extraName : ''"
         @update:variants="draft.personBVariants.value = $event"
         @update:active-index="draft.setActivePersonBVariant($event)"
         @add="onAddPersonBVariant"

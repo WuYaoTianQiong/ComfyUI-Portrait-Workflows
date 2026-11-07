@@ -97,6 +97,7 @@ function validSnapshot(): ReferenceStudioSettings {
     negativePrompt: '低质量，多余手指',
     personBText: '金色齐肩短发，酒红色西装外套',
     personBVariants: [],
+    personBVariantIndex: 0,
     portraitMode: 'image',
     costumeMode: 'image',
     poseMode: 'image',
@@ -150,6 +151,7 @@ describe('默认值', () => {
       negativePrompt: '',
       personBText: '',
       personBVariants: [],
+      personBVariantIndex: 0,
       portraitMode: null,
       costumeMode: null,
       poseMode: null,
@@ -215,6 +217,24 @@ describe('写入后读回', () => {
       source: 'upload',
       path: '/up/a.png',
       text: 'y',
+    })
+
+    // v2-A：人像库条目作为人物B身份参考，与新发型来源一样按 library+id 读回。
+    raw.extra = {
+      source: 'library',
+      library: 'portrait',
+      id: 'p-1',
+      path: '',
+      name: '人像 A',
+      text: '墨绿上衣',
+    }
+    expect(parseReferenceStudioSettings(raw)?.extra).toEqual({
+      source: 'library',
+      library: 'portrait',
+      id: 'p-1',
+      path: '',
+      name: '人像 A',
+      text: '墨绿上衣',
     })
   })
 

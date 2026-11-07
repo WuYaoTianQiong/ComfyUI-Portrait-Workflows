@@ -70,6 +70,8 @@ import {
   exceedsBatchLimit,
   describeBatchLimit,
   buildBatchGroups,
+  parseStudioExtraKind,
+  resolveExtraKindConflict,
   parseWorkflowSlots,
   evaluateWorkflowApplicability,
   workflowInapplicableRole,
@@ -310,6 +312,32 @@ export function useReferenceRecipe() {
     workflowSelection,
     (selection) => writeWorkflowSelectionSession(selection),
     { deep: true, flush: 'sync' },
+  )
+
+  /**
+   * 第 4 槽语义互斥（v2-A 收尾）。
+   *
+   * `person_b` 与 `hair` 共用第 4 槽但按各自语义编译提示词，混选会让其中一条
+   * 错配。选择层只保留**最新勾选**的一条并沿用既有提示通道（页面转 toast），
+   * 不改后端、不按工作流分组提交。
+   *
+   * `sync` 保证页面直接 `workflowSelection = $event` 时也立即收敛；
+   * 目录未加载 / 只有一种语义时函数返回 null，不做任何改动。
+   */
+  watch(
+    [workflowSelection, workflows],
+    () => {
+      const resolution = resolveExtraKindConflict(workflowSelection.value, workflows.value)
+      if (!resolution.kind) return
+      workflowSelection.value = resolution.kept
+      const label = resolution.kind === 'person_b' ? '人物B身份参考' : '发型'
+      workflowSelectionNotice.value =
+        `已自动取消 ${resolution.removed.length} 个工作流。` +
+        '原因：第 4 槽不能同时用作「人物B身份参考」与「发型参考」，' +
+        `只保留最新选择的「${label}」。` +
+        '下一步：若要改用另一种语义，请先取消当前工作流再重新勾选。'
+    },
+    { flush: 'sync' },
   )
 
   /** 默认工作流路径：后端 `default` 在列表内时用它，否则回落首条；空列表为 ''。 */
@@ -873,6 +901,7 @@ export function useReferenceRecipe() {
           // 三态解析：缺失=undefined（旧后端宽松）/ 空数组或脏数据=[]（不可识别，禁用）/
           // 非空=按角色匹配。
           slots: parseWorkflowSlots(item.slots),
+          extraKind: parseStudioExtraKind(item.extra_kind),
           caps: parseStudioCaps(item.caps),
           params: parseStudioParams(item.params),
         })
@@ -1018,9 +1047,9 @@ export function useReferenceRecipe() {
     draft.setExtraUpload(path, name)
   }
 
-  /** 第 4 张改为库条目（当前仅发型库）：提交 `extra_id` + `extra_library`。 */
+  /** 第 4 张改为库条目（发型库 / v2-A 人像库）：提交 `extra_id` + `extra_library`。 */
   function setExtraLibrary(library: string, id: string, name: string): void {
-    if (library !== 'hair') return
+    if (library !== 'hair' && library !== 'portrait') return
     draft.setExtraLibrary(library, id, name)
   }
 

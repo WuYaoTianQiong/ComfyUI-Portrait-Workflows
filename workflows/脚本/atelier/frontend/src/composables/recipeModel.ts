@@ -290,10 +290,74 @@ export interface StudioWorkflowOption {
    * - 非空：按角色匹配，缺少已选槽位角色即不适用。
    */
   slots?: StudioWorkflowSlot[]
+  /** 第 4 槽语义（v2-A）：`hair` / `person_b` / 空串；缺省按空串。 */
+  extraKind?: StudioExtraKind
   /** 后端探测的注入能力；缺失时由 `useWorkflowCaps` 回落到乐观默认值。 */
   caps?: WorkflowCaps
   /** 画质 / 方向参数描述；用于生成真实档位与比例选项。 */
   params?: WorkflowParams
+}
+
+/** 第 4 槽语义：发型参考 / 人物B身份参考 / 空（附加参考）。 */
+export type StudioExtraKind = 'hair' | 'person_b' | ''
+
+/**
+ * 解析后端 `extra_kind`（v2-A）。
+ *
+ * 旧后端缺字段 / 脏数据一律回落空串（按普通附加参考处理），不误伤旧目录。
+ */
+export function parseStudioExtraKind(raw: unknown): StudioExtraKind {
+  return raw === 'hair' || raw === 'person_b' ? raw : ''
+}
+
+/** 第 4 槽语义互斥的解析结果（v2-A 收尾）。 */
+export interface ExtraKindConflictResolution {
+  /** 冲突中保留的语义；null = 无需处理（未混选 / 目录未识别出两种语义）。 */
+  kind: StudioExtraKind | null
+  /** 处理后的选择（保持原顺序）；无需处理时与输入一致。 */
+  kept: string[]
+  /** 被移除的冲突项路径；无需处理时为空。 */
+  removed: string[]
+}
+
+/**
+ * 第 4 槽语义互斥（v2-A 收尾）。
+ *
+ * `person_b` 与 `hair` 共用同一个第 4 槽，提示词却按各自语义编译：
+ * 同批混选会让其中一条语义错配，因此选择层只保留**最新选中**的一条。
+ *
+ * 「最新选中」按数组顺序判定：`ReferenceWorkflowSelect` 勾选时总把新项追加到
+ * 末尾，因此冲突项中下标最大的一条即用户刚选的那条。目录里无法识别的路径
+ * （旧后端 / 尚未加载）不参与判定，避免误伤。
+ */
+export function resolveExtraKindConflict(
+  selection: readonly string[],
+  workflows: readonly StudioWorkflowOption[],
+): ExtraKindConflictResolution {
+  const conflicting: Array<{ path: string; kind: StudioExtraKind }> = []
+  for (const path of selection) {
+    const workflow = workflows.find((item) => item.path === path)
+    const kind = workflow?.extraKind ?? ''
+    if (kind === 'person_b' || kind === 'hair') conflicting.push({ path, kind })
+  }
+
+  const hasPersonB = conflicting.some((item) => item.kind === 'person_b')
+  const hasHair = conflicting.some((item) => item.kind === 'hair')
+  if (!hasPersonB || !hasHair) {
+    return { kind: null, kept: [...selection], removed: [] }
+  }
+
+  // 数组末尾 = 最近勾选；同语义的多条不算冲突，只移除另一种语义。
+  const latest = conflicting[conflicting.length - 1]
+  const removed = conflicting
+    .filter((item) => item.kind !== latest.kind)
+    .map((item) => item.path)
+  const removedSet = new Set(removed)
+  return {
+    kind: latest.kind,
+    kept: selection.filter((path) => !removedSet.has(path)),
+    removed,
+  }
 }
 
 /** 工作流目录响应。 */

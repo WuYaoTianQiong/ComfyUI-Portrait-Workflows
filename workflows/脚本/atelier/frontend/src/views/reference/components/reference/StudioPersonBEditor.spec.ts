@@ -25,9 +25,14 @@ function variantWithFace(id: string, content: string): RecipePersonBVariant {
   return variant
 }
 
-function mountEditor(variants: RecipePersonBVariant[], activeIndex = 0, disabled = false) {
+function mountEditor(
+  variants: RecipePersonBVariant[],
+  activeIndex = 0,
+  disabled = false,
+  portraitCount?: number,
+) {
   return mount(StudioPersonBEditor, {
-    props: { variants, activeIndex, safeMode: true, disabled },
+    props: { variants, activeIndex, safeMode: true, disabled, portraitCount },
   })
 }
 
@@ -72,6 +77,19 @@ describe('StudioPersonBEditor', () => {
     expect(wrapper.find('[data-testid="studio-person-b-remove"]').attributes('disabled')).toBeDefined()
   })
 
+  it('配对数量不等时提示复核；数量相等时不提示', () => {
+    const variants = [variantWithFace('b-1', '鹅蛋脸'), variantWithFace('b-2', '圆脸')]
+
+    const uneven = mountEditor(variants, 0, false, 3)
+    const notice = uneven.find('[data-testid="studio-person-b-pairing-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('人像 3 张 / B 变体 2 组')
+    expect(notice.text()).toContain('复用最后一组')
+
+    const even = mountEditor(variants, 0, false, 2)
+    expect(even.find('[data-testid="studio-person-b-pairing-notice"]').exists()).toBe(false)
+  })
+
   it('手动改写提示词时禁用自由文字输入', () => {
     const wrapper = mountEditor([variantWithFace('b-1', '鹅蛋脸')], 0, true)
     expect(
@@ -80,5 +98,30 @@ describe('StudioPersonBEditor', () => {
     expect(
       wrapper.find('[data-testid="studio-person-b-pick-人物面部"]').attributes('disabled'),
     ).toBeDefined()
+  })
+
+  it('已选人物B身份图时，面部/身材入口禁用，服饰仍可编辑', () => {
+    const wrapper = mount(StudioPersonBEditor, {
+      props: {
+        variants: [variantWithFace('b-1', '鹅蛋脸')],
+        activeIndex: 0,
+        safeMode: true,
+        identityImageSelected: true,
+        identityImageName: '长发・标准款',
+      },
+    })
+    // 提示说明脸/发型由身份图控制，并带上图名
+    expect(wrapper.text()).toContain('由第 4 槽身份图')
+    expect(wrapper.text()).toContain('长发・标准款')
+    // 后端忽略这两类碎片：入口禁用
+    for (const type of ['人物面部', '人物身材']) {
+      expect(
+        wrapper.find(`[data-testid="studio-person-b-pick-${type}"]`).attributes('disabled'),
+      ).toBeDefined()
+    }
+    // 人物服饰仍走文字，不能被一起禁用
+    expect(
+      wrapper.find('[data-testid="studio-person-b-pick-人物服饰"]').attributes('disabled'),
+    ).toBeUndefined()
   })
 })

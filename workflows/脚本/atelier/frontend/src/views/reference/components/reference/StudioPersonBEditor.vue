@@ -38,6 +38,17 @@ const props = defineProps<{
   safeMode: boolean
   /** 手动改写提示词时禁用（B 设定不参与提交）。 */
   disabled?: boolean
+  /** 当前 A 人像条目数；用于提示 1:1 配对数量不等。 */
+  portraitCount?: number
+  /**
+   * v2-A：第 4 槽已选人物B身份图。
+   *
+   * 有身份图时后端只取图里的脸型 / 发型，`人物面部` / `人物身材` 这两类
+   * B 碎片会被忽略；页面据此禁用这两类入口并说明原因。
+   */
+  identityImageSelected?: boolean
+  /** 身份图展示名（库条目标题或上传文件名）。 */
+  identityImageName?: string
 }>()
 
 const emit = defineEmits<{
@@ -52,6 +63,21 @@ const current = computed<RecipePersonBVariant | null>(
   () => props.variants[props.activeIndex] ?? props.variants[0] ?? null,
 )
 
+/** 1:1 配对数量提示：人像与 B 变体数量不等时，批量会复用较少一侧最后一组。 */
+const pairingNotice = computed<string>(() => {
+  const portraits = props.portraitCount ?? 0
+  const variants = props.variants.length
+  if (!variants) return ''
+  if (portraits <= 0) {
+    return `未选人像参考图：${variants} 组 B 变体会各自单独成组（人物 A 走文字槽）。`
+  }
+  if (portraits === variants) return ''
+  return (
+    `配对数量不等：人像 ${portraits} 张 / B 变体 ${variants} 组；` +
+    '批量时较少一侧复用最后一组，请在生成清单里复核配对。'
+  )
+})
+
 /** 当前打开弹层的类型；null = 未打开。 */
 const pickerType = ref<FragmentType | null>(null)
 
@@ -65,6 +91,14 @@ const pickerSelected = computed<readonly SelectedFragment[]>(() =>
 /** 当前变体某一类的 B 碎片。 */
 function itemsOf(type: FragmentType): SelectedFragment[] {
   return current.value ? fragmentsOfPerson(current.value.fragments, type, 'B') : []
+}
+
+/** 该类 B 碎片是否已被身份图接管（后端忽略这两类）。 */
+function isIdentityManaged(type: FragmentType): boolean {
+  return (
+    props.identityImageSelected === true &&
+    (type === '人物面部' || type === '人物身材')
+  )
 }
 
 /** 某一类的字数合计。 */
@@ -92,9 +126,10 @@ function removeFragment(type: FragmentType, index: number): void {
   replaceCurrent({ ...current.value, fragments })
 }
 
-/** 打开某一类的碎片弹层（已达上限时按钮已禁用，这里再防御一次）。 */
+/** 打开某一类的碎片弹层（已达上限 / 身份图接管时按钮已禁用，这里再防御一次）。 */
 function openPicker(type: FragmentType): void {
-  if (props.disabled || itemsOf(type).length >= MAX_FRAGMENTS_PER_TYPE) return
+  if (props.disabled || isIdentityManaged(type)) return
+  if (itemsOf(type).length >= MAX_FRAGMENTS_PER_TYPE) return
   pickerType.value = type
 }
 
@@ -134,11 +169,27 @@ function previewContent(content: string): string {
     </header>
 
     <p class="person-b__hint">
-      人物 A 沿用图2的脸型/发型与图3的衣装；人物 B 只按这里的文字生成，脸会与 A 区分。
+      <template v-if="identityImageSelected">
+        人物 B 的脸型/发型由第 4 槽身份图
+        <strong v-if="identityImageName">「{{ identityImageName }}」</strong>
+        控制：人物面部/人物身材碎片会被忽略，只保留人物服饰与自由文字。
+        人物 A 仍沿用图2的脸型/发型与图3的衣装。
+      </template>
+      <template v-else>
+        人物 A 沿用图2的脸型/发型与图3的衣装；人物 B 只按这里的文字生成，脸会与 A 区分。
+      </template>
       批量时按序号与人物 A 的人像参考图 1:1 配对；数量不等时较少一侧复用最后一组。
       <template v-if="disabled">
         当前已手动改写提示词，B 设定不参与提交，请直接改下方提示词。
       </template>
+    </p>
+
+    <p
+      v-if="pairingNotice"
+      class="person-b__notice"
+      data-testid="studio-person-b-pairing-notice"
+    >
+      {{ pairingNotice }}
     </p>
 
     <div class="person-b__tabs" role="tablist" aria-label="人物B变体">
@@ -180,6 +231,7 @@ function previewContent(content: string): string {
           v-for="type in PERSON_FRAGMENT_TYPES"
           :key="type"
           class="person-b__row"
+          :class="{ 'is-identity-managed': isIdentityManaged(type) }"
           :data-testid="`studio-person-b-row-${type}`"
         >
           <span class="person-b__home" :data-home="FRAGMENT_HOMES[type]">
@@ -208,13 +260,16 @@ function previewContent(content: string): string {
             <button
               type="button"
               class="person-b__pick"
-              :disabled="disabled || itemsOf(type).length >= MAX_FRAGMENTS_PER_TYPE"
+              :disabled="disabled || isIdentityManaged(type) || itemsOf(type).length >= MAX_FRAGMENTS_PER_TYPE"
               :data-testid="`studio-person-b-pick-${type}`"
               @click="openPicker(type)"
             >
-              选择碎片
+              {{ isIdentityManaged(type) ? '由身份图控制' : '选择碎片' }}
             </button>
-            <span class="person-b__meta">
+            <span v-if="isIdentityManaged(type)" class="person-b__meta">
+              已选身份图，该类碎片不参与提交
+            </span>
+            <span v-else class="person-b__meta">
               {{ itemsOf(type).length }}/{{ MAX_FRAGMENTS_PER_TYPE }} 条 ·
               {{ charsOf(type) }} 字
             </span>
@@ -288,6 +343,13 @@ function previewContent(content: string): string {
   line-height: 1.6;
 }
 
+.person-b__notice {
+  margin: 6px 0 0;
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .person-b__tabs {
   display: flex;
   flex-wrap: wrap;
@@ -339,6 +401,12 @@ function previewContent(content: string): string {
 
 .person-b__row:last-child {
   border-bottom: 0;
+}
+
+/* 身份图接管脸/发型后：这两类仍展示已有碎片，但明确弱化（后端不采用）。 */
+.person-b__row.is-identity-managed .person-b__chips,
+.person-b__row.is-identity-managed .person-b__type {
+  opacity: 0.6;
 }
 
 .person-b__home {

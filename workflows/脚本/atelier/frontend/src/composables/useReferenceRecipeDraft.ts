@@ -562,8 +562,8 @@ function setExtraUpload(path: string, name: string): void {
   }
 }
 
-/** 第 4 槽：改为发型库条目（当前唯一支持的库）。 */
-function setExtraLibrary(library: 'hair', id: string, name: string): void {
+/** 第 4 槽：改为库条目（发型背面图 / v2-A 人物B人像参考）。 */
+function setExtraLibrary(library: 'hair' | 'portrait', id: string, name: string): void {
   extra.value = {
     source: 'library',
     library,
@@ -679,6 +679,7 @@ function persist(): void {
     // 旧字段兼容：当前变体的自由文字；完整变体存 `personBVariants`。
     personBText: personBText.value,
     personBVariants: clonePersonBVariants(personBVariants.value),
+    personBVariantIndex: activePersonBVariantIndex.value,
     // P2：三槽模式单独持久化（旧数据没有这三个字段时由 hydrate 推导）。
     portraitMode: slotModes.value.portrait,
     costumeMode: slotModes.value.costume,
@@ -851,6 +852,7 @@ function restoreTextFragmentsFromSettings(
     | 'negativePrompt'
     | 'personBText'
     | 'personBVariants'
+    | 'personBVariantIndex'
     | 'portraitSupplement'
     | 'costumeSupplement'
     | 'poseSupplement'
@@ -878,8 +880,9 @@ function restoreTextFragmentsFromSettings(
   } else {
     personBVariants.value = []
   }
+  // 记住用户最后编辑的变体；越界时回落到最后一组。
   activePersonBVariantIndex.value = Math.min(
-    activePersonBVariantIndex.value,
+    stored.personBVariantIndex,
     Math.max(0, personBVariants.value.length - 1),
   )
   supplementFlags.value = cloneSupplementFlags({
@@ -1044,6 +1047,7 @@ watch(
       personBVariants: clonePersonBVariants(personBVariants.value),
       // 旧字段同步为当前变体自由文字，保证旧读取方仍能拿到文本。
       personBText: personBText.value,
+      personBVariantIndex: activePersonBVariantIndex.value,
     })
   },
   { deep: true, flush: 'sync' },
@@ -1052,7 +1056,10 @@ watch(
   activePersonBVariantIndex,
   () => {
     // 切换变体只影响「哪条是新旧字段的镜像」，不改变变体内容本身。
-    writeReferenceStudioSettings({ personBText: personBText.value })
+    writeReferenceStudioSettings({
+      personBText: personBText.value,
+      personBVariantIndex: activePersonBVariantIndex.value,
+    })
   },
   { flush: 'sync' },
 )

@@ -573,6 +573,25 @@ describe('第 4 槽（extra）', () => {
     })
   })
 
+  it('v2-A：人像库条目可作为人物B身份参考，并随快照持久化', () => {
+    draft.setExtraLibrary('portrait', 'p-1', '人像 A')
+    expect(draft.extraFilled.value).toBe(true)
+    expect(draft.extra.value).toMatchObject({
+      source: 'library',
+      library: 'portrait',
+      id: 'p-1',
+      path: '',
+      name: '人像 A',
+    })
+
+    flushReferenceStudioSettings()
+    expect(readReferenceStudioSettings()?.extra).toMatchObject({
+      source: 'library',
+      library: 'portrait',
+      id: 'p-1',
+    })
+  })
+
   it('持久化后 hydrate 恢复；clearDraft 连文字一起清空', () => {
     draft.setExtraLibrary('hair', 'hair-1', '发型 A')
     draft.setExtraText('发尾挑染')
@@ -626,6 +645,20 @@ describe('v1.5 人物B变体持久化与旧数据迁移', () => {
     expect(draft.personBVariants.value[0].fragments.人物面部).toEqual([
       { type: '人物面部', content: '鹅蛋脸', person: 'B' },
     ])
+  })
+
+  it('记住当前 B 变体下标，刷新后恢复到同一组', () => {
+    draft.ensurePersonBVariant()
+    draft.addPersonBVariant()
+    draft.setActivePersonBVariant(1)
+    flushReferenceStudioSettings()
+
+    draft.clearDraft()
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(draft.personBVariants.value).toHaveLength(2)
+    expect(draft.activePersonBVariantIndex.value).toBe(1)
+    expect(draft.activePersonBVariant.value?.id).toBe(draft.personBVariants.value[1].id)
   })
 
   it('旧快照只有 personBText 时迁移成第一条变体', () => {
