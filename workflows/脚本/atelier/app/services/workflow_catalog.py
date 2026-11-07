@@ -232,8 +232,10 @@ _PREFERRED_STUDIO_NAMES = (
 
 #: 合成台下拉里打「推荐」标签的工作流。
 #: 四图可选发型：人像/服装/姿势三槽 + 可选发型（背面无脸），空 extra 自动退化三图。
+#: 五图人物B：三槽 + B 身份图 + B 服装，双人姿势下优先选它（2026-11-08）。
 _RECOMMENDED_STUDIO_NAMES = (
     "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json",
+    "图库专用_Qwen21+VNCCS_五图_可选人物B_25步_双人.api.json",
 )
 
 #: studio 下拉的屏蔽名单：文件名 → 不可用原因。

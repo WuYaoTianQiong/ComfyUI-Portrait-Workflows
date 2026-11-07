@@ -96,6 +96,14 @@ const pairingNotice = computed<string>(() => {
 /** 当前打开弹层的类型；null = 未打开。 */
 const pickerType = ref<FragmentType | null>(null)
 
+/**
+ * 设定区是否展开。
+ *
+ * 默认收起：B 卡较高，展开时会把生成清单 / 参数推离首屏；头部保留变体数
+ * 与 B 摘要，需要编辑时再展开。
+ */
+const bodyOpen = ref(false)
+
 /** 弹层的初始选区：当前变体该类已有的 B 碎片。 */
 const pickerSelected = computed<readonly SelectedFragment[]>(() =>
   pickerType.value && current.value
@@ -181,8 +189,18 @@ function previewContent(content: string): string {
       <span class="person-b__count" data-testid="studio-person-b-count">
         {{ variants.length }} 组变体
       </span>
+      <button
+        type="button"
+        class="person-b__action person-b__toggle"
+        :aria-expanded="bodyOpen"
+        data-testid="studio-person-b-toggle"
+        @click="bodyOpen = !bodyOpen"
+      >
+        {{ bodyOpen ? '收起' : '展开编辑' }}
+      </button>
     </header>
 
+    <div v-show="bodyOpen" class="person-b__body">
     <p class="person-b__hint">
       <template v-if="identityImageSelected">
         人物 B 的脸型/发型由第 4 槽身份图
@@ -358,6 +376,7 @@ function previewContent(content: string): string {
         @input="onFreeText"
       ></textarea>
     </template>
+    </div>
 
     <StudioFragmentPicker
       v-if="pickerType"
@@ -385,6 +404,10 @@ function previewContent(content: string): string {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-sm);
+}
+
+.person-b__toggle {
+  margin-left: auto;
 }
 
 .person-b__title {
