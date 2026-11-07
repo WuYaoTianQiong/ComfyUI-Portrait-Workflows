@@ -60,6 +60,18 @@ const {
   retry,
 } = useReferencePoses()
 
+/** 卡片右下角逐行信息：类型 · 风格 · 不可用标记（v1.5 D046 降权）。 */
+function poseMetaOf(item: PoseItem | null | undefined): string {
+  if (!item) return ''
+  return [
+    poseTypeOf(item),
+    poseStyleOf(item),
+    item.usable === false ? '不可用' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 const {
   safeMode,
   ageGateOpen,
@@ -741,11 +753,7 @@ onMounted(() => {
           :badge="card.group.number"
           :angle="card.item?.角度"
           :meta-left="card.group.system"
-          :meta-right="
-            card.item
-              ? [poseTypeOf(card.item), poseStyleOf(card.item)].filter(Boolean).join(' · ')
-              : ''
-          "
+          :meta-right="poseMetaOf(card.item)"
           :selectable="Boolean(card.item)"
           :selected="card.item ? isPoseSelected(card.item.id) : false"
           @open="openGroup(card.group, card.index)"
@@ -788,7 +796,7 @@ onMounted(() => {
           :angle="card.item.角度"
           meta-mono
           :meta-left="card.item.id"
-          :meta-right="[poseTypeOf(card.item), poseStyleOf(card.item)].filter(Boolean).join(' · ')"
+          :meta-right="poseMetaOf(card.item)"
           selectable
           :selected="card.selected"
           @open="openSingle(card.item)"
