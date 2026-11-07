@@ -88,6 +88,10 @@ class ReferenceItem(BaseModel):
     nsfw: bool = False
     #: 该条目是否有深度变体；pose-studio-lite 等第二来源为 false
     has_depth: bool = False
+    #: 仅 pose：可用性标记（`false` = 实测姿势不跟随，仍可手动选）
+    usable: bool = True
+    #: 仅 pose：不可用原因；可用时为空串
+    usable_note: str = ""
     remote: bool = False
     #: 仅 costume-anime 且上游有「来源地址」时非空
     source_url: str | None = None

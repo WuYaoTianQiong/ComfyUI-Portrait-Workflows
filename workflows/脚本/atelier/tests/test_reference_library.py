@@ -547,6 +547,15 @@ def test_psl_taxonomy_mapping():
     assert rl._psl_pose_type_style(duo, "pair") == ("背向坐位", "性感")
 
 
+def test_pose_usability_note_marks_d046_only():
+    """psl-D046 实测姿势不跟随：标记不可用并带原因；其余姿势默认可用。"""
+    usable, note = rl._pose_usability("psl-D046")
+    assert usable is False
+    assert "姿势不跟随" in note
+    assert rl._pose_usability("psl-D026") == (True, "")
+    assert rl._pose_usability("P001_front") == (True, "")
+
+
 def test_pose_extra_image_path_is_scoped(api, ref_root, pose_extra_root):
     """PSL 元数据里出现 ../ 时按越界 400 处理，不读上游/任意文件。"""
     meta = json.loads((pose_extra_root / "meta.json").read_text(encoding="utf-8"))

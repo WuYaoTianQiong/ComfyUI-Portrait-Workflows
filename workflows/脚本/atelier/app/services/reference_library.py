@@ -177,6 +177,18 @@ PSL_PAIR_POSITION = {
 }
 
 
+#: 姿势可用性备注（2026-11-07 40 样本分层实测，见验证文档 §13.7）。
+#: 键为完整条目 ID；有备注即 `usable=False`：仍可手动选择，但列表降权、随机候选排除。
+POSE_USABILITY_NOTES: dict[str, str] = {
+    "psl-D046": "姿势不跟随：3/3 样本被模型改成并排站",
+}
+
+
+def _pose_usability(item_id: str) -> tuple[bool, str]:
+    note = POSE_USABILITY_NOTES.get(item_id, "")
+    return (not note, note)
+
+
 def _upstream_composition(group: str) -> str:
     if "双人" in group:
         return COMPOSITION_PAIR
@@ -490,12 +502,16 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
             else None
         )
 
+    usable, usable_note = _pose_usability(item_id) if library == "pose" else (True, "")
     return {
         **fields,
         "thumb_url": thumb_url,
         "image_url": image_url,
         "depth_url": depth_url,
         "depth_thumb_url": depth_thumb_url,
+        #: 仅 pose：可用性标记；非姿势库恒为 True / 空串
+        "usable": usable,
+        "usable_note": usable_note,
         "hot": bool(obj.get("热门", False)),
         "featured": bool(obj.get("精选", False)),
         "nsfw": nsfw,
@@ -590,6 +606,7 @@ def _psl_to_record(source: PoseSource, obj: dict[str, Any]) -> dict[str, Any] | 
     thumb_rel = str(obj.get("thumb") or obj.get("file") or "").strip()
     image_rel = str(obj.get("file") or "").strip()
     subtitle = " · ".join(part for part in [raw_id, angle] if part)
+    usable, usable_note = _pose_usability(item_id)
     return {
         "id": item_id,
         "library": "pose",
@@ -616,6 +633,9 @@ def _psl_to_record(source: PoseSource, obj: dict[str, Any]) -> dict[str, Any] | 
         "has_depth": False,
         "remote": False,
         "source_url": None,
+        #: 姿势可用性标记：不参与筛选，只做列表降权 / 随机排除 / UI 提示
+        "usable": usable,
+        "usable_note": usable_note,
         "search_text": search_text,
         "_search": search_text.lower(),
         "_thumb_rel": thumb_rel,
