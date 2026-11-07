@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/vue-query'
 
 import ToastHost from './components/ToastHost.vue'
 import OutputLocationField from './components/OutputLocationField.vue'
-import { getSystemStatus, listJobs, type SystemStatus } from './api/endpoints'
+import { listJobs } from './api/jobs'
+import { getSystemStatus, type SystemStatus } from './api/system'
 import { setupNaive } from './utils/naive'
 import {
   applyInitialTheme,

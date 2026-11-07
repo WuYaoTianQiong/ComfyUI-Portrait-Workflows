@@ -1,6 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { buildQuery, thumbnailUrl, viewUrl } from './client'
+import { ApiError, apiGet, buildQuery, thumbnailUrl, viewUrl } from './client'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('ApiError', () => {
+  it('保留 status / detail / request-id，并把 detail 放进 message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: '工作流不存在' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'rid-123' },
+          }),
+      ),
+    )
+
+    const err = await apiGet('/api/nope').catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(404)
+    expect((err as ApiError).detail).toEqual({ detail: '工作流不存在' })
+    expect((err as ApiError).requestId).toBe('rid-123')
+    expect((err as ApiError).message).toContain('工作流不存在')
+  })
+
+  it('非 JSON 错误体保留原文（反向代理 502 等）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('Bad Gateway', { status: 502 })),
+    )
+
+    const err = await apiGet('/api/nope').catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(502)
+    expect((err as ApiError).message).toContain('Bad Gateway')
+    expect((err as ApiError).requestId).toBeNull()
+  })
+})
 
 describe('buildQuery', () => {
   it('空值不参与拼串', () => {

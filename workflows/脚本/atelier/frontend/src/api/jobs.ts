@@ -1,4 +1,4 @@
-/** 端点级类型封装：调用点只关心业务参数与响应，不再各自写泛型。 */
+/** 任务域：列表 / 详情 / 取消 / 重试 / SSE 地址。 */
 import type { components } from './openapi'
 import { apiGet, apiPost } from './client'
 import type { JobSnapshot } from './types'
@@ -24,19 +24,6 @@ export interface RetryJobResponse {
   total: number
   errors: Array<{ index?: number; error: string }>
   idempotent: boolean
-}
-
-export interface SystemStatus {
-  comfyui: 'online' | 'offline'
-  queue_running: number
-  queue_pending: number
-}
-
-export interface SystemConfig {
-  workflow_path: string
-  workflow_name: string
-  db_path: string
-  output_dir: string
 }
 
 export function listJobs(params: { limit?: number; active?: boolean } = {}) {
@@ -65,16 +52,7 @@ export function retryJob(jobId: number, indexes?: number[]) {
   )
 }
 
-export function getSystemStatus() {
-  return apiGet<SystemStatus>('/api/system/status')
-}
-
-export function getSystemConfig() {
-  return apiGet<SystemConfig>('/api/system/config')
-}
-
-export function openOutputDir() {
-  return apiPost<{ success: boolean; path?: string; message?: string }>(
-    '/api/system/open-output',
-  )
+/** SSE 地址集中在任务域，composable 不再手拼路径。 */
+export function jobEventsUrl(ids?: number[] | null): string {
+  return ids?.length ? `/api/jobs/events?ids=${ids.join(',')}` : '/api/jobs/events'
 }

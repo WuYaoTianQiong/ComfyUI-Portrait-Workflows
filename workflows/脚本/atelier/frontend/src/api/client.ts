@@ -14,14 +14,47 @@ export function buildQuery(params: QueryParams = {}): string {
   return qs ? `?${qs}` : ''
 }
 
+/** 后端统一的错误形状（FastAPI 的 `detail` 可能是字符串，也可能是校验错误数组）。 */
+function detailText(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && 'detail' in detail) {
+    const inner = (detail as { detail: unknown }).detail
+    return typeof inner === 'string' ? inner : JSON.stringify(inner)
+  }
+  return JSON.stringify(detail)
+}
+
+/** 请求失败时抛这个，调用方可以按 status 分支，并按 requestId 去日志里串一次操作。 */
+export class ApiError extends Error {
+  readonly status: number
+  readonly detail: unknown
+  readonly requestId: string | null
+
+  constructor(status: number, detail: unknown, requestId: string | null) {
+    super(`${status} ${detailText(detail).slice(0, 200)}`)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+    this.requestId = requestId
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     ...init,
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
   })
   if (!resp.ok) {
-    const detail = await resp.text().catch(() => '')
-    throw new Error(`${resp.status} ${detail.slice(0, 200)}`)
+    const text = await resp.text().catch(() => '')
+    let detail: unknown = text
+    if (text) {
+      try {
+        detail = JSON.parse(text)
+      } catch {
+        // 非 JSON 错误体（反向代理 502 等）保留原文
+      }
+    }
+    throw new ApiError(resp.status, detail, resp.headers.get('X-Request-ID'))
   }
   return (await resp.json()) as T
 }

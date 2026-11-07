@@ -2,7 +2,9 @@
 import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
-import { apiGet } from '../api/client'
+import { getImageFacets } from '../api/images'
+import { getSystemStats } from '../api/system'
+import type { ImageFacets, SystemStats } from '../api/types'
 import EmptyState from '../components/EmptyState.vue'
 import QueryState from '../components/QueryState.vue'
 import { sourceLabel } from '../utils/format'
@@ -14,30 +16,15 @@ import { sourceLabel } from '../utils/format'
  * - `/api/system/stats`      —— 总量 + 热门标签
  * - `/api/images/facets` —— 图片的来源/方向/模型分布（复用画廊那套分面统计）
  */
-interface StatsResponse {
-  prompt_count: number
-  history_count: number
-  job_count: number
-  fragment_count: number
-  top_tags: Array<{ name: string; count: number; color: string }>
-}
-
-interface Facets {
-  source: Record<string, number>
-  date: Record<string, number>
-  model: Record<string, number>
-  orientation: Record<string, number>
-}
-
 const {
   data: stats,
   isFetching,
   isError: statsError,
   error: statsErr,
   refetch: refetchStats,
-} = useQuery<StatsResponse>({
+} = useQuery<SystemStats>({
   queryKey: ['stats'],
-  queryFn: () => apiGet('/api/system/stats'),
+  queryFn: getSystemStats,
 })
 
 const {
@@ -45,9 +32,9 @@ const {
   isError: facetsError,
   error: facetsErr,
   refetch: refetchFacets,
-} = useQuery<Facets>({
+} = useQuery<ImageFacets>({
   queryKey: ['history', 'facets', 'stats'],
-  queryFn: () => apiGet('/api/images/facets'),
+  queryFn: () => getImageFacets(),
 })
 
 const loadError = computed(() => {

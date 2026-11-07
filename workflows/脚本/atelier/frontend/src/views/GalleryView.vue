@@ -9,7 +9,18 @@ import CategoryFilter from '../components/CategoryFilter.vue'
 import Modal from '../components/Modal.vue'
 import Skeleton from '../components/Skeleton.vue'
 import TagCloud from '../components/TagCloud.vue'
-import { apiGet, apiPost, thumbnailUrl } from '../api/client'
+import { apiPost, thumbnailUrl } from '../api/client'
+import {
+  backfillImageTaxonomy,
+  batchDeleteImages,
+  cleanupMissingImages,
+  getImageFacets,
+  listImageIds,
+  listImages,
+  setImageFavorite,
+  syncImagesLight,
+} from '../api/images'
+import { listCategories, listTags } from '../api/taxonomy'
 import EmptyState from '../components/EmptyState.vue'
 import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
@@ -21,7 +32,7 @@ import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useImageLocation } from '../composables/useImageLocation'
 import { useGallerySelection } from '../composables/useGallerySelection'
-import type { CategoryNode, HistoryItem, HistoryPage, TagRow } from '../api/types'
+import type { HistoryItem, HistoryPage, ImageFacets } from '../api/types'
 import { formatSize, resolution } from '../utils/format'
 import { flattenCategories } from '../utils/categories'
 
@@ -206,38 +217,27 @@ const {
   error,
 } = useQuery<HistoryPage>({
   queryKey: historyKey,
-  queryFn: () => apiGet<HistoryPage>('/api/images', historyFilterParams()),
+  queryFn: () => listImages(historyFilterParams()),
   // 翻页时保留上一页内容，避免整页闪烁
   placeholderData: (prev) => prev,
 })
 
-interface Facets {
-  source: Record<string, number>
-  date: Record<string, number>
-  model: Record<string, number>
-  orientation: Record<string, number>
-}
-
 /** 分面计数：后端按「当前筛选（不含分面维度自身）」算，避免「数出来的和筛出来的对不上」。 */
-const { data: facets } = useQuery<Facets>({
+const { data: facets } = useQuery<ImageFacets>({
   queryKey: computed(() => ['facets', facetScope.value]),
-  queryFn: () => apiGet('/api/images/facets', facetScope.value),
+  queryFn: () => getImageFacets(facetScope.value),
   placeholderData: (prev) => prev,
   staleTime: 15_000,
 })
 
-const { data: tagData } = useQuery<{ tags: TagRow[] }>({
+const { data: tagData } = useQuery({
   queryKey: ['tags', 'image'],
-  queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'image' }),
+  queryFn: () => listTags({ count_scope: 'image' }),
 })
 
-const { data: catData } = useQuery<{ categories: CategoryNode[] }>({
+const { data: catData } = useQuery({
   queryKey: ['categories', 'gallery'],
-  queryFn: () =>
-    apiGet<{ categories: CategoryNode[] }>('/api/categories', {
-      tree: true,
-      count_scope: 'image',
-    }),
+  queryFn: () => listCategories({ tree: true, count_scope: 'image' }),
 })
 
 const items = computed<HistoryItem[]>(() => history.value?.items ?? [])
@@ -390,10 +390,7 @@ const selectingAll = ref(false)
 async function selectAllMatching() {
   selectingAll.value = true
   try {
-    const data = await apiGet<{ ids: number[]; total: number }>(
-      '/api/images/ids',
-      historyFilterParams(),
-    )
+    const data = await listImageIds(historyFilterParams())
     selectAll(data.ids)
     if (!data.ids.length) toast.info('当前筛选下没有可选的图片')
   } catch (e) {
@@ -405,10 +402,7 @@ async function selectAllMatching() {
 
 const deleteMutation = useMutation({
   mutationFn: (payload: { ids: number[]; deleteFiles: boolean }) =>
-    apiPost<{ success: boolean; deleted: number; files_deleted: number }>(
-      '/api/images/batch_delete',
-      { ids: payload.ids, delete_files: payload.deleteFiles },
-    ),
+    batchDeleteImages(payload.ids, payload.deleteFiles),
   onSuccess: (data, payload) => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['history'] })
@@ -422,7 +416,7 @@ const deleteMutation = useMutation({
 })
 
 const favoriteMutation = useMutation({
-  mutationFn: (id: number) => apiPost<{ success: boolean; is_favorite: boolean }>(`/api/images/${id}/favorite`),
+  mutationFn: setImageFavorite,
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['history'] })
     queryClient.invalidateQueries({ queryKey: ['facets'] })
@@ -550,15 +544,15 @@ const bulkTagId = ref<number | null>(null)
 const bulkCatId = ref<number | null>(null)
 const bulkBusy = ref(false)
 
-const { data: bulkTags } = useQuery<{ tags: TagRow[] }>({
+const { data: bulkTags } = useQuery({
   queryKey: ['tags', 'bulk'],
-  queryFn: () => apiGet('/api/tags', { count_scope: 'image' }),
+  queryFn: () => listTags({ count_scope: 'image' }),
   enabled: computed(() => bulkOpen.value),
 })
 
-const { data: bulkCats } = useQuery<{ categories: CategoryNode[] }>({
+const { data: bulkCats } = useQuery({
   queryKey: ['categories', 'bulk'],
-  queryFn: () => apiGet('/api/categories', { tree: true }),
+  queryFn: () => listCategories({ tree: true }),
   enabled: computed(() => bulkOpen.value),
 })
 
@@ -605,9 +599,7 @@ async function backfillTaxonomy() {
   })
   if (!ok) return
   try {
-    const result = await apiPost<{ success: boolean; backfilled: number }>(
-      '/api/images/backfill_taxonomy',
-    )
+    const result = await backfillImageTaxonomy()
     toast.success(`已补齐 ${result.backfilled} 张图片的分类/标签`)
     queryClient.invalidateQueries({ queryKey: ['history'] })
     queryClient.invalidateQueries({ queryKey: ['tags'] })
@@ -689,12 +681,6 @@ function toggleMissing() {
 
 const toast = useToast()
 
-interface LightSyncResult {
-  added: number
-  total: number
-  busy: boolean
-}
-
 const syncing = ref(false)
 
 /**
@@ -707,7 +693,7 @@ async function syncNewImages(showToast = false) {
   if (syncing.value) return
   syncing.value = true
   try {
-    const result = await apiPost<LightSyncResult>('/api/images/sync/light')
+    const result = await syncImagesLight()
     if (result.added > 0) {
       // 手动刷新发现新图时回到第 1 页，否则用户停在旧页码看不到它们
       if (showToast && page.value !== 1) page.value = 1
@@ -741,16 +727,6 @@ async function copyFilename(name: string) {
 }
 const cleaning = ref(false)
 
-interface CleanupPreview {
-  success: boolean
-  dry_run: boolean
-  total: number
-  will_clean: number
-  samples: Array<{ id: number; filename: string; subfolder: string; img_type: string }>
-  guarded: boolean
-  message: string
-}
-
 /**
  * 清理范围 = 当前筛选，但**刻意不传 missing**。
  *
@@ -776,11 +752,7 @@ async function cleanupMissing() {
   if (cleaning.value) return
   cleaning.value = true
   try {
-    const preview = await apiPost<CleanupPreview>(
-      '/api/images/cleanup_missing',
-      undefined,
-      { ...cleanupScope(), dry_run: true },
-    )
+    const preview = await cleanupMissingImages(cleanupScope(), { dryRun: true })
 
     if (preview.guarded) {
       toast.error(preview.message || '疑似路径异常，已阻止清理')
@@ -811,16 +783,12 @@ async function cleanupMissing() {
     })
     if (!ok) return
 
-    const data = await apiPost<CleanupPreview & { cleaned: number }>(
-      '/api/images/cleanup_missing',
-      undefined,
-      { ...cleanupScope(), dry_run: false, confirm: true },
-    )
+    const data = await cleanupMissingImages(cleanupScope(), { dryRun: false })
     if (!data.success) {
       toast.error(data.message || '清理未执行')
       return
     }
-    toast.success(`已清理 ${data.cleaned} 条失效记录（共扫描 ${data.total} 条）`)
+    toast.success(`已清理 ${data.cleaned ?? 0} 条失效记录（共扫描 ${data.total} 条）`)
     queryClient.invalidateQueries({ queryKey: ['history'] })
   } catch (e) {
     toast.error(`清理失败：${e instanceof Error ? e.message : String(e)}`)

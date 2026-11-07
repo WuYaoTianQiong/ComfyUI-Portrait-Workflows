@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 
-import { cancelJob, listJobs, retryJob, stopAllJobs } from '../api/endpoints'
+import { cancelJob, listJobs, retryJob, stopAllJobs } from '../api/jobs'
 import { thumbnailUrl } from '../api/client'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useImageLocation } from '../composables/useImageLocation'

@@ -15,7 +15,23 @@ import Lightbox from '../components/Lightbox.vue'
 import { parseMarkedSegments, renderAllSegments, smartSegmentText } from '../utils/segmentation'
 import { confirmDialog } from '../utils/naive'
 import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
-import { apiDelete, apiGet, apiPost, apiPut, thumbnailUrl } from '../api/client'
+import { apiDelete, apiPost, thumbnailUrl } from '../api/client'
+import { listImages } from '../api/images'
+import {
+  PROMPT_EXPORT_URL,
+  batchDeletePrompts,
+  batchFavoritePrompts,
+  deletePrompt as deletePromptRequest,
+  getPrompt,
+  getPromptHistoryRefs,
+  importPrompts,
+  listPrompts,
+  ratePrompt,
+  setPromptFavorite,
+  setPromptPinned,
+  updatePrompt,
+} from '../api/prompts'
+import { autoClassifyPrompt, listCategories, listTags } from '../api/taxonomy'
 import EmptyState from '../components/EmptyState.vue'
 import QueryState from '../components/QueryState.vue'
 import Skeleton from '../components/Skeleton.vue'
@@ -36,13 +52,10 @@ import Pager from '../components/Pager.vue'
 import { FRAGMENT_TYPES } from '../constants'
 import { flattenCategories } from '../utils/categories'
 import type {
-  CategoryNode,
   HistoryItem,
   HistoryPage,
   PromptDetail,
-  PromptListPage,
   PromptListItem,
-  TagRow,
 } from '../api/types'
 
 const { workflowPath, orientation } = useSettings()
@@ -256,10 +269,10 @@ const {
   isError: listError,
   error: listErr,
   refetch: refetchList,
-} = useQuery<PromptListPage>({
+} = useQuery({
   queryKey: listKey,
   queryFn: () =>
-    apiGet<PromptListPage>('/api/prompts', {
+    listPrompts({
       page: page.value,
       page_size: pageSize.value,
       search: search.value.trim(),
@@ -286,18 +299,14 @@ watch(list, async () => {
   if (listEl.value) listEl.value.scrollTop = savedSession.scrollTop
 })
 
-const { data: catData } = useQuery<{ categories: CategoryNode[] }>({
+const { data: catData } = useQuery({
   queryKey: ['categories', 'prompt'],
-  queryFn: () =>
-    apiGet<{ categories: CategoryNode[] }>('/api/categories', {
-      tree: true,
-      count_scope: 'prompt',
-    }),
+  queryFn: () => listCategories({ tree: true, count_scope: 'prompt' }),
 })
 
-const { data: tagData } = useQuery<{ tags: TagRow[] }>({
+const { data: tagData } = useQuery({
   queryKey: ['tags', 'prompt'],
-  queryFn: () => apiGet<{ tags: TagRow[] }>('/api/tags', { count_scope: 'prompt' }),
+  queryFn: () => listTags({ count_scope: 'prompt' }),
 })
 
 const { workflows, allWorkflows } = useWorkflows()
@@ -352,7 +361,7 @@ const flatCats = computed(() => flattenCategories(catData.value?.categories))
 
 const { data: detail } = useQuery<PromptDetail>({
   queryKey: computed(() => ['prompt', selectedId.value]),
-  queryFn: () => apiGet<PromptDetail>(`/api/prompts/${selectedId.value}`),
+  queryFn: () => getPrompt(selectedId.value as number),
   enabled: computed(() => selectedId.value !== null),
 })
 
@@ -423,7 +432,7 @@ function toggleCategory(catId: number) {
 
 /** 单条自动归类：按提示词正文里的【类型】数量归入 组合/单项/零散。 */
 const autoClassifyMutation = useMutation({
-  mutationFn: (id: number) => apiPost(`/api/categories/auto-classify/${id}`),
+  mutationFn: autoClassifyPrompt,
   onSuccess: () => {
     if (selectedId.value !== null) {
       queryClient.invalidateQueries({ queryKey: ['prompt', selectedId.value] })
@@ -547,13 +556,10 @@ const { data: shotHistory } = useQuery<HistoryPage>({
     const empty: HistoryPage = { items: [], total: 0, page: 1, page_size: 24 }
     const id = selectedId.value
     if (!id) return empty
-    const refs = await apiGet<{ items: Array<{ id: number }> }>(
-      `/api/prompts/${id}/history`,
-      { limit: 24 },
-    )
+    const refs = await getPromptHistoryRefs(id, 24)
     const ids = refs.items.map((it) => it.id)
     if (!ids.length) return empty
-    return apiGet<HistoryPage>('/api/images', {
+    return listImages({
       ids: ids.join(','),
       page: 1,
       page_size: ids.length,
@@ -640,7 +646,7 @@ async function smartSegment() {
 
 const saveMutation = useMutation({
   mutationFn: (payload: Partial<PromptDetail>) =>
-    apiPut<{ success: boolean }>(`/api/prompts/${selectedId.value}`, payload),
+    updatePrompt(selectedId.value as number, payload),
   onSuccess: () => {
     markSaved()
     invalidateAll(selectedId.value)
@@ -674,10 +680,7 @@ function save() {
  * 之前每次都 invalidateAll → 重拉详情 → 触发"恢复草稿"弹窗，纯属自找麻烦。
  */
 const favoriteMutation = useMutation({
-  mutationFn: () =>
-    apiPost<{ success: boolean; is_favorite: boolean }>(
-      `/api/prompts/${selectedId.value}/favorite`,
-    ),
+  mutationFn: () => setPromptFavorite(selectedId.value as number),
   onSuccess: (result) => {
     if (draft.value) draft.value.is_favorite = result.is_favorite
     const id = selectedId.value
@@ -691,8 +694,7 @@ const favoriteMutation = useMutation({
 })
 
 const pinMutation = useMutation({
-  mutationFn: () =>
-    apiPost<{ success: boolean; is_pinned: boolean }>(`/api/prompts/${selectedId.value}/pin`),
+  mutationFn: () => setPromptPinned(selectedId.value as number),
   onSuccess: (result) => {
     if (draft.value) draft.value.is_pinned = result.is_pinned
     const id = selectedId.value
@@ -706,12 +708,7 @@ const pinMutation = useMutation({
 })
 
 const rateMutation = useMutation({
-  mutationFn: (rating: number) =>
-    apiPost<{ success: boolean; rating: number }>(
-      `/api/prompts/${selectedId.value}/rate`,
-      undefined,
-      { rating },
-    ),
+  mutationFn: (rating: number) => ratePrompt(selectedId.value as number, rating),
   onSuccess: (result) => {
     if (draft.value) draft.value.rating = result.rating
     const id = selectedId.value
@@ -726,7 +723,7 @@ const rateMutation = useMutation({
 
 /** 单条删除（旧版详情页的「删除」）。删完清空选中，列表 watcher 会选下一条。 */
 const deleteMutation = useMutation({
-  mutationFn: (id: number) => apiDelete(`/api/prompts/${id}`),
+  mutationFn: deletePromptRequest,
   onSuccess: () => {
     selectedId.value = null
     jumpTargetId.value = null
@@ -772,8 +769,7 @@ function clearSelection() {
 }
 
 const batchFavoriteMutation = useMutation({
-  mutationFn: (ids: number[]) =>
-    apiPost<{ success: boolean }>('/api/prompts/batch_favorite', { ids }, { favorite: true }),
+  mutationFn: batchFavoritePrompts,
   onSuccess: () => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['prompts'] })
@@ -781,8 +777,7 @@ const batchFavoriteMutation = useMutation({
 })
 
 const batchDeleteMutation = useMutation({
-  mutationFn: (ids: number[]) =>
-    apiPost<{ success: boolean; deleted: number }>('/api/prompts/batch_delete', { ids }),
+  mutationFn: batchDeletePrompts,
   onSuccess: () => {
     clearSelection()
     queryClient.invalidateQueries({ queryKey: ['prompts'] })
@@ -896,14 +891,11 @@ function closeMore() {
 const importMessage = ref('')
 
 function exportPrompts() {
-  window.open('/api/prompts/export', '_blank')
+  window.open(PROMPT_EXPORT_URL, '_blank')
 }
 
 const importMutation = useMutation({
-  mutationFn: (prompts: unknown[]) =>
-    apiPost<{ success: boolean; imported: number; message: string }>('/api/prompts/import', {
-      prompts,
-    }),
+  mutationFn: importPrompts,
   onSuccess: (result) => {
     importMessage.value = result.message
     queryClient.invalidateQueries({ queryKey: ['prompts'] })

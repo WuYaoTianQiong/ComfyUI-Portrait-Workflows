@@ -46,6 +46,8 @@ export type HistoryItem = Omit<Required<Schemas['HistoryItem']>, 'version'> & {
 export type HistoryPage = Omit<Required<Schemas['HistoryListResponse']>, 'items'> & {
   items: HistoryItem[]
 }
+export type ImageFacets = Required<Schemas['FacetsResponse']>
+export type ImageIdsPage = Required<Schemas['HistoryIdsResponse']>
 export type ImageRunInfo = Required<Schemas['ImageRunInfo']>
 export type ImageDetail = Omit<
   Required<Schemas['ImageDetailResponse']>,
@@ -72,3 +74,9 @@ export type PromptListPage = Omit<Required<Schemas['PromptListResponse']>, 'prom
   prompts: PromptListItem[]
 }
 export type PromptDetail = Required<Schemas['PromptDetail']>
+
+// ---------------------------------------------------------------------------
+// 系统
+// ---------------------------------------------------------------------------
+
+export type SystemStats = Required<Schemas['StatsResponse']>

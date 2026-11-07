@@ -2,7 +2,18 @@
 import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { clearThumbnailCache } from '../api/system'
+import {
+  autoClassifyAll as autoClassifyAllRequest,
+  createCategory,
+  createTag,
+  deleteCategory,
+  deleteTag,
+  listCategories,
+  listTags,
+  updateCategory,
+  updateTag,
+} from '../api/taxonomy'
 import EmptyState from '../components/EmptyState.vue'
 import Skeleton from '../components/Skeleton.vue'
 import { useToast } from '../composables/useToast'
@@ -16,7 +27,6 @@ import {
   resetAllConfirmSkips,
   type ConfirmPromptMeta,
 } from '../utils/confirmKeys'
-import type { CategoryNode, TagRow } from '../api/types'
 
 /**
  * 分类与标签。
@@ -63,9 +73,9 @@ function restoreAllPrompts() {
   toast.success('已恢复全部确认提示')
 }
 
-const { data: catData, isFetching: catsFetching, refetch: refetchCats } = useQuery<{ categories: CategoryNode[] }>({
+const { data: catData, isFetching: catsFetching, refetch: refetchCats } = useQuery({
   queryKey: ['categories', 'taxonomy'],
-  queryFn: () => apiGet('/api/categories', { tree: true, count_scope: 'prompt' }),
+  queryFn: () => listCategories({ tree: true, count_scope: 'prompt' }),
 })
 
 const flatCats = computed(() => flattenCategories(catData.value?.categories))
@@ -75,9 +85,9 @@ const visibleTags = computed(() => {
   return onlyUnused.value ? list.filter((t) => !t.prompt_count) : list
 })
 
-const { data: tagData, isFetching: tagsFetching, refetch: refetchTags } = useQuery<{ tags: TagRow[] }>({
+const { data: tagData, isFetching: tagsFetching, refetch: refetchTags } = useQuery({
   queryKey: ['tags', 'taxonomy'],
-  queryFn: () => apiGet('/api/tags', { count_scope: 'prompt' }),
+  queryFn: () => listTags({ count_scope: 'prompt' }),
 })
 
 const newName = ref('')
@@ -100,10 +110,10 @@ async function createItem() {
   if (!name) return
   try {
     if (panel.value === 'category') {
-      await apiPost('/api/categories', { name, color: newColor.value })
+      await createCategory(name, newColor.value)
       refetchCats()
     } else {
-      await apiPost('/api/tags', { name, color: newColor.value })
+      await createTag(name, newColor.value)
       refetchTags()
     }
     newName.value = ''
@@ -134,10 +144,10 @@ async function saveEdit() {
   }
   try {
     if (panel.value === 'category') {
-      await apiPut(`/api/categories/${editingId.value}`, { name })
+      await updateCategory(editingId.value, { name })
       refetchCats()
     } else {
-      await apiPut(`/api/tags/${editingId.value}`, { name })
+      await updateTag(editingId.value, { name })
       refetchTags()
     }
     cancelEdit()
@@ -153,8 +163,7 @@ async function saveEdit() {
  * 成功后分类计数会变，所以要同时失效分类与提示词两个缓存。
  */
 const autoClassifyMutation = useMutation({
-  mutationFn: () =>
-    apiPost<{ success: boolean; reclassified: number }>('/api/categories/auto-classify'),
+  mutationFn: autoClassifyAllRequest,
   onSuccess: (result) => {
     refetchCats()
     toast.success(`已重新分类，${result.reclassified} 条提示词的分类发生变化`)
@@ -175,7 +184,7 @@ async function autoClassifyAll() {
 
 /** 清理缩略图缓存（缩略图按 路径+mtime+尺寸 做键，下次访问自动重建）。 */
 const clearThumbs = useMutation({
-  mutationFn: () => apiPost<{ success: boolean; deleted: number }>('/api/media/thumbnail/clear'),
+  mutationFn: clearThumbnailCache,
   onSuccess: (result) => {
     toast.success(`已清理 ${result.deleted} 个缩略图缓存文件`)
   },
@@ -235,10 +244,10 @@ async function removeItem(kind: Panel, id: number, name: string) {
   if (!ok) return
   try {
     if (kind === 'category') {
-      await apiDelete(`/api/categories/${id}`)
+      await deleteCategory(id)
       refetchCats()
     } else {
-      await apiDelete(`/api/tags/${id}`)
+      await deleteTag(id)
       refetchTags()
     }
     toast.success(`已删除「${name}」`)

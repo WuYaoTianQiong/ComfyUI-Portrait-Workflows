@@ -1,5 +1,6 @@
 import { onBeforeUnmount } from 'vue'
 
+import { jobEventsUrl } from '../api/jobs'
 import type { JobSnapshot } from '../api/types'
 
 interface JobStreamOptions {
@@ -31,10 +32,7 @@ export function useJobStream(
   function open(ids: number[] | null = null) {
     close()
     if (ids && !ids.length) return
-    const url = ids?.length
-      ? `/api/jobs/events?ids=${ids.join(',')}`
-      : '/api/jobs/events'
-    const es = new EventSource(url)
+    const es = new EventSource(jobEventsUrl(ids))
     source = es
 
     const parse = (event: Event) => {
