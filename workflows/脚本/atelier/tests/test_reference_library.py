@@ -181,8 +181,9 @@ def ref_root(tmp_path: Path, monkeypatch, remote_cache: Path) -> Path:
     _write_bytes(root / "img" / "portrait" / "p1.webp")
 
     monkeypatch.setattr(settings, "reference_root", root)
-    # 隔离本机真实安装的第二姿势来源，避免合并条数污染既有用例
+    # 隔离本机真实安装的第二来源，避免合并条数污染既有用例
     monkeypatch.setattr(settings, "pose_extra_dir", None)
+    monkeypatch.setattr(settings, "costume_character_dir", None)
     monkeypatch.setattr(settings, "reference_allow_nsfw", False)
     monkeypatch.setattr(settings, "reference_page_size", 60)
     rl.clear_cache()
@@ -280,6 +281,47 @@ def pose_extra_root(tmp_path: Path, monkeypatch) -> Path:
         _write_bytes(root / rel)
 
     monkeypatch.setattr(settings, "pose_extra_dir", root)
+    rl.clear_cache()
+    yield root
+    rl.clear_cache()
+
+
+@pytest.fixture()
+def costume_extra_root(ref_root, tmp_path: Path, monkeypatch) -> Path:
+    """最小角色创作库服装来源：2 条中文键条目，带来源署名。"""
+    root = tmp_path / "character-ref-costume-60"
+    items = [
+        {
+            "id": "char-TEST-1",
+            "分类": "男性现代服装",
+            "服装名称": "测试夹克",
+            "标签": ["夹克", "角色创作库"],
+            "关键词": "jacket test",
+            "缩略图": "thumbs/char-TEST-1.webp",
+            "原图": "images/char-TEST-1.webp",
+            "检索": "char-TEST-1 测试夹克 男性现代服装 角色创作库",
+        },
+        {
+            "id": "char-TEST-2",
+            "分类": "汉服形制",
+            "服装名称": "测试长裙",
+            "标签": ["长裙", "角色创作库"],
+            "关键词": "dress test",
+            "缩略图": "thumbs/char-TEST-2.webp",
+            "原图": "images/char-TEST-2.webp",
+            "检索": "char-TEST-2 测试长裙 汉服形制 角色创作库",
+        },
+    ]
+    _write_json(root / "meta.json", items)
+    for rel in (
+        "thumbs/char-TEST-1.webp",
+        "images/char-TEST-1.webp",
+        "thumbs/char-TEST-2.webp",
+        "images/char-TEST-2.webp",
+    ):
+        _write_bytes(root / rel)
+
+    monkeypatch.setattr(settings, "costume_character_dir", root)
     rl.clear_cache()
     yield root
     rl.clear_cache()
@@ -476,6 +518,66 @@ def test_pose_extra_missing_keeps_upstream(api, ref_root, pose_extra_root):
         "/api/reference/items", params={"library": "pose", "search": "psl-P001"}
     ).json()
     assert items["total"] == 0
+
+
+def test_costume_merges_character_source(api, ref_root, costume_extra_root):
+    """上游 2 件 + 角色创作库 2 件；来源署名、图片根和检索都要正确。"""
+    stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
+    assert stats["costume"]["total"] == 4
+    assert stats["costume"]["available"] is True
+    sources = {row["key"]: row for row in stats["costume"]["sources"]}
+    assert sources["upstream"]["total"] == 2
+    assert sources["character-ref"]["total"] == 2
+    assert sources["character-ref"]["label"] == "角色创作库 @62656456"
+
+    payload = api.get(
+        "/api/reference/items", params={"library": "costume", "search": "char-TEST-1"}
+    ).json()
+    assert payload["total"] == 1
+    item = payload["items"][0]
+    assert item["id"] == "char-TEST-1"
+    assert item["group"] == "男性现代服装"
+    assert item["source"] == "character-ref"
+    assert item["source_label"] == "角色创作库 @62656456"
+    assert item["source_url"] == rl.COSTUME_CHARACTER_SITE
+    assert "角色创作库" in item["tags"]
+    assert item["remote"] is False
+
+    image = api.get("/api/reference/items/costume/char-TEST-1/image", params={"kind": "image"})
+    assert image.status_code == 200
+    thumb = api.get("/api/reference/items/costume/char-TEST-1/image", params={"kind": "thumb"})
+    assert thumb.status_code == 200
+    path = rl.resolve_image("costume", "char-TEST-1", "image")
+    assert str(path).startswith(str(costume_extra_root))
+
+    # 上游服装不受影响
+    upstream = api.get("/api/reference/items/costume/SPR-0001")
+    assert upstream.status_code == 200
+    assert upstream.json()["source"] == "upstream"
+
+
+def test_costume_character_missing_keeps_upstream(api, ref_root, costume_extra_root):
+    (costume_extra_root / "meta.json").unlink()
+    rl.clear_cache()
+    stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
+    assert stats["costume"]["total"] == 2
+    assert stats["costume"]["available"] is True
+    payload = api.get(
+        "/api/reference/items", params={"library": "costume", "search": "char-TEST-1"}
+    ).json()
+    assert payload["total"] == 0
+
+
+def test_costume_character_path_is_scoped(api, ref_root, costume_extra_root):
+    meta = json.loads((costume_extra_root / "meta.json").read_text(encoding="utf-8"))
+    meta[0]["原图"] = "../../evil.webp"
+    (costume_extra_root / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
+    rl.clear_cache()
+    with pytest.raises(rl.ReferenceImageError) as exc:
+        rl.resolve_image("costume", "char-TEST-1", "image")
+    assert exc.value.status_code == 400
 
 
 def test_search_matches_upstream_search_field(api, ref_root):

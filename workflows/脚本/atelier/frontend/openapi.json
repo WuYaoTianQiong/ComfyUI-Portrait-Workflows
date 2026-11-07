@@ -3111,6 +3111,11 @@
             "title": "Source",
             "type": "string"
           },
+          "source_label": {
+            "default": "",
+            "title": "Source Label",
+            "type": "string"
+          },
           "source_url": {
             "anyOf": [
               {

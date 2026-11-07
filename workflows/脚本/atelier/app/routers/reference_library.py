@@ -91,6 +91,7 @@ class ReferenceItem(BaseModel):
     angle: str = ""
     #: canonical 三轴字段（仅 pose 非空）：来源 / 构图 / 姿势类型 / 风格
     source: str = ""
+    source_label: str = ""
     composition: str = ""
     pose_type: str = ""
     style: str = ""

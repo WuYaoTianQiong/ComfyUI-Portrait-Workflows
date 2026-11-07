@@ -83,6 +83,27 @@ POSE_SOURCE_BASELINES = {
     POSE_SOURCE_PSL: 280,
 }
 
+#: 服装库的第二来源：角色创作库精选 60 件（本地只读包，带署名）。
+COSTUME_SOURCE_UPSTREAM = "upstream"
+COSTUME_SOURCE_CHARACTER = "character-ref"
+COSTUME_CHARACTER_LABEL = "角色创作库 @62656456"
+COSTUME_CHARACTER_SITE = "https://62656456.github.io/character-reference-library/"
+
+
+@dataclass(frozen=True)
+class CostumeSource:
+    key: str
+    label: str
+    root: Path
+    metadata: Path
+    baseline: int | None
+
+
+COSTUME_SOURCE_BASELINES = {
+    COSTUME_SOURCE_UPSTREAM: 1407,
+    COSTUME_SOURCE_CHARACTER: 60,
+}
+
 #: 姿势库 canonical 分类（三轴：来源 / 分级 / 构图；类型与风格独立）。
 COMPOSITION_FULL = "full"
 COMPOSITION_UPPER = "upper"
@@ -409,6 +430,7 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
         "tags": _tags(obj),
         "keywords": _text(obj, "关键词"),
         "source": source,
+        "source_label": "",
         "composition": composition,
         "pose_type": pose_type,
         "style": style,
@@ -552,6 +574,7 @@ def _psl_to_record(source: PoseSource, obj: dict[str, Any]) -> dict[str, Any] | 
         "tags": tags,
         "keywords": "",
         "source": source.key,
+        "source_label": source.label,
         "composition": composition,
         "pose_type": pose_type,
         "style": style,
@@ -669,6 +692,124 @@ def _load_pose_merged() -> list[dict[str, Any]]:
     return items
 
 
+def _costume_sources() -> list[CostumeSource]:
+    """当前可用的服装来源；角色创作库 60 件未安装时只加载上游。"""
+    root = reference_root()
+    sources = [
+        CostumeSource(
+            key=COSTUME_SOURCE_UPSTREAM,
+            label="",
+            root=root,
+            metadata=root / LIBRARY_FILES["costume"],
+            baseline=COSTUME_SOURCE_BASELINES[COSTUME_SOURCE_UPSTREAM],
+        )
+    ]
+    extra = settings.costume_character_dir
+    if extra is not None:
+        extra = Path(extra).expanduser().absolute()
+        sources.append(
+            CostumeSource(
+                key=COSTUME_SOURCE_CHARACTER,
+                label=COSTUME_CHARACTER_LABEL,
+                root=extra,
+                metadata=extra / "meta.json",
+                baseline=COSTUME_SOURCE_BASELINES[COSTUME_SOURCE_CHARACTER],
+            )
+        )
+    return sources
+
+
+def _log_costume_source(source: CostumeSource, count: int) -> None:
+    if count == 0:
+        logger.warning("服装来源 %s 加载到 0 条：%s", source.key, source.metadata)
+        return
+    if source.baseline and abs(count - source.baseline) > source.baseline * BASELINE_TOLERANCE:
+        logger.warning(
+            "服装来源 %s 条数 %d 偏离基线 %d（±%d%%），请检查字段是否改名",
+            source.key,
+            count,
+            source.baseline,
+            int(BASELINE_TOLERANCE * 100),
+        )
+        return
+    logger.info("服装来源 %s 加载完成：%d 条", source.key, count)
+
+
+def _load_costume_source(source: CostumeSource) -> list[dict[str, Any]]:
+    mtime = _mtime_ns(source.metadata)
+    if mtime is None:
+        if source.key == COSTUME_SOURCE_UPSTREAM:
+            logger.warning("服装来源 %s 数据文件不存在：%s", source.key, source.metadata)
+        else:
+            logger.info("服装来源 %s 未安装，已跳过：%s", source.key, source.metadata)
+        return []
+    key = (str(source.metadata), f"costume-source:{source.key}")
+    with _LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached.mtime_ns == mtime:
+            return cached.items
+
+    try:
+        raw = json.loads(source.metadata.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("服装来源 %s 读取/解析失败：%s", source.key, exc)
+        return []
+    if not isinstance(raw, list):
+        logger.warning("服装来源 %s 顶层不是数组：%s", source.key, source.metadata)
+        return []
+
+    records: list[dict[str, Any]] = []
+    for obj in raw:
+        if not isinstance(obj, dict):
+            continue
+        record = _to_record("costume", obj)
+        if record is None:
+            continue
+        record["_root"] = source.root
+        record["_source"] = source.key
+        record["source"] = source.key
+        if source.key == COSTUME_SOURCE_CHARACTER:
+            record["source_label"] = source.label
+            record["source_url"] = COSTUME_CHARACTER_SITE
+        else:
+            record["source_label"] = ""
+        records.append(record)
+
+    _log_costume_source(source, len(records))
+    with _LOCK:
+        _CACHE[key] = _CacheEntry(
+            mtime_ns=mtime,
+            items=records,
+            by_id={record["id"]: record for record in records},
+        )
+    return records
+
+
+def _load_costume_merged() -> list[dict[str, Any]]:
+    sources = _costume_sources()
+    stamps = tuple(
+        (str(source.metadata), _mtime_ns(source.metadata)) for source in sources
+    )
+    key = ("__costume_merged__", "costume")
+    stamp = hash(stamps)
+    with _LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached.mtime_ns == stamp:
+            return cached.items
+
+    items: list[dict[str, Any]] = []
+    for source in sources:
+        items.extend(_load_costume_source(source))
+
+    with _LOCK:
+        _CACHE[key] = _CacheEntry(
+            mtime_ns=stamp,
+            items=items,
+            by_id={record["id"]: record for record in items},
+        )
+    return items
+
+
 def _log_loaded_count(library: str, count: int) -> None:
     """成功打 info；空库或明显偏离上游基线打 warning，避免"0 条且可用"无从排查。"""
     baseline = BASELINE_COUNTS.get(library)
@@ -696,6 +837,8 @@ def _load(library: str) -> list[dict[str, Any]]:
         return []
     if library == "pose":
         return _load_pose_merged()
+    if library == "costume":
+        return _load_costume_merged()
     path = _library_path(library)
     mtime = _mtime_ns(path)
     key = (str(path), library)
@@ -807,6 +950,24 @@ def library_stats() -> list[dict[str, Any]]:
                         "has_depth": source.has_depth,
                     }
                 )
+        elif library == "costume":
+            available = False
+            source_stats = []
+            for source in _costume_sources():
+                try:
+                    source_available = source.metadata.is_file()
+                except OSError:
+                    source_available = False
+                available = available or source_available
+                source_stats.append(
+                    {
+                        "key": source.key,
+                        "label": source.label or "原图库",
+                        "total": len(_load_costume_source(source)),
+                        "available": source_available,
+                        "has_depth": False,
+                    }
+                )
         else:
             path = _library_path(library)
             try:
@@ -895,10 +1056,12 @@ def _find_record(library: str, item_id: str) -> dict[str, Any] | None:
     if library not in LIBRARY_FILES or not item_id:
         return None
     _load(library)  # 确保缓存已按 mtime 填充
-    key = ("__pose_merged__", "pose") if library == "pose" else (
-        str(_library_path(library)),
-        library,
-    )
+    if library == "pose":
+        key = ("__pose_merged__", "pose")
+    elif library == "costume":
+        key = ("__costume_merged__", "costume")
+    else:
+        key = (str(_library_path(library)), library)
     with _LOCK:
         entry = _CACHE.get(key)
         return entry.by_id.get(item_id) if entry else None

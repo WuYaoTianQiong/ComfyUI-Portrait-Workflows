@@ -420,6 +420,25 @@ describe('DTO 归一化与映射', () => {
     expect(item.sourceUrl).toBeUndefined()
   })
 
+  it('本地第二来源：source_label 写入来源，不覆盖本地原图下载', () => {
+    const item = toCostumeItem(
+      dto({
+        id: 'char-1',
+        library: 'costume',
+        group: '汉服形制',
+        name: '百迭秋金',
+        source_label: '角色创作库 @62656456',
+        source_url: 'https://62656456.github.io/character-reference-library/',
+        tags: ['汉服', '角色创作库'],
+      }),
+    )
+
+    expect(item.一级分类).toBe('现实')
+    expect(item.来源).toBe('角色创作库 @62656456')
+    expect(item.sourceUrl).toBeUndefined()
+    expect(item.library).toBe('costume')
+  })
+
   it('人像：分区=group、发长=facet、发型名称=subtitle、标题=name', () => {
     const item = toPortraitItem(
       dto({

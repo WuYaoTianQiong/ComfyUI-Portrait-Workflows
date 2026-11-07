@@ -3742,6 +3742,11 @@ export interface components {
              * @default
              */
             source: string;
+            /**
+             * Source Label
+             * @default
+             */
+            source_label: string;
             /** Source Url */
             source_url?: string | null;
             /**

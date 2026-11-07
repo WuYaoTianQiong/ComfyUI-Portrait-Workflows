@@ -43,6 +43,8 @@ export interface ReferenceItemDto {
   number: string
   /** canonical 三轴字段（仅 pose 非空） */
   source?: string
+  /** 来源展示名（如角色创作库署名）；为空时沿用库默认文案 */
+  source_label?: string
   composition?: string
   pose_type?: string
   style?: string
@@ -388,6 +390,10 @@ export function toCostumeItem(dto: ReferenceItemDto): CostumeItem {
     item.日文名称 = text(dto.subtitle)
     item.来源地址 = dto.source_url ?? undefined
     item.sourceUrl = dto.source_url ?? null
+  } else if (text(dto.source_label)) {
+    // 角色创作库等第二来源：卡片 meta-left / 灯箱「来源」直接显示署名。
+    // 不写 sourceUrl：它是本地图，下载仍应走后端原图端点。
+    item.来源 = text(dto.source_label)
   }
 
   return item
