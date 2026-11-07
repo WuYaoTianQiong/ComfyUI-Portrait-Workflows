@@ -12,9 +12,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.config import settings
-from app.models import Fragment, GenJob, Image, Prompt, Tag
+from app.models import GenJob, Image, Prompt, Tag
 from app.schemas import StatsResponse
 from app.services.comfyui_client import get_queue as fetch_queue, is_online
+from app.services.fragment_pool import count_fragments
 from app.services.output_location import OutputLocationError, sanitize_subfolder
 from app.services.paths import _resolve_if_reparse
 from app.services.workflow_catalog import find_default_workflow
@@ -164,7 +165,7 @@ def get_system_stats():
     prompt_count = Prompt.select().count()
     image_count = Image.select().where(Image.is_deleted == False).count()  # noqa: E712
     job_count = GenJob.select().count()
-    fragment_count = Fragment.select().count()
+    fragment_count = count_fragments()
 
     # 热门标签（取前10）
     top_tags = Tag.select().order_by(Tag.usage_count.desc()).limit(10)

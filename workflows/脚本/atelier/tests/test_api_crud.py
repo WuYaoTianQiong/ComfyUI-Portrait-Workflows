@@ -75,29 +75,6 @@ def test_category_tree_envelope(api, seed_prompt):
 
 
 # ---------------------------------------------------------------------------
-# 碎片库
-# ---------------------------------------------------------------------------
-
-def test_fragment_crud(api):
-    created = api.post(
-        "/api/fragments",
-        json={"name": "测试碎片", "fragment_type": "人物面部", "content": "微笑"},
-    )
-    assert created.status_code == 201
-    fid = created.json()["id"]
-
-    listed = api.get("/api/fragments").json()
-    assert any(f["id"] == fid for f in listed["items"])
-
-    assert api.get("/api/fragments?search=微笑").json()["total"] >= 1
-    assert "grouped" in api.get("/api/fragments/by_type").json()
-
-    assert api.put(f"/api/fragments/{fid}", json={"content": "大笑"}).status_code == 200
-    assert api.delete(f"/api/fragments/{fid}").status_code == 200
-    assert api.delete(f"/api/fragments/{fid}").status_code == 404
-
-
-# ---------------------------------------------------------------------------
 # 标签
 # ---------------------------------------------------------------------------
 

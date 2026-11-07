@@ -270,23 +270,6 @@ class TemplateFragment(BaseModel):
         table_name = "template_fragments"
 
 
-# ======== Phase 4: 碎片库 ========
-class Fragment(BaseModel):
-    """独立碎片（碎片库）"""
-    id = AutoField()
-    name = TextField(default="")              # 碎片名（用户可自定义）
-    fragment_type = TextField()                # 人物面部/姿态动作/...
-    content = TextField()                      # 碎片文本内容
-    tags = TextField(default="")
-    usage_count = IntegerField(default=0)      # 被引用次数
-    created_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
-    updated_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
-
-    class Meta:
-        table_name = "fragments"
-# ================================
-
-
 def _migrate_column(db, table, col, col_def) -> bool:
     """如果列不存在则 ALTER TABLE 添加（兼容旧库）。返回是否新增了列。"""
     try:
@@ -437,7 +420,6 @@ def _ensure_tables():
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
     db.create_tables([ImageCategory, ImageTag, EntityTag], safe=True)
     db.create_tables([Template, TemplateFragment], safe=True)
-    db.create_tables([Fragment], safe=True)
 
 
 # v1 迁移完成后必须存在的列：迁移里所有 `_migrate_column` 都靠"ALTER 报错就算已存在"
@@ -446,7 +428,6 @@ def _ensure_tables():
 _V1_REQUIRED_COLUMNS = {
     "gen_history": {"prompt_params", "favorite", "captured_at", "is_deleted", "missing_since"},
     "prompts": {"is_favorite", "is_pinned", "usage_count", "last_used_at", "rating"},
-    "fragments": {"name", "tags", "updated_at"},
 }
 
 
@@ -604,6 +585,15 @@ def _migrate_v5_quality_keys(database):
         )
 
 
+def _migrate_v6_drop_fragments(database):
+    """v6：碎片已统一到 prompts 解析，删除不再读写的 fragments 表。
+
+    执行前应先导出旧表（data/backups/fragments_export_*.json）；
+    `IF EXISTS` 保证新库与重复执行都安全。
+    """
+    database.execute_sql("DROP TABLE IF EXISTS fragments")
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -615,6 +605,8 @@ MIGRATIONS = [
         lambda database: _migrate_v4_fragments_to_prompts(database)),
     (5, "画质内部键归一：2K/4K/6K/8K/12K/high → 0.75x/1.0x/1.25x/1.5x/2.0x",
         lambda database: _migrate_v5_quality_keys(database)),
+    (6, "退役 fragments 表：碎片统一从 prompts 实时解析",
+        lambda database: _migrate_v6_drop_fragments(database)),
 ]
 
 

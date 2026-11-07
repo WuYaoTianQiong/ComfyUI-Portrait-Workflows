@@ -197,24 +197,6 @@ class PromptDetail(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class FragmentRow(BaseModel):
-    id: int
-    name: str = ""
-    fragment_type: str = ""
-    content: str = ""
-    tags: str = ""
-    usage_count: int = 0
-    created_at: str = ""
-    updated_at: str = ""
-
-
-class FragmentListResponse(BaseModel):
-    items: list[FragmentRow] = Field(default_factory=list)
-    total: int = 0
-    page: int = 1
-    page_size: int = 0
-
-
 # ---------------------------------------------------------------------------
 # 任务
 # ---------------------------------------------------------------------------

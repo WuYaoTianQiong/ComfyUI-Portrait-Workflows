@@ -60,7 +60,6 @@ _TABLES = [
     "gen_jobs",
     "templates",
     "prompts",
-    "fragments",
     "categories",
     "tags",
 ]

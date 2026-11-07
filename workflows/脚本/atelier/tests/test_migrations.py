@@ -11,8 +11,8 @@ from app.services.migrations import applied_versions, apply_migrations
 
 
 def test_schema_version_recorded():
-    """conftest 里已经 init_db 过，v1-v5 必须都已登记。"""
-    assert applied_versions(db) == [1, 2, 3, 4, 5]
+    """conftest 里已经 init_db 过，MIGRATIONS 里的版本必须都已登记。"""
+    assert applied_versions(db) == [version for version, _, _ in MIGRATIONS]
 
 
 def test_apply_migrations_is_idempotent():

@@ -80,10 +80,7 @@ def test_job_and_stats_responses_contain_frontend_fields(api, seed_history):
     assert required <= set(stats), f"统计响应缺字段：{required - set(stats)}"
 
 
-def test_fragment_and_workflow_responses(api):
-    """碎片与工作流列表。"""
-    frags = api.get("/api/fragments").json()
-    assert set(frags) >= {"items", "total"}
-
+def test_workflow_list_response(api):
+    """工作流列表。"""
     wfs = api.get("/api/workflows").json()
     assert set(wfs) >= {"workflows", "default"}
