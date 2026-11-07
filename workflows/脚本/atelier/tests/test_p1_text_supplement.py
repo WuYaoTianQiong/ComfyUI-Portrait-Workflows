@@ -51,6 +51,34 @@ MODIFIER = "• 拍摄视角：低角度仰拍\n• 场景环境：午后街角�
 # ---------------------------------------------------------------------------
 
 
+def test_hair_extra_uses_hair_specific_clause():
+    """第 4 张在发型工作流里写「发型」主句，而不是通用附加元素。"""
+    hair = RecipeEntry(id="", name="上传的发型参考")
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        hair,
+        extra_kind="hair",
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+    )
+    assert "• 发型：" in prompt
+    assert "结合图2人物的发际线" in prompt
+    assert "不要使用图4中人物的脸" in prompt
+    assert "• 附加参考" not in prompt
+
+    generic = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        RecipeEntry(id="x", name="配饰"),
+        style="none",
+        index_map={"portrait": 2, "costume": 3, "pose": 1, "extra": 4},
+    )
+    assert "• 附加参考" in generic
+
+
 def test_supplement_clauses_are_appended_to_each_slot_master_sentence():
     prompt = build_recipe_prompt(
         PORTRAIT,

@@ -160,6 +160,7 @@ def build_recipe_prompt(
     costume: RecipeEntry | None,
     pose: RecipeEntry | None,
     extra: RecipeEntry | None = None,
+    extra_kind: str = "",
     style: str = "realistic",
     prompt_suffix: str = "",
     index_map: dict[str, int] | None = None,
@@ -335,9 +336,26 @@ def build_recipe_prompt(
 
     if extra:
         extra_num = _figure_no(index_map, "extra", idx)
-        clauses.append(
-            f"• 附加参考：融合图{extra_num}（{extra.name or '补充元素'}）中的元素、配饰、背景或光影细节。"
-        )
+        if extra_kind == "hair":
+            portrait_num = _figure_no(index_map, "portrait", 0)
+            face_hint = (
+                f"，结合图{portrait_num}人物的发际线自然衔接" if portrait_num else ""
+            )
+            name_hint = (
+                f"（参考：{extra.name}）"
+                if extra.name and "上传" not in extra.name
+                else ""
+            )
+            clauses.append(
+                f"• 发型：严格复现图{extra_num}中的发型{name_hint}"
+                "（长度、轮廓、分缝、发色、盘发/编发结构）"
+                f"{face_hint}。图{extra_num}只提供发型背面/无脸参考，"
+                f"不要使用图{extra_num}中人物的脸、服装或背景。"
+            )
+        else:
+            clauses.append(
+                f"• 附加参考：融合图{extra_num}（{extra.name or '补充元素'}）中的元素、配饰、背景或光影细节。"
+            )
         idx += 1
 
     if not clauses:

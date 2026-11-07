@@ -32,6 +32,7 @@ from app.services.workflow_parser import (
     detect_workflow_caps,
     find_loadimage_nodes,
     load_workflow,
+    loadimage_role,
 )
 
 router = APIRouter(tags=["参考图库"])
@@ -509,6 +510,16 @@ def check_reference_trim(req: TrimCheckRequest):
     )
 
 
+def _extra_kind(api_workflow: dict) -> str:
+    """第 4 张的业务语义：标题带「发型/Hair」时按发型参考生成专用提示词。"""
+    for _node_id, title in find_loadimage_nodes(api_workflow):
+        if loadimage_role(title) == "extra" and (
+            "发型" in title or "hair" in title.lower()
+        ):
+            return "hair"
+    return ""
+
+
 @router.post("/reference/recipes")
 def create_reference_recipe(req: RecipeRequest):
     """参考库出图：组提示词后直接复用 editor 的批量提交入口。
@@ -636,6 +647,9 @@ def create_reference_recipe(req: RecipeRequest):
         body_mode = "bare"
         body_mode_auto = True
 
+    # 第 4 张在发型工作流里按「发型参考」写专用提示词；其他工作流保持附加参考。
+    extra_kind = _extra_kind(api_wf)
+
     # 手动改写（P3）：前端已按分段编辑好整段正向，后端不再渲染碎片。
     if manual_override:
         prompt = manual_override
@@ -646,6 +660,7 @@ def create_reference_recipe(req: RecipeRequest):
             _slot_entry(costume, "costume") if costume_path else None,
             _slot_entry(pose, "pose") if pose_path else None,
             _slot_entry(extra, "extra") if extra_path else None,
+            extra_kind=extra_kind,
             style=req.style,
             prompt_suffix=req.prompt_suffix,
             index_map=index_map,

@@ -183,6 +183,8 @@ def test_studio_slots_degrade_to_empty_on_parse_error(api, tmp_path, monkeypatch
 #:   （唯一优势是快 1 分钟），用户 2026-11-06 拍板只留 Qwen21。
 STUDIO_ROLE_WORKFLOWS = {
     "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",
+    # 2026-11-07：独立发型槽验证工作流（第 4 张为发型，复用 extra 槽）
+    "图库专用_Qwen21+VNCCS_四图_25步_发型槽.api.json",
 }
 
 #: UI 格式 .json：能解析出 LoadImage，但标题一个业务角色都认不出 → 合成台永远失败。
