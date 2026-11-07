@@ -174,7 +174,7 @@ def test_studio_slots_degrade_to_empty_on_parse_error(api, tmp_path, monkeypatch
     assert rows[0]["slots"] == []
     assert rows[0]["input_count"] == 0
 
-#: 本机 studio 白名单基线（2026-11-06 逐张视觉评分后）：只留 1 条全能力工作流。
+#: 本机 studio 白名单基线：1 条默认四图（可选发型，空 extra 退化三图）+ 1 条三图回退。
 #: 已归档到 `历史工作流/未采用/`（原因见该目录 README）：
 #: - Nunchaku-fp4：连续出图会把 ComfyUI 打崩；
 #: - Flux 三图 / 四图：姿势不复现、服装配色漂、腿部结构错，且无低成本抢救路径；
@@ -183,8 +183,8 @@ def test_studio_slots_degrade_to_empty_on_parse_error(api, tmp_path, monkeypatch
 #:   （唯一优势是快 1 分钟），用户 2026-11-06 拍板只留 Qwen21。
 STUDIO_ROLE_WORKFLOWS = {
     "图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",
-    # 2026-11-07：独立发型槽验证工作流（第 4 张为发型，复用 extra 槽）
-    "图库专用_Qwen21+VNCCS_四图_25步_发型槽.api.json",
+    # 2026-11-07：四图可选发型（默认超集，空 extra 退化三图）
+    "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json",
 }
 
 #: UI 格式 .json：能解析出 LoadImage，但标题一个业务角色都认不出 → 合成台永远失败。
@@ -206,6 +206,14 @@ def test_studio_whitelist_excludes_workflows_without_recognizable_roles():
     assert STUDIO_ROLE_WORKFLOWS <= names, "可识别角色的 7 条必须保留"
     assert not (names & UNROLEABLE_UI_WORKFLOWS), "角色全认不出的 3 条必须剔除"
     assert names == STUDIO_ROLE_WORKFLOWS
+
+
+def test_default_studio_workflow_is_optional_hair_superset():
+    """默认必须是四图可选发型（四槽超集）；三图只作回退，不能再占默认位。"""
+    from app.services.workflow_catalog import find_default_workflow
+
+    path = find_default_workflow(scope="studio")
+    assert path.endswith("图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json")
 
 
 def test_scope_all_still_sees_unroleable_ui_workflows():

@@ -174,15 +174,17 @@ def get_workflow_media_kind(path: Path) -> str:
 
 
 def find_default_workflow(include_video: bool = False, scope: str = "all") -> str:
-    """默认工作流：studio 范围优先 T0 定稿的三槽链路，all 范围优先文件名带「文生图」。"""
+    """默认工作流：studio 优先定稿项（四图可选发型），all 优先文件名带「文生图」。"""
     items = list_valid_workflows(include_video=include_video, scope=scope)
     if scope == "studio":
-        # 合成台默认要「人像+服装+姿势」正好三槽：四图会多要一张、双图/单图会缺槽。
-        # 来源权重只用于兜底排序；`_PREFERRED_STUDIO_NAMES` 里的定稿项永远排最前。
+        # 四图工作流是超集：第 4 张为空时自动退化为三图（2026-11-07 实测 95s）。
+        # 所以默认优先 `_PREFERRED_STUDIO_NAMES`，而不是强行只挑三槽；
+        # 没有定稿项时才回退三槽，再回退全部 ready。
         ready = [w for w in items if w["studio_ready"]]
         if ready:
+            preferred = [w for w in ready if w["name"] in _PREFERRED_STUDIO_NAMES]
             three = [w for w in ready if w["image_slots"] == 3]
-            pool = three or ready
+            pool = preferred or three or ready
 
             def _pref(item: dict) -> int:
                 name = item["name"]
@@ -222,15 +224,17 @@ def _path_source(path: Path) -> str:
 _STUDIO_SOURCE_RANK = {"图库专用": 5, "我的工作流": 4, "上游原版": 3, "旧版归档": 2, "库根": 1}
 
 #: 本机实测能出图、作为默认选中的工作流（按优先级排列）。
-#: 2026-11-05 T0 三候选实测对比后定稿：Qwen21+VNCCS 三图 25 步单人
-#: （人像 + 服装 + 姿势三槽齐全、带姿势 LoRA），与参考库配方的默认保持一致。
-#: 与它在同一来源（图库专用工作流/）的候选按 mtime 排，所以这里写文件名即可。
-_PREFERRED_STUDIO_NAMES = ("图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",)
+#: 2026-11-07 收敛：四图可选发型是超集（第 4 张为空自动退化三图，实测 95s），
+#: 默认切到它；三图保留为极简回退，不再占默认位。
+_PREFERRED_STUDIO_NAMES = (
+    "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json",
+)
 
 #: 合成台下拉里打「推荐」标签的工作流。
-#: 2026-11-05 实测定档：它是唯一同时具备「人像槽 + 服装槽 + 姿势槽 + 姿势 LoRA」的链路，
-#: 5 姿势 × 3 种子 15/15 PASS，热跑 27s（cfg 2.5 后 81–110s）。
-_RECOMMENDED_STUDIO_NAMES = ("图库专用_Qwen21+VNCCS_三图_25步_单人.api.json",)
+#: 四图可选发型：人像/服装/姿势三槽 + 可选发型（背面无脸），空 extra 自动退化三图。
+_RECOMMENDED_STUDIO_NAMES = (
+    "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json",
+)
 
 #: studio 下拉的屏蔽名单：文件名 → 不可用原因。
 #: 上游参考库的 `src/workflows` 是只读目录，缺模型的工作流无法靠移文件隐藏，只能在这里排除；
