@@ -32,7 +32,6 @@ from app.services.image_formats import is_heif
 from app.services.paths import (
     IMAGE_EXTENSIONS,
     _resolve_if_reparse,
-    image_base_dir,
     is_safe_image_ref,
     missing_image_response,
     resolve_image_path,
@@ -94,27 +93,13 @@ def proxy_image(
     except Exception as e:
         raise HTTPException(500, f"获取图片失败: {e}")
 
-    # 把代理回来的图片落盘到本地，下次直接走本地路径，不再代理
-    _cache_proxied_image(filename, subfolder, type, content)
-
+    # 只读代理，不把结果写回 output：output 是画廊的扫描源，
+    # 读接口落盘会让同一张图在下次同步时被当成新图入库。
     return StreamingResponse(
         iter([content]),
         media_type=media_type,
         headers={"Cache-Control": "no-cache"},
     )
-
-
-def _cache_proxied_image(filename: str, subfolder: str, img_type: str, content: bytes) -> None:
-    """将代理获取到的图片保存到 ComfyUI 本地目录，便于后续直接读取。"""
-    if not is_safe_image_ref(filename, subfolder, img_type):
-        return
-    try:
-        target_dir = image_base_dir(img_type) / (subfolder or "")
-        target_dir.mkdir(parents=True, exist_ok=True)
-        (target_dir / filename).write_bytes(content)
-    except Exception:
-        # 落盘失败不影响本次返回
-        pass
 
 
 def _fetch_remote_image(filename: str, subfolder: str, img_type: str) -> bytes | None:
