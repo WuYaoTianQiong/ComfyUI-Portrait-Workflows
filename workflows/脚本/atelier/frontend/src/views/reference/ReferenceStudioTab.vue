@@ -1081,6 +1081,26 @@ function onExtraCostumePick(item: CostumeItem): void {
   toast.success(`已选人物B服装「${item.服装名称}」，整批共用这一张`)
 }
 
+/** V2-C：上传人物B服装（整批共享 1 张）。 */
+function onExtraCostumeUploaded(items: UploadedReference[]): void {
+  const first = items[0]
+  if (!first) return
+  if (!UPLOADS_SEGMENT.test(first.path)) {
+    toast.error(
+      '人物B服装参考图被拒绝。原因：上传结果不在 uploads 上传目录内。下一步：用本页的上传入口重新选择图片。',
+    )
+    return
+  }
+  draft.setExtraCostumeUpload(first.path, first.name)
+  toast.success('已添加人物B服装参考图（整批共用这 1 张）')
+}
+
+function onExtraCostumeError(message: string): void {
+  toast.error(
+    `人物B服装参考图上传失败。原因：${message}。下一步：换一张图片，或确认文件不超过 25MB 后重试。`,
+  )
+}
+
 function onExtraUploaded(items: UploadedReference[]): void {
   const first = items[0]
   if (!first) return
@@ -1468,6 +1488,8 @@ onMounted(async () => {
         @remove="onRemovePersonBVariant"
         @pick-costume="costumePickerOpen = true"
         @clear-costume="clearExtraCostume"
+        @upload-costume="onExtraCostumeUploaded"
+        @upload-costume-error="onExtraCostumeError"
       />
 
       <p

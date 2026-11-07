@@ -77,6 +77,36 @@ describe('StudioPersonBEditor', () => {
     expect(wrapper.find('[data-testid="studio-person-b-remove"]').attributes('disabled')).toBeDefined()
   })
 
+  it('V2-C 人物B服装槽：未选时显示库选择与上传入口', () => {
+    const wrapper = mount(StudioPersonBEditor, {
+      props: {
+        variants: [variantWithFace('b-1', '鹅蛋脸')],
+        activeIndex: 0,
+        safeMode: true,
+        costumeSlotEnabled: true,
+      },
+    })
+    expect(wrapper.find('[data-testid="studio-person-b-costume"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="studio-person-b-costume-pick"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="studio-person-b-costume-upload"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="studio-person-b-costume-clear"]').exists()).toBe(false)
+  })
+
+  it('V2-C 人物B服装槽：已选时显示移除，隐藏上传入口', () => {
+    const wrapper = mount(StudioPersonBEditor, {
+      props: {
+        variants: [variantWithFace('b-1', '鹅蛋脸')],
+        activeIndex: 0,
+        safeMode: true,
+        costumeSlotEnabled: true,
+        costumeName: '莲步半臂',
+      },
+    })
+    expect(wrapper.text()).toContain('莲步半臂')
+    expect(wrapper.find('[data-testid="studio-person-b-costume-clear"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="studio-person-b-costume-upload"]').exists()).toBe(false)
+  })
+
   it('配对数量不等时提示复核；数量相等时不提示', () => {
     const variants = [variantWithFace('b-1', '鹅蛋脸'), variantWithFace('b-2', '圆脸')]
 

@@ -26,7 +26,9 @@ import type {
   RecipePersonBVariant,
   SelectedFragment,
 } from '../../../../composables/recipeTextFragments'
+import type { UploadedReference } from '../../../../api/upload'
 
+import DropZone from '../../../../components/DropZone.vue'
 import StudioFragmentPicker from './StudioFragmentPicker.vue'
 
 const props = defineProps<{
@@ -64,6 +66,8 @@ const emit = defineEmits<{
   remove: [index: number]
   pickCostume: []
   clearCostume: []
+  uploadCostume: [items: UploadedReference[]]
+  uploadCostumeError: [message: string]
 }>()
 
 /** 当前变体；列表为空时为 null。 */
@@ -226,6 +230,18 @@ function previewContent(content: string): string {
           移除
         </button>
       </div>
+      <DropZone
+        v-if="!costumeName"
+        class="person-b__costume-upload"
+        variant="tile"
+        :multiple="false"
+        :disabled="disabled"
+        label="＋ 上传人物B服装"
+        hint="PNG / JPG / WebP，单张 ≤ 25MB"
+        data-testid="studio-person-b-costume-upload"
+        @uploaded="emit('uploadCostume', $event)"
+        @error="emit('uploadCostumeError', $event)"
+      />
       <p class="person-b__meta">
         选择后人物B的服装 / 配饰 / 鞋以该图为准，整批共用这一张。
       </p>
@@ -423,6 +439,11 @@ function previewContent(content: string): string {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.person-b__costume-upload {
+  max-width: 260px;
+  margin-top: 8px;
 }
 
 .person-b__tabs {
