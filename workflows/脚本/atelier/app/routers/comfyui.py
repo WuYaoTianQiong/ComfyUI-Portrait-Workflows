@@ -10,12 +10,12 @@ import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from app.schemas import WorkflowListResponse, WorkflowRow
+from app.schemas import WorkflowInspectResponse, WorkflowListResponse, WorkflowRow
 from pydantic import BaseModel, Field
 
 from app.models import Prompt, PromptCategory, Category
 from app.services.fragment_syntax import strip_headers
-from app.services.prompt_compiler import compile_prompt
+from app.services.prompt_compiler import compile_for_submission
 from app.services.workflow_catalog import (
     find_default_workflow,
     is_valid_workflow,
@@ -25,7 +25,8 @@ from app.services.workflow_catalog import (
     studio_sort_key,
 )
 from app.services.workflow_parser import (
-    RatioNotSupported, detect_workflow_caps, find_loadimage_nodes,
+    RatioNotSupported, apply_quality_tiers, build_size_preview,
+    detect_workflow_caps, detect_workflow_params, find_loadimage_nodes,
     loadimage_role, load_workflow, inject_prompt, resolve_seed,
 )
 from app.services.output_location import (
@@ -79,6 +80,13 @@ class RunTextRequest(BaseModel):
 class CompilePromptRequest(BaseModel):
     prompt: str = ""
     negative_prompt: str = ""
+    workflow_path: str = ""
+    workflow_content: str | None = None
+
+
+class InspectWorkflowRequest(BaseModel):
+    """只看能力，不出图；自定义工作流只存在浏览器本地，必须把内容带上来。"""
+
     workflow_path: str = ""
     workflow_content: str | None = None
 
@@ -284,6 +292,34 @@ def get_workflow_content(
     return {"path": str(file), "name": file.name, "content": content}
 
 
+@router.post("/workflows/inspect", response_model=WorkflowInspectResponse)
+def inspect_workflow(req: InspectWorkflowRequest):
+    """探测任意工作流（含只存在浏览器本地的自定义内容）的 caps / 参数 / 尺寸预演。
+
+    后端是唯一真源：前端不再自己解析节点、也不再自己算像素。
+    """
+    if req.workflow_content:
+        path = req.workflow_path or "custom://inspect"
+        content = req.workflow_content
+    else:
+        file = _resolve_workflow_file(req.workflow_path)
+        path = str(file)
+        content = file.read_text(encoding="utf-8")
+
+    try:
+        raw = json.loads(content)
+        api_wf = load_workflow(path, content)
+    except Exception as e:
+        raise HTTPException(400, f"工作流加载失败: {e}")
+
+    params = apply_quality_tiers(detect_workflow_params(api_wf), raw)
+    return {
+        "caps": detect_workflow_caps(api_wf),
+        "params": params,
+        "size_preview": build_size_preview(api_wf, params),
+    }
+
+
 # ---------- 提示词编译预览 ----------
 
 @router.post("/prompts/compile")
@@ -300,7 +336,7 @@ def compile_prompt_preview(req: CompilePromptRequest):
     caps = detect_workflow_caps(api_wf)
     effective = bool(caps.get("negative_effective"))
     # 与真正的提交入口一致：只去掉【类型】标题，预览看到的才是实际注入的正文。
-    compiled = compile_prompt(
+    compiled = compile_for_submission(
         strip_headers(req.prompt), req.negative_prompt, negative_effective=effective,
     )
     body = compiled.as_dict()

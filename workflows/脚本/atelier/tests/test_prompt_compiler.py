@@ -1,6 +1,21 @@
 """单框提示词编译器：否定改写、负向提取与保守边界。"""
 
-from app.services.prompt_compiler import compile_prompt
+from app.services.prompt_compiler import compile_for_submission, compile_prompt
+
+
+def test_compile_for_submission_matches_direct_compile():
+    direct = compile_prompt("站立，避免普通站姿", "水印", negative_effective=True)
+    via_entry = compile_for_submission("站立，避免普通站姿", "水印", negative_effective=True)
+    assert via_entry == direct
+
+
+def test_compile_for_submission_skips_rewrite_for_manual_edit():
+    result = compile_for_submission(
+        "不要军姿，保持原样", "水印", negative_effective=True, skip_compile=True,
+    )
+    assert result.positive == "不要军姿，保持原样"
+    assert result.negative == "水印"
+    assert result.extracted == ()
 
 
 def test_plain_prompt_is_unchanged():

@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.services import reference_library, reference_remote_cache, uploads
 from app.services.paths import IMAGE_EXTENSIONS, resolve_plain, resolve_under
-from app.services.prompt_compiler import compile_prompt
+from app.services.prompt_compiler import compile_for_submission
 from app.services.recipe_prompt import (
     BODY_MODES,
     RecipeEntry,
@@ -989,7 +989,7 @@ def create_reference_recipe(req: RecipeRequest):
         # 与 inject_prompt 同源判定，且用裁剪后的工作流（与真实提交内容一致）
         caps = detect_workflow_caps(trimmed_api)
         negative_effective = bool(caps.get("negative_effective"))
-        compiled = compile_prompt(
+        compiled = compile_for_submission(
             prompt, req.negative_prompt, negative_effective=negative_effective,
         )
         response_prompt = compiled.positive

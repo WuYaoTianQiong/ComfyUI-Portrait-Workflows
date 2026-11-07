@@ -1732,6 +1732,29 @@
         "title": "ImageRunInfo",
         "type": "object"
       },
+      "InspectWorkflowRequest": {
+        "description": "只看能力，不出图；自定义工作流只存在浏览器本地，必须把内容带上来。",
+        "properties": {
+          "workflow_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Content"
+          },
+          "workflow_path": {
+            "default": "",
+            "title": "Workflow Path",
+            "type": "string"
+          }
+        },
+        "title": "InspectWorkflowRequest",
+        "type": "object"
+      },
       "JobImage": {
         "properties": {
           "filename": {
@@ -4047,6 +4070,23 @@
         "title": "WorkflowCaps",
         "type": "object"
       },
+      "WorkflowInspectResponse": {
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/WorkflowCaps"
+          },
+          "params": {
+            "$ref": "#/components/schemas/WorkflowParams"
+          },
+          "size_preview": {
+            "additionalProperties": true,
+            "title": "Size Preview",
+            "type": "object"
+          }
+        },
+        "title": "WorkflowInspectResponse",
+        "type": "object"
+      },
       "WorkflowListResponseWithSlots": {
         "properties": {
           "default": {
@@ -4207,6 +4247,11 @@
             "default": "",
             "title": "Rel Path",
             "type": "string"
+          },
+          "size_preview": {
+            "additionalProperties": true,
+            "title": "Size Preview",
+            "type": "object"
           },
           "slots": {
             "items": {
@@ -10393,6 +10438,48 @@
           }
         },
         "summary": "Get Workflow Content",
+        "tags": [
+          "ComfyUI"
+        ]
+      }
+    },
+    "/api/workflows/inspect": {
+      "post": {
+        "description": "探测任意工作流（含只存在浏览器本地的自定义内容）的 caps / 参数 / 尺寸预演。\n\n后端是唯一真源：前端不再自己解析节点、也不再自己算像素。",
+        "operationId": "inspect_workflow_api_workflows_inspect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InspectWorkflowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowInspectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect Workflow",
         "tags": [
           "ComfyUI"
         ]

@@ -2066,6 +2066,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inspect Workflow
+         * @description 探测任意工作流（含只存在浏览器本地的自定义内容）的 caps / 参数 / 尺寸预演。
+         *
+         *     后端是唯一真源：前端不再自己解析节点、也不再自己算像素。
+         */
+        post: operations["inspect_workflow_api_workflows_inspect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2959,6 +2981,19 @@ export interface components {
              * @default
              */
             workflow_name: string;
+            /**
+             * Workflow Path
+             * @default
+             */
+            workflow_path: string;
+        };
+        /**
+         * InspectWorkflowRequest
+         * @description 只看能力，不出图；自定义工作流只存在浏览器本地，必须把内容带上来。
+         */
+        InspectWorkflowRequest: {
+            /** Workflow Content */
+            workflow_content?: string | null;
             /**
              * Workflow Path
              * @default
@@ -4202,6 +4237,15 @@ export interface components {
              */
             quality: boolean;
         };
+        /** WorkflowInspectResponse */
+        WorkflowInspectResponse: {
+            caps?: components["schemas"]["WorkflowCaps"];
+            params?: components["schemas"]["WorkflowParams"];
+            /** Size Preview */
+            size_preview?: {
+                [key: string]: unknown;
+            };
+        };
         /** WorkflowListResponseWithSlots */
         WorkflowListResponseWithSlots: {
             /**
@@ -4312,6 +4356,10 @@ export interface components {
              * @default
              */
             rel_path: string;
+            /** Size Preview */
+            size_preview?: {
+                [key: string]: unknown;
+            };
             /** Slots */
             slots: string[];
             /**
@@ -8153,6 +8201,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_workflow_api_workflows_inspect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InspectWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowInspectResponse"];
                 };
             };
             /** @description Validation Error */

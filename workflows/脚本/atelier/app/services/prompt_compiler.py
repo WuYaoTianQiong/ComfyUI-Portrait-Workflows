@@ -685,3 +685,30 @@ def compile_prompt(
         extracted=tuple(extracted_clean),
         negative_effective=negative_effective,
     )
+
+
+def compile_for_submission(
+    text: str | None,
+    negative: str | None = "",
+    *,
+    negative_effective: bool = True,
+    skip_compile: bool = False,
+) -> CompiledPrompt:
+    """提交前的唯一编译入口。
+
+    只负责「跳过编译 / 正常编译」这一层决策；`【类型】` 标题是否提前剥离
+    仍由各入口按现有口径决定（主提示词链路先剥离，编辑器/参考库保持原样），
+    这样预览、快照与真实注入不会因为顺序不同而分叉。
+    """
+    if skip_compile:
+        # P3 手动改写：正向按原文写入，负向只保留用户填写的内容。
+        return CompiledPrompt(
+            positive=str(text or ""),
+            negative=str(negative or ""),
+            negative_effective=negative_effective,
+        )
+    return compile_prompt(
+        str(text or ""),
+        str(negative or ""),
+        negative_effective=negative_effective,
+    )

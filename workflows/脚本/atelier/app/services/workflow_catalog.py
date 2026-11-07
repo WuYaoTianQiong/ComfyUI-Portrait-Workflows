@@ -11,6 +11,8 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.workflow_parser import (
+    apply_quality_tiers,
+    build_size_preview,
     find_loadimage_nodes,
     is_video_workflow,
     loadimage_role,
@@ -26,8 +28,8 @@ ARCHIVE_DIR = settings.library_root / "历史工作流"
 # 兼容旧引用
 DEPRECATED_DIR = ARCHIVE_DIR
 
-#: 探测缓存：路径 → (mtime, caps, params, media_kind)。文件没改动就不重复解析。
-_meta_cache: dict[str, tuple[float, dict[str, bool], dict, str]] = {}
+#: 探测缓存：路径 → (mtime, caps, params, media_kind, size_preview)。文件没改动就不重复解析。
+_meta_cache: dict[str, tuple[float, dict[str, bool], dict, str, dict]] = {}
 #: 槽位缓存：路径 → (mtime, 图片槽位数, 是否可做参考合成)
 _slot_cache: dict[str, tuple[float, int, bool]] = {}
 
@@ -137,41 +139,32 @@ def is_valid_workflow(filepath: Path) -> bool:
         return False
 
 
-def _load_meta(path: Path) -> tuple[float, dict[str, bool], dict, str]:
+def _load_meta(path: Path) -> tuple[float, dict[str, bool], dict, str, dict]:
     try:
         mtime = path.stat().st_mtime
     except OSError:
-        return 0.0, {}, {}, "image"
+        return 0.0, {}, {}, "image", {}
     cached = _meta_cache.get(str(path))
     if cached and cached[0] == mtime:
         return cached
     try:
-        workflow = load_workflow(str(path))
+        text = path.read_text(encoding="utf-8")
+        raw = json.loads(text)
+        workflow = load_workflow(str(path), text)
         caps = detect_workflow_caps(workflow)
-        params = detect_workflow_params(workflow)
-        # 工作流可在 extra.atelier 里声明可选画质档位（如 Qwen 去掉低于原生的档）。
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            atelier = (raw.get("extra") or {}).get("atelier") if isinstance(raw, dict) else None
-            if isinstance(atelier, dict):
-                tiers = atelier.get("quality_tiers")
-                if isinstance(tiers, list) and tiers:
-                    params["quality_tiers"] = [str(t) for t in tiers]
-                if isinstance(atelier.get("default_quality"), str):
-                    params["default_quality"] = atelier["default_quality"]
-        except Exception:
-            pass
+        params = apply_quality_tiers(detect_workflow_params(workflow), raw)
+        size_preview = build_size_preview(workflow, params)
         media_kind = "video" if is_video_workflow(workflow) else "image"
     except Exception as exc:
         logger.debug("探测工作流能力失败 %s：%s", path.name, exc)
-        caps, params, media_kind = {}, {}, "image"
-    _meta_cache[str(path)] = (mtime, caps, params, media_kind)
+        caps, params, media_kind, size_preview = {}, {}, "image", {}
+    _meta_cache[str(path)] = (mtime, caps, params, media_kind, size_preview)
     return _meta_cache[str(path)]
 
 
 def get_workflow_meta(path: Path) -> tuple[dict[str, bool], dict]:
     """返回某工作流的注入能力与参数描述；解析失败时返回空 dict（schema 默认全 True）。"""
-    _, caps, params, _ = _load_meta(path)
+    _, caps, params, _, _ = _load_meta(path)
     return caps, params
 
 
@@ -294,7 +287,7 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
             if resolved in seen_paths:
                 continue
             seen_paths.add(resolved)
-            mtime, caps, params, media_kind = _load_meta(file)
+            mtime, caps, params, media_kind, size_preview = _load_meta(file)
             if media_kind == "video" and not include_video:
                 continue
             slots, ready = _studio_slots(file)
@@ -315,6 +308,7 @@ def list_valid_workflows(include_video: bool = False, scope: str = "all") -> lis
                 "mtime": mtime,
                 "caps": caps,
                 "params": params,
+                "size_preview": size_preview,
                 "media_kind": media_kind,
                 "image_slots": slots,
                 "studio_ready": ready,

@@ -331,11 +331,19 @@ class WorkflowRow(BaseModel):
     input_count: int = 0
     caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
     params: WorkflowParams | None = None
+    #: 档位 × 比例的预演尺寸；前端只负责格式化，不再自己算像素
+    size_preview: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowListResponse(BaseModel):
     workflows: list[WorkflowRow] = Field(default_factory=list)
     default: str = ""
+
+
+class WorkflowInspectResponse(BaseModel):
+    caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
+    params: WorkflowParams = Field(default_factory=WorkflowParams)
+    size_preview: dict[str, Any] = Field(default_factory=dict)
 
 
 class TagRefListResponse(BaseModel):

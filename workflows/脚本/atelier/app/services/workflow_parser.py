@@ -7,7 +7,7 @@ import re
 
 from app.services.comfyui_client import get_object_info
 from app.services.image_formats import convert_heif_to_png, is_heif
-from app.services.prompt_compiler import CompiledPrompt, compile_prompt
+from app.services.prompt_compiler import compile_for_submission
 from app.services.quality_keys import normalize_quality, quality_scale
 
 logger = logging.getLogger("atelier.workflow")
@@ -1141,6 +1141,111 @@ def detect_workflow_params(api_workflow: dict) -> dict:
     return params
 
 
+DEFAULT_QUALITY_TIERS = ("2K", "4K", "6K", "8K", "12K")
+
+#: SeedVR 档位直接对应真实输出分辨率；与 _inject_resolution 的表保持一致。
+_SEEDVR_SIZE_BY_QUALITY = {
+    "0.75x": (2160, 3840), "1.0x": (2560, 4096),
+    "1.25x": (3200, 5120), "1.5x": (3840, 6400),
+    "2.0x": (5120, 8192),
+}
+
+
+def apply_quality_tiers(params: dict, raw_workflow: dict | None) -> dict:
+    """把工作流 `extra.atelier` 里声明的可选档位并进 params（原地修改）。"""
+    atelier = None
+    if isinstance(raw_workflow, dict):
+        extra = raw_workflow.get("extra")
+        if isinstance(extra, dict):
+            atelier = extra.get("atelier")
+    if not isinstance(atelier, dict):
+        return params
+    tiers = atelier.get("quality_tiers")
+    if isinstance(tiers, list) and tiers:
+        params["quality_tiers"] = [str(t) for t in tiers]
+    if isinstance(atelier.get("default_quality"), str):
+        params["default_quality"] = atelier["default_quality"]
+    return params
+
+
+def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
+    """按「档位 × 比例」预演实际注入尺寸，供前端只做展示。
+
+    返回 `{档位: {比例: {width, height, final_width, final_height, megapixels, scale, native}}}`；
+    SeedVR 用 `"*"` 作为比例键（输出分辨率与比例无关），无 latent 的像素档
+    只返回 `megapixels`。计算与 `_inject_resolution` 使用同一组函数，避免前后端两套公式。
+    """
+    params = dict(params or detect_workflow_params(api_workflow))
+    mode = params.get("quality_mode") or "none"
+    if mode == "none":
+        return {}
+    tiers = params.get("quality_tiers") or list(DEFAULT_QUALITY_TIERS)
+
+    if mode == "seedvr":
+        preview: dict = {}
+        for tier in tiers:
+            width, height = _SEEDVR_SIZE_BY_QUALITY.get(
+                normalize_quality(tier), _SEEDVR_SIZE_BY_QUALITY["1.0x"],
+            )
+            preview[tier] = {
+                "*": {
+                    "width": width, "height": height,
+                    "final_width": width, "final_height": height,
+                    "megapixels": round(width * height / 1_000_000, 3),
+                    "scale": quality_scale(tier), "native": False,
+                },
+            }
+        return preview
+
+    info = _latent_info(api_workflow)
+    if info is None:
+        return {}
+
+    multiple = int(info.get("multiple") or 16)
+    unit = int(info.get("unit") or 1_000_000)
+    post_scale = float(params.get("post_scale") or _output_scale(api_workflow, info["id"]))
+    ratios = params.get("aspect_ratios") or (
+        [params["default_ratio"]] if params.get("default_ratio") else []
+    )
+    base_mp = float(info.get("megapixels") or 0)
+
+    preview = {}
+    for tier in tiers:
+        scale = quality_scale(tier)
+        target_mp = base_mp * scale * scale
+        if info["mode"] == "resolution":
+            # 比例跟随第一张参考图，只能给像素总量
+            preview[tier] = {
+                "*": {
+                    "megapixels": round(target_mp, 3),
+                    "scale": scale,
+                    "native": abs(scale - 1.0) < 1e-9,
+                },
+            }
+            continue
+        per_ratio = {}
+        for ratio in ratios:
+            native = abs(scale - 1.0) < 1e-9 and ratio == info.get("ratio")
+            if native and info.get("width") and info.get("height"):
+                width, height = info["width"], info["height"]
+            else:
+                width, height = compute_aspect_size(ratio, target_mp, multiple, unit)
+            width, height = _cap_latent_to_final_long_side(
+                width, height, post_scale, multiple,
+            )
+            per_ratio[ratio] = {
+                "width": int(width),
+                "height": int(height),
+                "final_width": int(round(width * post_scale)),
+                "final_height": int(round(height * post_scale)),
+                "megapixels": round((width * height) / 1_000_000, 3),
+                "scale": scale,
+                "native": native,
+            }
+        preview[tier] = per_ratio
+    return preview
+
+
 def _set_latent_size(info: dict, width: float, height: float) -> None:
     inputs = info["node"].setdefault("inputs", {})
     inputs["width"] = max(256, min(4096, int(round(width))))
@@ -1309,26 +1414,15 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
         raw_prompt = str(prompt_data.get("prompt") or "")
         raw_negative = str(prompt_data.get("negative_prompt") or "")
         _nid, _node, (_pos_field, _neg_field) = text_nodes[0]
-        if prompt_data.get("skip_compile"):
-            # P3 手动改写：前端已编辑完整提示词，正向按原文写入，负向只保留用户填写的内容。
-            # 不跑 compile_prompt，否则「不要军姿」等否定会被二次改写，所见非所得。
-            positive = raw_prompt
-            negative = raw_negative if negative_effective else ""
-            # 与 CompiledPrompt.as_dict() 同形，下游（prompt_params / 重试 / 画廊）读取不报错
-            compiled_dict = CompiledPrompt(
-                positive=positive,
-                negative=raw_negative,
-                negative_effective=negative_effective,
-            ).as_dict()
-        else:
-            compiled = compile_prompt(
-                raw_prompt,
-                raw_negative,
-                negative_effective=negative_effective,
-            )
-            positive = compiled.positive
-            negative = compiled.negative if negative_effective else ""
-            compiled_dict = compiled.as_dict()
+        compiled = compile_for_submission(
+            raw_prompt,
+            raw_negative,
+            negative_effective=negative_effective,
+            skip_compile=bool(prompt_data.get("skip_compile")),
+        )
+        positive = compiled.positive
+        negative = compiled.negative if negative_effective else ""
+        compiled_dict = compiled.as_dict()
         _node["inputs"][_pos_field] = positive
         # 负向不生效时不提交任何负向内容，避免留下"写了但没用"的假象。
         if _neg_field:

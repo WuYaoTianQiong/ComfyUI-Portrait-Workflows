@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.models import Prompt, Category, Tag, PromptCategory, EntityTag, db
-from app.services.prompt_compiler import compile_prompt
+from app.services.prompt_compiler import compile_for_submission
 from app.services.workflow_parser import (
     RatioNotSupported, detect_workflow_caps, load_workflow, inject_prompt, resolve_seed,
 )
@@ -450,7 +450,7 @@ def composer_batch_random_run(
         negative_effective = bool(detect_workflow_caps(api_wf).get("negative_effective"))
         for item in job_items:
             params = json.loads(item["prompt_params"])
-            compiled = compile_prompt(
+            compiled = compile_for_submission(
                 strip_headers(params.get("prompt") or ""),
                 params.get("negative_prompt") or "",
                 negative_effective=negative_effective,
