@@ -274,7 +274,8 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     try {
       busy.value = true
       const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/batch', {
-        items: promptIds.map((id) => ({ prompt_id: id, seed: 0 })),
+        // 不传 seed：后端按「提示词保存的种子 → 随机」解析，item 记录与实际提交一致
+        items: promptIds.map((id) => ({ prompt_id: id })),
         workflow_path: options.workflowPath,
         // 自定义工作流不在后端磁盘上，内容必须一起带过去
         workflow_content: customWorkflowContent(options.workflowPath),
@@ -297,7 +298,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
    * 不写回提示词库 —— 这是"看效果"的操作，原件必须保持不变。
    */
   async function runBatchReplace(
-    items: Array<{ promptId: number; seed: number; promptOverride: string }>,
+    items: Array<{ promptId: number; seed: number | null; promptOverride: string }>,
     options: { workflowPath: string; quality: string; orientation: string; aspectRatio?: string; title?: string },
   ) {
     error.value = ''
@@ -340,7 +341,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     options: {
       prompt: string
       negative_prompt?: string
-      seed?: number
+      seed?: number | null
       workflowPath: string
       quality: string
       orientation: string
@@ -363,7 +364,7 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         orientation: options.orientation,
         quality: options.quality,
         aspect_ratio: options.aspectRatio ?? '',
-        seed: options.seed ?? 0,
+        seed: options.seed ?? null,
         output_subfolder: outputSubfolder.value,
       })
       subscribe(result.job_id)

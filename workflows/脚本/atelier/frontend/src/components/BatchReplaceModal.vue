@@ -73,7 +73,7 @@ const emit = defineEmits<{
       workflowPath: string
       quality: string
       aspectRatio: string
-      items: Array<{ promptId: number; seed: number; promptOverride: string }>
+      items: Array<{ promptId: number; seed: number | null; promptOverride: string }>
     },
   ]
 }>()
@@ -438,7 +438,7 @@ interface DiffOutcome extends TypeOutcome {
 interface MatchedRow {
   id: number
   name: string
-  seed: number
+  seed: number | null
   replaced: string
   /** 实际发生的替换/追加，按清单顺序 */
   outcomes: DiffOutcome[]
@@ -481,7 +481,7 @@ watch(
         return [{
           id: p.id,
           name: p.name || `#${p.id}`,
-          seed: p.seed ?? 0,
+          seed: p.seed ?? null,
           replaced: hit.replaced,
           outcomes: changed.map((o) => ({
             ...o,

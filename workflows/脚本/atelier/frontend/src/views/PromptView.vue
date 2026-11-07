@@ -837,7 +837,7 @@ async function onBatchReplace(payload: {
   workflowPath: string
   quality?: string
   aspectRatio?: string
-  items: Array<{ promptId: number; seed: number; promptOverride: string }>
+  items: Array<{ promptId: number; seed: number | null; promptOverride: string }>
 }) {
   if (!payload.workflowPath) {
     toast.error('请先选择工作流')

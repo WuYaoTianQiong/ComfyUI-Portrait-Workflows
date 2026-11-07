@@ -112,7 +112,7 @@ async function runTrial() {
   }
   busy.value = true
   try {
-    const result = await apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
+    const result = await apiPost<{ success: boolean; job_id: number; seed?: number }>('/api/runs/text', {
       prompt: props.prompt,
       negative_prompt: props.negativePrompt,
       workflow_path: workflowPath.value,
@@ -120,11 +120,11 @@ async function runTrial() {
       orientation: caps.value.orientation ? orientation.value : 'keep',
       quality: caps.value.quality ? quality.value : '4K',
       aspect_ratio: aspectRatio.value || defaultRatio.value,
-      seed: seed.value,
+      seed: seed.value || null,
       // 与「改文本跑」一致：出图仍关联回当前提示词
       source_prompt_id: props.promptId ?? 0,
     })
-    record('trial', seed.value, result.job_id ?? null, 1)
+    record('trial', result.seed ?? seed.value, result.job_id ?? null, 1)
     toast.success('已提交试跑，可在「任务」页看进度')
   } catch (e) {
     toast.error(`试跑失败：${e instanceof Error ? e.message : String(e)}`)
@@ -145,7 +145,7 @@ async function runVariants() {
     Array.from({ length: count }, (_, i) => {
       // 种子为 0 时交给后端随机；指定种子时依次 +1，出来的图才有区别
       const useSeed = seed.value ? seed.value + i : 0
-      return apiPost<{ success: boolean; job_id: number }>('/api/runs/text', {
+      return apiPost<{ success: boolean; job_id: number; seed?: number }>('/api/runs/text', {
         prompt: props.prompt,
         negative_prompt: props.negativePrompt,
         workflow_path: workflowPath.value,
@@ -153,10 +153,10 @@ async function runVariants() {
         orientation: caps.value.orientation ? orientation.value : 'keep',
         quality: caps.value.quality ? quality.value : '4K',
         aspect_ratio: aspectRatio.value || defaultRatio.value,
-        seed: useSeed,
+        seed: useSeed || null,
         source_prompt_id: props.promptId ?? 0,
       }).then((result) => {
-        record('variant', useSeed, result.job_id ?? null, 1)
+        record('variant', result.seed ?? useSeed, result.job_id ?? null, 1)
         return result
       })
     }),

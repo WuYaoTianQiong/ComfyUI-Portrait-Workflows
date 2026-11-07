@@ -192,7 +192,7 @@ async function retry(id: number) {
       toast.success(
         result.idempotent
           ? `已接回重试任务 #${result.job_id}`
-          : `已提交重试任务 #${result.job_id}（${result.submitted ?? 0} 条）`,
+          : `已提交重试任务 #${result.job_id}（${result.queued ?? result.submitted ?? 0} 条排队）`,
       )
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     } else {

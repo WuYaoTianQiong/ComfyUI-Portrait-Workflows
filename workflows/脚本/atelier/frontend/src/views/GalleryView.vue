@@ -511,7 +511,7 @@ async function regenerate(target: HistoryItem) {
       await runText({
         prompt: params.prompt,
         negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
-        seed: Number(params.seed ?? 0) || 0,
+        seed: Number(params.seed) || null,
         workflowPath: workflowPath.value,
         quality: caps.value.quality ? quality.value : '4K',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',

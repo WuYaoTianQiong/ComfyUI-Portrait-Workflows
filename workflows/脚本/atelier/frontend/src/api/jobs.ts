@@ -21,9 +21,11 @@ export interface RetryJobResponse {
   success: boolean
   job_id: number
   submitted: number
+  queued?: number
   total: number
   errors: Array<{ index?: number; error: string }>
   idempotent: boolean
+  async?: boolean
 }
 
 export function listJobs(params: { limit?: number; active?: boolean } = {}) {
