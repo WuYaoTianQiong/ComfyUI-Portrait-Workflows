@@ -44,7 +44,7 @@ import { usePromptDraft, splitTagText } from '../composables/usePromptDraft'
 import { useToast } from '../composables/useToast'
 import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
-import { readSession, writeSession } from '../composables/useSessionState'
+import { usePromptWorkspace } from '../composables/usePromptWorkspace'
 import WorkflowParams from '../components/WorkflowParams.vue'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import { statusLabel } from '../utils/format'
@@ -71,119 +71,37 @@ const {
   runBatchReplace,
 } = useGenerate()
 
-/**
- * 侧栏状态：宽度、折叠、每页条数、排序。
- *
- * 这些是"这台机器的浏览偏好"，不该每次刷新都回到默认值；
- * 存 localStorage，键名统一 `pb.promptUi`。
- */
-const UI_KEY = 'pb.promptUi'
+const {
+  pageSize,
+  sort,
+  order,
+  sidebarCollapsed,
+  sidebarWidth,
+  page,
+  search,
+  categoryId,
+  tagIds,
+  tagMatch,
+  fragmentType,
+  fragmentMatch,
+  selectedId,
+  selectedIds,
+  listEl,
+  savedSession,
+  saveUi,
+  saveSession,
+  onListScroll,
+  cancelScrollSave,
+  SORT_OPTIONS,
+  PAGE_SIZES,
+} = usePromptWorkspace()
 
-interface PromptUi {
-  pageSize: number
-  sort: string
-  order: 'asc' | 'desc'
-  collapsed: boolean
-  width: number
-}
-
-function readUi(): Partial<PromptUi> {
-  try {
-    const raw = localStorage.getItem(UI_KEY)
-    return raw ? (JSON.parse(raw) as Partial<PromptUi>) : {}
-  } catch {
-    return {}
-  }
-}
-
-const savedUi = readUi()
-const pageSize = ref(savedUi.pageSize ?? 50)
-const sort = ref(savedUi.sort ?? 'default')
-const order = ref<'asc' | 'desc'>(savedUi.order ?? 'desc')
-const sidebarCollapsed = ref(savedUi.collapsed ?? false)
-const sidebarWidth = ref(Math.min(600, Math.max(280, savedUi.width ?? 380)))
-
-function saveUi() {
-  try {
-    localStorage.setItem(
-      UI_KEY,
-      JSON.stringify({
-        pageSize: pageSize.value,
-        sort: sort.value,
-        order: order.value,
-        collapsed: sidebarCollapsed.value,
-        width: sidebarWidth.value,
-      }),
-    )
-  } catch {
-    /* 隐私模式下忽略 */
-  }
-}
-
-watch([pageSize, sort, order, sidebarCollapsed, sidebarWidth], saveUi)
-
-const SORT_OPTIONS = [
-  { value: 'default', label: '默认' },
-  { value: 'created', label: '创建时间' },
-  { value: 'name', label: '名称' },
-  { value: 'usage', label: '使用次数' },
-  { value: 'rating', label: '评级' },
-]
-const PAGE_SIZES = [20, 50, 100, 200]
-
-/**
- * 会话状态：筛选 / 页码 / 选中项 / 滚动位置。
- *
- * 切页或刷新后回到上次的样子；`pb.promptUi` 只管侧栏布局，这份管"看到哪儿"。
- */
-interface PromptSession {
-  page: number
-  search: string
-  categoryId: number | null
-  tagIds: number[]
-  tagMatch: 'all' | 'any'
-  fragmentType: string
-  fragmentMatch: 'has' | 'only'
-  selectedId: number | null
-  selectedIds: number[]
-  scrollTop: number
-}
-
-const SESSION_KEY = 'pb.session.prompt'
-const savedSession = readSession<PromptSession>(SESSION_KEY, {
-  page: 1,
-  search: '',
-  categoryId: null,
-  tagIds: [],
-  tagMatch: 'all',
-  fragmentType: '',
-  fragmentMatch: 'has',
-  selectedId: null,
-  selectedIds: [],
-  scrollTop: 0,
-})
-
-const page = ref(savedSession.page)
-const search = ref(savedSession.search)
-const categoryId = ref<number | null>(savedSession.categoryId)
 const missingOpen = ref(false)
 const replaceOpen = ref(false)
 const replaceTargetId = ref<number | null>(null)
 /** 最近一次「替换碎片出图」的任务 id：弹窗靠它订阅进度、刷新后也能接回来。 */
 const replaceJobId = ref<number | null>(null)
-const tagIds = ref<number[]>(savedSession.tagIds)
-const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
 const tagPanelOpen = ref(false)
-/**
- * 碎片级筛选：按正文里的 `【类型】` 结构筛，而不是全文本 LIKE。
- * 「仅含」= 出现过的类型集合恰好等于所选 —— 这才是"只有某段描写的提示词"。
- * α 之后碎片 = 单块 prompt，关键词搜索由顶部搜索框覆盖（搜 prompt 正文）。
- */
-const fragmentType = ref<string>(savedSession.fragmentType)
-const fragmentMatch = ref<'has' | 'only'>(savedSession.fragmentMatch)
-const selectedId = ref<number | null>(savedSession.selectedId)
-/** 多选集合（批量操作与批量替换用）；随会话保存，刷新后勾选不丢。 */
-const selectedIds = ref<Set<number>>(new Set(savedSession.selectedIds))
 /** 外部跳转的目标 id：列表变化时据此保留选中，不抢着改选第一条。 */
 const jumpTargetId = ref<number | null>(null)
 /** 负面提示词默认收起：空值不该占一大块；有内容时显示单行摘要。 */
@@ -192,49 +110,6 @@ const negativeExpanded = ref(false)
 watch(selectedId, () => {
   negativeExpanded.value = false
 })
-
-const listEl = ref<HTMLElement | null>(null)
-let scrollSaveTimer: number | undefined
-
-function saveSession() {
-  writeSession(SESSION_KEY, {
-    page: page.value,
-    search: search.value,
-    categoryId: categoryId.value,
-    tagIds: tagIds.value,
-    tagMatch: tagMatch.value,
-    fragmentType: fragmentType.value,
-    fragmentMatch: fragmentMatch.value,
-    selectedId: selectedId.value,
-    selectedIds: Array.from(selectedIds.value),
-    scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
-  })
-}
-
-watch(
-  () =>
-    [
-      page.value,
-      search.value,
-      categoryId.value,
-      tagIds.value.join(','),
-      tagMatch.value,
-      fragmentType.value,
-      fragmentMatch.value,
-      selectedId.value,
-      Array.from(selectedIds.value).sort((a, b) => a - b).join(','),
-    ].join('|'),
-  saveSession,
-)
-
-/** 滚动很频繁，节流后再写，避免每滚一像素都序列化一次。 */
-function onListScroll() {
-  if (scrollSaveTimer) return
-  scrollSaveTimer = window.setTimeout(() => {
-    scrollSaveTimer = undefined
-    saveSession()
-  }, 300)
-}
 
 const queryClient = useQueryClient()
 
@@ -1028,7 +903,7 @@ onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
-  if (scrollSaveTimer) window.clearTimeout(scrollSaveTimer)
+  cancelScrollSave()
   saveSession()
   stopResize()
 })
