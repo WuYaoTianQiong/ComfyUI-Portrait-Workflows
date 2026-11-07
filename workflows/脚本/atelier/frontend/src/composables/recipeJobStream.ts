@@ -1,5 +1,5 @@
 import { jobEventsUrl } from '../api/jobs'
-import type { RecipeJobSnapshot } from './useReferenceRecipe'
+import type { RecipeJobSnapshot } from './recipeModel'
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
 
