@@ -3,8 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
-import CategoryFilter from '../components/CategoryFilter.vue'
-import TagCloud from '../components/TagCloud.vue'
 import TagInput from '../components/TagInput.vue'
 import MissingImageRunPanel from '../components/MissingImageRunPanel.vue'
 import PromptTrialPanel from '../components/PromptTrialPanel.vue'
@@ -50,7 +48,7 @@ import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import { statusLabel } from '../utils/format'
 import PromptListFooter from '../components/PromptListFooter.vue'
 import PromptListRow from '../components/PromptListRow.vue'
-import { FRAGMENT_TYPES } from '../constants'
+import PromptFilterSidebar from '../components/PromptFilterSidebar.vue'
 import { flattenCategories } from '../utils/categories'
 import type {
   HistoryItem,
@@ -93,7 +91,6 @@ const {
   saveSession,
   onListScroll,
   cancelScrollSave,
-  SORT_OPTIONS,
   PAGE_SIZES,
 } = usePromptWorkspace()
 
@@ -102,7 +99,6 @@ const replaceOpen = ref(false)
 const replaceTargetId = ref<number | null>(null)
 /** 最近一次「替换碎片出图」的任务 id：弹窗靠它订阅进度、刷新后也能接回来。 */
 const replaceJobId = ref<number | null>(null)
-const tagPanelOpen = ref(false)
 /** 外部跳转的目标 id：列表变化时据此保留选中，不抢着改选第一条。 */
 const jumpTargetId = ref<number | null>(null)
 /** 负面提示词默认收起：空值不该占一大块；有内容时显示单行摘要。 */
@@ -794,6 +790,46 @@ function selectCategory(id: number | null) {
   page.value = 1
 }
 
+function onSearchInput(value: string) {
+  search.value = value
+  page.value = 1
+}
+
+function onSortChange(value: string) {
+  sort.value = value
+  page.value = 1
+}
+
+function toggleOrder() {
+  order.value = order.value === 'desc' ? 'asc' : 'desc'
+}
+
+function onTagMatchChange(value: 'all' | 'any') {
+  tagMatch.value = value
+  page.value = 1
+}
+
+function onFragmentTypeChange(value: string) {
+  fragmentType.value = value
+  page.value = 1
+}
+
+function onFragmentMatchChange(value: 'has' | 'only') {
+  fragmentMatch.value = value
+  page.value = 1
+}
+
+function onClearTags() {
+  tagIds.value = []
+  page.value = 1
+}
+
+function onClearFragment() {
+  fragmentType.value = ''
+  fragmentMatch.value = 'has'
+  page.value = 1
+}
+
 
 function toggleTag(id: number) {
   const idx = tagIds.value.indexOf(id)
@@ -826,9 +862,6 @@ async function selectRow(id: number) {
   }
   selectedId.value = id
 }
-
-const tagById = computed(() => new Map((tagData.value?.tags ?? []).map((t) => [t.id, t])))
-const activeCategory = computed(() => flatCats.value.find((c) => c.id === categoryId.value) ?? null)
 
 /** 列表行里的标签 chip：只显示前 4 个，避免把行撑高。 */
 function rowTags(item: PromptListItem): string[] {
@@ -887,175 +920,62 @@ onBeforeUnmount(() => {
 <template>
   <div class="prompt-page">
     <aside v-if="!sidebarCollapsed" class="sidebar" :style="{ width: `${sidebarWidth}px` }">
-      <div class="side-head">
-        <button
-          class="btn btn-sm collapse-btn"
-          title="收起侧栏"
-          @click="sidebarCollapsed = true"
-        >
-          «
-        </button>
-        <div class="search-box">
-          <span class="search-icon" aria-hidden="true">⌕</span>
-          <input
-            v-model="search"
-            class="search"
-            type="text"
-            placeholder="搜索名称 / 内容 / 标签 / 备注…"
-            @input="page = 1"
-          />
-          <button
-            v-if="search"
-            class="search-clear"
-            type="button"
-            title="清除搜索"
-            @click="search = ''; page = 1"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-
-      <div class="side-actions">
-        <button class="btn btn-sm primary" title="新建提示词" @click="createOpen = true">
-          ＋ 新建
-        </button>
-        <button class="btn btn-sm" title="从 JSON 导入提示词" @click="fileInput?.click()">
-          导入
-        </button>
-        <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">
-          导出
-        </button>
-        <details ref="moreMenu" class="more-menu">
-          <summary class="btn btn-sm" title="更多批量操作">更多 ▾</summary>
-          <div class="more-pop">
-            <button class="btn btn-sm" title="批量粘贴 AI 润色后的多条提示词，自动分段后入库" @click="closeMore(); importOpen = true">
-              智能导入
-            </button>
-            <button class="btn btn-sm" title="给「有提示词但没出图」的条目补图" @click="closeMore(); missingOpen = true">
-              补跑缺图
-            </button>
-          </div>
-        </details>
-        <input
-          ref="fileInput"
-          type="file"
-          accept="application/json,.json"
-          hidden
-          @change="onImportFile"
-        />
-      </div>
-
-      <div class="side-filters">
-        <CategoryFilter
-          inline
-          show-count
-          all-label="全部分类"
-          :categories="catData?.categories"
-          :model-value="categoryId"
-          @update:model-value="selectCategory"
-        />
-
-        <select v-model="sort" title="排序" @change="page = 1">
-          <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-        <button
-          v-if="sort !== 'default'"
-          class="btn btn-sm order-btn"
-          :title="order === 'desc' ? '降序（点切换）' : '升序（点切换）'"
-          @click="order = order === 'desc' ? 'asc' : 'desc'"
-        >
-          {{ order === 'desc' ? '↓' : '↑' }}
-        </button>
-        <button
-          class="btn btn-sm tag-toggle"
-          :class="{ active: tagPanelOpen }"
-          title="标签 / 碎片类型筛选"
-          @click="tagPanelOpen = !tagPanelOpen"
-        >
-          筛选
-          <span v-if="tagIds.length || fragmentType" class="badge">
-            {{ tagIds.length + (fragmentType ? 1 : 0) }}
-          </span>
-        </button>
-      </div>
-
-      <div v-if="tagPanelOpen" class="tag-panel">
-        <div class="frag-filter-row inline">
-          <select
-            v-model="fragmentType"
-            class="frag-select"
-            title="按碎片类型筛选（正文里的【类型】结构）"
-            @change="page = 1"
-          >
-            <option value="">全部碎片</option>
-            <option v-for="t in FRAGMENT_TYPES" :key="t" :value="t">{{ t }}</option>
-          </select>
-          <template v-if="fragmentType">
-            <button
-              class="btn btn-sm"
-              :class="{ active: fragmentMatch === 'has' }"
-              title="含有该类型（多出来的类型不影响）"
-              @click="fragmentMatch = 'has'; page = 1"
-            >
-              含有
-            </button>
-            <button
-              class="btn btn-sm"
-              :class="{ active: fragmentMatch === 'only' }"
-              title="只含该类型：出现别的类型就不算，用来找「只有某一段描写」的提示词"
-              @click="fragmentMatch = 'only'; page = 1"
-            >
-              仅含
-            </button>
-          </template>
-        </div>
-        <TagCloud
-          :tags="tagData?.tags ?? []"
-          :selected="tagIds"
-          :match="tagMatch"
-          clearable
-          empty-text="暂无带提示词的标签"
-          @toggle="toggleTag"
-          @update:match="(m) => { tagMatch = m; page = 1 }"
-          @clear="tagIds = []; page = 1"
-        />
-        <button class="btn btn-sm full" @click="tagIds = []; page = 1">清空标签</button>
-      </div>
-
-      <div
-        v-if="categoryId !== null || tagIds.length || fragmentType"
-        class="active-filters"
+      <PromptFilterSidebar
+        :search="search"
+        :categories="catData?.categories"
+        :category-id="categoryId"
+        :tags="tagData?.tags ?? []"
+        :tag-ids="tagIds"
+        :tag-match="tagMatch"
+        :sort="sort"
+        :order="order"
+        :fragment-type="fragmentType"
+        :fragment-match="fragmentMatch"
+        @collapse="sidebarCollapsed = true"
+        @update:search="onSearchInput"
+        @select-category="selectCategory"
+        @update:sort="onSortChange"
+        @toggle-order="toggleOrder"
+        @update:tag-match="onTagMatchChange"
+        @toggle-tag="toggleTag"
+        @set-fragment-type="onFragmentTypeChange"
+        @set-fragment-match="onFragmentMatchChange"
+        @clear-tags="onClearTags"
+        @clear-fragment="onClearFragment"
+        @clear-filters="clearFilters"
       >
-        <button
-          v-if="activeCategory"
-          class="filter-chip"
-          :title="`清除分类：${activeCategory.name}`"
-          @click="selectCategory(null)"
-        >
-          {{ activeCategory.name }} ×
-        </button>
-        <button
-          v-for="id in tagIds"
-          :key="id"
-          class="filter-chip"
-          :title="`清除标签：${tagById.get(id)?.name ?? id}`"
-          @click="toggleTag(id)"
-        >
-          {{ tagById.get(id)?.name ?? `#${id}` }} ×
-        </button>
-        <button
-          v-if="fragmentType"
-          class="filter-chip"
-          :title="`清除碎片筛选：${fragmentType}`"
-          @click="fragmentType = ''; fragmentMatch = 'has'; page = 1"
-        >
-          {{ fragmentMatch === 'only' ? '仅' : '含' }}{{ fragmentType }} ×
-        </button>
-        <button class="btn btn-sm ghost" @click="clearFilters">全部清除</button>
-      </div>
+        <template #actions>
+          <div class="side-actions">
+            <button class="btn btn-sm primary" title="新建提示词" @click="createOpen = true">
+              ＋ 新建
+            </button>
+            <button class="btn btn-sm" title="从 JSON 导入提示词" @click="fileInput?.click()">
+              导入
+            </button>
+            <button class="btn btn-sm" title="导出全部提示词为 JSON" @click="exportPrompts">
+              导出
+            </button>
+            <details ref="moreMenu" class="more-menu">
+              <summary class="btn btn-sm" title="更多批量操作">更多 ▾</summary>
+              <div class="more-pop">
+                <button class="btn btn-sm" title="批量粘贴 AI 润色后的多条提示词，自动分段后入库" @click="closeMore(); importOpen = true">
+                  智能导入
+                </button>
+                <button class="btn btn-sm" title="给「有提示词但没出图」的条目补图" @click="closeMore(); missingOpen = true">
+                  补跑缺图
+                </button>
+              </div>
+            </details>
+            <input
+              ref="fileInput"
+              type="file"
+              accept="application/json,.json"
+              hidden
+              @change="onImportFile"
+            />
+          </div>
+        </template>
+      </PromptFilterSidebar>
 
       <div v-if="importMessage" class="import-line">{{ importMessage }}</div>
 
@@ -1524,71 +1444,6 @@ onBeforeUnmount(() => {
   background: var(--primary-soft);
 }
 
-.side-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap);
-  border-bottom: 1px solid var(--border);
-}
-
-.collapse-btn {
-  flex: none;
-}
-
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-}
-
-.search-icon {
-  position: absolute;
-  left: var(--gap-sm);
-  color: var(--muted);
-  font-size: var(--fs-lg);
-  line-height: 1;
-  pointer-events: none;
-}
-
-.search {
-  flex: 1;
-  min-width: 0;
-  padding-left: 28px;
-  padding-right: 24px;
-}
-
-.search:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
-.search-clear {
-  position: absolute;
-  right: var(--gap-xs);
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 1;
-  padding: 0;
-  transition:
-    background-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-
-.search-clear:hover {
-  background: var(--panel-3);
-  color: var(--text);
-}
-
 /* 4 个入口平分整行宽度；其余低频操作收进「更多」，避免工具栏占两行 */
 .side-actions {
   display: grid;
@@ -1644,135 +1499,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.side-filters {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: var(--gap-sm) var(--gap);
-  border-bottom: 1px solid var(--border);
-}
-
-.side-filters :deep(.group) {
-  flex: 1;
-  min-width: 0;
-}
-
-.side-filters select {
-  min-width: 0;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 3px 6px;
-  font: inherit;
-  font-size: var(--fs-sm);
-}
-
-.cat-select {
-  flex: 1;
-}
-
-.order-btn {
-  flex: none;
-  padding: 2px 7px;
-}
-
-.tag-toggle {
-  flex: none;
-}
-
-.tag-toggle.active {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.tag-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap);
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
-  max-height: 42vh;
-  overflow-y: auto;
-}
-
-.tag-panel .full {
-  width: 100%;
-}
-
-.frag-filter-row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: var(--gap-sm) var(--gap);
-  border-bottom: 1px solid var(--border);
-}
-
-.frag-filter-row.inline {
-  padding: 0;
-  border-bottom: 0;
-}
-
-.frag-select {
-  flex: 1;
-  min-width: 0;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 3px 6px;
-  font: inherit;
-  font-size: var(--fs-sm);
-}
-
-.frag-filter-row .btn {
-  flex: none;
-}
-
-.frag-filter-row .btn.active {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.badge {
-  display: inline-grid;
-  place-items: center;
-  min-width: 15px;
-  height: 15px;
-  margin-left: var(--gap-xs);
-  padding: 0 var(--gap-xs);
-  border-radius: var(--radius-pill);
-  background: var(--primary);
-  color: rgb(255 255 255);
-  font-size: var(--fs-xs);
-  line-height: 1;
-}
-
-.active-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: var(--gap-xs) var(--gap);
-  border-bottom: 1px solid var(--border);
-}
-
-.filter-chip {
-  border: 1px solid var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary);
-  border-radius: var(--radius-pill);
-  padding: 1px var(--gap-sm);
-  font-size: var(--fs-xs);
-}
-
-.btn.ghost {
-  border-color: transparent;
-  color: var(--muted);
 }
 
 .import-line {
