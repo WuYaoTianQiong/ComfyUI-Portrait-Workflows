@@ -14,9 +14,6 @@ downloads/
 eggs/
 .eggs/
 lib/
-# 例外：gallery-web 的 src/lib 是前端源码，不是 Python 依赖目录
-!workflows/脚本/atelier/gallery-web/src/lib/
-!workflows/脚本/atelier/gallery-web/src/lib/**
 lib64/
 parts/
 sdist/
@@ -167,12 +164,8 @@ workflows/脚本/atelier/frontend/node_modules/
 workflows/脚本/atelier/frontend/_dev*.log
 # vue-tsc / tsc -b 的增量构建缓存，每次类型检查都会重写
 workflows/脚本/atelier/frontend/tsconfig.tsbuildinfo
-workflows/脚本/atelier/gallery-web/tsconfig.tsbuildinfo
-# 参考图库 Web（v0.8 接管的 React 台）：依赖与构建缓存在本地生成
-workflows/脚本/atelier/gallery-web/node_modules/
-workflows/脚本/atelier/gallery-web/.vite/
 workflows/脚本/atelier/static/v2/
-# Vue 前端产物 web/ 入库（与 gallery-web/dist 一致），不在此忽略
+# Vue 前端产物 web/ 入库（运行时零 Node 依赖），不在此忽略
 workflows/脚本/atelier/_e2e_shot.png
 workflows/脚本/atelier/.pytest_cache/
 
@@ -186,14 +179,12 @@ workflows/_cleanup/
 
 workflows/node_modules/
 
-# 参考图库上游（junction -> F:\ComfyUI_Migration\custom_nodes\ai-pose-gallery-zh）
-# 1.1GB 素材只读引用，不入库；需要时用 mklink /J 重建入口
+# 旧布局兼容：参考图库曾以 junction 挂在工作流库下（当前规范位置是 <comfyui_root>/custom_nodes/）
+# 若有人重建该入口，1.1GB 只读素材仍不应入库
 workflows/ai-pose-gallery-zh/
 
 # 参考图上传目录（library_root/uploads，运行时写入，不入库）
 workflows/uploads/
-# 参考图库 Web 的构建产物随源码一起入库（运行时零 Node 依赖，见 gallery-web/UPSTREAM.md）
-!workflows/脚本/atelier/gallery-web/dist/
 # 验收会话产物（浏览器/构建/探针日志，每轮重写，仅本地留存）
 /.resultverify/
 # Windows 重定向误建的 0 字节文件（`> null` 的产物，不是源码）
