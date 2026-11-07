@@ -25,7 +25,6 @@ import {
   getPrompt,
   getPromptHistoryRefs,
   importPrompts,
-  listPrompts,
   ratePrompt,
   setPromptFavorite,
   setPromptPinned,
@@ -45,6 +44,7 @@ import { useToast } from '../composables/useToast'
 import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { usePromptWorkspace } from '../composables/usePromptWorkspace'
+import { usePromptList } from '../composables/usePromptList'
 import WorkflowParams from '../components/WorkflowParams.vue'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import { statusLabel } from '../utils/format'
@@ -113,57 +113,26 @@ watch(selectedId, () => {
 
 const queryClient = useQueryClient()
 
-/**
- * 碎片筛选参数：列表、定位、批量替换必须传同一份，否则"看到的"和"替换的"不是一批。
- * 后端没有碎片索引表，这些参数会走一次全表解析（300+ 条，毫秒级）。
- */
-function fragmentParams() {
-  return {
-    fragment_types: fragmentType.value,
-    fragment_match: fragmentMatch.value,
-  }
-}
-
-const listKey = computed(() => [
-  'prompts',
-  page.value,
-  pageSize.value,
-  search.value.trim(),
-  categoryId.value,
-  tagIds.value.slice().sort((a, b) => a - b).join(','),
-  tagMatch.value,
-  fragmentType.value,
-  fragmentMatch.value,
-  sort.value,
-  order.value,
-])
-
 const {
-  data: listData,
+  list,
+  total,
+  totalPages,
   isFetching,
-  isError: listError,
-  error: listErr,
-  refetch: refetchList,
-} = useQuery({
-  queryKey: listKey,
-  queryFn: () =>
-    listPrompts({
-      page: page.value,
-      page_size: pageSize.value,
-      search: search.value.trim(),
-      category_id: categoryId.value ?? undefined,
-      tag_ids: tagIds.value.join(','),
-      tag_match: tagMatch.value,
-      ...fragmentParams(),
-      sort: sort.value,
-      order: order.value,
-    }),
-  placeholderData: (prev) => prev,
+  listError,
+  listErr,
+  refetchList,
+} = usePromptList({
+  page,
+  pageSize,
+  search,
+  categoryId,
+  tagIds,
+  tagMatch,
+  fragmentType,
+  fragmentMatch,
+  sort,
+  order,
 })
-
-const list = computed(() => listData.value?.prompts ?? [])
-const total = computed(() => listData.value?.total ?? 0)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 /** 列表数据到位后再恢复滚动位置，否则容器还没高度，scrollTop 会被清 0。 */
 let scrollRestored = false
