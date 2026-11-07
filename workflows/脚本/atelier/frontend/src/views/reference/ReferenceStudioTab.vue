@@ -141,8 +141,12 @@ const negativePrompt = computed<string>({
 /** 双人姿势专用：B 变体由草稿单例持有，换 seed / 画质不会清空。 */
 const hasPairPose = draft.hasPairPose
 
-/** 新增一条 B 变体；达到上限时只提示，不静默失败。 */
+/** 新增一条 B 变体；双人配对模式只允许 1 组，达到上限时只提示，不静默失败。 */
 function onAddPersonBVariant(): void {
+  if (draft.pairModeActive.value) {
+    toast.info('双人配对模式下只保留 1 组人物 B 变体；如需多组请打开「批量展开」')
+    return
+  }
   if (!draft.addPersonBVariant()) {
     toast.info(`人物 B 变体最多 ${MAX_PERSON_B_VARIANTS} 组，请先删除一组再新增`)
   }
@@ -286,6 +290,13 @@ watch(bodyModeNotice, (message) => {
   if (!message) return
   toast.info(message)
   clearBodyModeNotice()
+})
+
+/** 双人配对模式自动收敛（旧草稿多选 / 关闭批量展开）时提示一次。 */
+watch(draft.pairLimitNotice, (message) => {
+  if (!message) return
+  toast.info(message)
+  draft.pairLimitNotice.value = ''
 })
 
 /**
@@ -1415,6 +1426,7 @@ onMounted(async () => {
         :safe-mode="safeMode"
         :disabled="manualPromptActive"
         :portrait-count="draft.portraitCount.value"
+        :single-mode="draft.pairModeActive.value"
         :identity-image-selected="extraKind === 'person_b' && extraFilled"
         :identity-image-name="extraKind === 'person_b' && extraFilled ? extraName : ''"
         @update:variants="draft.personBVariants.value = $event"
@@ -1504,12 +1516,15 @@ onMounted(async () => {
           :body-mode="bodyMode"
           :safe-mode="safeMode"
           :base-seed="baseSeed"
+          :pair-mode-available="hasPairPose"
+          :pair-batch-expanded="draft.pairBatchExpanded.value"
           @update:workflow-selection="workflowSelection = $event"
           @update:style="onParamsStyleChange"
           @toggle-quality="toggleQuality"
           @toggle-ratio="toggleRatio"
           @update:base-seed="setBaseSeed"
           @update:body-mode="onParamsBodyMode"
+          @update:pair-batch-expanded="draft.setPairBatchExpanded"
           @reload-workflows="reloadWorkflows"
         />
       </ReferenceSectionCard>

@@ -145,6 +145,13 @@ export interface ReferenceStudioSettings {
   /** 当前编辑 / 预览的 B 变体下标；旧快照缺字段按 0。 */
   personBVariantIndex: number
   /**
+   * 双人配对模式是否被「批量展开」显式放开（V2-C，2026-11-08）。
+   *
+   * 默认 false：任一姿势为 composition=pair 时，每槽只保留 1 张、B 变体 1 组；
+   * 打开后恢复多选与跨槽组合。
+   */
+  pairBatchExpanded: boolean
+  /**
    * 三槽模式（P2 替代态，方案 §4.4）。
    *
    * `null` 表示旧快照没有该字段：调用方按
@@ -350,6 +357,8 @@ export function parseReferenceStudioSettings(
     personBText,
     personBVariants,
     personBVariantIndex,
+    // V2-C：旧快照缺字段按 false（默认进入双人配对模式）。
+    pairBatchExpanded: value.pairBatchExpanded === true,
     // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
     portraitMode: parseSlotMode(value.portraitMode),
     costumeMode: parseSlotMode(value.costumeMode),
@@ -386,6 +395,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     personBText: '',
     personBVariants: [],
     personBVariantIndex: 0,
+    pairBatchExpanded: false,
     // 默认没有模式记录：旧数据同样走「有图 / 有文本」推导。
     portraitMode: null,
     costumeMode: null,

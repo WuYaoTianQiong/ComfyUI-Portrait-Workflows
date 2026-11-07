@@ -519,6 +519,28 @@ export function useReferenceRecipe() {
   )
 
   /**
+   * 组合计数用的槽位数：双人配对模式下每槽最多按 1 张计。
+   *
+   * 选择层已收敛；这里再兜底一次，保证完全展开前（例如旧草稿恢复）
+   * 「当前 N / 上限 100」不会按多选虚高。
+   */
+  const batchSlotCounts = computed<RecipeSlotCounts>(() =>
+    draft.pairModeActive.value
+      ? {
+          portrait: Math.min(1, slotCounts.value.portrait),
+          costume: Math.min(1, slotCounts.value.costume),
+          pose: Math.min(1, slotCounts.value.pose),
+        }
+      : slotCounts.value,
+  )
+
+  /** 组合计数用的 B 变体数：配对模式下只算 1 组。 */
+  const batchPersonBVariantCount = computed(() => {
+    if (!draft.hasPairPose.value) return 0
+    return draft.pairModeActive.value ? 1 : draft.personBVariants.value.length
+  })
+
+  /**
    * 全组合数（契约 C-REF-TOTAL@2）：
    * `槽位组合数 × 选中工作流数 × 画质档数 × 比例数`。
    *
@@ -526,12 +548,12 @@ export function useReferenceRecipe() {
    */
   const batchTotal = computed(() =>
     countBatchTotal(
-      slotCounts.value,
+      batchSlotCounts.value,
       qualityDimension.value,
       ratioDimension.value,
       workflowDimension.value,
       draft.slotModes.value,
-      draft.hasPairPose.value ? draft.personBVariants.value.length : 0,
+      batchPersonBVariantCount.value,
     ),
   )
   const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
@@ -1323,11 +1345,19 @@ export function useReferenceRecipe() {
 
   /** 用当前工作流与当前选择构造分组（提交前 / 强制提交共用）。 */
   function buildCurrentBatchGroups(): RecipeBatchGroup[] {
+    // V2-C：双人配对模式只取每槽首张 / 首组变体，避免任何跨槽笛卡尔积。
+    const singlePair = draft.pairModeActive.value
+    const portraitSource = singlePair ? draft.portrait.value.slice(0, 1) : draft.portrait.value
+    const costumeSource = singlePair ? draft.costume.value.slice(0, 1) : draft.costume.value
+    const poseSource = singlePair ? draft.pose.value.slice(0, 1) : draft.pose.value
+    const variantSource = singlePair
+      ? draft.personBVariants.value.slice(0, 1)
+      : draft.personBVariants.value
     return buildBatchGroups({
-      portrait: draft.portrait.value,
+      portrait: portraitSource,
       // 素体模式：即使槽位有残留服装也绝不进入组合（后端 bare + 服装 = 400）。
-      costume: costumeDimensionForBodyMode(draft.costume.value, effectiveBodyMode.value),
-      pose: draft.pose.value.map((entry) => entry.item),
+      costume: costumeDimensionForBodyMode(costumeSource, effectiveBodyMode.value),
+      pose: poseSource.map((entry) => entry.item),
       workflows: effectiveWorkflows.value.map((item) => item.path),
       qualities: qualitySelection.value,
       ratios: ratioSelection.value,
@@ -1343,7 +1373,7 @@ export function useReferenceRecipe() {
         draft.supplementFlags.value,
       ),
       // v1.5：双人姿势下 A 人像与 B 变体 1:1 配对；单人姿势不启用。
-      personBVariants: draft.hasPairPose.value ? draft.personBVariants.value : [],
+      personBVariants: draft.hasPairPose.value ? variantSource : [],
     })
   }
 

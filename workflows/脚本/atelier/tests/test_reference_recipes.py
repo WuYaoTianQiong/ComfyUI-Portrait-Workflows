@@ -865,6 +865,31 @@ def test_person_b_text_reaches_prompt_for_composition_pair(api, recipe_env):
     assert "不要复用人物A的脸" in prompt
 
 
+def test_pair_prompt_requires_complete_limbs(api, recipe_env):
+    """V2-C：双人条款要求四肢完整，并把缺手缺脚类词交给负向。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    prompt = body["prompt"]
+    assert "两人的手、手指、手臂、腿、脚必须完整自然出现" in prompt
+    assert "服装未覆盖的部位必须是自然皮肤" in prompt
+    assert "人体结构完整，四肢与手脚自然呈现" in prompt
+    # 原文保留否定句，由编译器抽成负向；编译后正向不再出现「禁止漂浮衣架式人体」。
+    assert "禁止漂浮衣架式人体" in body["prompt_raw"]
+    assert "禁止漂浮衣架式人体" not in prompt
+    assert "不得出现性器官、胸部、臀部裸露" in prompt
+    assert "服装之外正常可见的手臂、小腿、手、脚属于正常皮肤" in prompt
+
+
 def test_person_b_fragment_fields_reach_pair_prompt(api, recipe_env):
     """v1.5：B 的面部/身材、服饰字段与自由文本一起进入 B 条款；A 槽位文本不受影响。"""
     _seed_pair_pose(recipe_env)

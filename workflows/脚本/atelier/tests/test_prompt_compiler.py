@@ -87,6 +87,19 @@ def test_fingers_and_anatomy_rewrites():
     assert "畸形" in result.negative
 
 
+def test_floating_clothes_anatomy_rewrite():
+    """V2-C：禁止漂浮衣架式人体 → 四肢完整肯定句 + 缺手缺脚类负向。"""
+    result = compile_prompt(
+        "两人的手、手指、手臂、腿、脚必须完整自然出现；禁止漂浮衣架式人体。",
+        negative_effective=True,
+    )
+    assert "禁止漂浮衣架式人体" not in result.positive
+    assert "人体结构完整，四肢与手脚自然呈现" in result.positive
+    for term in ("缺少手", "缺少手指", "缺少腿", "缺少脚", "漂浮衣物", "衣架",
+                 "人体结构缺失", "肢体融合"):
+        assert term in result.negative
+
+
 def test_compiler_is_idempotent():
     first = compile_prompt("不要看镜头，穿白衬衫", negative_effective=True)
     second = compile_prompt(first.positive, first.negative, negative_effective=True)

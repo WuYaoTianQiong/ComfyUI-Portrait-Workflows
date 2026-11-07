@@ -177,8 +177,9 @@ function ensurePersonBVariant(): RecipePersonBVariant {
   return variant
 }
 
-/** 新增变体并切到新变体；达到上限时保持原状态并返回 false。 */
+/** 新增变体并切到新变体；达到上限（或双人配对模式只允许 1 组）时返回 false。 */
 function addPersonBVariant(): boolean {
+  if (pairModeActive.value) return false
   if (personBVariants.value.length >= MAX_PERSON_B_VARIANTS) return false
   personBVariants.value = [...personBVariants.value, newPersonBVariant()]
   activePersonBVariantIndex.value = personBVariants.value.length - 1
@@ -273,6 +274,61 @@ watch(
   { immediate: true },
 )
 
+/**
+ * 双人配对模式（V2-C，2026-11-08）：任一已选姿势 `composition=pair` 时默认生效。
+ *
+ * 生效时三槽各最多 1 张、B 变体 1 组、不做跨槽笛卡尔积；「批量展开」显式打开后
+ * 恢复原来的多选语义。纯前端约束，后端仍是单值提交。
+ */
+const pairBatchExpanded = ref(false)
+/** 双人配对模式是否生效（双人姿势 + 未打开批量展开）。 */
+const pairModeActive = computed(
+  () => hasPairPose.value && !pairBatchExpanded.value,
+)
+/** 进入配对模式时自动收敛的提示；页面转 toast 后清空。 */
+const pairLimitNotice = ref('')
+
+/** 配对模式下每槽只留首张、B 变体只留首组；返回是否发生收敛。 */
+function limitPairSelections(): boolean {
+  let changed = false
+  if (portrait.value.length > 1) {
+    portrait.value = portrait.value.slice(0, 1)
+    changed = true
+  }
+  if (costume.value.length > 1) {
+    costume.value = costume.value.slice(0, 1)
+    changed = true
+  }
+  if (pose.value.length > 1) {
+    pose.value = pose.value.slice(0, 1)
+    changed = true
+  }
+  if (personBVariants.value.length > 1) {
+    personBVariants.value = personBVariants.value.slice(0, 1)
+    activePersonBVariantIndex.value = 0
+    changed = true
+  }
+  return changed
+}
+
+/** 进入配对模式（含从磁盘恢复出多选）时自动收敛到首张，只提示一次。 */
+watch(pairModeActive, (active) => {
+  if (!active) return
+  if (limitPairSelections()) {
+    pairLimitNotice.value = '已进入双人配对模式，每个图片槽只保留 1 张'
+  }
+})
+
+/** 切换「批量展开」；关闭时立即收敛，避免同一 tick 内开关不触发 watcher。 */
+function setPairBatchExpanded(expanded: boolean): void {
+  if (pairBatchExpanded.value === expanded) return
+  pairBatchExpanded.value = expanded
+  if (!expanded && limitPairSelections()) {
+    pairLimitNotice.value = '已进入双人配对模式，每个图片槽只保留 1 张'
+  }
+  writeReferenceStudioSettings({ pairBatchExpanded: expanded })
+}
+
 /** 非空槽位数量（0–3）；数组里有内容即视为该槽已选。 */
 const count = computed(
   () =>
@@ -291,8 +347,13 @@ const isComplete = computed(() => count.value === RECIPE_SLOT_TOTAL)
 // 人像槽
 // ---------------------------------------------------------------------------
 
-/** 人像槽：追加一张；同 id 已存在时不重复加入。 */
+/** 人像槽：追加一张；同 id 已存在时不重复加入。配对模式下替换为单张。 */
 function addPortrait(item: PortraitItem): void {
+  if (pairModeActive.value) {
+    if (portrait.value.length === 1 && portrait.value[0].id === item.id) return
+    portrait.value = [item]
+    return
+  }
   if (portrait.value.some((entry) => entry.id === item.id)) return
   portrait.value = [...portrait.value, item]
 }
@@ -302,9 +363,13 @@ function setPortrait(item: PortraitItem | null): void {
   portrait.value = item ? [item] : []
 }
 
-/** 人像槽：点已选取消，否则追加。返回 true 表示本次是「加入」。 */
+/** 人像槽：点已选取消，否则追加。返回 true 表示本次是「加入」。配对模式下单选。 */
 function togglePortrait(item: PortraitItem): boolean {
   const already = portrait.value.some((entry) => entry.id === item.id)
+  if (pairModeActive.value) {
+    portrait.value = already ? [] : [item]
+    return !already
+  }
   portrait.value = already
     ? portrait.value.filter((entry) => entry.id !== item.id)
     : [...portrait.value, item]
@@ -324,8 +389,13 @@ function removePortrait(id?: string): void {
 // 服装槽
 // ---------------------------------------------------------------------------
 
-/** 服装槽：追加一张；同 id 已存在时不重复加入。 */
+/** 服装槽：追加一张；同 id 已存在时不重复加入。配对模式下替换为单张。 */
 function addCostume(item: CostumeItem): void {
+  if (pairModeActive.value) {
+    if (costume.value.length === 1 && costume.value[0].id === item.id) return
+    costume.value = [item]
+    return
+  }
   if (costume.value.some((entry) => entry.id === item.id)) return
   costume.value = [...costume.value, item]
 }
@@ -335,9 +405,13 @@ function setCostume(item: CostumeItem | null): void {
   costume.value = item ? [item] : []
 }
 
-/** 服装槽：点已选取消，否则追加。 */
+/** 服装槽：点已选取消，否则追加。配对模式下单选。 */
 function toggleCostume(item: CostumeItem): boolean {
   const already = costume.value.some((entry) => entry.id === item.id)
+  if (pairModeActive.value) {
+    costume.value = already ? [] : [item]
+    return !already
+  }
   costume.value = already
     ? costume.value.filter((entry) => entry.id !== item.id)
     : [...costume.value, item]
@@ -367,9 +441,13 @@ function normalizePoseDepth(item: PoseItem, useDepth: boolean): boolean {
   return Boolean(useDepth && poseSupportsDepth(item))
 }
 
-/** 姿势槽：追加；同 id 已存在时更新其模式（后写覆盖）。 */
+/** 姿势槽：追加；同 id 已存在时更新其模式（后写覆盖）。配对模式下替换为单张。 */
 function addPose(item: PoseItem, useDepth = false): void {
   const normalized = normalizePoseDepth(item, useDepth)
+  if (pairModeActive.value) {
+    pose.value = [{ item, useDepth: normalized }]
+    return
+  }
   const index = pose.value.findIndex((entry) => entry.item.id === item.id)
   if (index < 0) {
     pose.value = [...pose.value, { item, useDepth: normalized }]
@@ -395,6 +473,15 @@ function setPose(item: PoseItem | null, useDepth = false): void {
  */
 function togglePose(item: PoseItem, useDepth = false): boolean {
   const normalized = normalizePoseDepth(item, useDepth)
+  if (pairModeActive.value) {
+    const current = pose.value[0]
+    if (current && current.item.id === item.id && current.useDepth === normalized) {
+      pose.value = []
+      return false
+    }
+    pose.value = [{ item, useDepth: normalized }]
+    return true
+  }
   const index = pose.value.findIndex((entry) => entry.item.id === item.id)
   if (index < 0) {
     pose.value = [...pose.value, { item, useDepth: normalized }]
@@ -525,23 +612,38 @@ function poseUploadSelection(input: UploadSlotInput): PoseSlotSelection {
   return { item, useDepth: false }
 }
 
-/** 人像槽：加入一张本地图；同路径不重复。 */
+/** 人像槽：加入一张本地图；同路径不重复。配对模式下替换为单张。 */
 function addPortraitUpload(input: UploadSlotInput): void {
   const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (pairModeActive.value) {
+    if (portrait.value.length === 1 && portrait.value[0].id === id) return
+    portrait.value = [portraitUploadItem(input)]
+    return
+  }
   if (portrait.value.some((entry) => entry.id === id)) return
   portrait.value = [...portrait.value, portraitUploadItem(input)]
 }
 
-/** 服装槽：加入一张本地图；同路径不重复。 */
+/** 服装槽：加入一张本地图；同路径不重复。配对模式下替换为单张。 */
 function addCostumeUpload(input: UploadSlotInput): void {
   const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (pairModeActive.value) {
+    if (costume.value.length === 1 && costume.value[0].id === id) return
+    costume.value = [costumeUploadItem(input)]
+    return
+  }
   if (costume.value.some((entry) => entry.id === id)) return
   costume.value = [...costume.value, costumeUploadItem(input)]
 }
 
-/** 姿势槽：加入一张本地图；同路径不重复。 */
+/** 姿势槽：加入一张本地图；同路径不重复。配对模式下替换为单张。 */
 function addPoseUpload(input: UploadSlotInput): void {
   const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (pairModeActive.value) {
+    if (pose.value.length === 1 && pose.value[0].item.id === id) return
+    pose.value = [poseUploadSelection(input)]
+    return
+  }
   if (pose.value.some((entry) => entry.item.id === id)) return
   pose.value = [...pose.value, poseUploadSelection(input)]
 }
@@ -600,6 +702,7 @@ function clearDraft(): void {
   negativePrompt.value = ''
   personBVariants.value = []
   activePersonBVariantIndex.value = 0
+  pairBatchExpanded.value = false
   // 模式与「上次姿势」同属草稿：清空后回到「三槽都是空」的推导起点。
   slotModes.value = createEmptySlotModes()
   supplementFlags.value = createEmptySupplementFlags()
@@ -680,6 +783,7 @@ function persist(): void {
     personBText: personBText.value,
     personBVariants: clonePersonBVariants(personBVariants.value),
     personBVariantIndex: activePersonBVariantIndex.value,
+    pairBatchExpanded: pairBatchExpanded.value,
     // P2：三槽模式单独持久化（旧数据没有这三个字段时由 hydrate 推导）。
     portraitMode: slotModes.value.portrait,
     costumeMode: slotModes.value.costume,
@@ -711,6 +815,8 @@ function slotKey(library: string, id: string): string {
 function hydrate(libraries: ReferenceDraftLibraries): boolean {
   const stored = readReferenceStudioSettings()
   if (!stored) return false
+  // 配对模式偏好必须先于三槽恢复：否则恢复出多选时会被误收敛成首张。
+  pairBatchExpanded.value = stored.pairBatchExpanded
 
   const portraitByKey = new Map<string, PortraitItem>()
   for (const item of libraries.portrait) {
@@ -906,6 +1012,8 @@ function restoreTextFragmentsFromSettings(
 function hydrateTextFragments(): boolean {
   const stored = readReferenceStudioSettings()
   if (!stored) return false
+  // 配对模式偏好同样不依赖三库，先恢复以避免旧快照的多选被误收敛。
+  pairBatchExpanded.value = stored.pairBatchExpanded
   restoreTextFragmentsFromSettings(stored)
   // 显式模式字段可以立即恢复（不依赖库数据）；缺字段的槽等三槽 hydrate 后再推导。
   applyStoredSlotModes(stored, false)
@@ -1129,6 +1237,11 @@ export function useReferenceRecipeDraft() {
     removePersonBVariant,
     setActivePersonBVariant,
     hasPairPose,
+    // V2-C：双人配对模式（默认单图 / 单变体）与「批量展开」开关
+    pairBatchExpanded,
+    pairModeActive,
+    pairLimitNotice,
+    setPairBatchExpanded,
     setSlotMode,
     setSlotSupplement,
     setRecipeSource,

@@ -43,6 +43,21 @@ BARE_DISPLAY_CLAUSE = (
     "保持中性、非性化的站姿或姿势构图，不添加任何性暗示元素。"
 )
 
+#: 双人姿势的人体完整性条款（V2-C，2026-11-08）：
+#: 参考图多为大头照 / ghost mannequin / 线稿，模型缺少肢体视觉证据，
+#: 容易只画衣服不画手脚。这里显式要求四肢完整，并把否定交给编译器抽成负向。
+PAIR_ANATOMY_CLAUSE = (
+    "两人的手、手指、手臂、腿、脚必须完整自然出现；服装未覆盖的部位必须是自然皮肤；"
+    "禁止漂浮衣架式人体。"
+)
+
+#: 双人姿势的着装边界：正常可见的手臂 / 小腿 / 手脚不算裸露，
+#: 避免模型把「不许裸露」理解成用衣服遮住或省略四肢。
+PAIR_MODESTY_CLAUSE = (
+    "不得出现性器官、胸部、臀部裸露；"
+    "服装之外正常可见的手臂、小腿、手、脚属于正常皮肤，不视为裸露。"
+)
+
 
 @dataclass(frozen=True)
 class RecipeEntry:
@@ -359,6 +374,7 @@ def build_recipe_prompt(
         if body_mode == "bare":
             clauses.append(
                 "• 双人要求：画面中为恰好两位成年女性的素体展示，两人都完整入镜，保持中性、非性化姿态。"
+                f"{PAIR_ANATOMY_CLAUSE}"
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
@@ -376,7 +392,7 @@ def build_recipe_prompt(
             )
             clauses.append(
                 "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都完整入镜；"
-                f"人物A：{a_desc}；人物B{b_source}；任何一位都不允许裸露或半裸。"
+                f"人物A：{a_desc}；人物B{b_source}；{PAIR_MODESTY_CLAUSE}{PAIR_ANATOMY_CLAUSE}"
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
@@ -397,7 +413,7 @@ def build_recipe_prompt(
             )
             clauses.append(
                 "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都要完整入镜；"
-                f"{pair_costume}任何一位都不允许裸露或半裸。"
+                f"{pair_costume}{PAIR_MODESTY_CLAUSE}{PAIR_ANATOMY_CLAUSE}"
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )

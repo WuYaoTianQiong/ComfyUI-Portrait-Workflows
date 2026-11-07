@@ -49,6 +49,8 @@ const props = defineProps<{
   identityImageSelected?: boolean
   /** 身份图展示名（库条目标题或上传文件名）。 */
   identityImageName?: string
+  /** V2-C：双人配对模式下只允许 1 组变体（需「批量展开」才能新增）。 */
+  singleMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -208,7 +210,8 @@ function previewContent(content: string): string {
       <button
         type="button"
         class="person-b__action"
-        :disabled="disabled || variants.length >= MAX_PERSON_B_VARIANTS"
+        :disabled="disabled || singleMode || variants.length >= MAX_PERSON_B_VARIANTS"
+        :title="singleMode ? '双人配对模式下只保留 1 组；如需多组请打开「批量展开」' : ''"
         data-testid="studio-person-b-add"
         @click="emit('add')"
       >

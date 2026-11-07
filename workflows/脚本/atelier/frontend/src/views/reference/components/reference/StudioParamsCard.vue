@@ -48,6 +48,10 @@ const props = defineProps<{
   bodyMode: RecipeBodyMode
   safeMode: boolean
   baseSeed: number
+  /** V2-C：当前是否有双人姿势（决定是否显示配对模式开关）。 */
+  pairModeAvailable?: boolean
+  /** V2-C：是否已显式打开「批量展开」。 */
+  pairBatchExpanded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -57,6 +61,7 @@ const emit = defineEmits<{
   toggleRatio: [value: string]
   'update:baseSeed': [value: string]
   'update:bodyMode': [mode: RecipeBodyMode]
+  'update:pairBatchExpanded': [value: boolean]
   reloadWorkflows: []
 }>()
 
@@ -93,6 +98,13 @@ function onBodyModeChange(event: Event): void {
   const target = event.target as HTMLInputElement | null
   if (!target) return
   emit('update:bodyMode', target.checked ? 'bare' : 'costume')
+}
+
+/** 双人「批量展开」开关：打开后恢复多选与跨槽组合。 */
+function onPairBatchChange(event: Event): void {
+  const target = event.target as HTMLInputElement | null
+  if (!target) return
+  emit('update:pairBatchExpanded', target.checked)
 }
 </script>
 
@@ -261,6 +273,30 @@ function onBodyModeChange(event: Event): void {
             {{
               safeMode ? '安全模式下不可用，请先解锁 18+' : '开启后清空服装槽'
             }}
+          </span>
+        </span>
+      </label>
+    </div>
+
+    <!-- 双人配对模式（V2-C）：默认每槽 1 张、B 变体 1 组；显式展开才恢复多选 -->
+    <div
+      v-if="pairModeAvailable"
+      class="field field--full"
+      data-testid="studio-pair-batch-field"
+    >
+      <span class="field__label">双人配对模式</span>
+      <label class="switch-row">
+        <input
+          type="checkbox"
+          class="switch-row__input"
+          data-testid="studio-pair-batch-expand"
+          :checked="pairBatchExpanded === true"
+          @change="onPairBatchChange"
+        />
+        <span class="switch-row__text">
+          <span class="switch-row__title">批量展开</span>
+          <span class="switch-row__hint">
+            默认每个图片槽只保留 1 张、人物 B 变体 1 组，不做跨槽笛卡尔积；打开后恢复多选
           </span>
         </span>
       </label>

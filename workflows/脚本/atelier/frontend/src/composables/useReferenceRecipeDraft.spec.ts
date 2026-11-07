@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
 import { createEmptyRecipeTextFragments } from './recipeTextFragments'
@@ -404,6 +405,61 @@ describe('清空与持久化（2026-11-05 取代 M3 不持久化）', () => {
       pose: 'empty',
     })
     expect(draft.lastPoseId.value).toBe('')
+  })
+
+  it('V2-C 双人配对模式：进入时自动收敛到首张并提示一次', async () => {
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+    draft.toggleCostume(costume('c1'))
+    draft.toggleCostume(costume('c2'))
+
+    draft.togglePose(pose('pair-01'))
+    await nextTick()
+
+    expect(draft.pairModeActive.value).toBe(true)
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
+    expect(draft.costume.value.map((item) => item.id)).toEqual(['c1'])
+    expect(draft.pairLimitNotice.value).toBe('已进入双人配对模式，每个图片槽只保留 1 张')
+  })
+
+  it('V2-C 双人配对模式：点新图替换而不是追加，B 变体只保留 1 组', async () => {
+    draft.togglePose(pose('pair-01'))
+    await nextTick()
+
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt2'])
+
+    expect(draft.addPersonBVariant()).toBe(false)
+    expect(draft.personBVariants.value).toHaveLength(1)
+  })
+
+  it('V2-C 双人配对模式：打开「批量展开」后恢复多选', async () => {
+    draft.togglePose(pose('pair-01'))
+    await nextTick()
+
+    draft.setPairBatchExpanded(true)
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+
+    expect(draft.pairModeActive.value).toBe(false)
+    expect(draft.portraitCount.value).toBe(2)
+    expect(draft.addPersonBVariant()).toBe(true)
+  })
+
+  it('V2-C 双人配对模式：关闭「批量展开」时再次收敛并提示', async () => {
+    draft.togglePose(pose('pair-01'))
+    await nextTick()
+    draft.setPairBatchExpanded(true)
+    draft.togglePortrait(portrait('pt1'))
+    draft.togglePortrait(portrait('pt2'))
+    expect(draft.portraitCount.value).toBe(2)
+
+    draft.setPairBatchExpanded(false)
+    await nextTick()
+
+    expect(draft.portrait.value.map((item) => item.id)).toEqual(['pt1'])
+    expect(draft.pairLimitNotice.value).toBe('已进入双人配对模式，每个图片槽只保留 1 张')
   })
 
   it('P4 补充开关：只在 image 模式打开，切 text 自动归零并落盘', () => {
