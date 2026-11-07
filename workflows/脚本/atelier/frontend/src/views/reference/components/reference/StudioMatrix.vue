@@ -19,9 +19,11 @@ import { computed, ref, watch } from 'vue'
 import {
   EMPTY_SLOT_TEXTS,
   buildRecipeSlotDisplays,
+  compilePersonBVariant,
   resolveSlotModes,
   slotDisplaysGroupKey,
   slotDisplaysGroupLabel,
+  slotTextPreview,
 } from '../../../../composables/recipeTextFragments'
 import type {
   RecipeSlotDisplaySlot,
@@ -164,7 +166,20 @@ function displaysOf(group: RecipeBatchGroup) {
  * 不同文本必须落到不同组（方案 §4.4），否则矩阵会把两个替代态合并成一组。
  */
 function groupKeyOf(group: RecipeBatchGroup): string {
-  return slotDisplaysGroupKey(displaysOf(group))
+  const key = slotDisplaysGroupKey(displaysOf(group))
+  // v1.5：同一张 A 人像配不同 B 变体必须落不同组，否则矩阵会把它们合并成一行。
+  return group.personBVariant ? `${key}${GROUP_KEY_SEPARATOR}b:${group.personBVariant.id}` : key
+}
+
+/** B 变体组头文案：面部/身材 + 服饰 + 自由文字的前 12 字。 */
+function personBLabelOf(group: RecipeBatchGroup): string {
+  const variant = group.personBVariant
+  if (!variant) return ''
+  const compiled = compilePersonBVariant(variant)
+  const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
+    .filter(Boolean)
+    .join('；')
+  return text ? `B：${slotTextPreview(text)}` : 'B（空设定）'
 }
 
 /** 泛型去重计数（保持简单：只关心「有几个不同值」）。 */
@@ -202,9 +217,11 @@ function buildThumbs(group: RecipeBatchGroup): MatrixThumb[] {
   })
 }
 
-/** 组头文案：text 槽用碎片前 12 字代替槽名（方案 §8 P2）。 */
+/** 组头文案：text 槽用碎片前 12 字代替槽名（方案 §8 P2）；有 B 变体时追加 B 摘要。 */
 function titleOf(group: RecipeBatchGroup): string {
-  return slotDisplaysGroupLabel(displaysOf(group))
+  const base = slotDisplaysGroupLabel(displaysOf(group))
+  const bLabel = personBLabelOf(group)
+  return bLabel ? `${base} · ${bLabel}` : base
 }
 
 /**

@@ -326,6 +326,34 @@ describe('buildRecipeRequest', () => {
     expect('person_b_text' in blank).toBe(false)
   })
 
+  it('v1.5：B 变体拆成面/身、服饰、自由文字三个字段发送', () => {
+    const request = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        personBVariant: {
+          id: 'b-1',
+          fragments: {
+            ...createEmptyRecipeTextFragments(),
+            人物面部: [{ type: '人物面部', content: '鹅蛋脸', person: 'B' }],
+            人物身材: [{ type: '人物身材', content: '高挑', person: 'B' }],
+            人物服饰: [{ type: '人物服饰', content: '酒红西装', person: 'B' }],
+          },
+          freeText: '年龄与人物 A 相近',
+        },
+      },
+    )
+
+    expect(request.person_b_portrait_text).toBe('鹅蛋脸；高挑')
+    expect(request.person_b_costume_text).toBe('酒红西装')
+    expect(request.person_b_text).toBe('年龄与人物 A 相近')
+    // A 的三槽字段不能被 B 碎片污染
+    expect(request.portrait_text).toBeUndefined()
+    expect(request.costume_text).toBeUndefined()
+  })
+
   it('八类碎片按归属映射到 4 个文本字段（同类以「；」连接）', () => {
     const fragments: RecipeTextFragments = {
       ...createEmptyRecipeTextFragments(),

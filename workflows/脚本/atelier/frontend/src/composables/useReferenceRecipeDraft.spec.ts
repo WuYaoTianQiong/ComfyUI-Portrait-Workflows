@@ -15,6 +15,7 @@ import {
   flushReferenceStudioSettings,
   readReferenceStudioSettings,
   REFERENCE_STUDIO_STORAGE_KEY,
+  writeReferenceStudioSettings,
 } from './useReferenceStudioSettings'
 
 /**
@@ -599,5 +600,42 @@ describe('第 4 槽（extra）', () => {
       name: '发型 A',
       text: '发尾挑染',
     })
+  })
+})
+
+describe('v1.5 人物B变体持久化与旧数据迁移', () => {
+  it('persist / hydrate 恢复变体的碎片与自由文字', () => {
+    const variant = draft.ensurePersonBVariant()
+    draft.personBVariants.value = [
+      {
+        ...variant,
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物面部: [{ type: '人物面部', content: '鹅蛋脸', person: 'B' }],
+        },
+        freeText: '金色齐肩短发',
+      },
+    ]
+    flushReferenceStudioSettings()
+
+    draft.clearDraft()
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(draft.personBVariants.value).toHaveLength(1)
+    expect(draft.personBVariants.value[0].freeText).toBe('金色齐肩短发')
+    expect(draft.personBVariants.value[0].fragments.人物面部).toEqual([
+      { type: '人物面部', content: '鹅蛋脸', person: 'B' },
+    ])
+  })
+
+  it('旧快照只有 personBText 时迁移成第一条变体', () => {
+    writeReferenceStudioSettings({ personBText: '旧版 B 文字设定' })
+    flushReferenceStudioSettings()
+
+    draft.clearDraft()
+    draft.hydrateTextFragments()
+
+    expect(draft.personBVariants.value).toHaveLength(1)
+    expect(draft.personBText.value).toBe('旧版 B 文字设定')
   })
 })

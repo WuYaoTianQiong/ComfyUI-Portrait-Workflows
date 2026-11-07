@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { CostumeItem, PortraitItem, PoseItem } from '../../../../api/reference'
 import type { StudioWorkflowOption } from '../../../../composables/useReferenceRecipe'
 import { buildBatchGroups } from '../../../../composables/useReferenceRecipe'
+import { createEmptyPersonBVariant } from '../../../../composables/recipeTextFragments'
 
 import StudioMatrix from './StudioMatrix.vue'
 
@@ -227,6 +228,37 @@ describe('StudioMatrix 生成清单', () => {
     expect(chips[0]!.text()).toContain('白色衬衫配黑色西裤和黑色…')
     // text 槽不渲染「空」占位
     expect(chips.every((chip) => !chip.find('.matrix__thumb-empty').exists())).toBe(true)
+  })
+
+  it('v1.5：同一 A 人像的不同 B 变体不合并成一组，组头带 B 摘要', () => {
+    const first = { ...createEmptyPersonBVariant('b1'), freeText: '金色齐肩短发' }
+    const second = { ...createEmptyPersonBVariant('b2'), freeText: '深棕高马尾' }
+    const groups = buildBatchGroups({
+      portrait: [portrait('p1', '人像A')],
+      costume: [],
+      pose: [],
+      workflows: [],
+      qualities: [],
+      ratios: [],
+      qualityEnabled: false,
+      orientationEnabled: false,
+      baseSeed: 100000,
+      personBVariants: [first, second],
+    })
+
+    const wrapper = mountMatrix({
+      groups,
+      total: groups.length,
+      slotCounts: { portrait: 1, costume: 0, pose: 0 },
+      activeSlotCount: 1,
+    })
+
+    expect(wrapper.findAll('[data-testid="studio-matrix-group"]')).toHaveLength(2)
+    const titles = wrapper
+      .findAll('[data-testid="studio-matrix-group"]')
+      .map((group) => group.text())
+    expect(titles.some((text) => text.includes('B：金色齐肩短发'))).toBe(true)
+    expect(titles.some((text) => text.includes('B：深棕高马尾'))).toBe(true)
   })
 
   it('删掉 1 张人像导致原首组键失效时，自动展开新的首组而不是整块收起', async () => {

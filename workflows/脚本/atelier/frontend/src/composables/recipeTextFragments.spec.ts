@@ -13,15 +13,20 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_SLOT_TEXTS,
   buildRecipeSlotDisplays,
+  clonePersonBVariants,
   cloneSlotModes,
   cloneSupplementFlags,
   compileActiveSlotTexts,
+  compilePersonBVariant,
+  compileRecipeTextFragments,
   compileSlotTexts,
+  createEmptyPersonBVariant,
   createEmptyRecipeTextFragments,
   createEmptySlotModes,
   createEmptySupplementFlags,
   deriveSlotMode,
   deriveSlotModes,
+  fragmentsOfPerson,
   slotDisplaysGroupKey,
   slotDisplaysGroupLabel,
   slotTextPreview,
@@ -216,5 +221,73 @@ describe('矩阵组键 / 组标签（文本槽）', () => {
       texts: { ...EMPTY_SLOT_TEXTS },
     })
     expect(slotDisplaysGroupLabel(displays)).toBe('未选参考图')
+  })
+})
+
+describe('v1.5 人物A / 人物B 碎片隔离', () => {
+  function fragmentsWithAB() {
+    return {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [
+        { type: '人物面部' as const, content: 'A 圆脸' },
+        { type: '人物面部' as const, content: 'B 鹅蛋脸', person: 'B' as const },
+      ],
+      人物身材: [
+        { type: '人物身材' as const, content: 'A 纤细' },
+        { type: '人物身材' as const, content: 'B 高挑', person: 'B' as const },
+      ],
+      人物服饰: [
+        { type: '人物服饰' as const, content: 'A 白衬衫' },
+        { type: '人物服饰' as const, content: 'B 酒红西装', person: 'B' as const },
+      ],
+    }
+  }
+
+  it('B 碎片不进入 A 的 portrait_text / costume_text', () => {
+    const compiled = compileRecipeTextFragments(fragmentsWithAB())
+    expect(compiled.portraitText).toBe('A 圆脸；A 纤细')
+    expect(compiled.costumeText).toBe('A 白衬衫')
+    expect(compiled.personBPortraitText).toBe('B 鹅蛋脸；B 高挑')
+    expect(compiled.personBCostumeText).toBe('B 酒红西装')
+  })
+
+  it('旧数据缺 person → 一律归 A', () => {
+    const fragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部' as const, content: '旧数据圆脸' }],
+    }
+    expect(compileRecipeTextFragments(fragments).personBPortraitText).toBe('')
+    expect(compileRecipeTextFragments(fragments).portraitText).toBe('旧数据圆脸')
+    expect(fragmentsOfPerson(fragments, '人物面部', 'A')).toHaveLength(1)
+  })
+
+  it('clonePersonBVariants 强制 person=B，并丢弃非人物类碎片', () => {
+    const variants = clonePersonBVariants([
+      {
+        id: 'b-x',
+        fragments: {
+          ...createEmptyRecipeTextFragments(),
+          人物面部: [{ type: '人物面部', content: '鹅蛋脸' }],
+          场景环境: [{ type: '场景环境', content: '窗边书房' }],
+        },
+        freeText: '年龄与 A 相近',
+      },
+    ])
+    expect(variants).toHaveLength(1)
+    expect(variants[0].fragments.人物面部[0].person).toBe('B')
+    expect(variants[0].fragments.场景环境).toEqual([])
+  })
+
+  it('compilePersonBVariant 返回 B 的面/身、服饰与自由文字', () => {
+    const variant = {
+      ...createEmptyPersonBVariant('b-1'),
+      fragments: fragmentsWithAB(),
+      freeText: '年龄与人物 A 相近',
+    }
+    expect(compilePersonBVariant(variant)).toEqual({
+      portraitText: 'B 鹅蛋脸；B 高挑',
+      costumeText: 'B 酒红西装',
+      freeText: '年龄与人物 A 相近',
+    })
   })
 })

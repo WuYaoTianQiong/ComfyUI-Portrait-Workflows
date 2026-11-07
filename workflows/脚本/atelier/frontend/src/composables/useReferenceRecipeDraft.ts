@@ -149,9 +149,12 @@ const activePersonBVariant = computed<RecipePersonBVariant | null>(() => {
 const personBText = computed<string>({
   get: () => activePersonBVariant.value?.freeText ?? '',
   set: (value: string) => {
-    const index = activePersonBVariantIndex.value
     const variant = activePersonBVariant.value
     if (!variant) return
+    const index = Math.min(
+      Math.max(activePersonBVariantIndex.value, 0),
+      personBVariants.value.length - 1,
+    )
     personBVariants.value = personBVariants.value.map((item, position) =>
       position === index ? { ...item, freeText: value } : item,
     )
@@ -863,6 +866,11 @@ function restoreTextFragmentsFromSettings(
   const restoredVariants = clonePersonBVariants(stored.personBVariants)
   if (restoredVariants.length) {
     personBVariants.value = restoredVariants
+    // 恢复后把计数器抬到已有 `b-N` 的最大值，避免新增变体与旧 id 撞键。
+    personBVariantSeq = restoredVariants.reduce((max, variant) => {
+      const matched = /^b-(\d+)$/.exec(variant.id)
+      return Math.max(max, matched ? Number(matched[1]) : 0)
+    }, personBVariantSeq)
   } else if (stored.personBText.trim()) {
     personBVariants.value = [
       { ...createEmptyPersonBVariant('b-1'), freeText: stored.personBText },

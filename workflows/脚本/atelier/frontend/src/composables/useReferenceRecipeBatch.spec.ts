@@ -55,6 +55,7 @@ import type {
   StudioWorkflowSlot,
 } from './useReferenceRecipe'
 import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { createEmptyPersonBVariant } from './recipeTextFragments'
 
 function portrait(id: string): PortraitItem {
   return {
@@ -214,6 +215,70 @@ describe('P2 替代态的组合折叠', () => {
       expect(group.slots.portrait).toBeNull()
       expect(group.slots.pose).toBeNull()
     }
+  })
+})
+
+describe('v1.5：A 人像 × B 变体按序号 1:1 配对', () => {
+  function variant(id: string) {
+    return { ...createEmptyPersonBVariant(id), freeText: `B ${id}` }
+  }
+  const base = {
+    costume: [],
+    pose: [],
+    workflows: [],
+    qualities: [],
+    ratios: [],
+    qualityEnabled: false,
+    orientationEnabled: false,
+    baseSeed: 100,
+  }
+
+  it('2 人像 + 2 变体 → 2 组（不是 4 组笛卡尔积）', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2')],
+      personBVariants: [variant('b1'), variant('b2')],
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.slots.portrait?.id)).toEqual(['p1', 'p2'])
+    expect(groups.map((group) => group.personBVariant?.id)).toEqual(['b1', 'b2'])
+  })
+
+  it('人像更多时复用最后一组变体，不丢人像也不做乘积', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2'), portrait('p3')],
+      personBVariants: [variant('b1'), variant('b2')],
+    })
+    expect(groups).toHaveLength(3)
+    expect(groups[2].slots.portrait?.id).toBe('p3')
+    expect(groups[2].personBVariant?.id).toBe('b2')
+  })
+
+  it('变体更多时复用最后一张人像，不丢变体', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2')],
+      personBVariants: [variant('b1'), variant('b2'), variant('b3')],
+    })
+    expect(groups).toHaveLength(3)
+    expect(groups[2].slots.portrait?.id).toBe('p2')
+    expect(groups[2].personBVariant?.id).toBe('b3')
+  })
+
+  it('没有变体时保持旧口径：人像 × 服装仍为笛卡尔积', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      costume: [costume('c1'), costume('c2')],
+      portrait: [portrait('p1'), portrait('p2')],
+    })
+    expect(groups).toHaveLength(4)
+    expect(groups.every((group) => group.personBVariant === null)).toBe(true)
+  })
+
+  it('countSlotCombinations / countBatchTotal 与配对口径一致', () => {
+    expect(countSlotCombinations({ portrait: 2, costume: 0, pose: 0 }, undefined, 3)).toBe(3)
+    expect(countBatchTotal({ portrait: 2, costume: 0, pose: 0 }, 1, 1, 1, undefined, 3)).toBe(3)
   })
 })
 

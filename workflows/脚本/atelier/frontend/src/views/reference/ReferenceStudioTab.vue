@@ -1668,6 +1668,7 @@ onMounted(async () => {
       :recipe-loading="recipeRandomLoading"
       :atomic-loading="atomicRandomLoading"
       :slot-modes="slotModes"
+      :person-b-variant-count="hasPairPose ? draft.personBVariants.value.length : 0"
       @randomize="randomize"
       @randomize-recipe="randomizeRecipe"
       @randomize-atomic="randomizeAtomic"

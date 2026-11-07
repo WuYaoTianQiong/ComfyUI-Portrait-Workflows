@@ -39,6 +39,8 @@ const props = defineProps<{
   atomicLoading?: boolean
   /** 三槽模式（P2）：文本槽不参与图片维度计数。缺省 = 全 image。 */
   slotModes?: RecipeSlotModes
+  /** v1.5：人物 B 变体数；与 A 人像按序号 1:1 配对，不乘成乘积。 */
+  personBVariantCount?: number
 }>()
 
 const emit = defineEmits<{ randomize: []; randomizeRecipe: []; randomizeAtomic: []; submit: [] }>()
@@ -57,6 +59,7 @@ const slotCombos = computed(() =>
       pose: props.poseCount,
     },
     props.slotModes ?? createImageSlotModes(),
+    props.personBVariantCount ?? 0,
   ),
 )
 
@@ -67,10 +70,14 @@ const detailText = computed(() => {
     if (modes[slot] === 'text') return '文本'
     return String(count)
   }
+  const variants = props.personBVariantCount ?? 0
+  const variantNote = variants
+    ? `（人像与 B 变体按序号 1:1 配对，共 ${Math.max(1, props.portraitCount, variants)} 对）`
+    : ''
   return (
     `人像${dimension('portrait', props.portraitCount)} × ` +
     `服装${dimension('costume', props.costumeCount)} × ` +
-    `姿势${dimension('pose', props.poseCount)} = ${slotCombos.value}，` +
+    `姿势${dimension('pose', props.poseCount)} = ${slotCombos.value}${variantNote}，` +
     `×${props.workflowCount} 工作流 ×${props.qualityCount} 尺寸`
   )
 })
