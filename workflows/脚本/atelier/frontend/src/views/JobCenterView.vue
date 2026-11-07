@@ -208,7 +208,7 @@ async function retry(id: number) {
 async function cancel(id: number) {
   const ok = await confirmDialog({
     title: '取消任务',
-    content: '确定取消这个任务吗？已提交到 ComfyUI 的部分会继续跑完。',
+    content: '确定取消这个任务吗？正在生成的会被中断，排队中的会从 ComfyUI 队列移除。',
     positiveText: '取消任务',
     negativeText: '返回',
   })
