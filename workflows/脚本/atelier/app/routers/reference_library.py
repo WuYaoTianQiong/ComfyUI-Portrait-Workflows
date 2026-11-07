@@ -295,6 +295,10 @@ class RecipeRequest(BaseModel):
     pose_supplement: bool = False
     #: 双人姿势的人物 B 文字设定；仅 `composition=pair` 且自动模式生效
     person_b_text: str = ""
+    #: v1.5：人物 B 的面部/身材与服饰文本碎片，独立于 A 的三槽文本；
+    #: 仅双人姿势下并入「人物B（文字设定）」，单人姿势忽略。
+    person_b_portrait_text: str = ""
+    person_b_costume_text: str = ""
     #: 修饰层渲染结果（`• 类型：内容` 多行）；始终追加，插在「补充要求」之前
     modifier_fragments: str = ""
     #: 真负向（透传 FaceswapRequest.negative_prompt）；实际提交内容由编译层合并
@@ -704,6 +708,9 @@ def create_reference_recipe(req: RecipeRequest):
             modifier_fragments=req.modifier_fragments,
             negative_prompt=req.negative_prompt,
             person_b_text=req.person_b_text,
+            # v1.5：人物 B 的面部/身材与服饰碎片，只在双人姿势下并入 B 条款
+            person_b_portrait_text=req.person_b_portrait_text,
+            person_b_costume_text=req.person_b_costume_text,
             # 第 4 槽文字补充：只在 extra 图片存在时渲染「此外需体现」
             extra_text=extra_text,
         )

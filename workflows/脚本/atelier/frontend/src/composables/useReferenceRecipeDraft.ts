@@ -28,16 +28,19 @@ import { computed, ref, watch } from 'vue'
 
 import type { CostumeItem, PoseItem, PortraitItem } from '../api/reference'
 import {
+  MAX_PERSON_B_VARIANTS,
   RECIPE_SLOT_KEYS,
+  clonePersonBVariants,
   cloneRecipeTextFragments,
   cloneSupplementFlags,
+  createEmptyPersonBVariant,
   createEmptyRecipeTextFragments,
   createEmptySlotModes,
   createEmptySupplementFlags,
   deriveSlotModes,
-
 } from './recipeTextFragments'
 import type {
+  RecipePersonBVariant,
   RecipeSlotKey,
   RecipeSlotMode,
   RecipeSlotModes,
@@ -122,8 +125,82 @@ const extraFilled = computed(() => extra.value.source !== 'empty')
 const textFragments = ref<RecipeTextFragments>(createEmptyRecipeTextFragments())
 /** 用户手填的负向提示词；最终负向 = 后端自动抽取 + 这里的内容。 */
 const negativePrompt = ref('')
-/** 双人姿势的人物 B 文字设定；只在选中 composition=pair 姿势时参与提交。 */
-const personBText = ref('')
+/**
+ * 双人姿势的人物 B 文字变体（v1.5）。
+ *
+ * 每条变体 = B 专属的三类人物碎片 + 自由文字；批量时与 A 人像按序号 1:1 配对。
+ * `personBText` 仍保留为「当前变体的自由文字」兼容读写，旧调用方无需改动。
+ */
+const personBVariants = ref<RecipePersonBVariant[]>([])
+/** 当前编辑 / 预览使用的变体下标；越界时回落到 0。 */
+const activePersonBVariantIndex = ref(0)
+/** 变体 id 计数器：仅本会话内唯一，避免用时间戳导致持久化不稳定。 */
+let personBVariantSeq = 0
+
+/** 当前激活变体；空列表时为 null。 */
+const activePersonBVariant = computed<RecipePersonBVariant | null>(() => {
+  const list = personBVariants.value
+  if (!list.length) return null
+  const index = Math.min(Math.max(activePersonBVariantIndex.value, 0), list.length - 1)
+  return list[index] ?? null
+})
+
+/** 双人姿势的人物 B 自由文字；读写当前激活变体（旧 API 兼容）。 */
+const personBText = computed<string>({
+  get: () => activePersonBVariant.value?.freeText ?? '',
+  set: (value: string) => {
+    const index = activePersonBVariantIndex.value
+    const variant = activePersonBVariant.value
+    if (!variant) return
+    personBVariants.value = personBVariants.value.map((item, position) =>
+      position === index ? { ...item, freeText: value } : item,
+    )
+  },
+})
+
+/** 新建一个带唯一 id 的空变体。 */
+function newPersonBVariant(): RecipePersonBVariant {
+  personBVariantSeq += 1
+  return createEmptyPersonBVariant(`b-${personBVariantSeq}`)
+}
+
+/** 确保至少有一条变体（双人姿势首次进入 / 旧数据迁移时使用）。 */
+function ensurePersonBVariant(): RecipePersonBVariant {
+  const current = activePersonBVariant.value
+  if (current) return current
+  const variant = newPersonBVariant()
+  personBVariants.value = [variant]
+  activePersonBVariantIndex.value = 0
+  return variant
+}
+
+/** 新增变体并切到新变体；达到上限时保持原状态并返回 false。 */
+function addPersonBVariant(): boolean {
+  if (personBVariants.value.length >= MAX_PERSON_B_VARIANTS) return false
+  personBVariants.value = [...personBVariants.value, newPersonBVariant()]
+  activePersonBVariantIndex.value = personBVariants.value.length - 1
+  return true
+}
+
+/** 删除指定变体（缺省删当前）；删空后自动补一条空变体，保证双人卡片可编辑。 */
+function removePersonBVariant(index?: number): void {
+  const target = index ?? activePersonBVariantIndex.value
+  if (target < 0 || target >= personBVariants.value.length) return
+  personBVariants.value = personBVariants.value.filter((_, position) => position !== target)
+  if (!personBVariants.value.length) {
+    personBVariants.value = [newPersonBVariant()]
+  }
+  activePersonBVariantIndex.value = Math.min(
+    target,
+    Math.max(0, personBVariants.value.length - 1),
+  )
+}
+
+/** 切换当前编辑的变体。 */
+function setActivePersonBVariant(index: number): void {
+  if (index < 0 || index >= personBVariants.value.length) return
+  activePersonBVariantIndex.value = index
+}
 
 /**
  * 三槽模式（P2 替代态，方案 §4.4）。
@@ -182,6 +259,15 @@ const hasPairPose = computed(() =>
     (entry) =>
       entry.item.composition === 'pair' || entry.item.id.startsWith('pair'),
   ),
+)
+
+/** 双人姿势首次出现（含从磁盘恢复）时自动补一条空变体，保证 B 卡片可编辑。 */
+watch(
+  hasPairPose,
+  (pair) => {
+    if (pair && !personBVariants.value.length) ensurePersonBVariant()
+  },
+  { immediate: true },
 )
 
 /** 非空槽位数量（0–3）；数组里有内容即视为该槽已选。 */
@@ -509,7 +595,8 @@ function clearDraft(): void {
   // 文本补充与负向同属草稿；清空后允许下次重新从磁盘恢复（测试与显式清空共用）。
   textFragments.value = createEmptyRecipeTextFragments()
   negativePrompt.value = ''
-  personBText.value = ''
+  personBVariants.value = []
+  activePersonBVariantIndex.value = 0
   // 模式与「上次姿势」同属草稿：清空后回到「三槽都是空」的推导起点。
   slotModes.value = createEmptySlotModes()
   supplementFlags.value = createEmptySupplementFlags()
@@ -586,7 +673,9 @@ function persist(): void {
     // 文本补充存全文（不是只存 id）：恢复时不依赖库数据，也不会因为碎片池改名而丢内容。
     textFragments: cloneRecipeTextFragments(textFragments.value),
     negativePrompt: negativePrompt.value,
+    // 旧字段兼容：当前变体的自由文字；完整变体存 `personBVariants`。
     personBText: personBText.value,
+    personBVariants: clonePersonBVariants(personBVariants.value),
     // P2：三槽模式单独持久化（旧数据没有这三个字段时由 hydrate 推导）。
     portraitMode: slotModes.value.portrait,
     costumeMode: slotModes.value.costume,
@@ -758,6 +847,7 @@ function restoreTextFragmentsFromSettings(
     | 'textFragments'
     | 'negativePrompt'
     | 'personBText'
+    | 'personBVariants'
     | 'portraitSupplement'
     | 'costumeSupplement'
     | 'poseSupplement'
@@ -769,7 +859,21 @@ function restoreTextFragmentsFromSettings(
   extra.value = { ...stored.extra }
   textFragments.value = cloneRecipeTextFragments(stored.textFragments)
   negativePrompt.value = stored.negativePrompt
-  personBText.value = stored.personBText
+  // v1.5：优先恢复变体列表；旧快照只有 personBText 时迁移成第一条变体。
+  const restoredVariants = clonePersonBVariants(stored.personBVariants)
+  if (restoredVariants.length) {
+    personBVariants.value = restoredVariants
+  } else if (stored.personBText.trim()) {
+    personBVariants.value = [
+      { ...createEmptyPersonBVariant('b-1'), freeText: stored.personBText },
+    ]
+  } else {
+    personBVariants.value = []
+  }
+  activePersonBVariantIndex.value = Math.min(
+    activePersonBVariantIndex.value,
+    Math.max(0, personBVariants.value.length - 1),
+  )
   supplementFlags.value = cloneSupplementFlags({
     portrait: stored.portraitSupplement,
     costume: stored.costumeSupplement,
@@ -926,8 +1030,20 @@ watch(
   { flush: 'sync' },
 )
 watch(
-  personBText,
+  personBVariants,
   () => {
+    writeReferenceStudioSettings({
+      personBVariants: clonePersonBVariants(personBVariants.value),
+      // 旧字段同步为当前变体自由文字，保证旧读取方仍能拿到文本。
+      personBText: personBText.value,
+    })
+  },
+  { deep: true, flush: 'sync' },
+)
+watch(
+  activePersonBVariantIndex,
+  () => {
+    // 切换变体只影响「哪条是新旧字段的镜像」，不改变变体内容本身。
     writeReferenceStudioSettings({ personBText: personBText.value })
   },
   { flush: 'sync' },
@@ -988,7 +1104,15 @@ export function useReferenceRecipeDraft() {
     recipeSourceId,
     recipeSourceName,
     lastPoseId,
+    // v1.5：人物 B 文案变体（当前变体 + 增删 / 切换）
+    personBVariants,
+    activePersonBVariant,
+    activePersonBVariantIndex,
     personBText,
+    ensurePersonBVariant,
+    addPersonBVariant,
+    removePersonBVariant,
+    setActivePersonBVariant,
     hasPairPose,
     setSlotMode,
     setSlotSupplement,

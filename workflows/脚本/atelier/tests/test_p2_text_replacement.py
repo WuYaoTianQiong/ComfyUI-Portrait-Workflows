@@ -223,6 +223,62 @@ def test_person_b_text_ignored_for_single_pose():
     assert "人物B" not in prompt
 
 
+def test_person_b_fragment_fields_join_b_clause_in_fixed_order():
+    """v1.5：B 的面部/身材、服饰、自由补充按固定顺序并入同一个 B 条款。"""
+    psl_pair = RecipeEntry(
+        id="psl-D026", name="双臂前伸扶腰", composition="pair",
+    )
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        psl_pair,
+        style="none",
+        person_b_portrait_text="冷白皮，鹅蛋脸，深棕高马尾",
+        person_b_costume_text="浅蓝衬衫，米色长裙",
+        person_b_text="棕色乐福鞋，年龄与人物A相近",
+    )
+    assert (
+        "• 人物B（文字设定）：冷白皮，鹅蛋脸，深棕高马尾；"
+        "浅蓝衬衫，米色长裙；棕色乐福鞋，年龄与人物A相近。"
+    ) in prompt
+    assert "不要复用人物A的脸" in prompt
+
+
+def test_person_b_fragment_fields_ignored_for_single_pose():
+    """单人姿势下 B 碎片同样完全忽略，避免把 B 描述混进单人画面。"""
+    prompt = build_recipe_prompt(
+        PORTRAIT,
+        COSTUME,
+        POSE,
+        style="none",
+        person_b_portrait_text="冷白皮，鹅蛋脸",
+        person_b_costume_text="浅蓝衬衫，米色长裙",
+    )
+    assert "人物B" not in prompt
+
+
+def test_only_changing_b_keeps_a_prompt_identical():
+    """隔离回归：只改 B 碎片时，A 的提示词（含双人要求前半段）必须逐字不变。"""
+    psl_pair = RecipeEntry(
+        id="psl-D026", name="双臂前伸扶腰", composition="pair",
+    )
+    base = dict(portrait=PORTRAIT, costume=COSTUME, pose=psl_pair, style="none")
+    first = build_recipe_prompt(
+        **base,
+        person_b_portrait_text="冷白皮，鹅蛋脸",
+        person_b_costume_text="浅蓝衬衫，米色长裙",
+    )
+    second = build_recipe_prompt(
+        **base,
+        person_b_portrait_text="小麦色皮肤，圆脸，金色短发",
+        person_b_costume_text="酒红西装，黑色阔腿裤",
+    )
+    # B 条款之前的所有内容（人物A条款 + 双人要求）完全一致
+    assert first.split("• 人物B（文字设定）")[0] == second.split("• 人物B（文字设定）")[0]
+    assert "冷白皮，鹅蛋脸；浅蓝衬衫，米色长裙" in first
+    assert "小麦色皮肤，圆脸，金色短发；酒红西装，黑色阔腿裤" in second
+
+
 # ---------------------------------------------------------------------------
 # 4. 三槽全文本无图 → 400（C1：至少留 1 张图）
 # ---------------------------------------------------------------------------

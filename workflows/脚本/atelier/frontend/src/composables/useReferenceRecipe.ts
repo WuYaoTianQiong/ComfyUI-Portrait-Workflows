@@ -503,6 +503,7 @@ export function useReferenceRecipe() {
       ratioDimension.value,
       workflowDimension.value,
       draft.slotModes.value,
+      draft.hasPairPose.value ? draft.personBVariants.value.length : 0,
     ),
   )
   const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
@@ -664,6 +665,8 @@ export function useReferenceRecipe() {
         extraId: extraId.value,
         extraLibrary: extraLibrary.value,
         extraText: extraText.value,
+        // v1.5：预览用当前激活的 B 变体（面/身、服饰、自由文字三部分分开下发）。
+        personBVariant: draft.hasPairPose.value ? draft.activePersonBVariant.value : null,
         personBText: draft.hasPairPose.value ? draft.personBText.value : '',
         workflow: previewWorkflow.value?.path ?? '',
         bodyMode: effectiveBodyMode.value,
@@ -1088,6 +1091,10 @@ export function useReferenceRecipe() {
           extraLibrary: extraLibrary.value,
           // 第 4 槽不进入批次维度：每组共用同一份 extra / extra_text。
           extraText: extraText.value,
+          // v1.5：每组提交自己的 B 变体；无变体时回退到当前变体 / 旧自由文字。
+          personBVariant: draft.hasPairPose.value
+            ? (group.personBVariant ?? draft.activePersonBVariant.value)
+            : null,
           personBText: draft.hasPairPose.value ? draft.personBText.value : '',
           // 每组提交自己的工作流（契约 C-REF-TOTAL@2）；空串由后端用默认工作流。
           workflow: group.workflow,
@@ -1306,6 +1313,8 @@ export function useReferenceRecipe() {
         draft.slotModes.value,
         draft.supplementFlags.value,
       ),
+      // v1.5：双人姿势下 A 人像与 B 变体 1:1 配对；单人姿势不启用。
+      personBVariants: draft.hasPairPose.value ? draft.personBVariants.value : [],
     })
   }
 

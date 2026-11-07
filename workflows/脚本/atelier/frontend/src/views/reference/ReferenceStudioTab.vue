@@ -52,6 +52,7 @@ import {
 import type { RecipeBatch, RecipeBodyMode } from '../../composables/useReferenceRecipe'
 import {
   BARE_COSTUME_TEXT_CONFLICT_HINT,
+  MAX_PERSON_B_VARIANTS,
   POSE_TEXT_PAIR_CONFLICT_HINT,
   RECIPE_SLOT_KEYS,
   compileActiveSlotTexts,
@@ -75,6 +76,7 @@ import StudioPromptEditor from './components/reference/StudioPromptEditor.vue'
 import StudioResultBoard from './components/reference/StudioResultBoard.vue'
 import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
 import StudioTextSupplementCard from './components/reference/StudioTextSupplementCard.vue'
+import StudioPersonBEditor from './components/reference/StudioPersonBEditor.vue'
 import HairPickerModal from './components/reference/HairPickerModal.vue'
 import type { HairItem } from '../../api/reference'
 import {
@@ -135,14 +137,20 @@ const negativePrompt = computed<string>({
   },
 })
 
-/** 人物 B 文字设定（双人姿势专用）；与草稿单例同步，换 seed / 画质不会清空。 */
+/** 双人姿势专用：B 变体由草稿单例持有，换 seed / 画质不会清空。 */
 const hasPairPose = draft.hasPairPose
-const personBText = computed<string>({
-  get: () => draft.personBText.value,
-  set: (value) => {
-    draft.personBText.value = value
-  },
-})
+
+/** 新增一条 B 变体；达到上限时只提示，不静默失败。 */
+function onAddPersonBVariant(): void {
+  if (!draft.addPersonBVariant()) {
+    toast.info(`人物 B 变体最多 ${MAX_PERSON_B_VARIANTS} 组，请先删除一组再新增`)
+  }
+}
+
+/** 删除当前 B 变体（草稿层保证至少保留一组）。 */
+function onRemovePersonBVariant(index: number): void {
+  draft.removePersonBVariant(index)
+}
 
 /**
  * 「画风技术」碎片与画风预设互斥（方案 §5.4）：
@@ -616,6 +624,15 @@ const slotCards = computed<SlotCardView[]>(() => {
   ]
 })
 
+/** 已选姿势里是否含「实测不可用」条目（v1.5 D046 降权提示）。 */
+const unusablePoseMessage = computed(() => {
+  const entry = draft.pose.value.find((item) => item.item.usable === false)
+  if (!entry) return ''
+  const reason = entry.item.usableNote || '实测姿势不跟随参考图'
+  return `姿势「${entry.item.姿势名称}」标记为不可用：${reason}。下一步：换一张姿势，或仅在确认可接受时继续提交。`
+})
+const unusablePoseSelected = computed(() => unusablePoseMessage.value !== '')
+
 /** 三槽当前是否按深度图取姿势缩略图（图墙与清单共用同一模式）。 */
 const poseUseDepth = computed(() => draft.pose.value[0]?.useDepth ?? poseDepthMode.value)
 
@@ -653,6 +670,8 @@ const previewGroups = computed(() =>
     // P2：清单与提交共用模式 / 文本，避免「清单显示图片、提交却发文本」。
     slotModes: slotModes.value,
     slotTexts: slotTexts.value,
+    // v1.5：双人姿势下 A 人像与 B 变体 1:1 配对，清单与计数器同口径。
+    personBVariants: draft.hasPairPose.value ? draft.personBVariants.value : [],
   }),
 )
 
@@ -1338,25 +1357,26 @@ onMounted(async () => {
         </div>
       </div>
 
-      <section v-if="hasPairPose" class="pair-b-card" data-testid="studio-pair-b">
-        <header class="pair-b-card__head">
-          <span class="pair-b-card__title">人物 B 文字设定</span>
-          <span class="pair-b-card__badge">双人姿势</span>
-        </header>
-        <p class="pair-b-card__hint">
-          人物 A 沿用图2的脸型/发型与图3的衣装；人物 B 只按这段文字生成，脸会与 A 区分。
-          不填时 B 只有「同色系简化款」，模型容易画成 A 的克隆。
-          <template v-if="manualPromptActive">当前已手动改写提示词，B 设定不参与提交，请直接改下方提示词。</template>
-        </p>
-        <textarea
-          v-model="personBText"
-          class="pair-b-card__text"
-          rows="3"
-          data-testid="studio-pair-b-text"
-          :disabled="manualPromptActive"
-          placeholder="例如：成年女性，金色齐肩短发，酒红色西装外套，黑色阔腿长裤，白色运动鞋；五官与人物 A 明显不同。"
-        ></textarea>
-      </section>
+      <StudioPersonBEditor
+        v-if="hasPairPose"
+        :variants="draft.personBVariants.value"
+        :active-index="draft.activePersonBVariantIndex.value"
+        :safe-mode="safeMode"
+        :disabled="manualPromptActive"
+        @update:variants="draft.personBVariants.value = $event"
+        @update:active-index="draft.setActivePersonBVariant($event)"
+        @add="onAddPersonBVariant"
+        @remove="onRemovePersonBVariant"
+      />
+
+      <p
+        v-if="unusablePoseSelected"
+        class="studio-error studio-error--inline"
+        role="alert"
+        data-testid="studio-pose-unusable"
+      >
+        {{ unusablePoseMessage }}
+      </p>
 
     </ReferenceSectionCard>
 
@@ -2035,63 +2055,6 @@ onMounted(async () => {
 .extra-library:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-.pair-b-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--surface-panel);
-}
-
-.pair-b-card__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pair-b-card__title {
-  color: var(--text-strong);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.pair-b-card__badge {
-  padding: 2px 8px;
-  border-radius: 9999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.pair-b-card__hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.pair-b-card__text {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--surface-sunken);
-  color: var(--text-strong);
-  font-size: 13px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.pair-b-card__text:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .extra-item {

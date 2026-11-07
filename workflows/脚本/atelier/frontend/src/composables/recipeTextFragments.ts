@@ -14,10 +14,33 @@
 import { FRAGMENT_TYPES } from '../constants'
 import type { FragmentType } from '../constants'
 
+/**
+ * 碎片的人物归属（v1.5）。
+ *
+ * 只有三类人物碎片（人物面部 / 人物身材 / 人物服饰）区分 A / B；
+ * 其余五类（姿态动作及画面修饰）恒为共享，不写 `person`。
+ * 旧数据没有该字段 → 一律视为 A（向后兼容）。
+ */
+export type FragmentPerson = 'A' | 'B'
+
 /** 一条已选碎片；`content` 存全文（最长 783 字）。 */
 export interface SelectedFragment {
   type: FragmentType
   content: string
+  /** 仅人物类碎片：A / B；缺省 = A（旧数据）。 */
+  person?: FragmentPerson
+}
+
+/** 可区分 A/B 的三类人物碎片。 */
+export const PERSON_FRAGMENT_TYPES: readonly FragmentType[] = [
+  '人物面部',
+  '人物身材',
+  '人物服饰',
+]
+
+/** 该类型是否支持人物归属（其余类型共享）。 */
+export function isPersonFragmentType(type: FragmentType): boolean {
+  return PERSON_FRAGMENT_TYPES.includes(type)
 }
 
 /** 八类碎片表：所有类可空，同类多碎片在槽内拼接，不参与笛卡尔积。 */
@@ -186,12 +209,29 @@ export function resolveSlotModes(modes: RecipeSlotModes | undefined): RecipeSlot
   return modes ? cloneSlotModes(modes) : createImageSlotModes()
 }
 
-/** 取某槽对应的全部碎片（人像槽 = 面部 + 身材）。 */
+/** 取某类中属于指定人物的碎片；旧数据缺 `person` 时按 A 处理。 */
+export function fragmentsOfPerson(
+  fragments: RecipeTextFragments | undefined,
+  type: FragmentType,
+  person: FragmentPerson,
+): SelectedFragment[] {
+  return fragmentsOf(fragments, type).filter(
+    (item) => (item.person ?? 'A') === person,
+  )
+}
+
+/**
+ * 取某槽对应的全部碎片（人像槽 = 面部 + 身材）。
+ *
+ * 只统计 **A**：B 是独立文字设定，不占图片槽，也不参与槽位模式推导（v1.5）。
+ */
 export function slotFragmentItems(
   fragments: RecipeTextFragments | undefined,
   slot: RecipeSlotKey,
 ): SelectedFragment[] {
-  return SLOT_TEXT_TYPES[slot].flatMap((type) => fragmentsOf(fragments, type))
+  return SLOT_TEXT_TYPES[slot].flatMap((type) =>
+    fragmentsOfPerson(fragments, type, 'A'),
+  )
 }
 
 /** 按「三槽条目数 + 八类碎片」推导整份模式表（旧快照缺 mode 时使用）。 */
@@ -289,7 +329,13 @@ export function cloneRecipeTextFragments(
       if (typeof content !== 'string') continue
       const text = content.trim()
       if (!text) continue
-      entries.push({ type, content: text })
+      const entry: SelectedFragment = { type, content: text }
+      // 只有人物类碎片保留 A/B 归属；旧数据缺字段按 A（不写入，保持体积不变）。
+      if (isPersonFragmentType(type)) {
+        const person = (item as { person?: unknown }).person
+        if (person === 'A' || person === 'B') entry.person = person
+      }
+      entries.push(entry)
       if (entries.length >= MAX_FRAGMENTS_PER_TYPE) break
     }
     result[type] = entries
@@ -330,22 +376,32 @@ export interface CompiledTextFragments {
   costumeText: string
   poseText: string
   modifierFragments: string
+  /** v1.5：人物 B 的面部 + 身材（独立字段，不混入 A 的 portrait_text）。 */
+  personBPortraitText: string
+  /** v1.5：人物 B 的服饰（独立字段，不混入 A 的 costume_text）。 */
+  personBCostumeText: string
 }
 
 /**
  * 按契约把八类碎片编译成提交体字段（方案 §4.2）：
- * - 人物面部 + 人物身材 → `portrait_text`；
- * - 人物服饰 → `costume_text`；
+ * - 人物面部 + 人物身材（A）→ `portrait_text`；
+ * - 人物服饰（A）→ `costume_text`；
  * - 姿态动作 → `pose_text`；
  * - 拍摄视角 / 场景环境 / 光影色调 / 画风技术 → `modifier_fragments`
- *   （多行 `• 类型：内容`，同类多条各占一行）。
+ *   （多行 `• 类型：内容`，同类多条各占一行）；
+ * - v1.5：人物 B 的三类碎片 → `personBPortraitText` / `personBCostumeText`，
+ *   与 A 完全隔离；旧数据缺 `person` 一律归 A。
  */
 export function compileRecipeTextFragments(
   fragments: RecipeTextFragments | undefined,
 ): CompiledTextFragments {
   const portrait = [
-    ...fragmentsOf(fragments, '人物面部'),
-    ...fragmentsOf(fragments, '人物身材'),
+    ...fragmentsOfPerson(fragments, '人物面部', 'A'),
+    ...fragmentsOfPerson(fragments, '人物身材', 'A'),
+  ]
+  const personBPortrait = [
+    ...fragmentsOfPerson(fragments, '人物面部', 'B'),
+    ...fragmentsOfPerson(fragments, '人物身材', 'B'),
   ]
 
   const modifierLines: string[] = []
@@ -359,9 +415,105 @@ export function compileRecipeTextFragments(
 
   return {
     portraitText: joinFragmentContents(portrait),
-    costumeText: joinFragmentContents(fragmentsOf(fragments, '人物服饰')),
+    costumeText: joinFragmentContents(fragmentsOfPerson(fragments, '人物服饰', 'A')),
     poseText: joinFragmentContents(fragmentsOf(fragments, '姿态动作')),
     modifierFragments: modifierLines.join('\n'),
+    personBPortraitText: joinFragmentContents(personBPortrait),
+    personBCostumeText: joinFragmentContents(
+      fragmentsOfPerson(fragments, '人物服饰', 'B'),
+    ),
+  }
+}
+
+/**
+ * 人物 B 文字变体（v1.5）。
+ *
+ * 一组 B 专属碎片（面部 / 身材 / 服饰）+ 一段自由文字；批量生成时按序号与
+ * A 人像 1:1 配对，避免 A × B 的笛卡尔积爆炸。
+ */
+export interface RecipePersonBVariant {
+  id: string
+  fragments: RecipeTextFragments
+  freeText: string
+}
+
+/** 变体数量软上限：超过后批量配对产物过多，UI 直接禁止新增。 */
+export const MAX_PERSON_B_VARIANTS = 8
+
+/** 新建一个空变体（只清空三类人物碎片，其余类不使用但保持结构完整）。 */
+export function createEmptyPersonBVariant(id: string): RecipePersonBVariant {
+  return { id, fragments: createEmptyRecipeTextFragments(), freeText: '' }
+}
+
+/** 变体只描述 B 的人物特征：保留三类人物碎片，强制 person='B'，其余类清空。 */
+function normalizeVariantFragments(source: unknown): RecipeTextFragments {
+  const fragments = cloneRecipeTextFragments(source)
+  for (const type of FRAGMENT_TYPES) {
+    if (isPersonFragmentType(type)) {
+      fragments[type] = fragments[type].map((item) => ({ ...item, person: 'B' as const }))
+    } else {
+      fragments[type] = []
+    }
+  }
+  return fragments
+}
+
+/** 单条变体容错归一；脏数据返回 null。 */
+export function clonePersonBVariant(
+  source: unknown,
+  index = 0,
+): RecipePersonBVariant | null {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null
+  const record = source as { id?: unknown; fragments?: unknown; freeText?: unknown }
+  const id =
+    typeof record.id === 'string' && record.id.trim()
+      ? record.id.trim()
+      : `b-${index + 1}`
+  return {
+    id,
+    fragments: normalizeVariantFragments(record.fragments),
+    freeText: typeof record.freeText === 'string' ? record.freeText : '',
+  }
+}
+
+/**
+ * 变体表容错归一：非法项丢弃、id 重复时用序号补全、总数裁剪到上限。
+ *
+ * 旧快照没有该字段 → 空数组；迁移由 `useReferenceRecipeDraft` 负责
+ * （把旧的 `personBText` 放进第一条变体的自由文字）。
+ */
+export function clonePersonBVariants(source: unknown): RecipePersonBVariant[] {
+  if (!Array.isArray(source) || source.length === 0) return []
+  const seen = new Set<string>()
+  const variants: RecipePersonBVariant[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    const variant = clonePersonBVariant(source[index], index)
+    if (!variant) continue
+    const id = seen.has(variant.id) ? `${variant.id}-${index + 1}` : variant.id
+    seen.add(id)
+    variants.push({ ...variant, id })
+    if (variants.length >= MAX_PERSON_B_VARIANTS) break
+  }
+  return variants
+}
+
+/** 变体编译结果；空串表示该字段不发送。 */
+export interface CompiledPersonBVariant {
+  portraitText: string
+  costumeText: string
+  freeText: string
+}
+
+/** 编译一个 B 变体（只取 B 的三类人物碎片 + 自由文字）。 */
+export function compilePersonBVariant(
+  variant: RecipePersonBVariant | null | undefined,
+): CompiledPersonBVariant {
+  if (!variant) return { portraitText: '', costumeText: '', freeText: '' }
+  const compiled = compileRecipeTextFragments(variant.fragments)
+  return {
+    portraitText: compiled.personBPortraitText,
+    costumeText: compiled.personBCostumeText,
+    freeText: variant.freeText.trim(),
   }
 }
 

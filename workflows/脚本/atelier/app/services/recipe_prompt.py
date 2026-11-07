@@ -182,6 +182,8 @@ def build_recipe_prompt(
     negative_prompt: str = "",
     person_b_text: str = "",
     extra_text: str = "",
+    person_b_portrait_text: str = "",
+    person_b_costume_text: str = "",
 ) -> str:
     """按上游顺序拼出完整提示词；未知画风/素体模式抛 ValueError（由路由转成 400）。
 
@@ -203,6 +205,9 @@ def build_recipe_prompt(
       提交层 `compile_prompt` / `inject_prompt` 处理。
     - `extra_text`（第 4 槽文字补充，2026-11-07）：仅在 `extra` 图片存在时生效，
       在发型 / 附加参考主句后追加「此外需体现」分句；无图时不渲染（路由层已 400）。
+    - `person_b_portrait_text` / `person_b_costume_text`（v1.5，2026-11-07）：
+      人物 B 的面部/身材与服饰文本碎片，只在双人姿势下并入「人物B（文字设定）」条款；
+      单人或无 B 内容时完全忽略，A 的条款（图N人物 + 槽位文本）逐字不变。
 
     P2 替代态（方案 §5.1 / §4.4）：对应槽**无图**且文本非空时，用文本句替换图片主句
     （`portrait is None` 等），三槽要么图片句、要么文本句，二选一。
@@ -319,7 +324,16 @@ def build_recipe_prompt(
     is_pair = bool(
         pose and (pose.composition == "pair" or pose.id.startswith("pair"))
     )
-    b_text = person_b_text.strip()
+    # B 的三部分文本（面部/身材、服饰、自由补充）各自独立；只在双人姿势下并入 B 条款。
+    b_parts = [
+        part
+        for part in (
+            _replacement_text(person_b_portrait_text),
+            _replacement_text(person_b_costume_text),
+            _replacement_text(person_b_text),
+        )
+        if part
+    ]
     if is_pair:
         if body_mode == "bare":
             clauses.append(
@@ -327,7 +341,7 @@ def build_recipe_prompt(
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
-        elif b_text:
+        elif b_parts:
             a_parts: list[str] = []
             if portrait_idx:
                 a_parts.append(f"脸型、五官、发型严格沿用图{portrait_idx}中的人物")
@@ -340,8 +354,10 @@ def build_recipe_prompt(
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
+            # B 的三部分按「面部/身材 → 服饰 → 自由补充」固定顺序拼接；
+            # A 的条款完全不动，只改 B 文本时 A 的提示词逐字不变（隔离回归）。
             clauses.append(
-                f"• 人物B（文字设定）：{_ensure_period(b_text)}"
+                f"• 人物B（文字设定）：{_ensure_period('；'.join(b_parts))}"
                 "人物B的脸型、五官必须与人物A明显不同，不要复用人物A的脸。"
             )
         else:

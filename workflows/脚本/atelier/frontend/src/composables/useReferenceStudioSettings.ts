@@ -23,11 +23,13 @@
 
 import type { ReferenceLibraryId } from '../api/reference'
 import {
+  clonePersonBVariants,
   cloneRecipeTextFragments,
   createEmptyRecipeTextFragments,
   isRecipeSlotMode,
 } from './recipeTextFragments'
 import type {
+  RecipePersonBVariant,
   RecipeSlotMode,
   RecipeTextFragments,
 } from './recipeTextFragments'
@@ -133,6 +135,12 @@ export interface ReferenceStudioSettings {
   negativePrompt: string
   /** 双人姿势的人物 B 文字设定；空串 = 不启用 B 文字。 */
   personBText: string
+  /**
+   * v1.5：人物 B 的文字变体列表（B 专属碎片 + 自由文字）。
+   *
+   * 旧快照没有该字段 → 空数组；草稿层会把旧 `personBText` 迁移成第一条变体。
+   */
+  personBVariants: RecipePersonBVariant[]
   /**
    * 三槽模式（P2 替代态，方案 §4.4）。
    *
@@ -312,6 +320,8 @@ export function parseReferenceStudioSettings(
     typeof value.negativePrompt === 'string' ? value.negativePrompt : ''
   const personBText =
     typeof value.personBText === 'string' ? value.personBText : ''
+  // v1.5 扩展字段：容错读回；旧快照缺字段 → 空数组（由草稿层迁移旧文本）。
+  const personBVariants = clonePersonBVariants(value.personBVariants)
 
   return {
     portrait,
@@ -327,6 +337,7 @@ export function parseReferenceStudioSettings(
     textFragments,
     negativePrompt,
     personBText,
+    personBVariants,
     // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
     portraitMode: parseSlotMode(value.portraitMode),
     costumeMode: parseSlotMode(value.costumeMode),
@@ -361,6 +372,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     textFragments: createEmptyRecipeTextFragments(),
     negativePrompt: '',
     personBText: '',
+    personBVariants: [],
     // 默认没有模式记录：旧数据同样走「有图 / 有文本」推导。
     portraitMode: null,
     costumeMode: null,

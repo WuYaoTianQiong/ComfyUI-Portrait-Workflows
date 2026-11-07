@@ -865,6 +865,31 @@ def test_person_b_text_reaches_prompt_for_composition_pair(api, recipe_env):
     assert "不要复用人物A的脸" in prompt
 
 
+def test_person_b_fragment_fields_reach_pair_prompt(api, recipe_env):
+    """v1.5：B 的面部/身材、服饰字段与自由文本一起进入 B 条款；A 槽位文本不受影响。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "portrait_text": "人物A：冷白皮",
+            "portrait_supplement": True,
+            "person_b_portrait_text": "冷白皮，鹅蛋脸，深棕高马尾",
+            "person_b_costume_text": "浅蓝衬衫，米色长裙",
+            "person_b_text": "棕色乐福鞋",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    # A 的补充文本仍在 A 条款里
+    assert "此外需体现：人物A：冷白皮" in prompt
+    # B 三部分按固定顺序合成同一段 B 条款
+    assert "• 人物B（文字设定）：冷白皮，鹅蛋脸，深棕高马尾；浅蓝衬衫，米色长裙；棕色乐福鞋。" in prompt
+
+
 def test_no_costume_prompt_drops_original_outfit_hint(api, recipe_env):
     """未选服装时不能写「保留图1人物原有可见服装」——否则模型会补全/捏造衣服。"""
     resp = api.post(
