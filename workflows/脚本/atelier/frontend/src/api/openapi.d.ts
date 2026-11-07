@@ -3527,6 +3527,15 @@ export interface components {
              * @default
              */
             group: string;
+            /** Hair Back Url */
+            hair_back_url?: string | null;
+            /** Hair Front Url */
+            hair_front_url?: string | null;
+            /**
+             * Hair Usable
+             * @default false
+             */
+            hair_usable: boolean;
             /**
              * Has Depth
              * @default false
@@ -6723,7 +6732,7 @@ export interface operations {
     list_reference_items_api_reference_items_get: {
         parameters: {
             query?: {
-                /** @description pose / costume / portrait / costume-anime */
+                /** @description pose / costume / portrait / hair / costume-anime */
                 library?: string;
                 /** @description 直接匹配上游预拼好的「检索」串 */
                 search?: string;

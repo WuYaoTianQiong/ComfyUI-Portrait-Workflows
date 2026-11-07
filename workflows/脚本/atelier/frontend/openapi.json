@@ -2891,6 +2891,33 @@
             "title": "Group",
             "type": "string"
           },
+          "hair_back_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hair Back Url"
+          },
+          "hair_front_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hair Front Url"
+          },
+          "hair_usable": {
+            "default": false,
+            "title": "Hair Usable",
+            "type": "boolean"
+          },
           "has_depth": {
             "default": false,
             "title": "Has Depth",
@@ -8327,13 +8354,13 @@
         "operationId": "list_reference_items_api_reference_items_get",
         "parameters": [
           {
-            "description": "pose / costume / portrait / costume-anime",
+            "description": "pose / costume / portrait / hair / costume-anime",
             "in": "query",
             "name": "library",
             "required": false,
             "schema": {
               "default": "pose",
-              "description": "pose / costume / portrait / costume-anime",
+              "description": "pose / costume / portrait / hair / costume-anime",
               "title": "Library",
               "type": "string"
             }
