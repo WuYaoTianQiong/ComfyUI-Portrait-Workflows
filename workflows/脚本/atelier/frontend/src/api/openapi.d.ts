@@ -987,23 +987,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Check Progress */
-        get: operations["check_progress_api_jobs_progress_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/jobs/stop_all": {
         parameters: {
             query?: never;
@@ -6112,37 +6095,6 @@ export interface operations {
             query?: {
                 /** @description 逗号分隔的 job id；为空则订阅全部 */
                 ids?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    check_progress_api_jobs_progress_get: {
-        parameters: {
-            query?: {
-                prompt_id?: string;
             };
             header?: never;
             path?: never;

@@ -7057,47 +7057,6 @@
         ]
       }
     },
-    "/api/jobs/progress": {
-      "get": {
-        "operationId": "check_progress_api_jobs_progress_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "prompt_id",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Prompt Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Check Progress",
-        "tags": [
-          "任务"
-        ]
-      }
-    },
     "/api/jobs/stop_all": {
       "post": {
         "description": "停止所有进行中的任务（定向取消，不再 clear 整个队列）。",

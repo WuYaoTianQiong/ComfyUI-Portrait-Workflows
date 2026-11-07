@@ -15,7 +15,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services import job_state
-from app.services.comfyui_client import get_history_for_prompt
 
 router = APIRouter(tags=["任务"])
 
@@ -89,29 +88,6 @@ def job_events(ids: str = Query("", description="逗号分隔的 job id；为空
 @router.get("/jobs", response_model=JobListResponse)
 def list_jobs(active: bool = Query(False), limit: int = Query(50)):
     return {"jobs": job_state.list_snapshots(active=active, limit=limit)}
-
-
-# ---------------------------------------------------------------------------
-# 单条进度查询（保留给旧调用方）
-# 必须注册在 /jobs/{job_id} 之前，否则 "progress" 会被当成 job_id 并报 422
-# ---------------------------------------------------------------------------
-
-@router.get("/jobs/progress")
-def check_progress(prompt_id: str = Query("")):
-    if not prompt_id:
-        raise HTTPException(400, "缺少 prompt_id")
-    try:
-        hist = get_history_for_prompt(prompt_id)
-        done = False
-        images = []
-        if hist and prompt_id in hist:
-            done = True
-            for node_out in hist[prompt_id].get("outputs", {}).values():
-                for img in node_out.get("images", []):
-                    images.append(img)
-        return {"done": done, "images": images, "status": "done" if done else "unknown"}
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 @router.get("/jobs/{job_id}")

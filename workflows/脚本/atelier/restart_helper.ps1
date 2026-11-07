@@ -1,6 +1,6 @@
 ﻿# 释放端口上的旧进程（精确查杀监听套接字拥有者，跳过系统进程）
 # 端口取自 config.py 的 port 设置，作为唯一数据源，避免多处硬编码
-$configPath = Join-Path $PSScriptRoot "config.py"
+$configPath = Join-Path $PSScriptRoot "app\config.py"
 $port = 8656
 if (Test-Path $configPath) {
     $txt = Get-Content $configPath -Raw
