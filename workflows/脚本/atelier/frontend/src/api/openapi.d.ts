@@ -3415,6 +3415,16 @@ export interface components {
              */
             output_subfolder: string;
             /**
+             * Person B Costume Text
+             * @default
+             */
+            person_b_costume_text: string;
+            /**
+             * Person B Portrait Text
+             * @default
+             */
+            person_b_portrait_text: string;
+            /**
              * Person B Text
              * @default
              */
@@ -3652,6 +3662,16 @@ export interface components {
             tags?: string[];
             /** Thumb Url */
             thumb_url?: string | null;
+            /**
+             * Usable
+             * @default true
+             */
+            usable: boolean;
+            /**
+             * Usable Note
+             * @default
+             */
+            usable_note: string;
         };
         /** ReferenceItemListResponse */
         ReferenceItemListResponse: {

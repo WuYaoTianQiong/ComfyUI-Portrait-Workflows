@@ -2779,6 +2779,16 @@
             "title": "Output Subfolder",
             "type": "string"
           },
+          "person_b_costume_text": {
+            "default": "",
+            "title": "Person B Costume Text",
+            "type": "string"
+          },
+          "person_b_portrait_text": {
+            "default": "",
+            "title": "Person B Portrait Text",
+            "type": "string"
+          },
           "person_b_text": {
             "default": "",
             "title": "Person B Text",
@@ -3131,6 +3141,16 @@
               }
             ],
             "title": "Thumb Url"
+          },
+          "usable": {
+            "default": true,
+            "title": "Usable",
+            "type": "boolean"
+          },
+          "usable_note": {
+            "default": "",
+            "title": "Usable Note",
+            "type": "string"
           }
         },
         "required": [
