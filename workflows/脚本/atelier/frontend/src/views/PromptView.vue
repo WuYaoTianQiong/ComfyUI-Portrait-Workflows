@@ -48,7 +48,7 @@ import { usePromptList } from '../composables/usePromptList'
 import WorkflowParams from '../components/WorkflowParams.vue'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import { statusLabel } from '../utils/format'
-import Pager from '../components/Pager.vue'
+import PromptListFooter from '../components/PromptListFooter.vue'
 import PromptListRow from '../components/PromptListRow.vue'
 import { FRAGMENT_TYPES } from '../constants'
 import { flattenCategories } from '../utils/categories'
@@ -609,6 +609,11 @@ function selectAllOnPage() {
   selectedIds.value = new Set(list.value.map((it) => it.id))
 }
 
+function onPageSizeChange(size: number) {
+  pageSize.value = size
+  page.value = 1
+}
+
 function clearSelection() {
   selectedIds.value = new Set()
 }
@@ -1087,43 +1092,24 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div v-if="selectedCount" class="bulk">
-        <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 条</span>
-        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
-        <button class="btn btn-sm" @click="clearSelection">取消</button>
-        <span class="spacer" />
-        <button class="btn btn-sm" @click="batchFavorite">收藏</button>
-        <button class="btn btn-sm" title="替换选中提示词的某一类碎片后出图" @click="openReplaceForSelection">
-          批量替换
-        </button>
-        <button
-          class="btn btn-sm primary"
-          :class="{ loading: generating }"
-          :disabled="generating"
-          @click="batchGenerate"
-        >
-          批量出图
-        </button>
-        <button class="btn btn-sm danger" @click="batchDelete">删除</button>
-      </div>
-
-      <div class="pager-row">
-        <span class="count">第 {{ page }} / {{ totalPages }} 页</span>
-        <div class="pager-center">
-          <Pager compact :page="page" :total-pages="totalPages" @update:page="page = $event" />
-          <select v-model.number="pageSize" class="page-size" title="每页条数" @change="page = 1">
-            <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }} 条/页</option>
-          </select>
-        </div>
-        <button
-          class="btn btn-sm locate-btn"
-          :disabled="selectedId === null"
-          title="滚动到当前选中的提示词"
-          @click="locateSelected"
-        >
-          定位
-        </button>
-      </div>
+      <PromptListFooter
+        :selected-count="selectedCount"
+        :generating="generating"
+        :page="page"
+        :total-pages="totalPages"
+        :page-size="pageSize"
+        :selected-id="selectedId"
+        :page-sizes="PAGE_SIZES"
+        @select-all="selectAllOnPage"
+        @clear-selection="clearSelection"
+        @batch-favorite="batchFavorite"
+        @batch-replace="openReplaceForSelection"
+        @batch-generate="batchGenerate"
+        @batch-delete="batchDelete"
+        @update:page="page = $event"
+        @page-size-change="onPageSizeChange"
+        @locate="locateSelected"
+      />
     </aside>
 
     <aside v-else class="rail">
@@ -1837,29 +1823,6 @@ onBeforeUnmount(() => {
 }
 
 /* 批量操作条：浮在页面底部居中。 */
-.bulk {
-  position: fixed;
-  bottom: var(--gap-lg);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap-md);
-  border-radius: var(--radius-pill);
-  background: var(--panel-3);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
-
-.bulk > button {
-  flex: none;
-}
-
 .list.has-bulk {
   /* 给底部悬浮条留出滚动空间，最后一条能被滚到它上方 */
   padding-bottom: var(--gap-2xl);
@@ -1877,10 +1840,6 @@ onBeforeUnmount(() => {
   .list.has-bulk {
     padding-bottom: 104px;
   }
-}
-
-.bulk-count b {
-  color: var(--primary);
 }
 
 .btn.primary {
@@ -1903,49 +1862,8 @@ onBeforeUnmount(() => {
 }
 
 /* 翻页行：全选 / 总数 / 翻页 / 每页条数，都在侧栏底部一行里 */
-.pager-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap);
-  border-top: 1px solid var(--border);
-}
-
-.pager-row .count {
-  justify-self: start;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-
-.pager-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--gap-xs);
-}
-
-.locate-btn {
-  justify-self: end;
-}
-
 .row.locate-flash {
   box-shadow: inset 0 0 0 1px var(--primary);
-}
-
-.page-size {
-  flex: none;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 3px 4px;
-  font: inherit;
-  font-size: var(--fs-xs);
 }
 
 /* ---------- 详情 ---------- */
