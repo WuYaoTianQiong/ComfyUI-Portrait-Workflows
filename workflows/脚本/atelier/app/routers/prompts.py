@@ -10,8 +10,8 @@ from typing import Optional
 from datetime import datetime
 
 from app.models import (
-    Prompt, Image, db, Category, Tag, EntityTag,
-    PromptCategory, PromptTag, auto_classify_prompt,
+    COMPOSE_CATEGORY, Prompt, Image, db, Category, Tag, EntityTag,
+    PromptCategory, PromptTag, auto_classify_prompt, get_or_create_system_category,
 )
 from app.services.fragment_syntax import parse
 from app.services.image_meta import get_image_metadata
@@ -476,13 +476,9 @@ def create_prompt(data: PromptCreate):
         # 标签文本 → entity_tags（文本是唯一事实来源，写文本就要同步关联表）
         sync_prompt_tags(r.id, data_dict.get("tags"))
 
-        # 自动分类到"组合创作"
+        # 自动分类到"组合创作"（按 system_key 取，改名后仍指向同一个分类）
         if auto_categorize or "组合创作" in (data_dict.get("tags") or ""):
-            # 查找或创建"组合创作"分类
-            cat = Category.get_or_none(Category.name == "组合创作")
-            if not cat:
-                cat = Category.create(name="组合创作", color="#6366f1", parent_id=None)
-            # 关联提示词到分类
+            cat = get_or_create_system_category(COMPOSE_CATEGORY)
             PromptCategory.get_or_create(prompt=r.id, category=cat.id)
 
     return {"success": True, "id": r.id}

@@ -28,7 +28,11 @@ class BaseModel(Model):
 class Category(BaseModel):
     """分类表（支持多级分类）"""
     id = AutoField()
-    name = TextField()  # 分类名称
+    name = TextField()  # 分类名称（可改名）
+    #: 系统分类的稳定身份（如 auto:composite）；用户分类为 NULL。
+    #: 自动分类按它匹配，改名不会失联，也不会再生出默认分类。
+    #: 唯一性由 v7 的部分唯一索引保证（仅约束非空值，且不能在建表前创建）。
+    system_key = TextField(null=True)
     parent_id = IntegerField(null=True)  # 父分类 ID（NULL 表示顶级分类）
     sort_order = IntegerField(default=0)  # 排序顺序
     color = TextField(default="#6366f1")  # 分类颜色标识
@@ -314,19 +318,44 @@ def _backfill_captured_at() -> int:
 
 # ======== 自动分类工具函数 ========
 AUTO_CATEGORIES = {
-    "composite": {"name": "组合提示词", "color": "#6366f1"},
-    "single":    {"name": "单项提示词", "color": "#f59e0b"},
-    "scattered": {"name": "零散提示词", "color": "#6b7280"},
+    "composite": {"name": "组合提示词", "color": "#6366f1", "system_key": "auto:composite"},
+    "single":    {"name": "单项提示词", "color": "#f59e0b", "system_key": "auto:single"},
+    "scattered": {"name": "零散提示词", "color": "#6b7280", "system_key": "auto:scattered"},
 }
 
-# 自动类型分类当前包含的名称集合；含已废弃的“片段提示词”以便清洗历史残留
-_AUTO_TYPE_NAMES = {info["name"] for info in AUTO_CATEGORIES.values()} | {"片段提示词"}
+#: 「组合创作」是用户显式勾选/标签触发的分类，不属于自动类型三分类。
+COMPOSE_CATEGORY = {
+    "name": "组合创作", "color": "#6366f1", "system_key": "system:compose",
+}
+
+# 自动类型分类的系统键；旧库按名字回填后也只认这里
+_AUTO_TYPE_KEYS = {info["system_key"] for info in AUTO_CATEGORIES.values()}
+
+
+def get_or_create_system_category(info: dict) -> Category:
+    """按 system_key 取系统分类；旧库没有键时按名字补键，避免重复创建。"""
+    key = info["system_key"]
+    cat = Category.get_or_none(Category.system_key == key)
+    if cat is not None:
+        return cat
+    cat = Category.get_or_none(
+        (Category.name == info["name"]) & (Category.system_key.is_null())
+    )
+    if cat is not None:
+        Category.update(system_key=key).where(Category.id == cat.id).execute()
+        return Category.get_by_id(cat.id)
+    return Category.create(
+        name=info["name"], color=info["color"], parent_id=None, system_key=key,
+    )
 
 
 def _clear_auto_type_categories(prompt_id: int):
     """清除该提示词上所有「自动类型」旧标签（含旧体系的片段提示词），
     避免重分类时新旧标签叠加成互相矛盾的标签。不影响用户的自定义主题分类。"""
-    old_cats = list(Category.select().where(Category.name.in_(_AUTO_TYPE_NAMES)))
+    old_cats = list(Category.select().where(
+        (Category.system_key.in_(list(_AUTO_TYPE_KEYS)))
+        | (Category.name == "片段提示词")
+    ))
     if not old_cats:
         return
     old_ids = [c.id for c in old_cats]
@@ -357,19 +386,14 @@ def auto_classify_prompt(prompt_id: int):
         return
     # 先清掉该提示词上所有旧自动类型标签（含旧体系的片段提示词），避免叠加
     _clear_auto_type_categories(prompt_id)
-    cat_info = AUTO_CATEGORIES[ptype]
-    cat = Category.get_or_none(Category.name == cat_info["name"])
-    if cat is None:
-        cat = Category.create(name=cat_info["name"], color=cat_info["color"], parent_id=None)
+    cat = get_or_create_system_category(AUTO_CATEGORIES[ptype])
     PromptCategory.create(prompt=prompt_id, category=cat.id)
 
 
 def ensure_auto_categories():
-    """确保三个自动分类在 categories 表中存在"""
-    for key, info in AUTO_CATEGORIES.items():
-        cat = Category.get_or_none(Category.name == info["name"])
-        if cat is None:
-            Category.create(name=info["name"], color=info["color"], parent_id=None)
+    """确保三个自动分类存在，并持有稳定的 system_key。"""
+    for info in AUTO_CATEGORIES.values():
+        get_or_create_system_category(info)
 # ================================
 
 
@@ -594,6 +618,40 @@ def _migrate_v6_drop_fragments(database):
     database.execute_sql("DROP TABLE IF EXISTS fragments")
 
 
+def _backfill_category_system_key(database, info: dict) -> None:
+    """给已存在的同名分类补 system_key；不主动创建缺失分类。"""
+    key = info["system_key"]
+    if database.execute_sql(
+        "SELECT 1 FROM categories WHERE system_key = ?", (key,)
+    ).fetchone():
+        return
+    row = database.execute_sql(
+        "SELECT id FROM categories WHERE name = ? AND system_key IS NULL",
+        (info["name"],),
+    ).fetchone()
+    if row:
+        database.execute_sql(
+            "UPDATE categories SET system_key = ? WHERE id = ?", (key, row[0])
+        )
+
+
+def _migrate_v7_category_system_key(database):
+    """v7：分类加 system_key，自动分类不再按名字匹配。
+
+    - 只回填已有分类，不主动创建；
+    - 用户仍可改分类名，system_key 保持稳定；
+    - 唯一索引只约束非空值，用户分类可以继续为 NULL。
+    """
+    _migrate_column(database, "categories", "system_key", "system_key TEXT")
+    database.execute_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_system_key "
+        "ON categories(system_key) WHERE system_key IS NOT NULL"
+    )
+    for info in AUTO_CATEGORIES.values():
+        _backfill_category_system_key(database, info)
+    _backfill_category_system_key(database, COMPOSE_CATEGORY)
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -607,6 +665,8 @@ MIGRATIONS = [
         lambda database: _migrate_v5_quality_keys(database)),
     (6, "退役 fragments 表：碎片统一从 prompts 实时解析",
         lambda database: _migrate_v6_drop_fragments(database)),
+    (7, "分类 system_key：自动分类不再按名字匹配",
+        lambda database: _migrate_v7_category_system_key(database)),
 ]
 
 
