@@ -75,6 +75,8 @@ import StudioPromptEditor from './components/reference/StudioPromptEditor.vue'
 import StudioResultBoard from './components/reference/StudioResultBoard.vue'
 import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
 import StudioTextSupplementCard from './components/reference/StudioTextSupplementCard.vue'
+import HairPickerModal from './components/reference/HairPickerModal.vue'
+import type { HairItem } from '../../api/reference'
 import {
   desiredPoseFacets,
   pickMatchedPose,
@@ -204,8 +206,9 @@ const {
   clearWorkflowTrimNotice,
   style,
   promptSuffix,
-  extraPath,
   extraName,
+  extraFilled,
+  extraLibrary,
   bodyMode,
   setBodyMode,
   bodyModeNotice,
@@ -231,6 +234,7 @@ previewWorkflow,
   canSubmit,
   loadStudioWorkflows,
   setExtra,
+  setExtraLibrary,
   clearExtra,
   submit,
   confirmWorkflowDowngrade,
@@ -981,9 +985,17 @@ const extraSlotLabel = computed(() => {
 })
 const extraSlotHint = computed(() =>
   extraSlotLabel.value === '发型'
-    ? '只取发型，建议上传背面无脸图；PNG/JPG/WebP/HEIC ≤ 25MB'
+    ? '可从发型库选背面无脸图，或上传本地图；PNG/JPG/WebP/HEIC ≤ 25MB'
     : 'PNG/JPG/WebP/HEIC ≤ 25MB',
 )
+
+const hairPickerOpen = ref(false)
+
+function onHairPick(item: HairItem): void {
+  setExtraLibrary('hair', item.id, item.标题)
+  hairPickerOpen.value = false
+  toast.success(`已选发型「${item.标题}」，提交时使用背面无脸图`)
+}
 
 function onExtraUploaded(items: UploadedReference[]): void {
   const first = items[0]
@@ -1009,7 +1021,7 @@ function onExtraError(message: string): void {
  * 会话恢复的草稿里若还留着 extra，必须清掉，否则它会算进非空槽位、把所有工作流判成不适用。
  */
 watch(supportsExtraSlot, (enabled) => {
-  if (enabled || !extraPath.value) return
+  if (enabled || !extraFilled.value) return
   clearExtra()
   toast.info('当前工作流都不支持第 4 张参考图，已清空该槽位')
 })
@@ -1252,7 +1264,7 @@ onMounted(async () => {
 
         <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads；没有工作流接 extra 时整块不渲染 -->
         <div v-if="supportsExtraSlot" class="extra-block">
-          <div v-if="extraPath" class="extra-item" data-testid="studio-extra-selected">
+          <div v-if="extraFilled" class="extra-item" data-testid="studio-extra-selected">
             <span class="extra-item__mark" aria-hidden="true">
               <svg viewBox="0 0 16 16">
                 <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
@@ -1261,19 +1273,37 @@ onMounted(async () => {
             </span>
             <span class="extra-item__body">
               <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
-              <span class="extra-item__meta">来自 uploads · 提交时作为{{ extraSlotLabel }}</span>
+              <span class="extra-item__meta">
+                {{ extraLibrary ? '来自发型库 · 提交背面无脸裁切图' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
+              </span>
             </span>
             <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
           </div>
 
-          <DropZone
-            v-else
-            variant="tile"
-            :multiple="false"
-            :label="`＋ 上传${extraSlotLabel}`"
-            :hint="extraSlotHint"
-            @uploaded="onExtraUploaded"
-            @error="onExtraError"
+          <div v-else class="extra-actions">
+            <DropZone
+              variant="tile"
+              :multiple="false"
+              :label="`＋ 上传${extraSlotLabel}`"
+              :hint="extraSlotHint"
+              @uploaded="onExtraUploaded"
+              @error="onExtraError"
+            />
+            <button
+              v-if="extraSlotLabel === '发型'"
+              type="button"
+              class="extra-library"
+              data-testid="studio-extra-hair-library"
+              @click="hairPickerOpen = true"
+            >
+              从发型库选择
+            </button>
+          </div>
+
+          <HairPickerModal
+            :open="hairPickerOpen"
+            @close="hairPickerOpen = false"
+            @select="onHairPick"
           />
         </div>
       </div>
@@ -1934,6 +1964,27 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.extra-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extra-library {
+  height: 40px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.extra-library:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .extra-item {

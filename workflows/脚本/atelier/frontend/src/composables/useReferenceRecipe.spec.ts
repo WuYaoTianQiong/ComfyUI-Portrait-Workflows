@@ -245,6 +245,36 @@ describe('buildRecipeRequest', () => {
     expect('extra_path' in blank).toBe(false)
   })
 
+  it('第 4 张可改走发型库条目（extra_id + extra_library），路径优先', () => {
+    const fromLibrary = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        extraId: 'char-hair-082',
+        extraLibrary: 'hair',
+      },
+    )
+    expect(fromLibrary.extra_id).toBe('char-hair-082')
+    expect(fromLibrary.extra_library).toBe('hair')
+    expect(fromLibrary.extra_path).toBeUndefined()
+
+    const both = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: 'F:/lib/uploads/abc.png',
+        extraId: 'char-hair-082',
+        extraLibrary: 'hair',
+      },
+    )
+    expect(both.extra_path).toBe('F:/lib/uploads/abc.png')
+    expect(both.extra_id).toBeUndefined()
+    expect(both.extra_library).toBeUndefined()
+  })
+
   it('八类碎片按归属映射到 4 个文本字段（同类以「；」连接）', () => {
     const fragments: RecipeTextFragments = {
       ...createEmptyRecipeTextFragments(),

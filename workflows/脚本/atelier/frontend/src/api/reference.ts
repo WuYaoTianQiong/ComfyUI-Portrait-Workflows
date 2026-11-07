@@ -16,7 +16,7 @@
  */
 
 /** 参考库标识；`costume-anime` 为外链服装库。 */
-export type ReferenceLibraryId = 'pose' | 'costume' | 'costume-anime' | 'portrait'
+export type ReferenceLibraryId = 'pose' | 'costume' | 'costume-anime' | 'portrait' | 'hair'
 
 /** 后端 `ReferenceItem` 的 JSON 形状（字段名保持 snake_case）。 */
 export interface ReferenceItemDto {
@@ -50,6 +50,11 @@ export interface ReferenceItemDto {
   style?: string
   /** 仅 costume-anime 且上游有「来源地址」时非空 */
   source_url: string | null
+  /** 仅 hair：正/背面裁切图端点；单面发型为 null */
+  hair_front_url?: string | null
+  hair_back_url?: string | null
+  /** 仅 hair：是否有背面无脸图可用于第 4 槽 */
+  hair_usable?: boolean
   /** 与后端过滤一致的预拼检索串（小写前的原文） */
   search_text: string
 }
@@ -156,8 +161,25 @@ export interface PortraitItem {
   nsfw?: boolean
 }
 
-/** 图片种类；`depth|depth_thumb` 仅 pose 库支持（与后端契约一致）。 */
-export type ReferenceImageKind = 'thumb' | 'image' | 'depth_thumb' | 'depth'
+/** 发型条目。 */
+export interface HairItem {
+  id: string
+  分区: string
+  视图: string
+  标题: string
+  标签: string[]
+  缩略图: string
+  原图: string
+  正面: string
+  背面: string
+  可用于发型槽: boolean
+  检索: string
+  library?: 'hair'
+  nsfw?: boolean
+}
+
+/** 图片种类；`depth|depth_thumb` 仅 pose 库支持，`front|back` 仅 hair 库支持。 */
+export type ReferenceImageKind = 'thumb' | 'image' | 'depth_thumb' | 'depth' | 'front' | 'back'
 
 /** 后端条目列表端点前缀（不含尾斜杠）。 */
 export const REFERENCE_ITEMS_PATH = '/api/reference/items'
@@ -423,6 +445,26 @@ export function toPortraitItem(dto: ReferenceItemDto): PortraitItem {
   }
 }
 
+/** DTO → 发型条目。 */
+export function toHairItem(dto: ReferenceItemDto): HairItem {
+  const thumb = text(dto.thumb_url)
+  return {
+    id: dto.id,
+    分区: text(dto.group),
+    视图: text(dto.facet) || text(dto.subtitle),
+    标题: text(dto.name),
+    标签: tagList(dto.tags),
+    缩略图: thumb,
+    原图: text(dto.image_url) || thumb,
+    正面: text(dto.hair_front_url),
+    背面: text(dto.hair_back_url),
+    可用于发型槽: Boolean(dto.hair_usable),
+    检索: text(dto.search_text),
+    library: 'hair',
+    nsfw: Boolean(dto.nsfw),
+  }
+}
+
 /** 姿势条目或分组的 18+ 判定，唯一来源为 `nsfw` 字段。 */
 export function isNsfwPoseItem(item: PoseItem | PoseGroup): boolean {
   if ('items' in item) {
@@ -476,7 +518,11 @@ function dtoImageField(dto: ReferenceItemDto, kind: ReferenceImageKind): string 
         ? dto.image_url
         : kind === 'depth'
           ? dto.depth_url
-          : dto.depth_thumb_url
+          : kind === 'depth_thumb'
+            ? dto.depth_thumb_url
+            : kind === 'front'
+              ? dto.hair_front_url
+              : dto.hair_back_url
   return typeof value === 'string' && value.trim().length > 0 ? value : null
 }
 
@@ -498,6 +544,8 @@ export function referenceImageUrl(dto: ReferenceItemDto, kind: ReferenceImageKin
   if (!dto.id || !dto.library) return null
   // 深度图只有姿势库有，非 pose 一律不可用，避免给服装/人像构造 404 地址。
   if ((kind === 'depth' || kind === 'depth_thumb') && dto.library !== 'pose') return null
+  // 正/背面裁切只有发型库有。
+  if ((kind === 'front' || kind === 'back') && dto.library !== 'hair') return null
 
   const direct = dtoImageField(dto, kind)
   if (direct) return direct
@@ -515,6 +563,9 @@ export function referenceImageUrl(dto: ReferenceItemDto, kind: ReferenceImageKin
         ? referenceImageEndpoint(dto.library, dto.id, 'depth')
         : null
     case 'depth_thumb':
+      return null
+    case 'front':
+    case 'back':
       return null
   }
 }

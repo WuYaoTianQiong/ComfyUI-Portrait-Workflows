@@ -76,6 +76,7 @@ const TABS = [
   { tab: 'pose', label: '姿势', title: '姿势库' },
   { tab: 'costume', label: '服装', title: '服装库' },
   { tab: 'portrait', label: '人像', title: '人像库' },
+  { tab: 'hair', label: '发型', title: '发型库' },
   { tab: 'studio', label: '合成台', title: '合成台' },
   { tab: 'settings', label: '设置', title: '设置' },
 ] as const
@@ -90,7 +91,7 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe('ReferenceView 六页签壳', () => {
+describe('ReferenceView 七页签壳', () => {
   it.each(TABS)('?tab=$tab 直达渲染「$title」并把「$label」标为选中', async ({ tab, label, title }) => {
     const { wrapper } = await mountAt(`/reference?tab=${tab}`)
 
@@ -255,7 +256,7 @@ describe('左导航折叠（图标 rail）契约', () => {
     expect(activeTabLabel(wrapper)).toBe('姿势')
   })
 
-  it('预置折叠记忆后挂载即为折叠态，六个页签文本仍留在 DOM', async () => {
+  it('预置折叠记忆后挂载即为折叠态，七个页签文本仍留在 DOM', async () => {
     localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, '1')
 
     const { wrapper } = await mountAt('/reference?tab=costume')
@@ -265,7 +266,7 @@ describe('左导航折叠（图标 rail）契约', () => {
 
     // 折叠态标签用 display:none 隐藏但节点不删，text() 仍能读到全部标签
     const labels = wrapper.findAll('.reference-tab').map((item) => item.text())
-    expect(labels).toHaveLength(6)
+    expect(labels).toHaveLength(ALL_TAB_LABELS.length)
     expect(labels).toEqual(ALL_TAB_LABELS)
     expect(activeTabLabel(wrapper)).toBe('服装')
   })

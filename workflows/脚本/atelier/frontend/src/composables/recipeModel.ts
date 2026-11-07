@@ -118,6 +118,10 @@ export interface RecipeSubmitRequest {
   pose_path?: string
   costume_library?: RecipeCostumeLibrary
   extra_path?: string
+  /** 第 4 张库条目：与 `extra_path` 二选一。 */
+  extra_id?: string
+  /** 第 4 张库标识（当前仅 hair）；与 `extra_id` 配套。 */
+  extra_library?: string
   /** 合成台工作流文件名 / 库内路径；空 = 后端默认 Qwen21+VNCCS。 */
   workflow?: string
   /** 画质档位；`caps.quality === false` 时不发送。 */
@@ -308,6 +312,10 @@ export interface RecipeRequestOptions {
   promptSuffix: string
   /** 第 4 张上传图的后端路径；空串表示不带第 4 张 */
   extraPath: string
+  /** 第 4 张库条目 id；与 `extraPath` 二选一。 */
+  extraId?: string
+  /** 第 4 张库标识（当前仅 hair）。 */
+  extraLibrary?: string
   /** 所选工作流路径 / 文件名；空串不发送（后端用默认工作流）。 */
   workflow?: string
   /** 画质档位；空串不发送。 */
@@ -521,7 +529,15 @@ export function buildRecipeRequest(
   }
 
   const extra = options.extraPath.trim()
-  if (extra) request.extra_path = extra
+  if (extra) {
+    request.extra_path = extra
+  } else {
+    const extraId = options.extraId?.trim()
+    if (extraId) {
+      request.extra_id = extraId
+      request.extra_library = options.extraLibrary?.trim() || ''
+    }
+  }
 
   const workflow = options.workflow?.trim()
   if (workflow) request.workflow = workflow

@@ -362,7 +362,13 @@ export function useReferenceRecipe() {
   const style = ref<RecipeStyle>('realistic')
   const promptSuffix = ref('')
   const extraPath = ref('')
+  const extraId = ref('')
+  const extraLibrary = ref('')
   const extraName = ref('')
+  /** 第 4 槽是否已填（上传路径或发型库条目二选一）。 */
+  const extraFilled = computed(
+    () => Boolean(extraPath.value.trim() || extraId.value.trim()),
+  )
 
   /** 尺寸档位 / 比例均为多选；空数组表示本轮不发对应参数。 */
   const qualitySelection = ref<string[]>([])
@@ -456,7 +462,7 @@ export function useReferenceRecipe() {
     if (slotHasImage('portrait')) names.push('人像')
     if (slotHasImage('costume')) names.push('服装')
     if (slotHasImage('pose')) names.push('姿势')
-    if (extraPath.value.trim()) names.push('第 4 张')
+    if (extraFilled.value) names.push('第 4 张')
     return names
   })
   const activeSlotCount = computed(() => filledSlotNames.value.length)
@@ -467,7 +473,7 @@ export function useReferenceRecipe() {
     if (slotHasImage('portrait')) roles.push('portrait')
     if (slotHasImage('costume')) roles.push('costume')
     if (slotHasImage('pose')) roles.push('pose')
-    if (extraPath.value.trim()) roles.push('extra')
+    if (extraFilled.value) roles.push('extra')
     return roles
   })
 
@@ -997,11 +1003,23 @@ export function useReferenceRecipe() {
   /** 第 4 张：只保存 1 张（后传覆盖前传，与「只提交 extraImages[0]」一致）。 */
   function setExtra(path: string, name: string): void {
     extraPath.value = path
+    extraId.value = ''
+    extraLibrary.value = ''
+    extraName.value = name
+  }
+
+  /** 第 4 张改为库条目（当前仅发型库）：提交 `extra_id` + `extra_library`。 */
+  function setExtraLibrary(library: string, id: string, name: string): void {
+    extraPath.value = ''
+    extraId.value = id
+    extraLibrary.value = library
     extraName.value = name
   }
 
   function clearExtra(): void {
     extraPath.value = ''
+    extraId.value = ''
+    extraLibrary.value = ''
     extraName.value = ''
   }
 
@@ -1064,6 +1082,8 @@ export function useReferenceRecipe() {
           style: style.value,
           promptSuffix: promptSuffix.value,
           extraPath: extraPath.value,
+          extraId: extraId.value,
+          extraLibrary: extraLibrary.value,
           // 每组提交自己的工作流（契约 C-REF-TOTAL@2）；空串由后端用默认工作流。
           workflow: group.workflow,
           quality: group.quality,
@@ -1371,7 +1391,7 @@ export function useReferenceRecipe() {
       const hasImageSlot = RECIPE_SLOT_KEYS.some(
         (slot) => draft.slotModes.value[slot] === 'image' && imageCounts[slot] > 0,
       )
-      if (!hasImageSlot && !extraPath.value.trim()) {
+      if (!hasImageSlot && !extraFilled.value) {
         return rejectBeforeSubmit(
           `无法提交。原因：${NO_IMAGE_SLOT_HINT}。下一步：选择至少 1 张参考图后重试。`,
         )
@@ -1391,7 +1411,7 @@ export function useReferenceRecipe() {
           costume: draft.costumeCount.value,
           pose: draft.poseCount.value,
         },
-        extraFilled: Boolean(extraPath.value.trim()),
+        extraFilled: extraFilled.value,
         bodyMode: bodyMode.value,
         // 批量多选时只要任一姿势是 pair* 就阻止：文本替代无法表达双人语义。
         poseId:
@@ -1599,7 +1619,10 @@ export function useReferenceRecipe() {
     promptSuffix,
     extraPath,
     extraName,
+    extraFilled,
+    extraLibrary,
     setExtra,
+    setExtraLibrary,
     clearExtra,
     // 提示词只读预览（dry_run，与正式提交完全独立）
     previewPrompt,

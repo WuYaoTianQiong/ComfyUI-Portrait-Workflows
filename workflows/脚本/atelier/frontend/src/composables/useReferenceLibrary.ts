@@ -15,11 +15,13 @@ import type { Ref } from 'vue'
 import {
   fetchAllReferenceItems,
   toCostumeItem,
+  toHairItem,
   toPortraitItem,
   toPoseItem,
 } from '@/api/reference'
 import type {
   CostumeItem,
+  HairItem,
   PoseGroup,
   PoseItem,
   PortraitItem,
@@ -215,6 +217,13 @@ export function useReferencePortraits(): PortraitLibraryState {
   )
 }
 
+/** 发型库（角色创作库全量包）。 */
+export function useReferenceHairs(): HairLibraryState {
+  return sharedLibraryState('hair', () =>
+    fetchAllReferenceItems('hair').then((dtos) => dtos.map(toHairItem)),
+  )
+}
+
 /** 供视图做类型标注的聚合类型（避免各页面重复声明）。 */
 export type PoseLibraryState = LibraryState<PoseItem> & {
   groups: Ref<PoseGroup[]>
@@ -222,3 +231,4 @@ export type PoseLibraryState = LibraryState<PoseItem> & {
 }
 export type CostumeLibraryState = LibraryState<CostumeItem>
 export type PortraitLibraryState = LibraryState<PortraitItem>
+export type HairLibraryState = LibraryState<HairItem>

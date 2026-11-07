@@ -9,6 +9,7 @@ import {
 } from '../composables/useReferenceStudioSettings'
 
 import ReferenceCostumesTab from './reference/ReferenceCostumesTab.vue'
+import ReferenceHairTab from './reference/ReferenceHairTab.vue'
 import ReferenceHomeTab from './reference/ReferenceHomeTab.vue'
 import ReferencePortraitsTab from './reference/ReferencePortraitsTab.vue'
 import ReferencePosesTab from './reference/ReferencePosesTab.vue'
@@ -33,7 +34,7 @@ import ReferenceStudioTab from './reference/ReferenceStudioTab.vue'
  */
 
 /** 合法页签键；顺序即页签条展示顺序（「图库总览」固定第一位）。 */
-const TAB_KEYS = ['home', 'pose', 'costume', 'portrait', 'studio', 'settings'] as const
+const TAB_KEYS = ['home', 'pose', 'costume', 'portrait', 'hair', 'studio', 'settings'] as const
 
 type ReferenceTabKey = (typeof TAB_KEYS)[number]
 
@@ -47,6 +48,7 @@ const TABS: readonly TabDefinition[] = [
   { key: 'pose', label: '姿势' },
   { key: 'costume', label: '服装' },
   { key: 'portrait', label: '人像' },
+  { key: 'hair', label: '发型' },
   { key: 'studio', label: '合成台' },
   { key: 'settings', label: '设置' },
 ]
@@ -76,6 +78,11 @@ const TAB_ICONS: Record<ReferenceTabKey, readonly string[]> = {
   portrait: [
     'M8 2.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z',
     'M3.4 13.3c.5-2.3 2.3-3.9 4.6-3.9s4.1 1.6 4.6 3.9',
+  ],
+  hair: [
+    'M4.2 13.2c-.8-2.1-.7-4.6.3-6.6C5.5 4.5 6.7 3 8 3s2.5 1.5 3.5 3.6c1 2 1.1 4.5.3 6.6',
+    'M5.4 8.2c.6-.5 1.6-.8 2.6-.8s2 .3 2.6.8',
+    'M5.2 11.2c.7-.5 1.7-.8 2.8-.8s2.1.3 2.8.8',
   ],
   studio: [
     'M8 2.4 13.4 5.6 8 8.8 2.6 5.6 8 2.4z',
@@ -156,6 +163,7 @@ const TAB_COMPONENTS = {
   pose: ReferencePosesTab,
   costume: ReferenceCostumesTab,
   portrait: ReferencePortraitsTab,
+  hair: ReferenceHairTab,
   studio: ReferenceStudioTab,
   settings: ReferenceSettingsTab,
 } as const
