@@ -21,11 +21,35 @@ from app.services.workflow_parser import (
 #: 默认合成台工作流：四图可选发型（空第 4 槽自动裁成三图，实测 84–97s）。
 DEFAULT_STUDIO_WORKFLOW = "图库专用_Qwen21+VNCCS_四图_可选发型_25步_单人.api.json"
 
-#: 槽位固定顺序：提示词编号、提交顺序、错误文案都以它为准。
-SLOT_ROLES = ("portrait", "costume", "pose", "extra")
+#: 槽位描述符：顺序、中文名、来源与能力都从这里派生。
+SLOT_DESCRIPTORS = (
+    {
+        "key": "portrait", "label": "人像", "multiple": True,
+        "sources": ("library:portrait", "library:character",
+                    "library:costume-anime", "upload"),
+        "supports_text": True,
+    },
+    {
+        "key": "costume", "label": "服装", "multiple": True,
+        "sources": ("library:costume", "library:costume-anime", "upload"),
+        "supports_text": True,
+    },
+    {
+        "key": "pose", "label": "姿势", "multiple": True,
+        "sources": ("library:pose", "upload"),
+        "supports_text": True,
+    },
+    {
+        # 第 4 槽：发型库背面图 / 上传单图。工作流槽位能力由 manifest/slots 决定。
+        "key": "extra", "label": "第 4 张参考", "multiple": False,
+        "sources": ("library:hair", "upload"),
+        "supports_text": False,
+    },
+)
 
-#: 槽位中文名（仅用于错误信息，前端不依赖）
-SLOT_LABELS = {"portrait": "人像", "costume": "服装", "pose": "姿势", "extra": "第 4 张参考"}
+SLOT_ROLES = tuple(item["key"] for item in SLOT_DESCRIPTORS)
+SLOT_LABELS = {item["key"]: item["label"] for item in SLOT_DESCRIPTORS}
+SLOT_BY_KEY = {item["key"]: item for item in SLOT_DESCRIPTORS}
 
 #: 参考图分支上可安全删除的节点类型：删掉它们只会移除这一路参考，
 #: 不会影响主链路（KSampler / SaveImage 等不在此列，遇到即停止向下裁剪）。

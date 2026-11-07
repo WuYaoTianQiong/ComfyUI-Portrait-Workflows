@@ -976,13 +976,12 @@ function randomize(): void {
 // 第 4 张（extra）：只保留 1 张，仅 uploads
 // ---------------------------------------------------------------------------
 
-/** 第 4 槽文案：选中发型工作流时显示「发型」，否则保持通用「第 4 张」。 */
-const extraSlotLabel = computed(() => {
-  const flows = effectiveWorkflows.value
-  return flows.length > 0 && flows.every((item) => /发型|hair/i.test(item.name))
-    ? '发型'
-    : '第 4 张'
-})
+/**
+ * 第 4 槽文案由「当前来源」决定，不再按工作流文件名猜：
+ * 从发型库选中即显示「发型」，上传图则保持通用「第 4 张」。
+ * 是否显示该槽位仍由工作流 `slots.includes('extra')` 决定。
+ */
+const extraSlotLabel = computed(() => (extraLibrary.value ? '发型' : '第 4 张'))
 const extraSlotHint = computed(() =>
   extraSlotLabel.value === '发型'
     ? '可从发型库选背面无脸图，或上传本地图；PNG/JPG/WebP/HEIC ≤ 25MB'
