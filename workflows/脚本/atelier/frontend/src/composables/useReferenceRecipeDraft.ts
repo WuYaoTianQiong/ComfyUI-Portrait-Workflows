@@ -312,7 +312,13 @@ function limitPairSelections(): boolean {
     changed = true
   }
   if (pose.value.length > 1) {
-    pose.value = pose.value.slice(0, 1)
+    // 先选单图姿势再选双人姿势时，不能按顺序留下首张（否则双人姿势被丢、
+    // B 编辑器随之消失）；优先保留双人构图，其余槽仍留首张。
+    const pairEntry = pose.value.find(
+      (entry) =>
+        entry.item.composition === 'pair' || entry.item.id.startsWith('pair'),
+    )
+    pose.value = pairEntry ? [pairEntry] : pose.value.slice(0, 1)
     changed = true
   }
   if (personBVariants.value.length > 1) {

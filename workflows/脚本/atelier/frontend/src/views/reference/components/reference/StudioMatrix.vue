@@ -78,6 +78,13 @@ const props = defineProps<{
   slotTexts?: RecipeSlotTexts
   /** P4 跨源补充开关：image 槽的补充文本进入组键并在缩略图标「补充」。 */
   supplementFlags?: RecipeSupplementFlags
+  /**
+   * P0-5：当前批次级人物 B 信息（身份图 / B 服装 / 文字变体数）。
+   *
+   * 身份图与 B 服装是整批共享输入，不进入逐组组合，因此在清单头单独列一行，
+   * 避免用户只看到逐组的 B 文字却不知道身份图与服装是否已选。
+   */
+  personBInfo?: string
 }>()
 
 /** 分组键分隔符：用不可见控制字符避免真实 id 中可能出现的分隔符冲突。 */
@@ -403,6 +410,11 @@ function sizeTextOf(group: RecipeBatchGroup): string {
       </span>
     </header>
 
+    <!-- P0-5：人物B身份图 / B 服装是整批共享输入，单独列一行 -->
+    <p v-if="personBInfo" class="matrix__personb" data-testid="studio-matrix-personb">
+      {{ personBInfo }}
+    </p>
+
     <!-- 常驻计数条：无论空态 / 超限都在，宽度永不超过 100% -->
     <div
       class="matrix__progress"
@@ -498,6 +510,7 @@ function sizeTextOf(group: RecipeBatchGroup): string {
               v-for="row in group.rows"
               :key="row.index"
               class="matrix__row"
+              :class="{ 'matrix__row--has-b': row.personBVariant }"
               data-testid="studio-matrix-row"
             >
               <span class="matrix__index">#{{ row.index + 1 }}</span>
@@ -537,6 +550,15 @@ function sizeTextOf(group: RecipeBatchGroup): string {
               </span>
               <span class="matrix__workflow" :title="workflowNameOf(row.workflow)">
                 {{ workflowNameOf(row.workflow) }}
+              </span>
+              <!-- P0-5：逐行 B 变体可见（不同变体会落不同组，行内仍需能核对） -->
+              <span
+                v-if="row.personBVariant"
+                class="matrix__personb-row"
+                :title="personBLabelOf(row)"
+                data-testid="studio-matrix-row-personb"
+              >
+                {{ personBLabelOf(row) }}
               </span>
               <span class="matrix__size">{{ sizeTextOf(row) }}</span>
               <span class="matrix__seed">seed {{ row.seed }}</span>
@@ -596,6 +618,14 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   line-height: var(--lh-lg);
+}
+
+/* P0-5：整批共享的人物B身份图 / B 服装摘要 */
+.matrix__personb {
+  margin: 0;
+  color: var(--text-body-soft);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .matrix.is-over .matrix__total {
@@ -880,6 +910,21 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   min-height: var(--matrix-row-h, 48px);
   padding: var(--gap-xs) var(--gap-sm);
   border-top: 1px solid var(--border-faint);
+}
+
+/* P0-5：带 B 变体的行多一列，避免长文本把工作流名挤成省略号 */
+.matrix__row--has-b {
+  grid-template-columns: 40px auto minmax(0, 1fr) minmax(0, 132px) 96px 104px;
+}
+
+.matrix__personb-row {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-body-soft);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .matrix__row:hover {

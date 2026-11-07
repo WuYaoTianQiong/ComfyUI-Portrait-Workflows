@@ -14,7 +14,8 @@ const { toasts } = useToast()
 .toast-host {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  /* P0-3：与合成台吸底操作条避让（见 utils/naive.ts messageProviderProps） */
+  bottom: calc(18px + 150px);
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;

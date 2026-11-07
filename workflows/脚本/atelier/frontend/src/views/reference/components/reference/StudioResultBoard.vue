@@ -21,6 +21,10 @@ import type {
   StudioWorkflowOption,
 } from '../../../../composables/useReferenceRecipe'
 import {
+  compilePersonBVariant,
+  slotTextPreview,
+} from '../../../../composables/recipeTextFragments'
+import {
   describeRecipeBatchStatus,
   isRecipeBatchRunning,
   recipeBatchPercent,
@@ -108,6 +112,22 @@ function workflowNameOf(group: RecipeBatchGroup): string {
   if (option) return workflowDisplayName(option.name)
   const filename = group.workflow.split(/[\\/]/).pop() ?? group.workflow
   return workflowDisplayName(filename)
+}
+
+/**
+ * P0-5：结果字幕补人物 B 变体（与生成清单同口径）。
+ *
+ * 只展示本组自己的 B 文字；身份图 / B 服装是整批共享输入，不写入批次对象，
+ * 仍以提交前的清单摘要为准，避免结果区用「当前选择」误标历史批次。
+ */
+function personBLabelOf(group: RecipeBatchGroup): string {
+  const variant = group.personBVariant
+  if (!variant) return ''
+  const compiled = compilePersonBVariant(variant)
+  const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
+    .filter(Boolean)
+    .join('；')
+  return text ? `B：${slotTextPreview(text)}` : 'B（空设定）'
 }
 
 /** 尺寸文案：画质与比例都有 → `quality · ratio`；都空表示跟随参考图。 */
@@ -313,7 +333,8 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
                     </button>
                     <p class="result-board__caption" data-testid="studio-result-caption">
                       #{{ groupNumberOf(batch, entry) }} · {{ workflowNameOf(entry.group) }} ·
-                      {{ sizeTextOf(entry.group) }}
+                      {{ sizeTextOf(entry.group) }}<template v-if="personBLabelOf(entry.group)">
+                        · {{ personBLabelOf(entry.group) }}</template>
                     </p>
                   </div>
                 </template>
@@ -327,7 +348,8 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
                 >
                   <p class="result-board__error-label">
                     #{{ groupNumberOf(batch, entry) }} · {{ workflowNameOf(entry.group) }} ·
-                    {{ sizeTextOf(entry.group) }}
+                    {{ sizeTextOf(entry.group) }}<template v-if="personBLabelOf(entry.group)">
+                      · {{ personBLabelOf(entry.group) }}</template>
                   </p>
                   <p class="result-board__error-text">{{ errorTextOf(batch, entry) }}</p>
                 </div>

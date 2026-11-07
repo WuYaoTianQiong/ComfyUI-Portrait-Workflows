@@ -1032,6 +1032,24 @@ function randomize(): void {
  * 是否显示该槽位仍由工作流 `slots.includes('extra')` 决定。
  */
 const extraKind = computed(() => previewWorkflow.value?.extraKind ?? '')
+
+/**
+ * 人物 B 编辑区可见性（P0-4）。
+ *
+ * 双人姿势下默认显示；五图人物B工作流（第 4 槽语义 = person_b）即使尚未选
+ * 双人姿势，也要露出 B 文字设定与第 5 槽（B 服装）入口，避免入口被
+ * `hasPairPose` 藏住后用户找不到。
+ */
+const showPersonBEditor = computed(
+  () => hasPairPose.value || extraKind.value === 'person_b',
+)
+watch(
+  showPersonBEditor,
+  (visible) => {
+    if (visible) draft.ensurePersonBVariant()
+  },
+  { immediate: true },
+)
 const extraSlotLabel = computed(() => {
   if (extraKind.value === 'person_b') return '人物B身份参考'
   if (extraKind.value === 'hair' || extraLibrary.value === 'hair') return '发型'
@@ -1061,6 +1079,20 @@ const costumePickerOpen = ref(false)
 
 /** 第 5 槽展示名；空串 = 未选，仍由人物服饰碎片兜底。 */
 const extraCostumeName = computed(() => extraCostume.value.name)
+
+/** P0-5：整批共享的人物B信息摘要（生成清单头展示）。 */
+const personBInfo = computed(() => {
+  if (!showPersonBEditor.value) return ''
+  const parts: string[] = []
+  if (extraKind.value === 'person_b' && extraFilled.value) {
+    parts.push(`身份图「${extraName.value}」`)
+  }
+  if (supportsExtraCostumeSlot.value && extraCostumeFilled.value) {
+    parts.push(`B服装「${extraCostumeName.value}」`)
+  }
+  parts.push(`${draft.personBVariants.value.length} 组文字变体`)
+  return `人物B：${parts.join(' · ')}`
+})
 
 function onHairPick(item: HairItem): void {
   setExtraLibrary('hair', item.id, item.标题)
@@ -1471,7 +1503,7 @@ onMounted(async () => {
       </div>
 
       <StudioPersonBEditor
-        v-if="hasPairPose"
+        v-if="showPersonBEditor"
         :variants="draft.personBVariants.value"
         :active-index="draft.activePersonBVariantIndex.value"
         :safe-mode="safeMode"
@@ -1548,6 +1580,7 @@ onMounted(async () => {
           :slot-modes="slotModes"
           :slot-texts="slotTexts"
           :supplement-flags="supplementFlags"
+          :person-b-info="personBInfo"
         />
       </section>
 
@@ -1922,7 +1955,8 @@ onMounted(async () => {
 
 @media (max-width: 1023px) {
   .ref-studio {
-    padding-bottom: 96px;
+    /* P0-2：<1024 操作条按钮换行后实测约 157px，96px 会让最后一行被遮住 */
+    padding-bottom: 176px;
   }
 }
 

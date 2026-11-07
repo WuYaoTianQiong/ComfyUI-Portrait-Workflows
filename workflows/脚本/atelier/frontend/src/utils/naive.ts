@@ -39,10 +39,14 @@ export function setupNaive() {
      * 提示条口径（2026-11-06 合成台 UX 重构 A8）：
      * 最多同屏 2 条、右下角堆叠。连续选图时不再出现 3 条盖住页头，
      * 也与测试环境 `ToastHost` 的右下角位置保持一致。
+     *
+     * P0-3（2026-11-08）：合成台底部有常驻吸底操作条（桌面约 60px、<1024
+     * 约 157px），右下角提示会盖住「生成角色图」。统一上移 168px 避让。
      */
     messageProviderProps: {
       max: 2,
       placement: 'bottom-right',
+      containerStyle: { bottom: 'calc(18px + 150px)' },
     },
   })
   messageApi = message

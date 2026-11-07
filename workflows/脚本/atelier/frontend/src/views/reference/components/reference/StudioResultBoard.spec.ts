@@ -22,6 +22,7 @@ import type {
   RecipeGroupResult,
   StudioWorkflowOption,
 } from '../../../../composables/useReferenceRecipe'
+import { createEmptyPersonBVariant } from '../../../../composables/recipeTextFragments'
 
 import StudioResultBoard from './StudioResultBoard.vue'
 
@@ -189,6 +190,36 @@ describe('StudioResultBoard 批次结果区', () => {
     expect(captions[1].text()).toContain('16:9')
 
     expect(wrapper.findAll('[data-testid="studio-result-image"]')).toHaveLength(1)
+  })
+
+  it('组带人物 B 变体时 caption 追加 B 文字（P0-5）', () => {
+    const variant = {
+      ...createEmptyPersonBVariant('b-1'),
+      freeText: '金色齐肩短发',
+    }
+    const bGroup = group(0, {
+      workflow: 'workflows/qwen.json',
+      personBVariant: variant,
+    })
+
+    const wrapper = mountBoard({
+      batches: [
+        batch({
+          groups: [bGroup],
+          groupResults: [
+            { group: bGroup, jobId: 21, urls: ['/api/results/a.png'], error: '' },
+          ],
+          total: 1,
+          done: 1,
+          submitted: 1,
+          results: ['/api/results/a.png'],
+        }),
+      ],
+    })
+
+    const caption = wrapper.find('[data-testid="studio-result-caption"]')
+    expect(caption.text()).toContain('B：')
+    expect(caption.text()).toContain('金色齐肩短发')
   })
 
   it('1 个成功组 + 1 个失败组时出现失败灰块，正文含错误原因', () => {
