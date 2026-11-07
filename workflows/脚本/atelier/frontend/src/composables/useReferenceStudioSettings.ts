@@ -101,6 +101,30 @@ export function createEmptyExtraSlot(): StoredReferenceExtraSlot {
   }
 }
 
+/**
+ * V2-C 第 5 槽（人物B服装）的持久化形状。
+ *
+ * 整批共享 1 张，只记来源；文字兜底在人物 B 的「人物服饰」碎片里，不在这里。
+ */
+export interface StoredReferenceCostumeSlot {
+  source: 'empty' | 'library' | 'upload'
+  library: 'costume' | 'costume-anime' | ''
+  id: string
+  path: string
+  name: string
+}
+
+/** 空人物B服装槽；旧快照缺字段 / 清空草稿都用它。 */
+export function createEmptyCostumeSlot(): StoredReferenceCostumeSlot {
+  return {
+    source: 'empty',
+    library: '',
+    id: '',
+    path: '',
+    name: '',
+  }
+}
+
 /** `pb.reference_studio_v1` 的完整结构。 */
 export interface ReferenceStudioSettings {
   portrait: StoredReferenceSlotEntry[]
@@ -108,6 +132,8 @@ export interface ReferenceStudioSettings {
   pose: StoredReferenceSlotEntry[]
   /** 第 4 槽；旧快照缺字段按空处理。 */
   extra: StoredReferenceExtraSlot
+  /** V2-C 第 5 槽（人物B服装）；旧快照缺字段按空处理。 */
+  extraCostume: StoredReferenceCostumeSlot
   /** 画风预设；后端只认 none / realistic。 */
   style: RecipeStyle
   /** 工作流文件名 / 库内路径；空串表示沿用后端默认工作流。 */
@@ -267,6 +293,29 @@ function parseStyle(value: unknown): RecipeStyle | null {
   return value === 'none' || value === 'realistic' ? value : null
 }
 
+/** 人物B服装槽校验：缺字段 / 脏数据一律回落空槽。 */
+function parseCostumeSlot(value: unknown): StoredReferenceCostumeSlot {
+  const empty = createEmptyCostumeSlot()
+  if (!isRecord(value)) return empty
+  const source = value.source
+  if (source !== 'library' && source !== 'upload') return empty
+  const library: StoredReferenceCostumeSlot['library'] =
+    value.library === 'costume' || value.library === 'costume-anime'
+      ? value.library
+      : ''
+  const id = typeof value.id === 'string' ? value.id : ''
+  const path = typeof value.path === 'string' ? value.path : ''
+  if (source === 'library' && (!id || !library)) return empty
+  if (source === 'upload' && !path) return empty
+  return {
+    source,
+    library,
+    id: source === 'library' ? id : '',
+    path: source === 'upload' ? path : '',
+    name: typeof value.name === 'string' ? value.name : '',
+  }
+}
+
 /**
  * 槽位模式校验：合法值原样保留；缺字段 / 非法值一律返回 null。
  *
@@ -346,6 +395,7 @@ export function parseReferenceStudioSettings(
     costume,
     pose,
     extra: parseExtraSlot(value.extra),
+    extraCostume: parseCostumeSlot(value.extraCostume),
     style,
     workflow,
     baseSeed,
@@ -384,6 +434,7 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     costume: [],
     pose: [],
     extra: createEmptyExtraSlot(),
+    extraCostume: createEmptyCostumeSlot(),
     style: 'realistic',
     workflow: '',
     baseSeed: DEFAULT_REFERENCE_STUDIO_BASE_SEED,

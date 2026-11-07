@@ -71,12 +71,12 @@ DEFAULT_PROMPT = (
     "自然真实，高清细节"
 )
 
-# 一个工作流从上到下最多注入「目标图 + 参考图1 + 参考图2 + 参考图3」四张
-MAX_INPUTS = 4
+# 一个工作流从上到下最多注入「目标图 + 参考图1..4」五张（V2-C 五图）
+MAX_INPUTS = 5
 # 笛卡尔积上限：多组素材全组合很容易爆炸，超限直接让用户收窄选择
 MAX_COMBOS = 100
 
-ROLE_ORDER = ("target", "ref1", "ref2", "ref3")
+ROLE_ORDER = ("target", "ref1", "ref2", "ref3", "ref4")
 
 # 不涂遮罩时走整图重绘；尺寸/画质由工作流自己决定（本项目里多数编辑工作流用 ImageResizeKJ
 # 保持目标图原尺寸，EmptyLatentImage 相关的 quality/orientation 注入对这些工作流是空转）
@@ -98,10 +98,12 @@ class FaceswapRequest(BaseModel):
     ref_ids: list[int] = []        # 参考图1
     ref2_ids: list[int] = []       # 参考图2（三图工作流）
     ref3_ids: list[int] = []       # 参考图3（四图工作流，只补鞋包/配饰/场景）
+    ref4_ids: list[int] = []       # 参考图4（V2-C 五图：人物B服装）
     main_paths: list[str] = []     # 磁盘绝对路径，可与 ids 混用
     ref_paths: list[str] = []
     ref2_paths: list[str] = []
     ref3_paths: list[str] = []
+    ref4_paths: list[str] = []
     # 遮罩：与目标图顺序一一对应；空字符串 = 这张目标图不配遮罩（整图重绘）
     mask_paths: list[str] = []
     workflow_path: str = ""
@@ -117,6 +119,7 @@ class FaceswapRequest(BaseModel):
     ref_node: str | None = None    # 参考图1；留空 = 其余 LoadImage 按节点号排序
     ref2_node: str | None = None   # 参考图2
     ref3_node: str | None = None   # 参考图3（四图工作流的链尾节点）
+    ref4_node: str | None = None   # 参考图4（V2-C 五图工作流的链尾节点）
     dry_run: bool = False
     output_subfolder: str = ""     # 可选：output 下的相对子目录，空 = 平铺
     # 批量超分页专用（编辑页不传，保持旧行为）：空 = 沿用 QUALITY 常量
@@ -252,8 +255,9 @@ def _resolve_input_nodes(
     ref_node: str | None = None,
     ref2_node: str | None = None,
     ref3_node: str | None = None,
+    ref4_node: str | None = None,
 ) -> list[dict]:
-    """把 LoadImage 分成「目标图 / 参考图1 / 参考图2 / 参考图3」。
+    """把 LoadImage 分成「目标图 / 参考图1..4」。
 
     目标图优先取决定输出尺寸的那个 LoadImage（多图工作流里尺寸基准不一定是第一个节点），
     其余节点按节点号升序作为参考图。返回 [{"role", "id"}]，数量与工作流的输入数一致。
@@ -273,7 +277,7 @@ def _resolve_input_nodes(
 
     others = _sort_node_ids([nid for nid in ids if nid != target])
     refs: list[str] = []
-    for index, explicit in enumerate((ref_node, ref2_node, ref3_node)):
+    for index, explicit in enumerate((ref_node, ref2_node, ref3_node, ref4_node)):
         if index >= len(others):
             break
         chosen = explicit or others[index]
@@ -407,7 +411,8 @@ def faceswap_batch(
         raise HTTPException(400, f"工作流加载失败: {e}")
     loads = find_loadimage_nodes(api_wf)
     inputs = _resolve_input_nodes(
-        api_wf, loads, req.main_node, req.ref_node, req.ref2_node, req.ref3_node
+        api_wf, loads, req.main_node, req.ref_node, req.ref2_node, req.ref3_node,
+        req.ref4_node,
     )
     roles = [item["role"] for item in inputs]
 
@@ -432,6 +437,8 @@ def faceswap_batch(
         raise HTTPException(400, f"该工作流只有 {len(roles)} 个输入，但提交了参考图2")
     if "ref3" not in roles and (req.ref3_ids or req.ref3_paths):
         raise HTTPException(400, f"该工作流只有 {len(roles)} 个输入，但提交了参考图3")
+    if "ref4" not in roles and (req.ref4_ids or req.ref4_paths):
+        raise HTTPException(400, f"该工作流只有 {len(roles)} 个输入，但提交了参考图4")
 
     provided = {
         "target": _collect_sources(req.main_ids, req.main_paths, "目标图"),
@@ -442,6 +449,8 @@ def faceswap_batch(
         provided["ref2"] = _collect_sources(req.ref2_ids, req.ref2_paths, "参考图2")
     if "ref3" in roles:
         provided["ref3"] = _collect_sources(req.ref3_ids, req.ref3_paths, "参考图3")
+    if "ref4" in roles:
+        provided["ref4"] = _collect_sources(req.ref4_ids, req.ref4_paths, "参考图4")
     source_groups = [provided[role] for role in roles]
 
     # 遮罩按目标图顺序一一对应；空字符串表示这张不配遮罩

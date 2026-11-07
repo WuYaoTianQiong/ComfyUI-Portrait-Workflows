@@ -189,6 +189,16 @@ def recipe_env(tmp_path: Path, monkeypatch):
     default_workflow = studio_dir / ref_router.DEFAULT_STUDIO_WORKFLOW
     _write_json(default_workflow, _qwen21_workflow())
     _write_json(studio_dir / "图库专用_四槽_测试.api.json", _qwen21_workflow(with_extra=True))
+    five_workflow = studio_dir / "图库专用_Qwen21+VNCCS_五图_可选人物B_25步_双人.api.json"
+    five = _qwen21_workflow(with_extra=True)
+    five["4"]["_meta"]["title"] = "图4：人物B参考 (PersonB)"
+    five["13"] = {
+        "class_type": "LoadImage",
+        "inputs": {"image": "person_b_costume_ref.webp"},
+        "_meta": {"title": "图5：人物B服装参考 (PersonB Costume)"},
+    }
+    five["8"]["inputs"]["images.image_5"] = ["13", 0]
+    _write_json(five_workflow, five)
     _write_json(studio_dir / "测试_Flux三图_不可裁.api.json", _flux_workflow())
     # 不在 studio_dirs() 里：显式选择它必须 400，不能静默回落
     outside_workflow = library_root / "别处" / "外部工作流.api.json"
@@ -480,7 +490,7 @@ def test_slots_unify_library_and_upload(api, recipe_env, captured):
     )
     assert resp.status_code == 200
     slots = {slot["role"]: slot for slot in resp.json()["slots"]}
-    assert set(slots) == {"portrait", "costume", "pose", "extra"}
+    assert set(slots) == {"portrait", "costume", "pose", "extra", "extra_costume"}
     assert slots["extra"]["source"] == "empty"
 
     upload = slots["portrait"]
@@ -506,7 +516,7 @@ def test_slots_include_optional_fourth(api, recipe_env, captured):
     )
     assert resp.status_code == 200
     roles = [slot["role"] for slot in resp.json()["slots"]]
-    assert roles == ["portrait", "costume", "pose", "extra"]
+    assert roles == ["portrait", "costume", "pose", "extra", "extra_costume"]
     assert "ACC-0001" in resp.json()["references"]["extra"]
 
 
@@ -888,6 +898,82 @@ def test_pair_prompt_requires_complete_limbs(api, recipe_env):
     assert "禁止漂浮衣架式人体" not in prompt
     assert "不得出现性器官、胸部、臀部裸露" in prompt
     assert "服装之外正常可见的手臂、小腿、手、脚属于正常皮肤" in prompt
+
+
+FIVE_IMAGE_WORKFLOW = "图库专用_Qwen21+VNCCS_五图_可选人物B_25步_双人.api.json"
+
+
+FIVE_IMAGE_BODY = {
+    "portrait_id": "p1",
+    "costume_id": "SPR-0001",
+    "pose_id": "psl-D026",
+    "extra_library": "portrait",
+    "extra_id": "p1",
+    "extra_costume_library": "costume",
+    "extra_costume_id": "ACC-0001",
+    "workflow": FIVE_IMAGE_WORKFLOW,
+    "dry_run": True,
+}
+
+
+def test_five_image_workflow_exposes_extra_costume_slot(api, recipe_env):
+    """V2-C：五图工作流必须下发 5 个业务角色，且第 5 槽识别为 extra_costume。"""
+    resp = api.get("/api/workflows?scope=studio")
+    assert resp.status_code == 200
+    item = next(
+        (row for row in resp.json()["workflows"] if row["name"] == FIVE_IMAGE_WORKFLOW),
+        None,
+    )
+    assert item is not None
+    assert item["slots"] == ["pose", "portrait", "costume", "extra", "extra_costume"]
+    assert item["extra_kind"] == "person_b"
+    assert item["input_count"] == 5
+
+
+def test_five_image_prompt_uses_b_costume_image(api, recipe_env):
+    """V2-C：B 服装按图5；B 服装文字被图像接管；图5 不回流到 A。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **FIVE_IMAGE_BODY,
+            "person_b_costume_text": "浅蓝衬衫兜底文字",
+            "person_b_text": "与人物A年龄相近",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    prompt = body["prompt"]
+    assert "请根据提供的 5 张参考图" in prompt
+    assert "人物B按图4的脸型、发型与图5的服装" in prompt
+    assert "• 人物B（图像参考）：图4是人物B的脸型与发型参考" in prompt
+    assert "• 人物B（服装图像参考）：图5是人物B的整套服装、配饰与鞋参考" in prompt
+    assert "图5的服装绝对不要用于人物A" in prompt
+    # 图像接管后，B 服装文字与 B 面部文字都不再重复下发，只留自由文字（年龄）
+    assert "浅蓝衬衫兜底文字" not in prompt
+    assert "• 人物B（年龄/自由文字设定）：与人物A年龄相近。" in prompt
+    # A 三槽条款保持原样
+    assert "• 人物：图2中的人物" in prompt
+    assert "• 服装：让人物穿上图3中展示的整套服装和配饰" in prompt
+    slots = {item["role"]: item for item in body["slots"]}
+    assert slots["extra_costume"]["id"] == "ACC-0001"
+    assert slots["extra_costume"]["library"] == "costume"
+
+
+def test_five_image_single_pose_writes_no_b_clause(api, recipe_env):
+    """V2-C：单人姿势下第 4/5 槽仍作为输入，但不得写任何人物B条款。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            **FIVE_IMAGE_BODY,
+            "pose_id": "P001_front",
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "请根据提供的 5 张参考图" in prompt
+    assert "人物B" not in prompt
+    assert "图5是人物B" not in prompt
 
 
 def test_person_b_fragment_fields_reach_pair_prompt(api, recipe_env):

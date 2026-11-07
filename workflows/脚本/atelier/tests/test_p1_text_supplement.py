@@ -360,7 +360,7 @@ def test_supplement_state_does_not_change_slots(api, recipe_env):
     assert body["input_count"] == 3
     assert body["supplements"] == {"portrait": True, "costume": True, "pose": True}
     assert [slot["source"] for slot in body["slots"]] == [
-        "library", "library", "library", "empty",
+        "library", "library", "library", "empty", "empty",
     ]
     for text in (FACE_TEXT, COSTUME_TEXT, POSE_TEXT):
         assert f"{SUPPLEMENT_JOINER}{text}。" in body["prompt_raw"]

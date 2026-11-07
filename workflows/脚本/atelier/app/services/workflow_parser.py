@@ -39,6 +39,8 @@ _ENCODER_LATENT_NODES = {"TextEncodeQwenImage21"}
 #: LoadImage 标题里的业务角色关键词（合成台靠它判定“哪张图放哪个槽”）。
 #: 工作流标题是人工标注，中文/英文、Java 全角冒号都可能出现，统一小写后包含匹配。
 _LOADIMAGE_ROLE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # V2-C：人物B服装必须先于 costume 匹配，否则「图5：人物B服装参考」会被当成 A 的服装。
+    ("extra_costume", ("人物b服装", "人物b服饰", "personb costume", "person_b_costume")),
     ("portrait", ("人像", "portait", "portrait")),
     ("costume", ("服装", "costume", "outfit")),
     ("pose", ("姿势", "pose")),
@@ -1575,7 +1577,7 @@ def find_loadimage_nodes(api_workflow: dict) -> list[tuple[str, str]]:
 
 
 def loadimage_role(title: str) -> str | None:
-    """按 LoadImage 标题判定业务角色：portrait / costume / pose / extra。
+    """按 LoadImage 标题判定业务角色：portrait / costume / pose / extra / extra_costume。
 
     工作流标题是人写的（例如“图3：姿势参考 (Pose) · 深度图”），这里的“图3”
     是提示词编号而不是槽位编号，所以只认角色关键词，不解析标题里的数字。

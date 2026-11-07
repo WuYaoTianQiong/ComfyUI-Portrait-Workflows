@@ -79,9 +79,15 @@ export type RecipeCostumeLibrary = 'costume' | 'costume-anime'
 /**
  * 工作流支持的业务角色（后端 `slots` 字段，契约 C-REF-WF-SLOTS@1）。
  *
- * `extra` 对应合成台的第 4 张上传图；槽位为空时不参与适用性判定。
+ * `extra` 对应合成台的第 4 张上传图；`extra_costume` 是 V2-C 第 5 槽（人物B服装）。
+ * 槽位为空时不参与适用性判定。
  */
-export type StudioWorkflowSlot = 'portrait' | 'costume' | 'pose' | 'extra'
+export type StudioWorkflowSlot =
+  | 'portrait'
+  | 'costume'
+  | 'pose'
+  | 'extra'
+  | 'extra_costume'
 
 /** 合法角色值（顺序即 UI 提示顺序）。 */
 export const STUDIO_WORKFLOW_SLOTS: readonly StudioWorkflowSlot[] = [
@@ -89,6 +95,7 @@ export const STUDIO_WORKFLOW_SLOTS: readonly StudioWorkflowSlot[] = [
   'costume',
   'pose',
   'extra',
+  'extra_costume',
 ]
 
 /** 角色中文名（用于「缺少 X 输入，不适用于当前已选 X」文案）。 */
@@ -97,6 +104,7 @@ const WORKFLOW_SLOT_LABELS: Readonly<Record<StudioWorkflowSlot, string>> = {
   costume: '服装',
   pose: '姿势',
   extra: '第 4 张',
+  extra_costume: '人物B服装',
 }
 
 /** 体态模式：`costume` 服装模式；`bare` 素体展示（无服装）。 */
@@ -126,6 +134,14 @@ export interface RecipeSubmitRequest {
   extra_library?: string
   /** 第 4 张文字补充；只在 extra 图片存在时发送（后端对“有文本无图”返回 400）。 */
   extra_text?: string
+  /**
+   * V2-C 第 5 槽（人物B服装）：整批共享 1 张，不进入组合维度。
+   *
+   * 与 `extra_*` 同样的二选一：库条目发 `extra_costume_id + library`，上传图发 path。
+   */
+  extra_costume_id?: string
+  extra_costume_library?: string
+  extra_costume_path?: string
   /** 合成台工作流文件名 / 库内路径；空 = 后端默认 Qwen21+VNCCS。 */
   workflow?: string
   /** 画质档位；`caps.quality === false` 时不发送。 */
@@ -392,6 +408,12 @@ export interface RecipeRequestOptions {
   extraLibrary?: string
   /** 第 4 张文字补充；空串不发送，有文本无图也绝不发送。 */
   extraText?: string
+  /** V2-C 第 5 槽（人物B服装）：上传路径；空串不发送。 */
+  extraCostumePath?: string
+  /** V2-C 第 5 槽库条目 id；与 `extraCostumePath` 二选一。 */
+  extraCostumeId?: string
+  /** V2-C 第 5 槽库标识（costume / costume-anime）。 */
+  extraCostumeLibrary?: string
   /** 双人姿势的人物 B 文字设定；只在选中 composition=pair 姿势时发送。 */
   personBText?: string
   /**
@@ -646,6 +668,18 @@ export function buildRecipeRequest(
     (request.extra_path || request.extra_id)
   ) {
     request.extra_text = extraText
+  }
+
+  // V2-C 第 5 槽（人物B服装）：整批共享 1 张，与第 4 槽同一二选一规则。
+  const extraCostume = options.extraCostumePath?.trim() ?? ''
+  if (extraCostume) {
+    request.extra_costume_path = extraCostume
+  } else {
+    const extraCostumeId = options.extraCostumeId?.trim()
+    if (extraCostumeId) {
+      request.extra_costume_id = extraCostumeId
+      request.extra_costume_library = options.extraCostumeLibrary?.trim() || ''
+    }
   }
 
   const workflow = options.workflow?.trim()

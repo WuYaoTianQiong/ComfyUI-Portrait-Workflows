@@ -85,7 +85,7 @@ def test_portrait_text_replaces_missing_portrait_image(api, recipe_env, captured
     assert "保持其脸型、五官" not in raw
     assert "人物穿搭展示图" not in raw
     # 人像槽在溯源里仍是空槽（文本不计入 filled）
-    assert _slot_sources(body) == ["empty", "library", "library", "empty"]
+    assert _slot_sources(body) == ["empty", "library", "library", "empty", "empty"]
     assert (body["body_mode"], body["body_mode_auto"]) == ("costume", False)
     assert len(captured) == 1
 
@@ -132,7 +132,7 @@ def test_costume_text_is_not_auto_downgraded_to_bare(api, recipe_env, captured):
     assert "素体展示" not in raw
     assert "不穿任何服装" not in raw
     assert "图3中展示的整套服装" not in raw
-    assert _slot_sources(body) == ["library", "empty", "library", "empty"]
+    assert _slot_sources(body) == ["library", "empty", "library", "empty", "empty"]
 
 
 def test_text_costume_leaves_pose_wear_empty():
@@ -168,7 +168,7 @@ def test_pose_text_replaces_missing_pose_image(api, recipe_env, captured):
     assert "严格复现图" not in raw
     assert "只是动作示意" not in raw
     assert "不要军姿" in raw and "不要 T-pose" in raw
-    assert _slot_sources(body) == ["library", "library", "empty", "empty"]
+    assert _slot_sources(body) == ["library", "library", "empty", "empty", "empty"]
 
 
 def test_pose_text_does_not_trigger_pair_wording():

@@ -46,6 +46,14 @@ SLOT_DESCRIPTORS = (
         "sources": ("library:hair", "upload"),
         "supports_text": True,
     },
+    {
+        # V2-C 第 5 槽：人物B服装（整批共享 1 张，不进入组合维度）。
+        # 文字兜底仍走人物 B 的「人物服饰」碎片（person_b_costume_text），
+        # 因此这里不开纯文本槽，避免出现后端不消费的输入。
+        "key": "extra_costume", "label": "人物B服装", "multiple": False,
+        "sources": ("library:costume", "library:costume-anime", "upload"),
+        "supports_text": False,
+    },
 )
 
 SLOT_ROLES = tuple(item["key"] for item in SLOT_DESCRIPTORS)

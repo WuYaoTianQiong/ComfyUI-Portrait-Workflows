@@ -403,6 +403,13 @@ export function useReferenceRecipe() {
   /** 第 4 槽是否已填（上传路径或发型库条目二选一）。 */
   const extraFilled = draft.extraFilled
 
+  /** V2-C 第 5 槽（人物B服装）：只读投影，与草稿单例共用同一份来源。 */
+  const extraCostume = draft.extraCostume
+  const extraCostumeFilled = draft.extraCostumeFilled
+  const extraCostumePath = computed(() => extraCostume.value.path)
+  const extraCostumeId = computed(() => extraCostume.value.id)
+  const extraCostumeLibrary = computed(() => extraCostume.value.library)
+
   /** 尺寸档位 / 比例均为多选；空数组表示本轮不发对应参数。 */
   const qualitySelection = ref<string[]>([])
   const ratioSelection = ref<string[]>([])
@@ -460,6 +467,17 @@ export function useReferenceRecipe() {
       item.slots === undefined ? true : item.slots.includes('extra'),
     ),
   )
+  /**
+   * 当前生效工作流里是否有能接第 5 槽（`extra_costume`）的。
+   *
+   * 旧后端 `slots` 缺失时返回 false：第 5 槽是 V2-C 新契约，不猜测支持，
+   * 避免页面显示一个提交后必 400 的入口。
+   */
+  const supportsExtraCostumeSlot = computed(() =>
+    effectiveWorkflows.value.some((item) =>
+      item.slots === undefined ? false : item.slots.includes('extra_costume'),
+    ),
+  )
   /** 缺服装自动切换素体展示时的提示文案（页面转成 toast，不拦提交）。 */
   const bodyModeNotice = ref('')
   /**
@@ -496,6 +514,7 @@ export function useReferenceRecipe() {
     if (slotHasImage('costume')) names.push('服装')
     if (slotHasImage('pose')) names.push('姿势')
     if (extraFilled.value) names.push('第 4 张')
+    if (extraCostumeFilled.value) names.push('人物B服装')
     return names
   })
   const activeSlotCount = computed(() => filledSlotNames.value.length)
@@ -507,6 +526,7 @@ export function useReferenceRecipe() {
     if (slotHasImage('costume')) roles.push('costume')
     if (slotHasImage('pose')) roles.push('pose')
     if (extraFilled.value) roles.push('extra')
+    if (extraCostumeFilled.value) roles.push('extra_costume')
     return roles
   })
 
@@ -715,6 +735,10 @@ export function useReferenceRecipe() {
         extraId: extraId.value,
         extraLibrary: extraLibrary.value,
         extraText: extraText.value,
+        // V2-C：第 5 槽（人物B服装）同样整批共享，预览与提交共用。
+        extraCostumePath: extraCostumePath.value,
+        extraCostumeId: extraCostumeId.value,
+        extraCostumeLibrary: extraCostumeLibrary.value,
         // v1.5：预览用当前激活的 B 变体（面/身、服饰、自由文字三部分分开下发）。
         personBVariant: draft.hasPairPose.value ? draft.activePersonBVariant.value : null,
         personBText: draft.hasPairPose.value ? draft.personBText.value : '',
@@ -1079,6 +1103,21 @@ export function useReferenceRecipe() {
     draft.clearExtra()
   }
 
+  /** V2-C 第 5 槽：上传人物B服装。 */
+  function setExtraCostume(path: string, name: string): void {
+    draft.setExtraCostumeUpload(path, name)
+  }
+
+  /** V2-C 第 5 槽：从服装库选择人物B服装。 */
+  function setExtraCostumeLibrary(library: string, id: string, name: string): void {
+    if (library !== 'costume' && library !== 'costume-anime') return
+    draft.setExtraCostumeLibrary(library, id, name)
+  }
+
+  function clearExtraCostume(): void {
+    draft.clearExtraCostume()
+  }
+
   /** 清空上一次的运行结果（重试前调用）。 */
   /**
    * 清空「最近一批」兼容视图（重试前调用）。
@@ -1142,6 +1181,10 @@ export function useReferenceRecipe() {
           extraLibrary: extraLibrary.value,
           // 第 4 槽不进入批次维度：每组共用同一份 extra / extra_text。
           extraText: extraText.value,
+          // V2-C 第 5 槽（人物B服装）同样整批共享，不进入批次维度。
+          extraCostumePath: extraCostumePath.value,
+          extraCostumeId: extraCostumeId.value,
+          extraCostumeLibrary: extraCostumeLibrary.value,
           // v1.5：每组提交自己的 B 变体；无变体时回退到当前变体 / 旧自由文字。
           personBVariant: draft.hasPairPose.value
             ? (group.personBVariant ?? draft.activePersonBVariant.value)
@@ -1464,7 +1507,7 @@ export function useReferenceRecipe() {
       const hasImageSlot = RECIPE_SLOT_KEYS.some(
         (slot) => draft.slotModes.value[slot] === 'image' && imageCounts[slot] > 0,
       )
-      if (!hasImageSlot && !extraFilled.value) {
+      if (!hasImageSlot && !extraFilled.value && !extraCostumeFilled.value) {
         return rejectBeforeSubmit(
           `无法提交。原因：${NO_IMAGE_SLOT_HINT}。下一步：选择至少 1 张参考图后重试。`,
         )
@@ -1668,6 +1711,8 @@ export function useReferenceRecipe() {
     clearBodyModeNotice,
     /** 当前生效工作流是否支持第 4 张（extra）；false 时页面隐藏上传入口。 */
     supportsExtraSlot,
+    /** V2-C：当前生效工作流是否支持第 5 槽（人物B服装）。 */
+    supportsExtraCostumeSlot,
     // 能力与尺寸
     caps,
     qualityOptions,
@@ -1697,6 +1742,12 @@ export function useReferenceRecipe() {
     setExtra,
     setExtraLibrary,
     clearExtra,
+    // V2-C 第 5 槽（人物B服装）
+    extraCostume,
+    extraCostumeFilled,
+    setExtraCostume,
+    setExtraCostumeLibrary,
+    clearExtraCostume,
     // 提示词只读预览（dry_run，与正式提交完全独立）
     previewPrompt,
     /** 编译后的最终负向（§11.3：预览 = 最终正向 + 最终负向）。 */

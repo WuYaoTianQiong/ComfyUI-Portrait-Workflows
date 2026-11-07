@@ -51,6 +51,10 @@ const props = defineProps<{
   identityImageName?: string
   /** V2-C：双人配对模式下只允许 1 组变体（需「批量展开」才能新增）。 */
   singleMode?: boolean
+  /** V2-C：当前工作流是否支持第 5 槽（人物B服装）。 */
+  costumeSlotEnabled?: boolean
+  /** 已选人物B服装名；空串 = 未选，人物服饰碎片仍作文字兜底。 */
+  costumeName?: string
 }>()
 
 const emit = defineEmits<{
@@ -58,6 +62,8 @@ const emit = defineEmits<{
   'update:activeIndex': [value: number]
   add: []
   remove: [index: number]
+  pickCostume: []
+  clearCostume: []
 }>()
 
 /** 当前变体；列表为空时为 null。 */
@@ -181,10 +187,49 @@ function previewContent(content: string): string {
         人物 A 沿用图2的脸型/发型与图3的衣装；人物 B 只按这里的文字生成，脸会与 A 区分。
       </template>
       批量时按序号与人物 A 的人像参考图 1:1 配对；数量不等时较少一侧复用最后一组。
+      <template v-if="costumeName">
+        人物 B 的服装 / 配饰 / 鞋由「人物B服装」图控制，人物服饰碎片不再参与。
+      </template>
       <template v-if="disabled">
         当前已手动改写提示词，B 设定不参与提交，请直接改下方提示词。
       </template>
     </p>
+
+    <!-- V2-C 第 5 槽：人物B服装（整批共享 1 张，不进入批量组合） -->
+    <div
+      v-if="costumeSlotEnabled"
+      class="person-b__costume"
+      data-testid="studio-person-b-costume"
+    >
+      <span class="person-b__label">人物B服装（图像参考）</span>
+      <div class="person-b__costume-row">
+        <span class="person-b__costume-name" data-testid="studio-person-b-costume-name">
+          {{ costumeName || '未选择：人物服饰碎片仍作文字兜底' }}
+        </span>
+        <button
+          type="button"
+          class="person-b__action"
+          :disabled="disabled"
+          data-testid="studio-person-b-costume-pick"
+          @click="emit('pickCostume')"
+        >
+          {{ costumeName ? '重新选择' : '从服装库选择' }}
+        </button>
+        <button
+          v-if="costumeName"
+          type="button"
+          class="person-b__action"
+          :disabled="disabled"
+          data-testid="studio-person-b-costume-clear"
+          @click="emit('clearCostume')"
+        >
+          移除
+        </button>
+      </div>
+      <p class="person-b__meta">
+        选择后人物B的服装 / 配饰 / 鞋以该图为准，整批共用这一张。
+      </p>
+    </div>
 
     <p
       v-if="pairingNotice"
@@ -351,6 +396,33 @@ function previewContent(content: string): string {
   color: var(--warn);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* V2-C 第 5 槽：人物B服装入口（整批共享 1 张） */
+.person-b__costume {
+  margin-top: var(--gap-sm);
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.person-b__costume-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.person-b__costume-name {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-body);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .person-b__tabs {

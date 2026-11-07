@@ -246,6 +246,44 @@ describe('buildRecipeRequest', () => {
     expect('extra_path' in blank).toBe(false)
   })
 
+  it('V2-C 第 5 槽只带 1 个人物B服装来源，路径优先', () => {
+    const fromLibrary = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        extraCostumeId: 'char-costume-HAN-006',
+        extraCostumeLibrary: 'costume',
+      },
+    )
+    expect(fromLibrary.extra_costume_id).toBe('char-costume-HAN-006')
+    expect(fromLibrary.extra_costume_library).toBe('costume')
+    expect(fromLibrary.extra_costume_path).toBeUndefined()
+
+    const both = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        extraCostumePath: 'F:/lib/uploads/b-costume.png',
+        extraCostumeId: 'char-costume-HAN-006',
+        extraCostumeLibrary: 'costume',
+      },
+    )
+    expect(both.extra_costume_path).toBe('F:/lib/uploads/b-costume.png')
+    expect(both.extra_costume_id).toBeUndefined()
+    expect(both.extra_costume_library).toBeUndefined()
+
+    const blank = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      { style: 'realistic', promptSuffix: '', extraPath: '' },
+    )
+    expect('extra_costume_id' in blank).toBe(false)
+    expect('extra_costume_path' in blank).toBe(false)
+  })
+
   it('第 4 张可改走发型库条目（extra_id + extra_library），路径优先', () => {
     const fromLibrary = buildRecipeRequest(
       { portrait: portrait(), costume: costume(), pose: pose() },

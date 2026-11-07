@@ -2479,6 +2479,18 @@ export interface components {
              */
             ref3_paths: string[];
             /**
+             * Ref4 Ids
+             * @default []
+             */
+            ref4_ids: number[];
+            /** Ref4 Node */
+            ref4_node?: string | null;
+            /**
+             * Ref4 Paths
+             * @default []
+             */
+            ref4_paths: string[];
+            /**
              * Ref Ids
              * @default []
              */
@@ -3374,6 +3386,21 @@ export interface components {
              * @default false
              */
             dry_run: boolean;
+            /**
+             * Extra Costume Id
+             * @default
+             */
+            extra_costume_id: string;
+            /**
+             * Extra Costume Library
+             * @default
+             */
+            extra_costume_library: string;
+            /**
+             * Extra Costume Path
+             * @default
+             */
+            extra_costume_path: string;
             /**
              * Extra Id
              * @default

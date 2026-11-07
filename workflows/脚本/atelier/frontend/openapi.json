@@ -867,6 +867,33 @@
             "title": "Ref3 Paths",
             "type": "array"
           },
+          "ref4_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ref4 Ids",
+            "type": "array"
+          },
+          "ref4_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref4 Node"
+          },
+          "ref4_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ref4 Paths",
+            "type": "array"
+          },
           "ref_ids": {
             "default": [],
             "items": {
@@ -2738,6 +2765,21 @@
             "default": false,
             "title": "Dry Run",
             "type": "boolean"
+          },
+          "extra_costume_id": {
+            "default": "",
+            "title": "Extra Costume Id",
+            "type": "string"
+          },
+          "extra_costume_library": {
+            "default": "",
+            "title": "Extra Costume Library",
+            "type": "string"
+          },
+          "extra_costume_path": {
+            "default": "",
+            "title": "Extra Costume Path",
+            "type": "string"
           },
           "extra_id": {
             "default": "",

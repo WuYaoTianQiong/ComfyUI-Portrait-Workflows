@@ -48,12 +48,14 @@ import type {
   RecipeTextFragments,
 } from './recipeTextFragments'
 import {
+  createEmptyCostumeSlot,
   createEmptyExtraSlot,
   readReferenceStudioSettings,
   writeReferenceStudioSettings,
 } from './useReferenceStudioSettings'
 import type { ReferenceStudioSettings } from './useReferenceStudioSettings'
 import type {
+  StoredReferenceCostumeSlot,
   StoredReferenceExtraSlot,
   StoredReferenceSlotEntry,
 } from './useReferenceStudioSettings'
@@ -115,6 +117,16 @@ const extra = ref<StoredReferenceExtraSlot>(createEmptyExtraSlot())
 
 /** 第 4 槽是否已选图（`source=empty` 即未选）。 */
 const extraFilled = computed(() => extra.value.source !== 'empty')
+
+/**
+ * V2-C 第 5 槽（人物B服装）：整批共享 1 张，不进入批量组合维度。
+ *
+ * 只在工作流声明 `extra_costume` 时渲染入口；与第 4 槽一样随
+ * `pb.reference_studio_v1` 持久化。
+ */
+const extraCostume = ref<StoredReferenceCostumeSlot>(createEmptyCostumeSlot())
+/** 人物B服装槽是否已选图。 */
+const extraCostumeFilled = computed(() => extraCostume.value.source !== 'empty')
 
 /**
  * 文本补充八类碎片（2026-11-06）。
@@ -688,6 +700,41 @@ function clearExtra(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 第 5 槽（V2-C · 人物B服装，单图、整批共享）
+// ---------------------------------------------------------------------------
+
+/** 人物B服装：改为上传图（后传覆盖前传）。 */
+function setExtraCostumeUpload(path: string, name: string): void {
+  extraCostume.value = {
+    source: 'upload',
+    library: '',
+    id: '',
+    path,
+    name,
+  }
+}
+
+/** 人物B服装：改为服装库条目。 */
+function setExtraCostumeLibrary(
+  library: 'costume' | 'costume-anime',
+  id: string,
+  name: string,
+): void {
+  extraCostume.value = {
+    source: 'library',
+    library,
+    id,
+    path: '',
+    name,
+  }
+}
+
+/** 清空人物B服装槽。 */
+function clearExtraCostume(): void {
+  extraCostume.value = createEmptyCostumeSlot()
+}
+
+// ---------------------------------------------------------------------------
 // 通用
 // ---------------------------------------------------------------------------
 
@@ -697,6 +744,7 @@ function clearDraft(): void {
   costume.value = []
   pose.value = []
   extra.value = createEmptyExtraSlot()
+  extraCostume.value = createEmptyCostumeSlot()
   // 文本补充与负向同属草稿；清空后允许下次重新从磁盘恢复（测试与显式清空共用）。
   textFragments.value = createEmptyRecipeTextFragments()
   negativePrompt.value = ''
@@ -776,6 +824,8 @@ function persist(): void {
     pose: pose.value.map(storedPose),
     // 第 4 槽存最小来源信息 + 全文；恢复不依赖发型库是否已加载。
     extra: { ...extra.value },
+    // V2-C 第 5 槽（人物B服装）同样只存来源。
+    extraCostume: { ...extraCostume.value },
     // 文本补充存全文（不是只存 id）：恢复时不依赖库数据，也不会因为碎片池改名而丢内容。
     textFragments: cloneRecipeTextFragments(textFragments.value),
     negativePrompt: negativePrompt.value,
@@ -954,6 +1004,7 @@ function restoreTextFragmentsFromSettings(
   stored: Pick<
     ReferenceStudioSettings,
     | 'extra'
+    | 'extraCostume'
     | 'textFragments'
     | 'negativePrompt'
     | 'personBText'
@@ -968,6 +1019,7 @@ function restoreTextFragmentsFromSettings(
 ): void {
   if (textFragmentsRestoredFromStorage) return
   extra.value = { ...stored.extra }
+  extraCostume.value = { ...stored.extraCostume }
   textFragments.value = cloneRecipeTextFragments(stored.textFragments)
   negativePrompt.value = stored.negativePrompt
   // v1.5：优先恢复变体列表；旧快照只有 personBText 时迁移成第一条变体。
@@ -1218,6 +1270,12 @@ export function useReferenceRecipeDraft() {
     setExtraLibrary,
     setExtraText,
     clearExtra,
+    // V2-C 第 5 槽（人物B服装，单图、整批共享）
+    extraCostume,
+    extraCostumeFilled,
+    setExtraCostumeUpload,
+    setExtraCostumeLibrary,
+    clearExtraCostume,
     // 文本补充（八类碎片）与负向提示词（2026-11-06）
     textFragments,
     negativePrompt,

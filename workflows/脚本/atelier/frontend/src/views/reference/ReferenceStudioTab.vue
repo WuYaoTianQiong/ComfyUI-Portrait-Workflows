@@ -79,7 +79,8 @@ import StudioTextSupplementCard from './components/reference/StudioTextSupplemen
 import StudioPersonBEditor from './components/reference/StudioPersonBEditor.vue'
 import HairPickerModal from './components/reference/HairPickerModal.vue'
 import PortraitPickerModal from './components/reference/PortraitPickerModal.vue'
-import type { HairItem, PortraitItem } from '../../api/reference'
+import CostumePickerModal from './components/reference/CostumePickerModal.vue'
+import type { CostumeItem, HairItem, PortraitItem } from '../../api/reference'
 import {
   desiredPoseFacets,
   pickMatchedPose,
@@ -236,6 +237,11 @@ const {
   bodyModeNotice,
   clearBodyModeNotice,
   supportsExtraSlot,
+  supportsExtraCostumeSlot,
+  extraCostume,
+  extraCostumeFilled,
+  setExtraCostumeLibrary,
+  clearExtraCostume,
   previewPrompt,
   previewNegativePrompt,
   previewNegativeEffective,
@@ -1051,6 +1057,10 @@ const extraText = computed<string>({
 
 const hairPickerOpen = ref(false)
 const portraitPickerOpen = ref(false)
+const costumePickerOpen = ref(false)
+
+/** 第 5 槽展示名；空串 = 未选，仍由人物服饰碎片兜底。 */
+const extraCostumeName = computed(() => extraCostume.value.name)
 
 function onHairPick(item: HairItem): void {
   setExtraLibrary('hair', item.id, item.标题)
@@ -1062,6 +1072,13 @@ function onPortraitPick(item: PortraitItem): void {
   setExtraLibrary('portrait', item.id, item.标题)
   portraitPickerOpen.value = false
   toast.success(`已选人物B身份参考「${item.标题}」，提交时使用该人像原图`)
+}
+
+function onExtraCostumePick(item: CostumeItem): void {
+  const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
+  setExtraCostumeLibrary(library, item.id, item.服装名称)
+  costumePickerOpen.value = false
+  toast.success(`已选人物B服装「${item.服装名称}」，整批共用这一张`)
 }
 
 function onExtraUploaded(items: UploadedReference[]): void {
@@ -1091,6 +1108,15 @@ watch(supportsExtraSlot, (enabled) => {
   if (enabled || !extraFilled.value) return
   clearExtra()
   toast.info('当前工作流都不支持第 4 张参考图，已清空该槽位')
+})
+
+/**
+ * V2-C：工作流都不支持第 5 槽时清空人物B服装，避免残留输入把所有工作流判成不适用。
+ */
+watch(supportsExtraCostumeSlot, (enabled) => {
+  if (enabled || !extraCostumeFilled.value) return
+  clearExtraCostume()
+  toast.info('当前工作流都不支持人物B服装参考图，已清空该槽位')
 })
 
 /**
@@ -1416,6 +1442,11 @@ onMounted(async () => {
             @close="portraitPickerOpen = false"
             @select="onPortraitPick"
           />
+          <CostumePickerModal
+            :open="costumePickerOpen"
+            @close="costumePickerOpen = false"
+            @select="onExtraCostumePick"
+          />
         </div>
       </div>
 
@@ -1427,12 +1458,16 @@ onMounted(async () => {
         :disabled="manualPromptActive"
         :portrait-count="draft.portraitCount.value"
         :single-mode="draft.pairModeActive.value"
+        :costume-slot-enabled="supportsExtraCostumeSlot"
+        :costume-name="extraCostumeName"
         :identity-image-selected="extraKind === 'person_b' && extraFilled"
         :identity-image-name="extraKind === 'person_b' && extraFilled ? extraName : ''"
         @update:variants="draft.personBVariants.value = $event"
         @update:active-index="draft.setActivePersonBVariant($event)"
         @add="onAddPersonBVariant"
         @remove="onRemovePersonBVariant"
+        @pick-costume="costumePickerOpen = true"
+        @clear-costume="clearExtraCostume"
       />
 
       <p

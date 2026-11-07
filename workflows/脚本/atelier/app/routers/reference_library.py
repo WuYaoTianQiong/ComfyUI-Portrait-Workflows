@@ -272,6 +272,10 @@ class RecipeRequest(BaseModel):
     extra_path: str = ""
     #: 第 4 槽文字补充：只在 extra 图片存在时追加「此外需体现」；有文本无图 400
     extra_text: str = ""
+    #: V2-C 第 5 槽（可选）：人物B服装；整批共享 1 张，不进入组合维度
+    extra_costume_library: str = ""
+    extra_costume_id: str = ""
+    extra_costume_path: str = ""
     #: 指定合成台工作流（文件名或库内路径）；空 = 默认 Qwen21+VNCCS 三图
     workflow: str = ""
     #: 尺寸参数（前端透传）：空 = 保持现有默认；工作流 caps 不支持时后端会忽略
@@ -396,6 +400,7 @@ _UPLOAD_ENTRY: dict[str, RecipeEntry] = {
     "costume": RecipeEntry(id="", name="上传的服装参考"),
     "pose": RecipeEntry(id="", name="上传的姿势参考"),
     "extra": RecipeEntry(id="", name="上传的附加参考图"),
+    "extra_costume": RecipeEntry(id="", name="上传的人物B服装参考"),
 }
 
 
@@ -575,7 +580,12 @@ def create_reference_recipe(req: RecipeRequest):
             f"（仅支持 {' / '.join(COSTUME_LIBRARIES)}）",
         )
     # 素体模式不穿衣服：同时选了服装（库条目或上传图）就自相矛盾，直接 400
-    if req.body_mode == "bare" and (req.costume_id.strip() or req.costume_path.strip()):
+    if req.body_mode == "bare" and (
+        req.costume_id.strip()
+        or req.costume_path.strip()
+        or req.extra_costume_id.strip()
+        or req.extra_costume_path.strip()
+    ):
         raise HTTPException(400, "素体模式不能同时选择服装")
     # bare 下服装文本同样属于「不穿衣服却描述衣服」，与服装图一视同仁拒绝。
     # P3 手动模式下文本字段不参与（前端不发送），因此不再据此 400。
@@ -601,6 +611,22 @@ def create_reference_recipe(req: RecipeRequest):
     elif req.extra_path.strip():
         extra_path = _upload_path(req.extra_path, "第 4 张参考")
 
+    # V2-C 第 5 槽：人物B服装（整批共享 1 张；只允许服装库或上传）
+    extra_costume = None
+    extra_costume_path = None
+    if req.extra_costume_id.strip():
+        if req.extra_costume_library not in COSTUME_LIBRARIES:
+            raise HTTPException(
+                400,
+                f"不支持的人物B服装库：{req.extra_costume_library}"
+                f"（仅支持 {' / '.join(COSTUME_LIBRARIES)}）",
+            )
+        extra_costume, extra_costume_path = _recipe_entry(
+            req.extra_costume_library, req.extra_costume_id.strip(), "人物B服装参考",
+        )
+    elif req.extra_costume_path.strip():
+        extra_costume_path = _upload_path(req.extra_costume_path, "人物B服装参考")
+
     # 第 4 槽是「图为主 + 文本补充」：没有图片时文字不生效，直接 400，
     # 避免把一句发型描述当成纯文字第 4 槽提交（与明确不做项一致）。
     extra_text = req.extra_text.strip()
@@ -615,6 +641,7 @@ def create_reference_recipe(req: RecipeRequest):
         "costume": costume_path,
         "pose": pose_path,
         "extra": extra_path,
+        "extra_costume": extra_costume_path,
     }
     filled = {role: paths[role] is not None for role in SLOT_ROLES}
     total = sum(filled.values())
@@ -698,6 +725,12 @@ def create_reference_recipe(req: RecipeRequest):
             _slot_entry(pose, "pose") if pose_path else None,
             _slot_entry(extra, "extra") if extra_path else None,
             extra_kind=extra_kind,
+            # V2-C：第 5 槽 = 人物B服装；仅双人姿势下写 B 条款
+            extra_costume=(
+                _slot_entry(extra_costume, "extra_costume")
+                if extra_costume_path
+                else None
+            ),
             style=req.style,
             prompt_suffix=req.prompt_suffix,
             index_map=index_map,
@@ -735,10 +768,12 @@ def create_reference_recipe(req: RecipeRequest):
         ref_paths=[str(refs[0][2])] if len(refs) > 0 else [],
         ref2_paths=[str(refs[1][2])] if len(refs) > 1 else [],
         ref3_paths=[str(refs[2][2])] if len(refs) > 2 else [],
+        ref4_paths=[str(refs[3][2])] if len(refs) > 3 else [],
         main_node=ordered[0][1],
         ref_node=refs[0][1] if len(refs) > 0 else None,
         ref2_node=refs[1][1] if len(refs) > 1 else None,
         ref3_node=refs[2][1] if len(refs) > 2 else None,
+        ref4_node=refs[3][1] if len(refs) > 3 else None,
         workflow_path=str(workflow_path),
         # 空槽裁剪只作用在副本上：把裁剪后的 API 工作流随请求传下去，不改磁盘文件
         workflow_content=json.dumps(trimmed_api, ensure_ascii=False) if trimmed else None,
@@ -792,6 +827,10 @@ def create_reference_recipe(req: RecipeRequest):
         _slot_info("costume", costume, costume_path, req.costume_library),
         _slot_info("pose", pose, pose_path, "pose"),
         _slot_info("extra", extra, extra_path, req.extra_library or ""),
+        _slot_info(
+            "extra_costume", extra_costume, extra_costume_path,
+            req.extra_costume_library or "",
+        ),
     ]
 
     body = {
@@ -837,6 +876,7 @@ def create_reference_recipe(req: RecipeRequest):
             "costume": costume["id"] if costume else "",
             "pose": pose["id"] if pose else "",
             "extra": extra["id"] if extra else "",
+            "extra_costume": extra_costume["id"] if extra_costume else "",
         },
     }
     #: 手动改写标记只在该模式下出现，自动模式（P1/P2）响应形状保持不变

@@ -199,6 +199,8 @@ def build_recipe_prompt(
     extra_text: str = "",
     person_b_portrait_text: str = "",
     person_b_costume_text: str = "",
+    #: V2-C 第 5 槽：人物B服装图像参考（只在双人姿势下写 B 条款）
+    extra_costume: RecipeEntry | None = None,
 ) -> str:
     """按上游顺序拼出完整提示词；未知画风/素体模式抛 ValueError（由路由转成 400）。
 
@@ -226,6 +228,9 @@ def build_recipe_prompt(
     - `extra_kind="person_b"`（v2-A，2026-11-07）：第 4 槽是人物 B 的脸/发型身份参考。
       B 的面容/发型以图N为准，`person_b_portrait_text` 不参与；B 的服装/年龄仍走文字。
       图N 的脸/发型明确禁止用于人物 A；A 的三槽条款保持逐字不变。
+    - `extra_costume`（V2-C，2026-11-08）：第 5 槽是人物 B 的服装图像参考。
+      B 的服装/配饰/鞋以该图为准，`person_b_costume_text` 不参与；B 的脸/发型仍由
+      第 4 槽身份图控制。单人姿势下不写任何 B 条款。
 
     P2 替代态（方案 §5.1 / §4.4）：对应槽**无图**且文本非空时，用文本句替换图片主句
     （`portrait is None` 等），三槽要么图片句、要么文本句，二选一。
@@ -351,6 +356,24 @@ def build_recipe_prompt(
         else:
             b_image_idx = 1 + int(bool(portrait)) + int(bool(costume)) + int(bool(pose))
 
+    # V2-C：第 5 槽 = 人物B服装图像；与 B 身份图一样按真实图号书写。
+    b_costume_idx = 0
+    if extra_costume:
+        if (
+            index_map
+            and isinstance(index_map.get("extra_costume"), int)
+            and index_map["extra_costume"] > 0
+        ):
+            b_costume_idx = index_map["extra_costume"]
+        else:
+            b_costume_idx = (
+                1
+                + int(bool(portrait))
+                + int(bool(costume))
+                + int(bool(pose))
+                + int(bool(extra))
+            )
+
     # B 的三部分文本（面部/身材、服饰、自由补充）各自独立；只在双人姿势下并入 B 条款。
     # 有 B 身份图时，面容/发型以图为准，`person_b_portrait_text` 不参与（UI 会禁用对应入口）。
     b_parts = [
@@ -378,29 +401,44 @@ def build_recipe_prompt(
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
-        elif b_image_idx or b_parts:
+        elif b_image_idx or b_costume_idx or b_parts:
             a_parts: list[str] = []
             if portrait_idx:
                 a_parts.append(f"脸型、五官、发型严格沿用图{portrait_idx}中的人物")
             if costume_idx:
                 a_parts.append(f"穿图{costume_idx}中展示的整套服装与配饰")
             a_desc = "，".join(a_parts) or "沿用前面的人物描述"
-            b_source = (
-                f"按图{b_image_idx}的脸型、发型与下方文字设定"
-                if b_image_idx
-                else "按下方文字设定"
-            )
+            if b_image_idx and b_costume_idx:
+                b_source = f"按图{b_image_idx}的脸型、发型与图{b_costume_idx}的服装"
+            elif b_image_idx:
+                b_source = f"按图{b_image_idx}的脸型、发型与下方文字设定"
+            elif b_costume_idx:
+                b_source = f"按图{b_costume_idx}的服装与下方文字设定"
+            else:
+                b_source = "按下方文字设定"
             clauses.append(
                 "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都完整入镜；"
                 f"人物A：{a_desc}；人物B{b_source}；{PAIR_MODESTY_CLAUSE}{PAIR_ANATOMY_CLAUSE}"
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
-            # 有 B 身份图：面容/发型以图为准，文字只保留服装/年龄，避免与图像冲突。
-            # 无 B 身份图：仍是 v1.5 的三部分固定顺序拼接；A 的条款完全不动。
-            b_text_parts = b_image_text_parts if b_image_idx else b_parts
+            # 图像优先：B 身份图管脸/发型；B 服装图管服装/配饰/鞋。
+            # 被图像接管的文字部分不再重复下发，只保留年龄/自由文字等图像无法表达的内容。
+            b_portrait_part = _replacement_text(person_b_portrait_text)
+            b_free_part = _replacement_text(person_b_text)
+            if b_costume_idx and b_image_idx:
+                b_text_parts = [part for part in (b_free_part,) if part]
+                label = "年龄/自由文字设定"
+            elif b_costume_idx:
+                b_text_parts = [part for part in (b_portrait_part, b_free_part) if part]
+                label = "面部/年龄文字设定"
+            elif b_image_idx:
+                b_text_parts = b_image_text_parts
+                label = "服装/年龄文字设定"
+            else:
+                b_text_parts = b_parts
+                label = "文字设定"
             if b_text_parts:
-                label = "服装/年龄文字设定" if b_image_idx else "文字设定"
                 clauses.append(
                     f"• 人物B（{label}）：{_ensure_period('；'.join(b_text_parts))}"
                     "人物B的脸型、五官必须与人物A明显不同，不要复用人物A的脸。"
@@ -479,6 +517,22 @@ def build_recipe_prompt(
         extra_note = _replacement_text(extra_text) if clause else ""
         if extra_note:
             clauses.append(f"• 此外需体现：{extra_note}。")
+        idx += 1
+
+    # V2-C：第 5 槽是人物B服装；只给 B 提供服装/配饰/鞋，绝不回流到 A。
+    # 单人姿势下不写任何 B 条款（与第 4 槽 person_b 同一隔离口径）。
+    if extra_costume:
+        if is_pair:
+            name_hint = (
+                f"（参考：{extra_costume.name}）"
+                if extra_costume.name and "上传" not in extra_costume.name
+                else ""
+            )
+            clauses.append(
+                f"• 人物B（服装图像参考）：图{b_costume_idx}是人物B的整套服装、配饰与鞋参考{name_hint}；"
+                f"人物B的服装、配饰、鞋必须与图{b_costume_idx}一致；"
+                f"图{b_costume_idx}的服装绝对不要用于人物A。"
+            )
         idx += 1
 
     if not clauses:
