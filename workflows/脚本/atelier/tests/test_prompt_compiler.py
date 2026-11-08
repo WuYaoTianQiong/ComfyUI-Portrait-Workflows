@@ -96,8 +96,22 @@ def test_floating_clothes_anatomy_rewrite():
     assert "禁止漂浮衣架式人体" not in result.positive
     assert "人体结构完整，四肢与手脚自然呈现" in result.positive
     for term in ("缺少手", "缺少手指", "缺少腿", "缺少脚", "漂浮衣物", "衣架",
-                 "人体结构缺失", "肢体融合"):
+                 "人体结构缺失", "肢体融合", "第三个人", "多余的腿", "多余的脚",
+                 "多余的手", "重复人体"):
         assert term in result.negative
+
+
+def test_extracted_negation_does_not_leave_double_punctuation():
+    """否定整段被抽走后不能残留「。。」「。，」，否则正向提示词会带坏标点。"""
+    result = compile_prompt(
+        "两人的相对位置严格按图中的两个人形。禁止合并成一个人、禁止裁掉其中一人、"
+        "禁止只画一个人。\n"
+        "膝盖的朝向与弯曲程度。不要画成双脚并拢、身体笔直、手臂自然下垂的站立姿势，"
+        "不要军姿。",
+        negative_effective=True,
+    )
+    assert "。。" not in result.positive
+    assert "。，" not in result.positive
 
 
 def test_compiler_is_idempotent():

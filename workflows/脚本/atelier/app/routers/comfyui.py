@@ -29,6 +29,7 @@ from app.services.workflow_parser import (
     detect_workflow_caps, detect_workflow_params, find_loadimage_nodes,
     loadimage_role, load_workflow, inject_prompt, resolve_seed,
 )
+from app.services.reference_studio import static_index_map
 from app.services.output_location import (
     OutputLocationError,
     expand_subfolder,
@@ -172,34 +173,44 @@ class WorkflowRowWithSlots(WorkflowRow):
     slots: list[str]
     #: 仅 studio：第 4 槽语义（`hair` / `person_b` / 空串），供前端切换标题与选择器
     extra_kind: str = ""
+    #: 仅 studio：角色 → 真实图号（与提示词里的「图N」同一口径）
+    figure_numbers: dict[str, int] = Field(default_factory=dict)
 
 
 class WorkflowListResponseWithSlots(WorkflowListResponse):
     workflows: list[WorkflowRowWithSlots] = Field(default_factory=list)
 
 
-#: 工作流输入信息缓存：路径 → (mtime, LoadImage 数, 角色列表)。
-#: 一次解析同时产出 input_count 与 slots：列表接口对每个工作流都要这两项，
-#: 分开算会把同一份 JSON 完整解析两遍（load_workflow 还要查 object_info，代价不低）。
-_loadimage_info_cache: dict[str, tuple[float, int, list[str], str]] = {}
+#: 工作流输入信息缓存：路径 → (mtime, LoadImage 数, 角色列表, 第4槽语义, 图号表)。
+#: 一次解析同时产出 input_count / slots / figure_numbers：列表接口对每个工作流都要这些，
+#: 分开算会把同一份 JSON 完整解析多遍（load_workflow 还要查 object_info，代价不低）。
+_loadimage_info_cache: dict[str, tuple[float, int, list[str], str, dict[str, int]]] = {}
 
 
-def _workflow_loadimage_info(path: str) -> tuple[int, list[str], str]:
-    """返回 (LoadImage 输入数, 能映射出的业务角色列表, 第 4 槽语义)。
+def _workflow_loadimage_info(
+    path: str,
+) -> tuple[int, list[str], str, dict[str, int]]:
+    """返回 (LoadImage 输入数, 能映射出的业务角色列表, 第 4 槽语义, 角色→图号)。
 
     角色按 LoadImage 节点顺序去重保序（不按角色优先级重排），因此同一工作流
     选中不同图片时，前端看到的顺序与节点顺序一致。解析失败时 `slots` 为 `[]`，
     不抛异常 —— 沿用「单个工作流坏掉不能拖垮整张列表」的既有语义。
+
+    `figure_numbers` 与 `/api/reference/recipes` 提示词里的「图N」同源
+    （`reference_studio.static_index_map`），前端据此在槽位卡上标图号。
     """
     try:
         mtime = Path(path).stat().st_mtime
     except OSError:
-        return 0, [], ""
+        return 0, [], "", {}
     cached = _loadimage_info_cache.get(path)
     if cached and cached[0] == mtime:
-        return cached[1], list(cached[2]), cached[3]
+        return cached[1], list(cached[2]), cached[3], dict(cached[4])
+    figures: dict[str, int] = {}
     try:
-        nodes = find_loadimage_nodes(load_workflow(path))
+        workflow = load_workflow(path)
+        nodes = find_loadimage_nodes(workflow)
+        figures = static_index_map(workflow)
     except Exception as exc:  # noqa: BLE001 —— 单个工作流解析失败不能拖垮整个列表
         logger.debug("解析工作流输入信息失败 %s：%s", path, type(exc).__name__)
         nodes = []
@@ -216,8 +227,8 @@ def _workflow_loadimage_info(path: str) -> tuple[int, list[str], str]:
                 extra_kind = "person_b"
             elif "发型" in title or "hair" in lower:
                 extra_kind = "hair"
-    _loadimage_info_cache[path] = (mtime, len(nodes), slots, extra_kind)
-    return len(nodes), list(slots), extra_kind
+    _loadimage_info_cache[path] = (mtime, len(nodes), slots, extra_kind, figures)
+    return len(nodes), list(slots), extra_kind, dict(figures)
 
 
 @router.get("/workflows", response_model=WorkflowListResponseWithSlots)
@@ -235,13 +246,15 @@ def list_workflows(
 
     # input_count / slots 必须在路由层显式补上：只靠模型默认值会把漏填字段静默变成 0
     for item in results:
-        input_count, slots, extra_kind = _workflow_loadimage_info(item["path"])
+        input_count, slots, extra_kind, figures = _workflow_loadimage_info(item["path"])
         item["input_count"] = input_count
         # 角色能力只对合成台生效；scope=all 保持向后兼容，统一给空数组。
         # scope=studio 下空 slots 的工作流已在目录层被过滤，走到这里的必然非空。
         item["slots"] = slots if scope == "studio" else []
         # 第 4 槽语义同样只对合成台生效（hair / person_b / 空串）。
         item["extra_kind"] = extra_kind if scope == "studio" else ""
+        # 图号表同理：合成台要用它把提示词里的「图N」标到对应槽位。
+        item["figure_numbers"] = figures if scope == "studio" else {}
 
     if scope == "studio":
         # 合成台：三槽（人像+服装+姿势）优先 → 画廊本机改版 > 参考库专用 > 库根 → 新到旧。

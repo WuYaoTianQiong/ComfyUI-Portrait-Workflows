@@ -305,6 +305,9 @@ class RecipeRequest(BaseModel):
     #: 素体模式（C-REF-BODY-MODE@1）：`costume`（默认，常规出图）/ `bare`（无服装素体展示）。
     #: 其它值 400；`bare` 时不允许同时选择服装。
     body_mode: str = "costume"
+    #: 成人向提示词（2026-11-08）：仅当 18+ 解锁后前端才置 true。
+    #: 作用：去掉素体/双人条款里的「非性化、禁裸露」抑制句，保留人数与结构约束。
+    adult_mode: bool = False
     prompt_suffix: str = ""
     #: 槽位碎片文本：槽有图时仅在对应 `*_supplement=true` 时作为补充；
     #: 槽无图时作为替代（§5.1 文本主句）。image 模式 + 文本但开关关闭 → 400。
@@ -596,6 +599,15 @@ def create_reference_recipe(req: RecipeRequest):
             f"不支持的素体模式：{req.body_mode}"
             f"（仅支持 {' / '.join(BODY_MODES)}）",
         )
+    # 成人向总闸（2026-11-08）：前端只在 18+ 解锁后置 adult_mode=true，
+    # 后端再按 `ATELIER_REFERENCE_ALLOW_NSFW` 复核一次，避免绕过前端直接放开抑制条款。
+    # 手动改写（P3）不渲染抑制句，但仍校验，防止前端误传。
+    if req.adult_mode and not settings.reference_allow_nsfw:
+        raise HTTPException(
+            400,
+            "后端未开启 18+ 总闸（ATELIER_REFERENCE_ALLOW_NSFW=0），"
+            "不能提交成人向提示词",
+        )
     if req.costume_library not in COSTUME_LIBRARIES:
         raise HTTPException(
             400,
@@ -759,6 +771,8 @@ def create_reference_recipe(req: RecipeRequest):
             index_map=index_map,
             # 素体模式透传：提示词据此追加中性素体条款（C-REF-BODY-MODE@1）
             body_mode=body_mode,
+            # 成人向（2026-11-08）：去掉抑制句，人数/四肢约束不变
+            adult_mode=req.adult_mode,
             # P2/P4 三槽文本：槽无图 → 替代态（§5.1）；槽有图 + supplement=true
             # → 补充态（「此外需体现」）。槽有图但开关关闭已在上方 400，不会到这里。
             portrait_text=req.portrait_text,
@@ -904,6 +918,12 @@ def create_reference_recipe(req: RecipeRequest):
             "extra": extra["id"] if extra else "",
             "extra_costume": extra_costume["id"] if extra_costume else "",
         },
+        #: 角色 → 真实图号（提示词里的「图N」）：含空槽，供前端把图号标到槽位卡上。
+        #: 与 `/api/workflows?scope=studio` 的 figure_numbers 同一口径；空槽也会出现，
+        #: 因此「图3 空着、提示词却没有图3」这种现象用户能自己看出来。
+        "figure_numbers": reference_studio.static_index_map(api_wf),
+        #: 本次提示词实际用到的图号（只含已填槽位），便于核对「图4」到底指哪张。
+        "figure_numbers_effective": dict(index_map),
     }
     #: 手动改写标记只在该模式下出现，自动模式（P1/P2）响应形状保持不变
     if manual_override:

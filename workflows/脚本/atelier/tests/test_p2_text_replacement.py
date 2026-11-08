@@ -277,7 +277,8 @@ def test_person_b_image_uses_image_for_face_and_keeps_only_costume_text():
         person_b_text="棕色乐福鞋",
     )
     # 双人主句按图4取脸与发型；B 面容文字被图像取代
-    assert "人物B按图4的脸型、发型与下方文字设定" in prompt
+    # 2026-11-08 拆条：B 的来源句独立成「• 人物B：…」条款
+    assert "• 人物B：按图4的脸型、发型与下方文字设定。" in prompt
     assert "• 人物B（服装/年龄文字设定）：浅蓝衬衫，米色长裙；棕色乐福鞋。" in prompt
     assert "冷白皮，鹅蛋脸，深棕高马尾" not in prompt
     # A 的条款逐字不变

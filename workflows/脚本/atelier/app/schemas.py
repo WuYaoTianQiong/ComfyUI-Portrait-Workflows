@@ -314,6 +314,9 @@ class WorkflowRow(BaseModel):
     recommended: bool = False
     #: 工作流里的 LoadImage 输入数（与 find_loadimage_nodes 一致，供合成台按槽位校验）
     input_count: int = 0
+    #: 角色 → 真实图号（"pose": 1 表示提示词里的「图1」是姿势参考）。
+    #: 合成台据此在槽位卡与预览段落上显示「图N」，否则用户无法把「图4」对上槽位。
+    figure_numbers: dict[str, int] = Field(default_factory=dict)
     caps: WorkflowCaps = Field(default_factory=WorkflowCaps)
     params: WorkflowParams | None = None
     #: 档位 × 比例的预演尺寸；前端只负责格式化，不再自己算像素

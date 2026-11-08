@@ -22,6 +22,7 @@ from app.routers import editor as editor_router
 from app.routers import reference_library as ref_router
 from app.services import reference_library as rl
 from app.services import reference_remote_cache
+from app.services.prompt_compiler import compile_prompt
 
 POSE_ITEMS = [
     {
@@ -316,6 +317,22 @@ def test_real_dry_run_reports_real_node_mapping(api, recipe_env):
     assert "图2中的人物" in body["prompt"]
     assert "图3中展示的整套服装" in body["prompt"]
     assert "图1中人体模型" in body["prompt"]
+    # 图号表（C-REF-FIGURE@1）：前端把「图N」标到槽位卡；含空槽
+    assert body["figure_numbers"] == {"pose": 1, "portrait": 2, "costume": 3}
+    assert body["figure_numbers_effective"] == {"pose": 1, "portrait": 2, "costume": 3}
+
+
+def test_figure_numbers_keep_empty_slots_and_effective_shrinks(api, recipe_env):
+    """空槽保留图号（用户能看出「图3 空着」），effective 只含真实用到的图号。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={"costume_id": "SPR-0001", "pose_id": "P001_front", "dry_run": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["figure_numbers"] == {"pose": 1, "portrait": 2, "costume": 3}
+    assert body["figure_numbers_effective"] == {"pose": 1, "costume": 3}
+    assert "图2" not in body["prompt"]
 
 
 def test_empty_slot_trims_workflow_and_keeps_real_numbers(api, recipe_env, captured):
@@ -893,6 +910,14 @@ def test_pair_prompt_requires_complete_limbs(api, recipe_env):
     assert "两人的手、手指、手臂、腿、脚必须完整自然出现" in prompt
     assert "服装未覆盖的部位必须是自然皮肤" in prompt
     assert "人体结构完整，四肢与手脚自然呈现" in prompt
+    # 2026-11-08：双人姿势线稿重叠会多画人或手脚，正向补数量锚点、负向补「多」类词。
+    assert "每人只有两条腿、两只脚、两只手" in prompt
+    assert "重叠交叉轮廓是前后遮挡关系，不属于多余肢体" in prompt
+    assert "画面中始终只有两位人物" in prompt
+    # 测试夹具工作流没有接负向，这里直接验证「原文 + 编译器」这条链路会产出多人类负向。
+    compiled = compile_prompt(body["prompt_raw"], "", negative_effective=True)
+    for term in ("第三个人", "多余的腿", "多余的脚", "多余的手", "重复人体"):
+        assert term in compiled.negative
     # 原文保留否定句，由编译器抽成负向；编译后正向不再出现「禁止漂浮衣架式人体」。
     assert "禁止漂浮衣架式人体" in body["prompt_raw"]
     assert "禁止漂浮衣架式人体" not in prompt
@@ -945,7 +970,7 @@ def test_five_image_prompt_uses_b_costume_image(api, recipe_env):
     body = resp.json()
     prompt = body["prompt"]
     assert "请根据提供的 5 张参考图" in prompt
-    assert "人物B按图4的脸型、发型与图5的服装" in prompt
+    assert "• 人物B：按图4的脸型、发型与图5的服装。" in prompt
     assert "• 人物B（图像参考）：图4是人物B的脸型与发型参考" in prompt
     assert "• 人物B（服装图像参考）：图5是人物B的整套服装、配饰与鞋参考" in prompt
     assert "图5的服装绝对不要用于人物A" in prompt
@@ -1023,7 +1048,7 @@ def test_person_b_pose_and_modifier_reach_pair_prompt(api, recipe_env):
     assert "• 人物B（姿态文字）：侧身坐姿，双腿交叠。" in prompt
     assert "• 人物B（附加修饰）：拍摄视角：低角度仰拍；场景环境：黄昏天台。" in prompt
     # B 条款不得混进 A 的姿势/修饰段
-    assert "• 姿势：严格复现图1中人体模型的身体姿态与镜头角度。" in prompt
+    assert "• 姿势：严格复现图1中两个人形的身体姿态与镜头角度。" in prompt
     assert "低角度仰拍" not in prompt.split("• 人物B（附加修饰）")[0]
 
 
@@ -1173,6 +1198,114 @@ def test_bare_pair_prompt_uses_neutral_two_person_wording(api, recipe_env):
     assert "两位成年女性的素体展示" in prompt
     assert "两人各自都有完整服装" not in prompt
     assert "不允许裸露" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# 提示词 A/B 拆条 + 成人向（2026-11-08）
+# ---------------------------------------------------------------------------
+
+
+def test_pair_prompt_splits_person_a_and_person_b_clauses(api, recipe_env):
+    """V1：双人 + B 内容时，A/B 各自独立成条，「双人要求」只留人数与构图约束。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "person_b_text": "金色齐肩短发，酒红色西装外套",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "• 人物A：脸型、五官、发型严格沿用图2中的人物" in prompt
+    assert "• 人物B：按下方文字设定。" in prompt
+    # 拆条后混排句必须整体消失（同一行里不再出现「人物A：…；人物B…」）
+    assert "人物A：脸型、五官、发型严格沿用图2中的人物；人物B" not in prompt
+    assert "人物A只出现一次，人物B只出现一次" in prompt
+
+
+def test_bare_pair_person_b_text_is_rendered(api, recipe_env):
+    """V3：bare + 双人 + B 文字时，B 条款不再被整体丢弃。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "psl-D026",
+            "body_mode": "bare",
+            "person_b_portrait_text": "金发碧眼，丰满身材",
+            "person_b_text": "体型高挑",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "• 人物B（文字设定）：金发碧眼，丰满身材；体型高挑。" in prompt
+    assert "• 人物A：脸型、五官、发型严格沿用图2中的人物。" in prompt
+    # 素体专属措辞仍在，且没有服装段
+    assert "不得出现性器官、胸部、臀部裸露" not in prompt
+    assert "服装：让人物穿上" not in prompt
+
+
+def test_adult_bare_removes_neutral_clauses(api, recipe_env, monkeypatch):
+    """V4：18+ 解锁 + bare → 不再出现非性化/性暗示抑制句。"""
+    monkeypatch.setattr(settings, "reference_allow_nsfw", True)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "P001_front",
+            "body_mode": "bare",
+            "adult_mode": True,
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "不穿任何服装与配饰" in prompt
+    for word in ("非性化", "性暗示", "不得出现性器官"):
+        assert word not in prompt, f"成人向提示词不应出现「{word}」"
+
+
+def test_adult_pair_removes_modesty_clause_keeps_limbs(api, recipe_env, monkeypatch):
+    """V5：18+ + 服装 + 双人 → 去掉禁裸露句，人数/四肢约束逐字保留。"""
+    monkeypatch.setattr(settings, "reference_allow_nsfw", True)
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "adult_mode": True,
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "不得出现性器官、胸部、臀部裸露" not in prompt
+    assert "每人只有两条腿、两只脚、两只手" in prompt
+    assert "两人的手、手指、手臂、腿、脚必须完整自然出现" in prompt
+    assert "禁止合并成一个人" in prompt
+
+
+def test_adult_mode_requires_backend_gate(api, recipe_env):
+    """总闸关闭时（fixture 默认 False），adult_mode=true 直接 400。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "pose_id": "P001_front",
+            "body_mode": "bare",
+            "adult_mode": True,
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 400
+    assert "18+ 总闸" in resp.json()["detail"]
 
 def test_recipe_400_separates_unrecognized_roles_from_missing_slot(
     api, recipe_env, captured, monkeypatch,

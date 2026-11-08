@@ -129,6 +129,59 @@ def test_studio_slots_skip_unrecognized_loadimage_titles(api, tmp_path, monkeypa
     assert row["slots"] == ["portrait", "pose"], "「主体」不是业务角色，不能进 slots"
     assert row["input_count"] == 3, "认不出角色的 LoadImage 仍占一个输入位"
 
+def test_studio_workflow_row_exposes_figure_numbers(api, tmp_path, monkeypatch):
+    """图号表（C-REF-FIGURE@1）：角色 → 文本编码器 images.image_N 的真实图号。
+
+    前端据此把提示词里的「图N」标到对应槽位卡上；键名是 图1=姿势 / 图2=人像
+    这类与节点标题相反的排布也必须按编码器键如实返回。
+    """
+    from app.services import workflow_catalog
+
+    studio = tmp_path / "图库专用工作流"
+    studio.mkdir()
+    (studio / "图号.api.json").write_text(
+        json.dumps(
+            {
+                "1": {
+                    "class_type": "LoadImage",
+                    "inputs": {"image": "pose.png"},
+                    "_meta": {"title": "图3：姿势参考 (Pose)"},
+                },
+                "2": {
+                    "class_type": "LoadImage",
+                    "inputs": {"image": "portrait.png"},
+                    "_meta": {"title": "图1：人像参考 (Portrait)"},
+                },
+                "8": {
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {
+                        "clip": ["1", 0],
+                        "text": "",
+                        "images.image_1": ["1", 0],
+                        "images.image_2": ["2", 0],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(workflow_catalog, "studio_dirs", lambda: [studio])
+    monkeypatch.setattr(workflow_catalog, "search_dirs", lambda: [tmp_path])
+    # scope=all 只扫 search_dirs 根目录：放一份同内容文件用于验证通用下拉不带图号表
+    (tmp_path / "图号通用.json").write_text(
+        (studio / "图号.api.json").read_text(encoding="utf-8"), encoding="utf-8",
+    )
+
+    resp = api.get("/api/workflows", params={"scope": "studio"})
+    assert resp.status_code == 200
+    row = resp.json()["workflows"][0]
+    assert row["figure_numbers"] == {"pose": 1, "portrait": 2}
+    # scope=all 不暴露图号表（通用下拉用不到）
+    resp_all = api.get("/api/workflows")
+    assert resp_all.json()["workflows"][0]["figure_numbers"] == {}
+
+
 def test_studio_slots_degrade_to_empty_on_parse_error(api, tmp_path, monkeypatch):
     """解析失败的工作流不能拖垮整张列表：slots 降级为 []，请求仍然 200。
 

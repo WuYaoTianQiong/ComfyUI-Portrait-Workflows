@@ -145,6 +145,20 @@ def role_nodes(api_workflow: dict) -> dict[str, str]:
     return out
 
 
+def static_index_map(api_workflow: dict) -> dict[str, int]:
+    """角色 → 工作流真实图号（不看是否填槽），供 UI 显示「图N」徽标。
+
+    与 `build_index_map` 的唯一差别是不过滤空槽：前端在用户选图之前就要把
+    「图1 是姿势 / 图2 是人像」标出来，否则提示词里突然出现「图4」时无法自查。
+    没有图片键的工作流（Flux 系）返回空映射。
+    """
+    return build_index_map(
+        api_workflow,
+        {role: True for role in SLOT_ROLES},
+        role_nodes(api_workflow),
+    )
+
+
 def build_index_map(
     api_workflow: dict, filled: dict[str, bool], nodes: dict[str, str],
 ) -> dict[str, int]:

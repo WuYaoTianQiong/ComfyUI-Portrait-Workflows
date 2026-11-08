@@ -3367,6 +3367,11 @@ export interface components {
          */
         RecipeRequest: {
             /**
+             * Adult Mode
+             * @default false
+             */
+            adult_mode: boolean;
+            /**
              * Aspect Ratio
              * @default
              */
@@ -4331,6 +4336,10 @@ export interface components {
              * @default
              */
             extra_kind: string;
+            /** Figure Numbers */
+            figure_numbers?: {
+                [key: string]: number;
+            };
             /**
              * Image Slots
              * @default 0

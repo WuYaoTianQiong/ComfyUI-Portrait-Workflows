@@ -58,6 +58,20 @@ PAIR_MODESTY_CLAUSE = (
     "服装之外正常可见的手臂、小腿、手、脚属于正常皮肤，不视为裸露。"
 )
 
+#: 成人向（18+ 解锁）的素体条款：只声明不穿服装，不再附加「中性 / 非性化 /
+#: 不添加性暗示元素」。默认路径仍用 `BARE_DISPLAY_CLAUSE`，该常量只在
+#: `adult_mode=True` 时生效（2026-11-08）。
+BARE_DISPLAY_CLAUSE_ADULT = (
+    "• 素体展示：画面为成年女性的素体人体展示，不穿任何服装与配饰。"
+)
+
+#: bare 模式下的双人四肢条款：没有服装，删掉「服装未覆盖的部位」措辞，
+#: 避免提示词里出现与素体自相矛盾的服装描述。
+PAIR_ANATOMY_CLAUSE_BARE = (
+    "两人的手、手指、手臂、腿、脚必须完整自然出现；全身皮肤自然；"
+    "禁止漂浮衣架式人体。"
+)
+
 
 @dataclass(frozen=True)
 class RecipeEntry:
@@ -214,6 +228,10 @@ def build_recipe_prompt(
     person_b_modifier_fragments: str = "",
     #: V2-C 第 5 槽：人物B服装图像参考（只在双人姿势下写 B 条款）
     extra_costume: RecipeEntry | None = None,
+    #: 成人向（2026-11-08）：仅当 18+ 解锁后由路由层置 True。
+    #: 作用范围仅限「去掉素体/双人条款里的非性化、禁裸露抑制句」，
+    #: 人数、四肢、构图约束与非成人模式完全一致；默认 False 保证旧行为逐字不变。
+    adult_mode: bool = False,
 ) -> str:
     """按上游顺序拼出完整提示词；未知画风/素体模式抛 ValueError（由路由转成 400）。
 
@@ -247,6 +265,10 @@ def build_recipe_prompt(
     - `person_b_pose_text` / `person_b_modifier_fragments`（P1，2026-11-08）：
       B 的姿态与修饰层独立成条款，仅双人姿势下生效；B 含「画风技术」时同样抑制整图
       固定风格段（画风是整图属性），其余 B 修饰不回流人物 A。
+    - `adult_mode`（2026-11-08）：18+ 解锁后由路由层置 True。只去掉素体/双人条款里的
+      「中性、非性化」「不添加任何性暗示元素」「不得出现性器官…裸露」抑制句，
+      人数锚点与四肢完整性约束逐字保留；不新增任何露骨描写，实际效果仍由用户提示词驱动。
+      默认 False 时所有安全文案与旧调用逐字一致。
 
     P2 替代态（方案 §5.1 / §4.4）：对应槽**无图**且文本非空时，用文本句替换图片主句
     （`portrait is None` 等），三槽要么图片句、要么文本句，二选一。
@@ -272,6 +294,11 @@ def build_recipe_prompt(
     b_pose_text = _replacement_text(person_b_pose_text)
     b_modifier_lines = _modifier_lines(person_b_modifier_fragments)
     b_modifier_types = _modifier_types(b_modifier_lines)
+    # 双人姿势：上游 `pair*` 与 pose-studio-lite 的 `composition=pair` 都必须识别。
+    # 姿势段与双人条款共用这一判定：双人时姿势段不能再用单人口径。
+    is_pair = bool(
+        pose and (pose.composition == "pair" or pose.id.startswith("pair"))
+    )
 
     clauses: list[str] = []
     #: 图号计数只在有图时递增（文本槽不占图号）；`index_map` 存在时以真实图位为准。
@@ -284,12 +311,15 @@ def build_recipe_prompt(
         portrait_idx = num
         # bare 模式下没有服装，"服装镂空处露出的皮肤"无从谈起；同时避免出现
         # 「裸露」等词，统一改成中性的「全身皮肤」表述。
+        # 2026-11-08：原来写「肤色必须与图一人物一致」——「图一」是上游单图时代的
+        # 硬编码图号，现在图1 是姿势白模/深度图，等于让模型对齐白模肤色。改为
+        # 不带图号的表述：人像本身就是脸部真源（本节主句已写明「图N中的人物」）。
         skin = (
-            "人物的肤色必须与图一人物一致，全身皮肤必须与脸部肤色统一，"
+            "人物的全身皮肤必须与脸部肤色统一，"
             "统一后的肤色与质感按风格要求呈现。"
             if body_mode == "bare"
             else (
-                "人物的肤色必须与图一人物一致，所有裸露皮肤（包括服装镂空处露出的皮肤）"
+                "人物的所有裸露皮肤（包括服装镂空处露出的皮肤）"
                 "必须与脸部肤色统一，统一后的肤色与质感按风格要求呈现。"
             )
         )
@@ -306,9 +336,10 @@ def build_recipe_prompt(
     elif portrait_text:
         # 替代态（§5.1）：槽无图但有文本 → 文本句替换图片主句，不写「图N」。
         # bare 下没有服装可参照，只声明中性素体展示；非 bare 保留肤色/质感约定。
+        # 成人向：素体替代句里的「中性」同样属于抑制措辞，改用普通肤色句。
         skin = (
             PORTRAIT_REPLACEMENT_SKIN_BARE
-            if body_mode == "bare"
+            if body_mode == "bare" and not adult_mode
             else PORTRAIT_REPLACEMENT_SKIN
         )
         clauses.append(
@@ -335,22 +366,42 @@ def build_recipe_prompt(
     if pose:
         pose_idx = _figure_no(index_map, "pose", idx)
         wear = f"，穿着图{costume_idx}的服装" if costume_idx else ""
-        body = (
-            f"最终画面中的人物是真人，皮肤真实自然{wear}"
-            if is_photo
-            else f"人物的肤色与质感按风格要求呈现{wear}"
-        )
+        if is_pair:
+            # 双人时不能再写「画面中的人物是真人…穿着图N的服装」：单人口径会和
+            # 后面的「恰好两位」冲突，模型会把两人都往人物A的服装上套。
+            body = (
+                "画面中只保留两位真人，皮肤真实自然"
+                if is_photo
+                else "画面中只保留两位真人，肤色与质感按风格要求呈现"
+            )
+        else:
+            body = (
+                f"最终画面中的人物是真人，皮肤真实自然{wear}"
+                if is_photo
+                else f"人物的肤色与质感按风格要求呈现{wear}"
+            )
         pose_desc = expand_pose_name(pose.name) or pose.name
         # 拍摄视角碎片优先于库条目角度：有碎片时不再写 pose.angle，其余姿势文案保留。
         if pose.angle and _MODIFIER_VIEW_ANGLE not in modifier_types:
             pose_desc = f"{pose_desc}；镜头角度：{pose.angle}"
+        pose_target = f"图{pose_idx}中两个人形" if is_pair else f"图{pose_idx}中人体模型"
+        limb_lead = (
+            "两人各自必须逐项落实这些身体部位的状态："
+            if is_pair
+            else "必须逐项落实这些身体部位的状态："
+        )
+        pair_hint = (
+            f"图{pose_idx}中的重叠交叉轮廓是前后遮挡关系，不属于多余肢体；"
+            if is_pair
+            else ""
+        )
         clause = (
-            f"• 姿势：严格复现图{pose_idx}中人体模型的身体姿态与镜头角度。"
+            f"• 姿势：严格复现{pose_target}的身体姿态与镜头角度。"
             f"身体姿态要点：{pose_desc}。"
-            "必须逐项落实这些身体部位的状态：重心落在哪条腿、胯部朝哪边顶、"
+            f"{limb_lead}重心落在哪条腿、胯部朝哪边顶、"
             "肩线与躯干的前后倾斜、手臂的位置（扶腰/搭肩/下垂）、膝盖的朝向与弯曲程度。"
             "不要画成双脚并拢、身体笔直、手臂自然下垂的站立姿势，不要军姿，不要 T-pose。"
-            f"图{pose_idx}只是动作示意，{body}。"
+            f"{pair_hint}图{pose_idx}只是动作示意，{body}。"
         )
         clause = _supplement_clause(clause, pose_text)
         clauses.append(clause)
@@ -360,13 +411,6 @@ def build_recipe_prompt(
         # 「严格复现图N」与「图N只是动作示意」两句必须整体消失，否则模型会去找不存在的图。
         clauses.append(f"• 姿势：{pose_text}{POSE_REPLACEMENT_TAIL}")
 
-    # 双人姿势：上游 `pair*` 与 pose-studio-lite 的 `composition=pair` 都必须识别。
-    # 2026-11-07 实测：自动模式只有一张人像时模型会克隆 A；B 的文字设定必须显式写出，
-    # 且要声明 B 的脸与 A 不同，否则两人会变成同一张脸。
-    # 未选服装时不再写「两人各自都有完整服装」：那是凭空捏造衣装。
-    is_pair = bool(
-        pose and (pose.composition == "pair" or pose.id.startswith("pair"))
-    )
     # v2-A：第 4 槽语义 = person_b 时，图N 是人物B的脸/发型真源。
     # 先算图号（index_map 优先；没有时按前面已填的图片槽递增），供双人条款引用。
     b_image_idx = 0
@@ -414,14 +458,25 @@ def build_recipe_prompt(
         if part
     ]
     if is_pair:
-        if body_mode == "bare":
-            clauses.append(
-                "• 双人要求：画面中为恰好两位成年女性的素体展示，两人都完整入镜，保持中性、非性化姿态。"
-                f"{PAIR_ANATOMY_CLAUSE}"
-                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
-                "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
-            )
-        elif b_image_idx or b_costume_idx or b_parts or b_pose_text or b_modifier_lines:
+        # 双人条款的三个分支共用同一套人数/四肢/构图约束，只有「抑制句」按模式条件拼接：
+        # - bare：用没有服装措辞的四肢条款；
+        # - 成人向：去掉禁裸露/非性化抑制句（人数与结构约束不动）。
+        anatomy = (
+            PAIR_ANATOMY_CLAUSE_BARE if body_mode == "bare" else PAIR_ANATOMY_CLAUSE
+        )
+        # bare 的抑制由素体条款承担，这里不再叠「不得出现…裸露」，
+        # 否则与「不穿任何服装与配饰」自相矛盾（旧 bare 分支同样没有这句）。
+        modesty = (
+            ""
+            if adult_mode or body_mode == "bare"
+            else PAIR_MODESTY_CLAUSE
+        )
+        # B 有任一内容（身份图/服装图/文字/姿态/修饰）就走详细分支。
+        # 2026-11-08：bare 不再整体丢弃 B 条款，素体展示同样要能画出人物B。
+        b_has_content = bool(
+            b_image_idx or b_costume_idx or b_parts or b_pose_text or b_modifier_lines
+        )
+        if b_has_content:
             a_parts: list[str] = []
             if portrait_idx:
                 a_parts.append(f"脸型、五官、发型严格沿用图{portrait_idx}中的人物")
@@ -436,11 +491,21 @@ def build_recipe_prompt(
                 b_source = f"按图{b_costume_idx}的服装与下方文字设定"
             else:
                 b_source = "按下方文字设定"
+            # 拆条（2026-11-08）：人数/结构/构图留在「双人要求」，
+            # A 与 B 各自的描述独立成条，前端按「人物A / 人物B / 共用约束」分组渲染。
             clauses.append(
                 "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都完整入镜；"
-                f"人物A：{a_desc}；人物B{b_source}；{PAIR_MODESTY_CLAUSE}{PAIR_ANATOMY_CLAUSE}"
-                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
+                "人物A只出现一次，人物B只出现一次，每人只有两条腿、两只脚、两只手；"
+                f"{modesty}{anatomy}"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形；"
+                f"图{pose_idx}中的重叠交叉轮廓是前后遮挡关系，不属于多余肢体，"
+                "画面中始终只有人物A与人物B两个人。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
+            clauses.append(f"• 人物A：{a_desc}。")
+            clauses.append(
+                f"• 人物B：{b_source}。"
+                "人物B的脸型、五官必须与人物A明显不同，不要复用人物A的脸。"
             )
             # 图像优先：B 身份图管脸/发型；B 服装图管服装/配饰/鞋。
             # 被图像接管的文字部分不再重复下发，只保留年龄/自由文字等图像无法表达的内容。
@@ -474,6 +539,16 @@ def build_recipe_prompt(
                 clauses.append(
                     f"• 人物B（附加修饰）：{_modifier_body(b_modifier_lines)}。"
                 )
+        elif body_mode == "bare":
+            neutral = "" if adult_mode else "保持中性、非性化姿态。"
+            clauses.append(
+                "• 双人要求：画面中为恰好两位成年女性的素体展示，两人都完整入镜，"
+                "每人只有两条腿、两只脚、两只手；"
+                f"{neutral}{anatomy}"
+                f"图{pose_idx}中的重叠交叉轮廓是前后遮挡关系，不属于多余肢体。"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
+                "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
+            )
         else:
             pair_costume = (
                 f"其中一位穿图{costume_idx}的整套服装和配饰，另一位穿同色系素色简化款；"
@@ -482,16 +557,21 @@ def build_recipe_prompt(
             )
             clauses.append(
                 "• 双人要求：画面中必须同时出现恰好两位成年女性，两人都要完整入镜；"
-                f"{pair_costume}{PAIR_MODESTY_CLAUSE}{PAIR_ANATOMY_CLAUSE}"
-                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
+                "画面中始终只有两位人物，每人只有两条腿、两只脚、两只手；"
+                f"{pair_costume}{modesty}{anatomy}"
+                f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形；"
+                f"图{pose_idx}中的重叠交叉轮廓是前后遮挡关系，不属于多余肢体。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
 
-    # 素体模式（C-REF-BODY-MODE@1）：只追加中性人体展示条款。
+    # 素体模式（C-REF-BODY-MODE@1）：只追加素体展示条款。
     # bare 下不可能同时选服装（图或文本），所以上面不会出现服装段落；
     # faceless 也天然不触发（`bool(costume and pose)` 需要服装图存在）。
+    # 成人向（2026-11-08）：换成不含「中性/非性化/性暗示」的素体条款。
     if body_mode == "bare":
-        clauses.append(BARE_DISPLAY_CLAUSE)
+        clauses.append(
+            BARE_DISPLAY_CLAUSE_ADULT if adult_mode else BARE_DISPLAY_CLAUSE
+        )
 
     if faceless:
         clauses.append(
@@ -591,5 +671,5 @@ def build_recipe_prompt(
     ):
         tail = "人物比例协调，手部自然，脸部无五官，光影统一。" if faceless else "人物比例协调，手部与五官自然，光影统一。"
         lines.append(f"• 风格：{style_info['prompt']} {tail}")
-    lines.append("画面中没有任何文字、标志或水印。")
+    lines.append("没有任何文字、标志或水印。")
     return "\n".join(lines)
