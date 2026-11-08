@@ -175,26 +175,43 @@ function displaysOf(group: RecipeBatchGroup) {
 function groupKeyOf(group: RecipeBatchGroup): string {
   const key = slotDisplaysGroupKey(displaysOf(group))
   // v1.5：同一张 A 人像配不同 B 变体必须落不同组，否则矩阵会把它们合并成一行。
-  return group.personBVariant ? `${key}${GROUP_KEY_SEPARATOR}b:${group.personBVariant.id}` : key
+  if (group.personBVariant) return `${key}${GROUP_KEY_SEPARATOR}b:${group.personBVariant.id}`
+  // P1：新 B 组按逐组 B 人像/服装区分，避免不同 B 素材被合并成一行。
+  if (group.personBPortrait || group.personBCostume) {
+    const portrait = group.personBPortrait?.id ?? ''
+    const costume = group.personBCostume?.id ?? ''
+    return `${key}${GROUP_KEY_SEPARATOR}bg:${portrait}${GROUP_KEY_SEPARATOR}${costume}`
+  }
+  return key
 }
 
 /** B 变体组头文案：身份图 / 服装图名称 + 文字前 12 字。 */
 function personBLabelOf(group: RecipeBatchGroup): string {
   const variant = group.personBVariant
-  if (!variant) return ''
+  if (variant) {
+    const parts: string[] = []
+    if (variant.identity.source !== 'empty' && variant.identity.name) {
+      parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+    }
+    if (variant.costume.source !== 'empty' && variant.costume.name) {
+      parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+    }
+    const compiled = compilePersonBVariant(variant)
+    const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
+      .filter(Boolean)
+      .join('；')
+    if (text) parts.push(`文字「${slotTextPreview(text)}」`)
+    return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
+  }
+  // P1：新 B 组的逐组素材；B 姿势图不参与提交（P2）。
   const parts: string[] = []
-  if (variant.identity.source !== 'empty' && variant.identity.name) {
-    parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+  if (group.personBPortrait) {
+    parts.push(`人像「${slotTextPreview(portraitSlotName(group.personBPortrait))}」`)
   }
-  if (variant.costume.source !== 'empty' && variant.costume.name) {
-    parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+  if (group.personBCostume) {
+    parts.push(`服装「${slotTextPreview(costumeSlotName(group.personBCostume))}」`)
   }
-  const compiled = compilePersonBVariant(variant)
-  const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
-    .filter(Boolean)
-    .join('；')
-  if (text) parts.push(`文字「${slotTextPreview(text)}」`)
-  return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
+  return parts.length ? `B：${parts.join(' · ')}` : ''
 }
 
 /** 泛型去重计数（保持简单：只关心「有几个不同值」）。 */
@@ -518,7 +535,10 @@ function sizeTextOf(group: RecipeBatchGroup): string {
               v-for="row in group.rows"
               :key="row.index"
               class="matrix__row"
-              :class="{ 'matrix__row--has-b': row.personBVariant }"
+              :class="{
+                'matrix__row--has-b':
+                  row.personBVariant || row.personBPortrait || row.personBCostume,
+              }"
               data-testid="studio-matrix-row"
             >
               <span class="matrix__index">#{{ row.index + 1 }}</span>
@@ -561,7 +581,7 @@ function sizeTextOf(group: RecipeBatchGroup): string {
               </span>
               <!-- P0-5：逐行 B 变体可见（不同变体会落不同组，行内仍需能核对） -->
               <span
-                v-if="row.personBVariant"
+                v-if="row.personBVariant || row.personBPortrait || row.personBCostume"
                 class="matrix__personb-row"
                 :title="personBLabelOf(row)"
                 data-testid="studio-matrix-row-personb"

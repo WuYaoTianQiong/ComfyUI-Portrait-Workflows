@@ -30,6 +30,7 @@ import {
   recipeBatchPercent,
   workflowDisplayName,
 } from '../../../../composables/useReferenceRecipe'
+import { costumeSlotName, portraitSlotName } from './slotView'
 
 const props = defineProps<{
   /** 已按显示顺序排列：最新批次在前。 */
@@ -122,20 +123,30 @@ function workflowNameOf(group: RecipeBatchGroup): string {
  */
 function personBLabelOf(group: RecipeBatchGroup): string {
   const variant = group.personBVariant
-  if (!variant) return ''
+  if (variant) {
+    const parts: string[] = []
+    if (variant.identity.source !== 'empty' && variant.identity.name) {
+      parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+    }
+    if (variant.costume.source !== 'empty' && variant.costume.name) {
+      parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+    }
+    const compiled = compilePersonBVariant(variant)
+    const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
+      .filter(Boolean)
+      .join('；')
+    if (text) parts.push(`文字「${slotTextPreview(text)}」`)
+    return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
+  }
+  // P1：新 B 组的逐组素材；B 姿势图不参与提交（P2）。
   const parts: string[] = []
-  if (variant.identity.source !== 'empty' && variant.identity.name) {
-    parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+  if (group.personBPortrait) {
+    parts.push(`人像「${slotTextPreview(portraitSlotName(group.personBPortrait))}」`)
   }
-  if (variant.costume.source !== 'empty' && variant.costume.name) {
-    parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+  if (group.personBCostume) {
+    parts.push(`服装「${slotTextPreview(costumeSlotName(group.personBCostume))}」`)
   }
-  const compiled = compilePersonBVariant(variant)
-  const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
-    .filter(Boolean)
-    .join('；')
-  if (text) parts.push(`文字「${slotTextPreview(text)}」`)
-  return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
+  return parts.length ? `B：${parts.join(' · ')}` : ''
 }
 
 /** 尺寸文案：画质与比例都有 → `quality · ratio`；都空表示跟随参考图。 */
@@ -287,7 +298,7 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
             </button>
           </header>
 
-          <!-- 壳阶段：本批提交时人物B组的预览摘要（明确标注待接入，不代表已提交） -->
+          <!-- P1：本批提交时人物B组的摘要（按提交那一刻的 B 组状态记录） -->
           <p
             v-if="batch.personBPreview"
             class="result-board__personb"

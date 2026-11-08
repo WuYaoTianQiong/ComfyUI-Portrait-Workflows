@@ -425,6 +425,48 @@ export function compileRecipeTextFragments(
   }
 }
 
+/** 人物B 八类碎片编译结果（P1）；空串表示该字段不发送。 */
+export interface CompiledPersonBFragments {
+  /** 面部 + 身材；后端 `person_b_portrait_text`。 */
+  portraitText: string
+  /** 服饰；后端 `person_b_costume_text`。 */
+  costumeText: string
+  /** 姿态动作；后端 `person_b_pose_text`（P1 只走文字）。 */
+  poseText: string
+  /** 视角 / 场景 / 光影 / 画风；后端 `person_b_modifier_fragments`。 */
+  modifierFragments: string
+}
+
+/**
+ * 编译人物B 自己的八类碎片（P1）。
+ *
+ * B 卡片是一份独立碎片表，选择时不写 `person`（`person` 只用于 A 卡片里区分
+ * A/B 归属），因此这里**不按 person 过滤**，按类型直接取：面部 + 身材 → 人像，
+ * 服饰 → 服装，姿态动作 → 姿势，其余四类 → B 专属修饰层。
+ */
+export function compilePersonBTextFragments(
+  fragments: RecipeTextFragments | undefined,
+): CompiledPersonBFragments {
+  const modifierLines: string[] = []
+  for (const type of MODIFIER_FRAGMENT_TYPES) {
+    for (const item of fragmentsOf(fragments, type)) {
+      const content = item.content.trim()
+      if (!content) continue
+      modifierLines.push(`${MODIFIER_LINE_PREFIX} ${type}：${content}`)
+    }
+  }
+
+  return {
+    portraitText: joinFragmentContents([
+      ...fragmentsOf(fragments, '人物面部'),
+      ...fragmentsOf(fragments, '人物身材'),
+    ]),
+    costumeText: joinFragmentContents(fragmentsOf(fragments, '人物服饰')),
+    poseText: joinFragmentContents(fragmentsOf(fragments, '姿态动作')),
+    modifierFragments: modifierLines.join('\n'),
+  }
+}
+
 /**
  * 人物 B 文字变体（v1.5）。
  *

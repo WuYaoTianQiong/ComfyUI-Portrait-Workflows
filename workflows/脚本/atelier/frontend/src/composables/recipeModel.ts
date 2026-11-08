@@ -163,6 +163,10 @@ export interface RecipeSubmitRequest {
   person_b_portrait_text?: string
   /** v1.5：人物 B 的服饰碎片；只在双人姿势下发送。 */
   person_b_costume_text?: string
+  /** P1：人物 B 的姿态动作文字；P1 没有 B 独立姿势图位，只走文字。 */
+  person_b_pose_text?: string
+  /** P1：人物 B 专属修饰层（视角 / 场景 / 光影 / 画风）；只在双人姿势下发送。 */
+  person_b_modifier_fragments?: string
   /** 人像补充文本（人物面部 + 人物身材）；空不发送。 */
   portrait_text?: string
   /** 服装补充文本（人物服饰）；空不发送。 */
@@ -427,6 +431,10 @@ export interface RecipeRequestOptions {
   personBPortraitText?: string
   /** 旧调用方直接给 B 服饰文本（无变体时使用）。 */
   personBCostumeText?: string
+  /** P1：B 姿态动作文字（无变体时使用）。 */
+  personBPoseText?: string
+  /** P1：B 专属修饰层（无变体时使用）。 */
+  personBModifierFragments?: string
   /** 所选工作流路径 / 文件名；空串不发送（后端用默认工作流）。 */
   workflow?: string
   /** 画质档位；空串不发送。 */
@@ -495,6 +503,26 @@ export interface RecipeBatchInput {
    * 空数组 = 不启用变体，组合口径与旧版本逐字一致。
    */
   personBVariants?: readonly RecipePersonBVariant[]
+  /**
+   * P1：新 B 组的逐组素材（已按 B 槽模式筛过，仅 image 模式才有条目）。
+   *
+   * 非空时优先于 `personBVariants`：A 人像与 B 人像按序号 1:1 配对，
+   * 数量不齐时按**较短侧收敛**（与已拍板口径一致）。
+   */
+  personBGroup?: RecipePersonBGroupInput
+}
+
+/** P1：新 B 组的配对素材；调用方已按模式过滤，空数组表示该侧不参与图片配对。 */
+export interface RecipePersonBGroupInput {
+  portraits: readonly PortraitItem[]
+  costumes: readonly CostumeItem[]
+}
+
+/** P1：A 人像 + B 组素材的一对组合。 */
+export interface RecipePersonBGroupCombination {
+  slots: RecipeSlots
+  personBPortrait: PortraitItem | null
+  personBCostume: CostumeItem | null
 }
 
 /** 一个笛卡尔积组合（= 一次 POST / 一个独立 job）。 */
@@ -525,6 +553,10 @@ export interface RecipeBatchGroup {
    * 与 `slots.portrait` 按组序号一一对应。
    */
   personBVariant?: RecipePersonBVariant | null
+  /** P1：本组使用的 B 人像；`null` = 本轮不提交 B 人像。 */
+  personBPortrait?: PortraitItem | null
+  /** P1：本组使用的 B 服装；`null` = 本轮不提交 B 服装。 */
+  personBCostume?: CostumeItem | null
 }
 
 /** 提交前降级确认框数据。 */
@@ -696,6 +728,13 @@ export function buildRecipeRequest(
   if (personBPortraitText) request.person_b_portrait_text = personBPortraitText
   if (personBCostumeText) request.person_b_costume_text = personBCostumeText
   if (personBText) request.person_b_text = personBText
+  // P1：B 的姿势动作与修饰层独立于 A；空串不发送。
+  const personBPoseText = options.personBPoseText?.trim() ?? ''
+  const personBModifierFragments = options.personBModifierFragments?.trim() ?? ''
+  if (personBPoseText) request.person_b_pose_text = personBPoseText
+  if (personBModifierFragments) {
+    request.person_b_modifier_fragments = personBModifierFragments
+  }
 
   const quality = options.quality?.trim()
   if (quality) request.quality = quality
@@ -765,6 +804,8 @@ export function countSlotCombinations(
   counts: RecipeSlotCounts,
   slotModes: RecipeSlotModes = createImageSlotModes(),
   personBVariantCount = 0,
+  /** P1：新 B 组人像数；>0 时按较短侧收敛（与 buildPersonBGroupCombinations 同口径）。 */
+  personBPortraitCount = 0,
 ): number {
   const modes = resolveSlotModes(slotModes)
   const hasContent = (['portrait', 'costume', 'pose'] as const).some((slot) =>
@@ -773,14 +814,19 @@ export function countSlotCombinations(
   if (!hasContent) return 0
 
   const variants = Math.max(0, Math.trunc(personBVariantCount || 0))
+  const bPortraits = Math.max(0, Math.trunc(personBPortraitCount || 0))
   return (['portrait', 'costume', 'pose'] as const).reduce((total, slot) => {
     const imageCount = modes[slot] === 'image' ? counts[slot] : 0
-    // v1.5：B 变体与 A 人像 1:1 配对 → 人像维度取较长一侧的长度，
-    // 不做 A × B；其余槽位口径不变。
-    const dimension =
-      slot === 'portrait' && variants > 0
-        ? Math.max(1, imageCount, variants)
-        : Math.max(1, imageCount)
+    let dimension = Math.max(1, imageCount)
+    if (slot === 'portrait' && bPortraits > 0) {
+      // P1：新 B 组按较短侧收敛；只有一侧有图时按有图侧计数。
+      dimension = imageCount && bPortraits
+        ? Math.min(imageCount, bPortraits)
+        : Math.max(1, imageCount, bPortraits)
+    } else if (slot === 'portrait' && variants > 0) {
+      // v1.5：旧 B 变体沿用「较长侧」口径，P2 删除旧路径后自然失效。
+      dimension = Math.max(1, imageCount, variants)
+    }
     return total * dimension
   }, 1)
 }
@@ -798,8 +844,14 @@ export function countBatchTotal(
   workflowCount = 1,
   slotModes: RecipeSlotModes = createImageSlotModes(),
   personBVariantCount = 0,
+  personBPortraitCount = 0,
 ): number {
-  const combos = countSlotCombinations(counts, slotModes, personBVariantCount)
+  const combos = countSlotCombinations(
+    counts,
+    slotModes,
+    personBVariantCount,
+    personBPortraitCount,
+  )
   if (combos === 0) return 0
   return (
     combos *
@@ -909,6 +961,56 @@ export function buildPairSlotCombinations(
 }
 
 /**
+ * P1：A 人像 × 新 B 组人像 **按序号 1:1 配对**，数量不齐时按较短侧收敛。
+ *
+ * 与旧 B 变体（较长侧复用最后一项）口径不同：本函数只在「新 B 组」启用时使用，
+ * 旧变体路径保持原行为，直到 P2 删除。
+ * B 服装不单独成为维度：按同一配对下标取值，不足时复用最后一张，无则 null。
+ */
+export function buildPersonBGroupCombinations(
+  portrait: readonly PortraitItem[],
+  costume: readonly CostumeItem[],
+  pose: readonly PoseItem[],
+  slotModes: RecipeSlotModes,
+  group: RecipePersonBGroupInput,
+): RecipePersonBGroupCombination[] {
+  const modes = resolveSlotModes(slotModes)
+  const imageDim = <T>(items: readonly T[], slot: RecipeSlotKey): (T | null)[] =>
+    modes[slot] === 'image' && items.length ? [...items] : [null]
+  const portraitDim = modes.portrait === 'image' && portrait.length ? [...portrait] : []
+  const bPortraitDim = [...group.portraits]
+  const costumeDim = imageDim(costume, 'costume')
+  const poseDim = imageDim(pose, 'pose')
+  const pairCount = (() => {
+    const a = portraitDim.length
+    const b = bPortraitDim.length
+    if (a && b) return Math.min(a, b)
+    if (a) return a
+    if (b) return b
+    return 1
+  })()
+  const pick = <T>(list: readonly T[], index: number): T | null =>
+    list.length ? list[Math.min(index, list.length - 1)]! : null
+
+  const combos: RecipePersonBGroupCombination[] = []
+  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+    const portraitItem = portraitDim[pairIndex] ?? null
+    const bPortrait = bPortraitDim[pairIndex] ?? null
+    const bCostume = pick(group.costumes, pairIndex)
+    for (const costumeItem of costumeDim) {
+      for (const poseItem of poseDim) {
+        combos.push({
+          slots: { portrait: portraitItem, costume: costumeItem, pose: poseItem },
+          personBPortrait: bPortrait,
+          personBCostume: bCostume,
+        })
+      }
+    }
+  }
+  return combos
+}
+
+/**
  * 生成四维笛卡尔积分组（= 前端要逐组 POST 的请求清单）。
  *
  * 顺序固定：槽位组合 → 工作流 → 画质 → 比例；第 i 组种子 = baseSeed + i。
@@ -926,21 +1028,42 @@ export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
     pose: input.slotTexts?.pose ?? '',
   }
   const variants = input.personBVariants ?? []
-  const pairCombos: RecipePairCombination[] =
-    variants.length > 0
+  const pairCombos: Array<
+    RecipePairCombination & {
+      personBPortrait: PortraitItem | null
+      personBCostume: CostumeItem | null
+    }
+  > = input.personBGroup
+    ? buildPersonBGroupCombinations(
+        input.portrait,
+        input.costume,
+        input.pose,
+        slotModes,
+        input.personBGroup,
+      ).map((combo) => ({ ...combo, personBVariant: null }))
+    : variants.length > 0
       ? buildPairSlotCombinations(
           input.portrait,
           input.costume,
           input.pose,
           slotModes,
           variants,
-        )
+        ).map((combo) => ({
+          ...combo,
+          personBPortrait: null,
+          personBCostume: null,
+        }))
       : buildSlotCombinations(
           input.portrait,
           input.costume,
           input.pose,
           slotModes,
-        ).map((slots) => ({ slots, personBVariant: null }))
+        ).map((slots) => ({
+          slots,
+          personBVariant: null,
+          personBPortrait: null,
+          personBCostume: null,
+        }))
   const workflowDim = input.workflows.length ? [...input.workflows] : ['']
   const qualityDim =
     input.qualityEnabled && input.qualities.length ? [...input.qualities] : ['']
@@ -965,6 +1088,9 @@ export function buildBatchGroups(input: RecipeBatchInput): RecipeBatchGroup[] {
             slotTexts: { ...slotTexts },
             // v1.5：本组自己的 B 变体（旧口径恒为 null）
             personBVariant: combo.personBVariant,
+            // P1：新 B 组的逐组人像/服装；旧口径恒为 null
+            personBPortrait: combo.personBPortrait,
+            personBCostume: combo.personBCostume,
           })
           index += 1
         }

@@ -35,10 +35,11 @@ import {
   NO_IMAGE_SLOT_HINT,
   RECIPE_SLOT_KEYS,
   compileActiveSlotTexts,
+  compilePersonBTextFragments,
   describeAlternateModeConflicts,
 } from './recipeTextFragments'
 import type { RecipeSlotKey } from './recipeTextFragments'
-import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 import { awaitRecipeJobs } from './recipeJobStream'
 import { useWorkflowCaps } from './useWorkflowCaps'
 import type { WorkflowRow } from './useWorkflows'
@@ -416,6 +417,85 @@ export function useReferenceRecipe() {
   const extraCostumeId = computed(() => extraCostume.value.id)
   const extraCostumeLibrary = computed(() => extraCostume.value.library)
 
+  /**
+   * P1：新 B 组是否进入本轮提交。
+   *
+   * 同时要求「已新增 B」「当前是双人姿势」「至少选了一个五图人物B工作流」。
+   * 单人姿势下 B 图像参考会污染人物A，所以即使 B 组有素材也绝不提交。
+   */
+  const personBGroupActive = computed(
+    () =>
+      draft.personBEnabled.value &&
+      draft.hasPairPose.value &&
+      effectiveWorkflows.value.some((item) => item.extraKind === 'person_b'),
+  )
+
+  /** 新 B 组逐组配对素材：只有 image 模式的槽才带图。 */
+  const personBGroupInput = computed(() => {
+    if (!personBGroupActive.value) return undefined
+    return {
+      portraits:
+        draft.personBSlotModes.value.portrait === 'image'
+          ? draft.personBPortrait.value
+          : [],
+      costumes:
+        draft.personBSlotModes.value.costume === 'image'
+          ? draft.personBCostume.value
+          : [],
+    }
+  })
+
+  /** P1：B 组人像数（计数用）；未生效时为 0，回落到旧变体口径。 */
+  const personBGroupPortraitCount = computed(() =>
+    personBGroupActive.value ? (personBGroupInput.value?.portraits.length ?? 0) : 0,
+  )
+
+  /**
+   * P1：A/B 人像数量不齐时的配对提示。
+   *
+   * 不阻断提交：按较少侧收敛，多出的素材本轮不参与；两侧都按 image 模式计。
+   */
+  const personBPairNotice = computed(() => {
+    if (!personBGroupActive.value) return ''
+    const a = draft.slotModes.value.portrait === 'image' ? slotCounts.value.portrait : 0
+    const b = personBGroupPortraitCount.value
+    if (!a || !b || a === b) return ''
+    return `A 人像 ${a} 张 / B 人像 ${b} 张，按较少侧 ${Math.min(a, b)} 组配对，多出的素材本轮不参与。`
+  })
+
+  /**
+   * P1：B 的文本字段（只在双人姿势下发送）。
+   *
+   * - 人像/服饰：text 模式恒发送；image 模式只在补充开关打开时发送（图为主）；
+   * - 姿态：P1 没有 B 独立姿势图位，非空即发送；
+   * - 修饰层：非空即发送，后端包成独立的人物B条款。
+   */
+  function personBTextFields(): {
+    personBPortraitText: string
+    personBCostumeText: string
+    personBPoseText: string
+    personBModifierFragments: string
+  } {
+    const empty = {
+      personBPortraitText: '',
+      personBCostumeText: '',
+      personBPoseText: '',
+      personBModifierFragments: '',
+    }
+    if (!draft.hasPairPose.value) return empty
+    const compiled = compilePersonBTextFragments(draft.personBTextFragments.value)
+    const modes = draft.personBSlotModes.value
+    const supplements = draft.personBSupplementFlags.value
+    const active = (slot: RecipeSlotKey): boolean =>
+      modes[slot] === 'text' || (modes[slot] === 'image' && supplements[slot])
+    return {
+      personBPortraitText: active('portrait') ? compiled.portraitText : '',
+      personBCostumeText: active('costume') ? compiled.costumeText : '',
+      personBPoseText: compiled.poseText,
+      personBModifierFragments: compiled.modifierFragments,
+    }
+  }
+
   /** 尺寸档位 / 比例均为多选；空数组表示本轮不发对应参数。 */
   const qualitySelection = ref<string[]>([])
   const ratioSelection = ref<string[]>([])
@@ -519,8 +599,13 @@ export function useReferenceRecipe() {
     if (slotHasImage('portrait')) names.push('人像')
     if (slotHasImage('costume')) names.push('服装')
     if (slotHasImage('pose')) names.push('姿势')
-    if (extraFilled.value) names.push('第 4 张')
-    if (extraCostumeFilled.value) names.push('人物B服装')
+    // P1：新 B 组生效时，B 人像/服装按逐组输入计入；否则沿用第 4/5 槽。
+    const bPortrait = personBGroupPortraitCount.value > 0
+    const bCostume = (personBGroupInput.value?.costumes.length ?? 0) > 0
+    if (personBGroupActive.value ? bPortrait : extraFilled.value) names.push('第 4 张')
+    if (personBGroupActive.value ? bCostume : extraCostumeFilled.value) {
+      names.push('人物B服装')
+    }
     return names
   })
   const activeSlotCount = computed(() => filledSlotNames.value.length)
@@ -531,8 +616,13 @@ export function useReferenceRecipe() {
     if (slotHasImage('portrait')) roles.push('portrait')
     if (slotHasImage('costume')) roles.push('costume')
     if (slotHasImage('pose')) roles.push('pose')
-    if (extraFilled.value) roles.push('extra')
-    if (extraCostumeFilled.value) roles.push('extra_costume')
+    // P1：新 B 组走逐组输入，角色判定与第 4/5 槽同构；未生效时保持旧口径。
+    const bPortrait = personBGroupPortraitCount.value > 0
+    const bCostume = (personBGroupInput.value?.costumes.length ?? 0) > 0
+    if (personBGroupActive.value ? bPortrait : extraFilled.value) roles.push('extra')
+    if (personBGroupActive.value ? bCostume : extraCostumeFilled.value) {
+      roles.push('extra_costume')
+    }
     return roles
   })
 
@@ -560,9 +650,10 @@ export function useReferenceRecipe() {
       : slotCounts.value,
   )
 
-  /** 组合计数用的 B 变体数：配对模式下只算 1 组。 */
+  /** 组合计数用的 B 变体数：配对模式下只算 1 组；新 B 组生效时不走旧变体。 */
   const batchPersonBVariantCount = computed(() => {
     if (!draft.hasPairPose.value) return 0
+    if (personBGroupActive.value) return 0
     return draft.pairModeActive.value ? 1 : draft.personBVariants.value.length
   })
 
@@ -580,6 +671,8 @@ export function useReferenceRecipe() {
       workflowDimension.value,
       draft.slotModes.value,
       batchPersonBVariantCount.value,
+      // P1：新 B 组按较短侧配对，计数与清单同口径。
+      personBGroupPortraitCount.value,
     ),
   )
   const batchOverLimit = computed(() => exceedsBatchLimit(batchTotal.value))
@@ -726,6 +819,13 @@ export function useReferenceRecipe() {
    * 素体模式随 `body_mode` 一起下发，保证预览与提交口径一致。
    */
   function buildPreviewRequest(): RecipeSubmitRequest {
+    // P1：新 B 组生效时，预览用 B 组首张素材与八类文本；否则沿用旧第 4/5 槽与变体。
+    const bGroup = personBGroupActive.value ? personBGroupInput.value : undefined
+    const firstBPortrait = bGroup?.portraits[0] ?? null
+    const firstBCostume = bGroup?.costumes[0] ?? null
+    const firstBPortraitUpload = uploadPathOf(firstBPortrait)
+    const firstBCostumeUpload = uploadPathOf(firstBCostume)
+    const bText = personBTextFields()
     return buildRecipeRequest(
       {
         portrait: draft.portrait.value[0] ?? null,
@@ -737,17 +837,33 @@ export function useReferenceRecipe() {
         style: style.value,
         promptSuffix: promptSuffix.value,
         // 预览与提交共用同一份第 4 槽（图片 + 文字），避免「预览看不到、提交却生效」。
-        extraPath: extraPath.value,
-        extraId: extraId.value,
-        extraLibrary: extraLibrary.value,
-        extraText: extraText.value,
+        extraPath: bGroup ? (firstBPortraitUpload ?? '') : extraPath.value,
+        extraId:
+          bGroup && !firstBPortraitUpload ? (firstBPortrait?.id ?? '') : bGroup ? '' : extraId.value,
+        extraLibrary: bGroup
+          ? firstBPortrait ? 'portrait' : ''
+          : extraLibrary.value,
+        extraText: bGroup ? '' : extraText.value,
         // V2-C：第 5 槽（人物B服装）同样整批共享，预览与提交共用。
-        extraCostumePath: extraCostumePath.value,
-        extraCostumeId: extraCostumeId.value,
-        extraCostumeLibrary: extraCostumeLibrary.value,
-        // v1.5：预览用当前激活的 B 变体（面/身、服饰、自由文字三部分分开下发）。
-        personBVariant: draft.hasPairPose.value ? draft.activePersonBVariant.value : null,
-        personBText: draft.hasPairPose.value ? draft.personBText.value : '',
+        extraCostumePath: bGroup
+          ? (firstBCostumeUpload ?? '')
+          : extraCostumePath.value,
+        extraCostumeId:
+          bGroup && !firstBCostumeUpload ? (firstBCostume?.id ?? '') : bGroup ? '' : extraCostumeId.value,
+        extraCostumeLibrary: bGroup
+          ? (firstBCostume?.library ?? '')
+          : extraCostumeLibrary.value,
+        // v1.5：旧路径用当前激活的 B 变体；P1 新 B 组改走下方独立字段。
+        personBVariant:
+          !personBGroupActive.value && draft.hasPairPose.value
+            ? draft.activePersonBVariant.value
+            : null,
+        personBText:
+          !personBGroupActive.value && draft.hasPairPose.value ? draft.personBText.value : '',
+        personBPortraitText: bGroup ? bText.personBPortraitText : '',
+        personBCostumeText: bGroup ? bText.personBCostumeText : '',
+        personBPoseText: bGroup ? bText.personBPoseText : '',
+        personBModifierFragments: bGroup ? bText.personBModifierFragments : '',
         workflow: previewWorkflow.value?.path ?? '',
         bodyMode: effectiveBodyMode.value,
         seed: baseSeed.value,
@@ -1167,10 +1283,13 @@ export function useReferenceRecipe() {
     }
     summarize('B 人像', draft.personBPortrait.value.map((item) => item.发型名称 || item.标题))
     summarize('B 服装', draft.personBCostume.value.map((item) => item.服装名称))
-    summarize('B 姿势', draft.personBPose.value.map((entry) => entry.item.姿势名称))
-    return parts.length
-      ? `B 组预览（待接入）：${parts.join(' · ')}`
-      : 'B 组预览（待接入）：未选择素材'
+    summarize('B 姿势图', draft.personBPose.value.map((entry) => entry.item.姿势名称))
+    const state = personBGroupActive.value
+      ? 'B 组（已接入）'
+      : 'B 组（本轮未接入：需双人姿势 + 五图人物B工作流）'
+    if (!parts.length) return `${state}：未选择素材`
+    const note = draft.hasPairPose.value ? '；B 独立姿势图待 P2，当前只提交姿势文字' : ''
+    return `${state}：${parts.join(' · ')}${note}`
   }
 
   /**
@@ -1203,14 +1322,35 @@ export function useReferenceRecipe() {
     batches.value.push(batch)
     syncLatestView(batch)
 
+    // P1：B 八类文本整批共享（不参与组合维度），在并发提交前只编译一次。
+    const bText = personBTextFields()
+
     const outcomes = await runWithConcurrency(
       groups,
       MAX_SUBMIT_CONCURRENCY,
       async (group): Promise<SubmitOutcome> => {
         // 2026-11-08：人物B工作流下，每个 B 变体绑定自己的身份图/服装图；
         // 非人物B工作流（发型/三槽）仍用页面全局的第 4 槽。
+        // P1：新 B 组优先，逐组用 group 自己的 B 人像/服装。
+        const groupWorkflow =
+          effectiveWorkflows.value.find((item) => item.path === group.workflow) ??
+          (group.workflow ? undefined : previewWorkflow.value)
+        const useBGroup =
+          personBGroupActive.value &&
+          draft.hasPairPose.value &&
+          groupWorkflow?.extraKind === 'person_b'
+        const bPortrait = useBGroup ? (group.personBPortrait ?? null) : null
+        const bPortraitUpload = uploadPathOf(bPortrait)
+        const bCostumeSupported =
+          groupWorkflow?.slots?.includes('extra_costume') ?? false
+        const bCostume = useBGroup && bCostumeSupported
+          ? (group.personBCostume ?? null)
+          : null
+        const bCostumeUpload = uploadPathOf(bCostume)
         const useVariantImages =
-          previewWorkflow.value?.extraKind === 'person_b' && draft.hasPairPose.value
+          !personBGroupActive.value &&
+          previewWorkflow.value?.extraKind === 'person_b' &&
+          draft.hasPairPose.value
         const variantForGroup = useVariantImages
           ? (group.personBVariant ?? draft.activePersonBVariant.value)
           : null
@@ -1219,24 +1359,44 @@ export function useReferenceRecipe() {
         const request = buildRecipeRequest(group.slots, {
           style: style.value,
           promptSuffix: promptSuffix.value,
-          extraPath: variantForGroup ? (variantIdentity?.path ?? '') : extraPath.value,
-          extraId: variantForGroup ? (variantIdentity?.id ?? '') : extraId.value,
-          extraLibrary: variantForGroup
-            ? (variantIdentity?.library ?? '')
-            : extraLibrary.value,
+          extraPath: useBGroup
+            ? (bPortraitUpload ?? '')
+            : variantForGroup ? (variantIdentity?.path ?? '') : extraPath.value,
+          extraId: useBGroup
+            ? (bPortraitUpload ? '' : (bPortrait?.id ?? ''))
+            : variantForGroup ? (variantIdentity?.id ?? '') : extraId.value,
+          extraLibrary: useBGroup
+            ? (bPortrait ? 'portrait' : '')
+            : variantForGroup
+              ? (variantIdentity?.library ?? '')
+              : extraLibrary.value,
           // 第 4 槽文字补充仍按页面全局发送（B 文字走变体自己的碎片）。
-          extraText: extraText.value,
+          extraText: useBGroup ? '' : extraText.value,
           // V2-C 第 5 槽（人物B服装）：有变体绑图时逐组发送，否则整批共享。
-          extraCostumePath: variantForGroup ? (variantCostume?.path ?? '') : extraCostumePath.value,
-          extraCostumeId: variantForGroup ? (variantCostume?.id ?? '') : extraCostumeId.value,
-          extraCostumeLibrary: variantForGroup
-            ? (variantCostume?.library ?? '')
-            : extraCostumeLibrary.value,
+          extraCostumePath: useBGroup
+            ? (bCostumeUpload ?? '')
+            : variantForGroup ? (variantCostume?.path ?? '') : extraCostumePath.value,
+          extraCostumeId: useBGroup
+            ? (bCostumeUpload ? '' : (bCostume?.id ?? ''))
+            : variantForGroup ? (variantCostume?.id ?? '') : extraCostumeId.value,
+          extraCostumeLibrary: useBGroup
+            ? (bCostume?.library ?? '')
+            : variantForGroup
+              ? (variantCostume?.library ?? '')
+              : extraCostumeLibrary.value,
           // v1.5：每组提交自己的 B 变体；无变体时回退到当前变体 / 旧自由文字。
-          personBVariant: draft.hasPairPose.value
-            ? (group.personBVariant ?? draft.activePersonBVariant.value)
-            : null,
-          personBText: draft.hasPairPose.value ? draft.personBText.value : '',
+          personBVariant: useBGroup
+            ? null
+            : draft.hasPairPose.value
+              ? (group.personBVariant ?? draft.activePersonBVariant.value)
+              : null,
+          personBText:
+            useBGroup || !draft.hasPairPose.value ? '' : draft.personBText.value,
+          // P1：B 八类文本独立下发；只有实际走五图人物B工作流的组才带。
+          personBPortraitText: useBGroup ? bText.personBPortraitText : '',
+          personBCostumeText: useBGroup ? bText.personBCostumeText : '',
+          personBPoseText: useBGroup ? bText.personBPoseText : '',
+          personBModifierFragments: useBGroup ? bText.personBModifierFragments : '',
           // 每组提交自己的工作流（契约 C-REF-TOTAL@2）；空串由后端用默认工作流。
           workflow: group.workflow,
           quality: group.quality,
@@ -1463,7 +1623,10 @@ export function useReferenceRecipe() {
         draft.supplementFlags.value,
       ),
       // v1.5：双人姿势下 A 人像与 B 变体 1:1 配对；单人姿势不启用。
-      personBVariants: draft.hasPairPose.value ? variantSource : [],
+      personBVariants:
+        !personBGroupActive.value && draft.hasPairPose.value ? variantSource : [],
+      // P1：新 B 组优先；按较短侧配对，B 人像/服装逐组下发。
+      personBGroup: personBGroupActive.value ? personBGroupInput.value : undefined,
     })
   }
 
@@ -1795,6 +1958,10 @@ export function useReferenceRecipe() {
     setExtraCostume,
     setExtraCostumeLibrary,
     clearExtraCostume,
+    // P1：新 B 组接入状态与配对提示
+    personBGroupActive,
+    personBGroupPortraitCount,
+    personBPairNotice,
     // 提示词只读预览（dry_run，与正式提交完全独立）
     previewPrompt,
     /** 编译后的最终负向（§11.3：预览 = 最终正向 + 最终负向）。 */

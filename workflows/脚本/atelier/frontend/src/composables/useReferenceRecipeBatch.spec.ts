@@ -282,6 +282,97 @@ describe('v1.5：A 人像 × B 变体按序号 1:1 配对', () => {
   })
 })
 
+describe('P1：A 人像 × 新 B 组人像按较短侧配对', () => {
+  const base = {
+    costume: [],
+    pose: [],
+    workflows: [],
+    qualities: [],
+    ratios: [],
+    qualityEnabled: false,
+    orientationEnabled: false,
+    baseSeed: 100,
+  }
+
+  it('2 A + 2 B → 2 组（不是 4 组笛卡尔积）', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2')],
+      personBGroup: { portraits: [portrait('b1'), portrait('b2')], costumes: [] },
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.slots.portrait?.id)).toEqual(['p1', 'p2'])
+    expect(groups.map((group) => group.personBPortrait?.id)).toEqual(['b1', 'b2'])
+  })
+
+  it('A 更多时按较短侧收敛：3 A + 2 B → 2 组', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2'), portrait('p3')],
+      personBGroup: { portraits: [portrait('b1'), portrait('b2')], costumes: [] },
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.slots.portrait?.id)).toEqual(['p1', 'p2'])
+  })
+
+  it('B 更多时按较短侧收敛：2 A + 3 B → 2 组', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2')],
+      personBGroup: {
+        portraits: [portrait('b1'), portrait('b2'), portrait('b3')],
+        costumes: [],
+      },
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.personBPortrait?.id)).toEqual(['b1', 'b2'])
+  })
+
+  it('B 人像为空时按 A 数量配对，B 为 null（文字兜底）', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2')],
+      personBGroup: { portraits: [], costumes: [] },
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.every((group) => group.personBPortrait === null)).toBe(true)
+  })
+
+  it('B 服装按同一下标配对；不足时复用最后一张，无则 null', () => {
+    const groups = buildBatchGroups({
+      ...base,
+      portrait: [portrait('p1'), portrait('p2'), portrait('p3')],
+      personBGroup: {
+        portraits: [portrait('b1'), portrait('b2')],
+        costumes: [costume('c1')],
+      },
+    })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.personBPortrait?.id)).toEqual(['b1', 'b2'])
+    expect(groups.map((group) => group.personBCostume?.id)).toEqual(['c1', 'c1'])
+  })
+
+  it('计数与清单一致：3 A + 2 B → 2 组', () => {
+    expect(countSlotCombinations({ portrait: 3, costume: 0, pose: 0 }, undefined, 0, 2)).toBe(2)
+    expect(countBatchTotal({ portrait: 3, costume: 0, pose: 0 }, 1, 1, 1, undefined, 0, 2)).toBe(2)
+  })
+
+  it('提交体发送 B 姿势文字与 B 修饰层', () => {
+    const request = buildRecipeRequest(
+      { portrait: null, costume: null, pose: null },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        personBPoseText: '侧身坐姿',
+        personBModifierFragments: '• 场景环境：黄昏天台',
+      },
+    )
+    expect(request.person_b_pose_text).toBe('侧身坐姿')
+    expect(request.person_b_modifier_fragments).toBe('• 场景环境：黄昏天台')
+  })
+})
+
 describe('上限 100', () => {
   it('100 张允许、101 张超限', () => {
     expect(MAX_BATCH_RECIPES).toBe(100)

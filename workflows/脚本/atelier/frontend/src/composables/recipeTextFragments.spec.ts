@@ -17,6 +17,7 @@ import {
   cloneSlotModes,
   cloneSupplementFlags,
   compileActiveSlotTexts,
+  compilePersonBTextFragments,
   compilePersonBVariant,
   compileRecipeTextFragments,
   compileSlotTexts,
@@ -221,6 +222,49 @@ describe('矩阵组键 / 组标签（文本槽）', () => {
       texts: { ...EMPTY_SLOT_TEXTS },
     })
     expect(slotDisplaysGroupLabel(displays)).toBe('未选参考图')
+  })
+})
+
+describe('P1 人物B 八类碎片独立编译', () => {
+  it('面部 + 身材 → 人像，服饰 → 服装，姿态 → 姿势，其余四类 → B 修饰层', () => {
+    const fragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部' as const, content: '鹅蛋脸' }],
+      人物身材: [{ type: '人物身材' as const, content: '高挑' }],
+      人物服饰: [{ type: '人物服饰' as const, content: '酒红西装' }],
+      姿态动作: [{ type: '姿态动作' as const, content: '侧身坐姿' }],
+      拍摄视角: [{ type: '拍摄视角' as const, content: '低角度仰拍' }],
+      场景环境: [{ type: '场景环境' as const, content: '黄昏天台' }],
+      光影色调: [{ type: '光影色调' as const, content: '暖橙侧光' }],
+      画风技术: [{ type: '画风技术' as const, content: '赛博朋克霓虹' }],
+    }
+    const compiled = compilePersonBTextFragments(fragments)
+    expect(compiled.portraitText).toBe('鹅蛋脸；高挑')
+    expect(compiled.costumeText).toBe('酒红西装')
+    expect(compiled.poseText).toBe('侧身坐姿')
+    expect(compiled.modifierFragments).toBe(
+      '• 拍摄视角：低角度仰拍\n• 场景环境：黄昏天台\n• 光影色调：暖橙侧光\n• 画风技术：赛博朋克霓虹',
+    )
+  })
+
+  it('不按 person 过滤：B 卡片里缺 person / 标 A 的碎片都按类型进入 B', () => {
+    const fragments = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [
+        { type: '人物面部' as const, content: '缺省归属' },
+        { type: '人物面部' as const, content: '显式 A', person: 'A' as const },
+      ],
+    }
+    expect(compilePersonBTextFragments(fragments).portraitText).toBe('缺省归属；显式 A')
+  })
+
+  it('空表返回四个空串（调用方据此不发送字段）', () => {
+    expect(compilePersonBTextFragments(createEmptyRecipeTextFragments())).toEqual({
+      portraitText: '',
+      costumeText: '',
+      poseText: '',
+      modifierFragments: '',
+    })
   })
 })
 

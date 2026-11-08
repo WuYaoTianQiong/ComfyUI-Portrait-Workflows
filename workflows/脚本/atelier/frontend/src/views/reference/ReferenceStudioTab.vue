@@ -265,6 +265,9 @@ const {
   extraCostume,
   extraCostumeFilled,
   clearExtraCostume,
+  // P1：新 B 组接入状态与配对提示
+  personBGroupActive,
+  personBPairNotice,
   previewPrompt,
   previewNegativePrompt,
   previewNegativeEffective,
@@ -752,9 +755,9 @@ const bSlotCards = computed<SlotCardView[]>(() => {
     },
     {
       key: 'pose',
-      label: 'B 单人姿势',
+      label: 'B 单人姿势（文字）',
       items: poseSlotItems(draft.personBPose.value),
-      hint: '+ 选人物B单人姿势（可多选）',
+      hint: '+ 选人物B单人姿势（P1 只提交姿势文字，姿势图待 P2）',
       showDepthToggle: true,
       useDepth,
     },
@@ -892,7 +895,23 @@ const previewGroups = computed(() =>
     slotModes: slotModes.value,
     slotTexts: slotTexts.value,
     // v1.5：双人姿势下 A 人像与 B 变体 1:1 配对，清单与计数器同口径。
-    personBVariants: draft.hasPairPose.value ? draft.personBVariants.value : [],
+    personBVariants:
+      !personBGroupActive.value && draft.hasPairPose.value
+        ? draft.personBVariants.value
+        : [],
+    // P1：新 B 组优先；清单逐组展示 B 人像/服装。
+    personBGroup: personBGroupActive.value
+      ? {
+          portraits:
+            draft.personBSlotModes.value.portrait === 'image'
+              ? draft.personBPortrait.value
+              : [],
+          costumes:
+            draft.personBSlotModes.value.costume === 'image'
+              ? draft.personBCostume.value
+              : [],
+        }
+      : undefined,
   }),
 )
 
@@ -1318,10 +1337,11 @@ const personBInfo = computed(() => {
     )
     if (portrait) parts.push(`B 人像「${portrait}」`)
     if (costume) parts.push(`B 服装「${costume}」`)
-    if (pose) parts.push(`B 姿势「${pose}」`)
-    return parts.length
-      ? `人物B组（预览·待接入）：${parts.join(' · ')}`
-      : '人物B组（预览·待接入）：未选择素材'
+    if (pose) parts.push(`B 姿势图「${pose}」（待 P2）`)
+    const state = personBGroupActive.value
+      ? '人物B组（已接入）'
+      : '人物B组（本轮未接入：需双人姿势 + 五图人物B工作流）'
+    return parts.length ? `${state}：${parts.join(' · ')}` : `${state}：未选择素材`
   }
   if (!showPersonBEditor.value) return ''
   const variants = draft.personBVariants.value
@@ -1897,7 +1917,14 @@ onMounted(async () => {
     <!-- 文本补充：A 与 B 并列；B 未新增时保持 A 单卡全宽 -->
     <template v-if="draft.personBEnabled.value">
       <p class="person-b-note" data-testid="studio-person-b-pending">
-        人物B 的独立姿势与八类提示词已可编辑并记忆；当前提交仍复用人物A 的提示词，待后端工作流接入后生效。
+        人物B 的八类提示词、B 人像/服装已接入提交（需双人姿势 + 五图人物B工作流）；B 独立姿势图为 P2，当前只提交 B 姿势文字。
+      </p>
+      <p
+        v-if="personBPairNotice"
+        class="person-b-note person-b-note--notice"
+        data-testid="studio-person-b-pair-notice"
+      >
+        {{ personBPairNotice }}
       </p>
     </template>
 
