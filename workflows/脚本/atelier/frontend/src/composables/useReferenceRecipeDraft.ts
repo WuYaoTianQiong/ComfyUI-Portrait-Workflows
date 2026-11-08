@@ -570,9 +570,23 @@ function clearPersonB(): void {
   personBNegativePrompt.value = ''
 }
 
+/**
+ * 人物B 槽从「空」切到「图片」。
+ *
+ * B 槽模式初始为 `empty`（与 A 的旧快照口径不同，B 组是运行时新建的）；
+ * 从库页签加入图片后若不提升为 `image`，提交时该槽会被当成空槽，
+ * 出现「选了 B 人像却只按 2 图裁剪」的计数错误。只在 `empty` 时提升，
+ * 用户显式选的 `text` 模式保持不变。
+ */
+function promotePersonBSlotImage(slot: RecipeSlotKey): void {
+  if (personBSlotModes.value[slot] !== 'empty') return
+  personBSlotModes.value = { ...personBSlotModes.value, [slot]: 'image' }
+}
+
 function addPersonBPortrait(item: PortraitItem): void {
   if (personBPortrait.value.some((entry) => entry.id === item.id)) return
   personBPortrait.value = [...personBPortrait.value, item]
+  promotePersonBSlotImage('portrait')
 }
 
 function togglePersonBPortrait(item: PortraitItem): boolean {
@@ -580,6 +594,7 @@ function togglePersonBPortrait(item: PortraitItem): boolean {
   personBPortrait.value = already
     ? personBPortrait.value.filter((entry) => entry.id !== item.id)
     : [...personBPortrait.value, item]
+  if (!already) promotePersonBSlotImage('portrait')
   return !already
 }
 
@@ -592,6 +607,7 @@ function removePersonBPortrait(id?: string): void {
 function addPersonBCostume(item: CostumeItem): void {
   if (personBCostume.value.some((entry) => entry.id === item.id)) return
   personBCostume.value = [...personBCostume.value, item]
+  promotePersonBSlotImage('costume')
 }
 
 function togglePersonBCostume(item: CostumeItem): boolean {
@@ -599,6 +615,7 @@ function togglePersonBCostume(item: CostumeItem): boolean {
   personBCostume.value = already
     ? personBCostume.value.filter((entry) => entry.id !== item.id)
     : [...personBCostume.value, item]
+  if (!already) promotePersonBSlotImage('costume')
   return !already
 }
 
@@ -668,12 +685,14 @@ function addPersonBPortraitUpload(input: UploadSlotInput): void {
   const id = `${UPLOAD_ID_PREFIX}${input.path}`
   if (personBPortrait.value.some((entry) => entry.id === id)) return
   personBPortrait.value = [...personBPortrait.value, portraitUploadItem(input)]
+  promotePersonBSlotImage('portrait')
 }
 
 function addPersonBCostumeUpload(input: UploadSlotInput): void {
   const id = `${UPLOAD_ID_PREFIX}${input.path}`
   if (personBCostume.value.some((entry) => entry.id === id)) return
   personBCostume.value = [...personBCostume.value, costumeUploadItem(input)]
+  promotePersonBSlotImage('costume')
 }
 
 function addPersonBPoseUpload(input: UploadSlotInput): void {

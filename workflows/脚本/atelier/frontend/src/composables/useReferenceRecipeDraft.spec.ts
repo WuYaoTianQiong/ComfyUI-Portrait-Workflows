@@ -866,6 +866,21 @@ describe('2026-11-08 人物B 全量角色组', () => {
     expect(uploadPathOf(draft.personBCostume.value[0]!)).toBe('/uploads/b-costume.png')
   })
 
+  it('B 槽为空时加入人像/服装自动切图片模式，显式 text 不被覆盖', () => {
+    draft.setPersonBEnabled(true)
+    expect(draft.personBSlotModes.value.portrait).toBe('empty')
+    expect(draft.personBSlotModes.value.costume).toBe('empty')
+
+    draft.addPersonBPortrait(portrait('bpt'))
+    draft.addPersonBCostume(costume('bc'))
+    expect(draft.personBSlotModes.value.portrait).toBe('image')
+    expect(draft.personBSlotModes.value.costume).toBe('image')
+
+    draft.setPersonBSlotMode('costume', 'text')
+    draft.addPersonBCostume(costume('bc2'))
+    expect(draft.personBSlotModes.value.costume).toBe('text')
+  })
+
   it('B 组三槽增删、模式与补充开关、移除时整体清空', () => {
     draft.setPersonBEnabled(true)
     draft.addPersonBPortrait(portrait('bpt'))
