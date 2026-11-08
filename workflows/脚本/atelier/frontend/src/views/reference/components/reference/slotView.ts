@@ -103,6 +103,63 @@ export function poseSlotName(item: PoseItem | null): string {
   if (!item) return ''
   return item.角度 ? `${item.姿势名称} · ${item.角度}` : item.姿势名称
 }
+
+/** 双人姿势人数风险类型（2026-11-08 0.5x 多 seed 实测结果）。 */
+export type PairPoseRiskKind = 'multi' | 'missing' | 'unstable' | ''
+
+/**
+ * 已实测的双人姿势风险表。
+ *
+ * 键是去掉角度后缀的姿势基 id；同一姿势的不同角度共用同一风险。
+ * 数据来源：24 个 facet × 多 seed 的 0.5x 抽样，结果见
+ * `_tmp_ui_audit/pair_pose_counts.jsonl`。新增姿势需要重新体检后补录。
+ */
+const PAIR_POSE_RISK: Readonly<Record<string, PairPoseRiskKind>> = {
+  'psl-D003': 'multi', // 正对卧位：稳定 3 人
+  'psl-D037': 'multi', // 前后位置/深前屈：稳定 3 人
+  'pair60_P002': 'multi', // 贴脸系：2/3/4 不稳定多人
+  'pair60_P049': 'missing', // 立位贴身：稳定 1 人
+  'psl-D049': 'missing', // 躺卧：稳定 1 人
+  'pair60_P042': 'unstable', // 面对面坐位：1/2 不稳定
+  'pair60_P055': 'unstable', // 坐位贴身：1/2 不稳定
+  'pair60_P057': 'unstable', // 趴卧：1/2 不稳定
+  'psl-D008': 'unstable', // 坐姿：1/2 不稳定
+}
+
+const POSE_ANGLE_SUFFIX_RE = /_(?:front|high|low|side|diag)$/
+
+/** 是否双人构图；与后端 `is_pair` 判定口径一致。 */
+export function isPairPose(
+  item: Pick<PoseItem, 'id' | 'composition'> | null | undefined,
+): boolean {
+  if (!item) return false
+  return item.composition === 'pair' || item.id.startsWith('pair')
+}
+
+/** 双人姿势人数风险；非双人或未录入返回空串。 */
+export function pairPoseRiskOf(
+  item: Pick<PoseItem, 'id' | 'composition'> | null | undefined,
+): PairPoseRiskKind {
+  if (!isPairPose(item)) return ''
+  const base = item!.id.replace(POSE_ANGLE_SUFFIX_RE, '')
+  return PAIR_POSE_RISK[base] ?? ''
+}
+
+/** 风险提示文案；无风险返回空串。 */
+export function describePairPoseRisk(
+  item: Pick<PoseItem, 'id' | 'composition' | '姿势名称'> | null | undefined,
+): string {
+  const kind = pairPoseRiskOf(item)
+  if (!kind) return ''
+  const name = item?.姿势名称 || '当前双人姿势'
+  if (kind === 'multi') {
+    return `该双人姿势实测可能多画人物（出现第三人）：${name}。建议换姿势，或生成后检查人数。`
+  }
+  if (kind === 'missing') {
+    return `该双人姿势实测可能只画一个人（丢失人物A或B）：${name}。建议换姿势，或生成后检查人数。`
+  }
+  return `该双人姿势实测人数不稳定（2/3/1 都出现过）：${name}。建议多生成几张或换姿势。`
+}
 // ---------------------------------------------------------------------------
 // 多选槽位视图（合成台展示「已选数量 + 前 N 张缩略图」）
 // ---------------------------------------------------------------------------

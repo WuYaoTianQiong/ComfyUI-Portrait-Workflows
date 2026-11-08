@@ -12,7 +12,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { CostumeItem, PortraitItem, PoseItem } from '../../../../api/reference'
 
-import { costumeSlotItems, poseSlotItems, portraitSlotItems } from './slotView'
+import {
+  costumeSlotItems,
+  describePairPoseRisk,
+  pairPoseRiskOf,
+  poseSlotItems,
+  portraitSlotItems,
+} from './slotView'
 
 function portrait(overrides: Partial<PortraitItem> & { id: string }): PortraitItem {
   return {
@@ -137,6 +143,35 @@ describe('costumeSlotItems', () => {
       thumb: '/t/c2.webp',
       image: '/i/c2.webp',
     })
+  })
+})
+
+describe('双人姿势人数风险', () => {
+  it('已实测的 3 人姿势返回 multi，并按角度后缀归并', () => {
+    expect(pairPoseRiskOf(pose({ id: 'psl-D037', composition: 'pair' }))).toBe('multi')
+    expect(pairPoseRiskOf(pose({ id: 'pair60_P002_diag', composition: 'pair' }))).toBe('multi')
+    const text = describePairPoseRisk(
+      pose({ id: 'psl-D037', composition: 'pair', 姿势名称: '深前屈手撑地' }),
+    )
+    expect(text).toContain('可能多画人物')
+    expect(text).toContain('深前屈手撑地')
+  })
+
+  it('稳定丢人姿势返回 missing，不稳定返回 unstable', () => {
+    expect(pairPoseRiskOf(pose({ id: 'pair60_P049_front', composition: 'pair' }))).toBe(
+      'missing',
+    )
+    expect(pairPoseRiskOf(pose({ id: 'psl-D049', composition: 'pair' }))).toBe('missing')
+    expect(pairPoseRiskOf(pose({ id: 'psl-D008', composition: 'pair' }))).toBe('unstable')
+    expect(describePairPoseRisk(pose({ id: 'psl-D008', composition: 'pair' }))).toContain(
+      '人数不稳定',
+    )
+  })
+
+  it('未录入的双人姿势与单人姿势返回空', () => {
+    expect(pairPoseRiskOf(pose({ id: 'psl-D026', composition: 'pair' }))).toBe('')
+    expect(pairPoseRiskOf(pose({ id: 'P001_front', composition: 'single' }))).toBe('')
+    expect(describePairPoseRisk(pose({ id: 'psl-D026', composition: 'pair' }))).toBe('')
   })
 })
 

@@ -95,6 +95,7 @@ import {
 } from './components/reference/slotHistoryItem'
 import {
   costumeSlotItems,
+  describePairPoseRisk,
   poseSlotItems,
   portraitSlotItems,
 } from './components/reference/slotView'
@@ -775,6 +776,20 @@ const hasPersonBPairPose = computed(() =>
 const showPersonBPairLayout = computed(
   () => draft.personBEnabled.value && (draft.hasPairPose.value || hasPersonBPairPose.value),
 )
+
+/**
+ * 已实测的双人姿势人数风险提示（2026-11-08 0.5x 多 seed 抽样）。
+ *
+ * 只提示、不阻断：同一姿势不同 seed 可能 2/3/1 都出现，直接禁用会把
+ * 可用姿势也误伤；先让用户知道并自行换姿势。
+ */
+const pairPoseRiskNotice = computed(() => {
+  for (const entry of [...draft.pose.value, ...draft.personBPose.value]) {
+    const text = describePairPoseRisk(entry.item)
+    if (text) return text
+  }
+  return ''
+})
 
 /** 双人布局下 B 单人姿势被隐藏时提示，避免用户以为数据丢失。 */
 const hiddenPersonBPoseNotice = computed(() => {
@@ -1871,6 +1886,14 @@ onMounted(async () => {
       </div>
 
       <p
+        v-if="pairPoseRiskNotice"
+        class="person-b-note person-b-note--risk"
+        data-testid="studio-pair-pose-risk"
+      >
+        {{ pairPoseRiskNotice }}
+      </p>
+
+      <p
         v-if="hiddenPersonBPoseNotice"
         class="person-b-note"
         data-testid="studio-person-b-pose-hidden"
@@ -2699,6 +2722,13 @@ onMounted(async () => {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* 已实测的高风险双人姿势：只提示，不阻断提交 */
+.person-b-note--risk {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-surface-faint);
+  color: var(--danger-text);
 }
 
 /* 文本补充区：与上方素材卡留出间距；B 存在时 A/B 两卡并列 */
