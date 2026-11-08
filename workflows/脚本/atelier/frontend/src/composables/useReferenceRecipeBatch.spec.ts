@@ -1295,6 +1295,36 @@ describe('提交前可裁剪探测（trim-check）', () => {
     await pending
   })
 
+  it('素体模式保留服装选择，但提交体不带服装（2026-11-08 非破坏）', async () => {
+    trimReply = {
+      workflows: [
+        { name: 'wf3.api.json', path: WORKFLOW, input_count: 3, slot_count: 1, trimmable: true, reason: '' },
+      ],
+      all_trimmable: true,
+    }
+    const recipe = await prepareRecipe()
+    draft.addCostume(costume('c1'))
+    await flushMicrotasks()
+
+    recipe.setBodyMode('bare')
+    await flushMicrotasks()
+    // UI 选择仍在（关闭素体后可直接恢复），但槽位计数与提交体都不含服装
+    expect(draft.costume.value).toHaveLength(1)
+    expect(recipe.slotCounts.value.costume).toBe(0)
+
+    const pending = recipe.submit()
+    await flushMicrotasks()
+
+    expect(submittedBodies[0].body_mode).toBe('bare')
+    expect('costume_id' in submittedBodies[0]).toBe(false)
+    expect('costume_text' in submittedBodies[0]).toBe(false)
+
+    jobState.set(1, { status: 'done', total: 1, done_count: 1, items: [{ images: [{ filename: 'c.png' }] }] })
+    await vi.advanceTimersByTimeAsync(RECIPE_POLL_INTERVAL_MS)
+    await flushMicrotasks()
+    await pending
+  })
+
   it('工作流都不支持 extra 时隐藏第 4 张入口，声明支持时恢复', async () => {
     const recipe = await prepareRecipe()
 

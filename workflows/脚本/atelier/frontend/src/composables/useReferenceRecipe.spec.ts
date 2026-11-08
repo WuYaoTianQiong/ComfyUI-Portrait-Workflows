@@ -71,6 +71,7 @@ import type {
   StudioWorkflowOption,
 } from './useReferenceRecipe'
 import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { useReferenceSafeMode } from './useReferenceSafeMode'
 
 function portrait(overrides: Partial<PortraitItem> = {}): PortraitItem {
   return {
@@ -1497,8 +1498,8 @@ describe('第 4 槽语义互斥（v2-A 收尾）', () => {
   })
 })
 
-describe('素体展示清空人物B服装（2026-11-08）', () => {
-  it('bare 同时清空 A 服装、B 新组服装与旧第 5 槽', () => {
+describe('素体展示保留服装选择（2026-11-08）', () => {
+  it('bare 不再清空服装槽，但服装不计入提交（计数 / 槽位名归零）', () => {
     const draft = useReferenceRecipeDraft()
     draft.clearDraft()
     draft.setCostume(costume())
@@ -1518,11 +1519,116 @@ describe('素体展示清空人物B服装（2026-11-08）', () => {
 
     recipe.setBodyMode('bare')
     expect(recipe.bodyMode.value).toBe('bare')
-    expect(draft.costume.value).toEqual([])
-    expect(draft.personBCostume.value).toEqual([])
-    expect(draft.extraCostume.value.source).toBe('empty')
+    // 选择保留：关闭素体后无需重新挑一遍
+    expect(draft.costume.value).toHaveLength(1)
+    expect(draft.personBCostume.value).toHaveLength(1)
+    expect(draft.extraCostume.value.source).not.toBe('empty')
+    // 提交层裁掉：服装槽按 0 计，不进入「非空槽位」
+    expect(recipe.slotCounts.value.costume).toBe(0)
+    expect(recipe.filledSlotNames.value).not.toContain('服装')
+    expect(recipe.filledSlotNames.value).not.toContain('人物B服装')
+
+    // 关闭素体后自动恢复提交
+    recipe.setBodyMode('costume')
+    expect(recipe.slotCounts.value.costume).toBe(1)
+    expect(recipe.filledSlotNames.value).toContain('服装')
 
     wrapper.unmount()
     draft.clearDraft()
+  })
+
+  it('素体模式保留的服装选择不进入提交体（costume_id / extra_costume_id 都不发）', () => {
+    const bare = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        bodyMode: 'bare',
+        extraCostumeId: 'b-costume',
+        extraCostumeLibrary: 'costume',
+      },
+    )
+    expect('costume_id' in bare).toBe(false)
+    expect('extra_costume_id' in bare).toBe(false)
+    expect('extra_costume_path' in bare).toBe(false)
+
+    const normal = buildRecipeRequest(
+      { portrait: portrait(), costume: costume(), pose: pose() },
+      {
+        style: 'realistic',
+        promptSuffix: '',
+        extraPath: '',
+        bodyMode: 'costume',
+        extraCostumeId: 'b-costume',
+        extraCostumeLibrary: 'costume',
+      },
+    )
+    expect(normal.costume_id).toBe('costume-1')
+    expect(normal.extra_costume_id).toBe('b-costume')
+  })
+})
+
+describe('成人向 adult_mode（2026-11-08）', () => {
+  it('buildRecipeRequest 只在 adultMode=true 时发送 adult_mode', () => {
+    const base = { style: 'realistic' as const, promptSuffix: '', extraPath: '' }
+    const safe = buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      base,
+    )
+    expect('adult_mode' in safe).toBe(false)
+
+    const adult = buildRecipeRequest(
+      { portrait: portrait(), costume: null, pose: null },
+      { ...base, adultMode: true },
+    )
+    expect(adult.adult_mode).toBe(true)
+  })
+
+  it('预览按 18+ 安全模式下发 adult_mode（预览与提交同口径）', async () => {
+    const { safeMode } = useReferenceSafeMode()
+    const bodies: Array<Record<string, unknown>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: unknown, init?: { body?: unknown }) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, dry_run: true, prompt: '正向' }),
+        }
+      }),
+    )
+
+    const runPreview = async (): Promise<void> => {
+      let pending!: Promise<void>
+      const wrapper = mount(
+        defineComponent({
+          setup() {
+            const recipe = useReferenceRecipe()
+            pending = recipe.refreshPreviewPrompt()
+            return () => h('div')
+          },
+        }),
+      )
+      try {
+        await pending
+      } finally {
+        wrapper.unmount()
+      }
+    }
+
+    const previous = safeMode.value
+    try {
+      safeMode.value = true
+      await runPreview()
+      expect(bodies[0]?.adult_mode).toBeUndefined()
+
+      safeMode.value = false
+      await runPreview()
+      expect(bodies[1]?.adult_mode).toBe(true)
+    } finally {
+      safeMode.value = previous
+    }
   })
 })

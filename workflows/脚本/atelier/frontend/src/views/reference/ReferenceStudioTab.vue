@@ -263,6 +263,8 @@ const {
   clearBodyModeNotice,
   supportsExtraSlot,
   supportsExtraCostumeSlot,
+  /** 角色 → 图号：槽位卡与预览段落上的「图N」徽标（旧后端为空对象）。 */
+  figureNumbers,
   extraCostume,
   extraCostumeFilled,
   clearExtraCostume,
@@ -342,7 +344,10 @@ watch(safeMode, (enabled) => {
   toast.info('已切换到安全模式，素体展示（无服装）已关闭')
 })
 
-/** 切换素体开关：开启时由 composable 清空服装槽，这里只负责把影响告诉用户。 */
+/**
+ * 切换素体开关：服装槽**保留**、仅本次不提交（2026-11-08 改为非破坏）。
+ * 这里只负责把影响告诉用户，槽位清理由提交层按生效体态裁剪。
+ */
 function onToggleBodyMode(enabled: boolean): void {
   if (safeMode.value) {
     toast.info('安全模式下不可用，请先解锁 18+')
@@ -353,7 +358,7 @@ function onToggleBodyMode(enabled: boolean): void {
     draft.personBCostume.value.length > 0 || draft.extraCostumeFilled.value
   setBodyMode(enabled ? 'bare' : 'costume')
   if (enabled && (hadCostume || hadPersonBCostume)) {
-    toast.info('已清空服装槽（含人物B）：素体展示不提交服装，避免后端拒绝 bare + 服装的组合')
+    toast.info('已进入素体展示：服装槽选择保留，但本次不提交；关闭素体后自动恢复。')
   }
 }
 
@@ -829,6 +834,19 @@ const sharedPairPoseCard = computed<SlotCardView | null>(() => {
     useDepth: items[0]?.useDepth ?? poseDepthMode.value,
   }
 })
+
+/**
+ * 人物B 槽位 → 图号（2026-11-08）。
+ *
+ * B 的人像走工作流第 4 槽（extra，即提示词里的「图4」），B 的服装走第 5 槽
+ * （extra_costume），B 的姿势与 A 共用姿势图。工作流没有对应图位时返回 0，
+ * StudioSlotPanel 据此不显示徽标。
+ */
+function personBFigureNo(key: RecipeSlotKey): number {
+  if (key === 'portrait') return figureNumbers.value.extra ?? 0
+  if (key === 'costume') return figureNumbers.value.extra_costume ?? 0
+  return figureNumbers.value.pose ?? 0
+}
 
 const slotCards = computed<SlotCardView[]>(() => {
   const useDepth = draft.pose.value[0]?.useDepth ?? poseDepthMode.value
@@ -1699,6 +1717,7 @@ onMounted(async () => {
           <StudioSlotPanel
             :label="slot.label"
             :slot-key="slot.key"
+            :figure-no="figureNumbers[slot.key]"
             :items="slot.items"
             :hint="slot.hint"
             :mode="slotModes[slot.key]"
@@ -1745,6 +1764,13 @@ onMounted(async () => {
         >
           <div v-if="extraFilled" class="extra-item" data-testid="studio-extra-selected">
             <div class="extra-item__row">
+              <span
+                v-if="figureNumbers.extra"
+                class="extra-figure"
+                data-testid="studio-extra-figure"
+              >
+                图{{ figureNumbers.extra }}
+              </span>
               <span class="extra-item__mark" aria-hidden="true">
                 <svg viewBox="0 0 16 16">
                   <path d="M2.6 12.4V5.2h3l1-1.6h3.8l1 1.6h2v7.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
@@ -1800,6 +1826,15 @@ onMounted(async () => {
           />
         </div>
         </div>
+
+          <!-- 素体展示不再清空服装槽（2026-11-08）：保留选择但本次不提交 -->
+          <p
+            v-if="bodyMode === 'bare' && draft.costumeCount.value > 0"
+            class="studio-hint studio-hint--bare-kept"
+            data-testid="studio-bare-costume-kept"
+          >
+            素体展示中：服装槽已保留但不提交。
+          </p>
         </div>
 
         <!-- 双人姿势：右侧独立一列，竖向居中，覆盖 A 下半 / B 上半 -->
@@ -1812,6 +1847,7 @@ onMounted(async () => {
           <StudioSlotPanel
             :label="sharedPairPoseCard.label"
             :slot-key="sharedPairPoseCard.key"
+            :figure-no="figureNumbers.pose"
             :items="sharedPairPoseCard.items"
             :hint="sharedPairPoseCard.hint"
             :mode="slotModes.pose"
@@ -1846,6 +1882,7 @@ onMounted(async () => {
                 :label="slot.label"
                 :slot-key="slot.key"
                 test-id-prefix="b-"
+                :figure-no="personBFigureNo(slot.key)"
                 :items="slot.items"
                 :hint="slot.hint"
                 :mode="draft.personBSlotModes.value[slot.key]"
@@ -2078,6 +2115,15 @@ onMounted(async () => {
             </template>
           </p>
 
+          <!-- 18+ 解锁后后端不再追加非性化抑制条款，用户要能看见这个口径差异 -->
+          <p
+            v-if="!safeMode"
+            class="studio-hint studio-hint--adult"
+            data-testid="studio-adult-mode-note"
+          >
+            当前为 18+ 模式：已放开素体/双人的非性化限制；具体画面仍由你的提示词决定。
+          </p>
+
           <div class="prompt-preview" data-testid="studio-prompt-preview">
             <span v-if="previewLoading" class="prompt-preview__state">
               正在生成提示词预览…
@@ -2091,6 +2137,8 @@ onMounted(async () => {
               v-model="promptOverride"
               :slot-modes="slotModes"
               :supplement-flags="supplementFlags"
+              :expects-person-b="showPersonBEditor"
+              :figure-numbers="figureNumbers"
               :loading="previewLoading"
               :error="previewError"
               @retry="refreshPreviewPrompt"
@@ -2922,6 +2970,19 @@ onMounted(async () => {
   line-height: 1.5;
 }
 
+/* 第 4 张的图号徽标：与槽位卡上的「图N」同一视觉语言 */
+.extra-figure {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--fill-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
 .extra-item__mark {
   display: flex;
   flex: none;
@@ -3104,6 +3165,15 @@ onMounted(async () => {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 素体展示保留服装槽 / 18+ 模式：用警告色，与普通说明区分（2026-11-08） */
+.studio-hint--bare-kept {
+  color: var(--warn);
+}
+
+.studio-hint--adult {
+  color: var(--warn);
 }
 
 .studio-error {

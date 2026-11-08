@@ -14,12 +14,20 @@ import { computed, nextTick, ref, watch } from 'vue'
 
 import {
   composePromptSegments,
+  figureBadge,
+  figureLegend,
   parsePromptSegments,
   segmentDisplayLabel,
+  segmentFigureRole,
+  segmentOwner,
   segmentSourceHint,
   segmentTone,
 } from '../../../../composables/promptSegments'
-import type { PromptSegment } from '../../../../composables/promptSegments'
+import type {
+  PromptFigureRole,
+  PromptSegment,
+  PromptSegmentOwner,
+} from '../../../../composables/promptSegments'
 import type { RecipeSupplementFlags } from '../../../../composables/recipeTextFragments'
 
 const props = withDefaults(
@@ -32,10 +40,21 @@ const props = withDefaults(
     slotModes?: Partial<Record<'portrait' | 'costume' | 'pose', string>>
     /** P4：image 模式只有补充开关打开才显示「图片 + 补充碎片」。 */
     supplementFlags?: RecipeSupplementFlags
+    /** 本次是否应该有 B 条款（双人姿势/五图人物B工作流）；B 组为空时据此提示。 */
+    expectsPersonB?: boolean
+    /** 角色 → 图号：用于「图N」徽标与顶部图例；旧后端缺字段时为空对象。 */
+    figureNumbers?: Partial<Record<PromptFigureRole, number>>
     loading?: boolean
     error?: string
   }>(),
-  { slotModes: undefined, supplementFlags: undefined, loading: false, error: '' },
+  {
+    slotModes: undefined,
+    supplementFlags: undefined,
+    expectsPersonB: false,
+    figureNumbers: () => ({}),
+    loading: false,
+    error: '',
+  },
 )
 
 const emit = defineEmits<{
@@ -61,6 +80,70 @@ const totalChars = computed(() =>
 const manualEmpty = computed(
   () => dirty.value && !segments.value.some((segment) => segment.text.trim()),
 )
+
+/** 三组展示元信息：顺序固定 人物A → 人物B → 共用约束。 */
+const GROUP_META = [
+  { key: 'A', title: '人物A', hint: '人物A的脸型、服装、姿势与修饰' },
+  { key: 'B', title: '人物B', hint: '人物B的身份、服装、姿态与修饰' },
+  { key: 'shared', title: '共用约束', hint: '人数、构图、光影、画风等两人共用条款' },
+] as const
+
+/** 一个预览分组：段 + 段数 + 字数 + 标签摘要。 */
+interface PromptGroup {
+  key: PromptSegmentOwner
+  title: string
+  hint: string
+  items: PromptSegment[]
+  chars: number
+  labels: string[]
+}
+
+/**
+ * 按归属把段分成三组（2026-11-08）。
+ *
+ * 只影响阅读顺序：`segments` 本身不动，提交仍由 `composePromptSegments`
+ * 按原文顺序拼接，因此分组不会改变提示词语义。
+ */
+const groups = computed<PromptGroup[]>(() => {
+  const buckets: Record<PromptSegmentOwner, PromptSegment[]> = { A: [], B: [], shared: [] }
+  for (const segment of segments.value) {
+    buckets[segmentOwner(segmentDisplayLabel(segment))].push(segment)
+  }
+  return GROUP_META.map((meta) => {
+    const items = buckets[meta.key]
+    const labels: string[] = []
+    for (const item of items) {
+      const label = segmentDisplayLabel(item)
+      if (!labels.includes(label)) labels.push(label)
+    }
+    return {
+      key: meta.key,
+      title: meta.title,
+      hint: meta.hint,
+      items,
+      chars: items.reduce((sum, item) => sum + item.text.trim().length, 0),
+      labels,
+    }
+  })
+})
+
+/** 分组折叠状态：默认全部展开，与旧版「所有段直接可见」保持一致。 */
+const collapsed = ref<Record<PromptSegmentOwner, boolean>>({
+  A: false,
+  B: false,
+  shared: false,
+})
+
+function toggleGroup(key: PromptSegmentOwner): void {
+  collapsed.value[key] = !collapsed.value[key]
+  // 展开后 textarea 重新挂载，需要再撑一次高度，否则长段出现内部滚动条。
+  if (!collapsed.value[key]) void nextTick(autoGrowTextareas)
+}
+
+/** 分组容器 testid 后缀：`studio-prompt-group-a` / `-b` / `-shared`。 */
+function groupTestKey(key: PromptSegmentOwner): string {
+  return key.toLowerCase()
+}
 
 /**
  * 把后端提示词解析成可编辑段。
@@ -143,8 +226,14 @@ function toneClass(segment: PromptSegment): string {
   return `prompt-segment--${segmentTone(segmentDisplayLabel(segment))}`
 }
 
-/** 标签对应的槽位键（人物 / 服装 / 姿势），其它返回 null。 */
+/**
+ * 标签对应的槽位键（人物 / 服装 / 姿势），其它返回 null。
+ *
+ * 人物B（2026-11-08）：B 的条款来自 B 自己的碎片/图像，不是 A 的槽位，
+ * 这里必须先排除，否则来源提示会错写成「图片」。
+ */
 function slotKeyOf(label: string): 'portrait' | 'costume' | 'pose' | null {
+  if (label.startsWith('人物B')) return null
   if (label.startsWith('人物')) return 'portrait'
   if (label.startsWith('服装')) return 'costume'
   if (label.startsWith('姿势')) return 'pose'
@@ -163,6 +252,14 @@ function sourceHint(segment: PromptSegment): string {
   }
   return segmentSourceHint(label)
 }
+
+/** 段的「图N」徽标：没有图号映射时返回空串（旧后端不显示，绝不显示错号）。 */
+function figureBadgeOf(segment: PromptSegment): string {
+  return figureBadge(segmentFigureRole(segmentDisplayLabel(segment)), props.figureNumbers)
+}
+
+/** 顶部图号图例；空串表示当前工作流没有图号信息，整行不渲染。 */
+const figureLegendText = computed(() => figureLegend(props.figureNumbers))
 
 /** 空段给一个可操作的占位提示；有内容时不显示。 */
 function placeholderOf(segment: PromptSegment): string {
@@ -234,41 +331,105 @@ function segmentRows(segment: PromptSegment): number {
     </p>
 
     <div v-else class="prompt-editor__segments">
-      <article
-        v-for="segment in segments"
-        :key="segment.id"
-        class="prompt-segment"
-        :class="toneClass(segment)"
-        :data-testid="`studio-prompt-segment-${segment.id}`"
+      <p class="prompt-editor__group-note" data-testid="studio-prompt-group-note">
+        按「人物A / 人物B / 共用约束」分组便于阅读；提交仍按原文顺序拼接。
+      </p>
+
+      <p
+        v-if="figureLegendText"
+        class="prompt-editor__figure-legend"
+        data-testid="studio-prompt-figure-legend"
       >
-        <header class="prompt-segment__head">
-          <span
-            class="prompt-segment__label"
-            :data-testid="`studio-prompt-segment-label-${segment.id}`"
+        本工作流图位：{{ figureLegendText }}
+      </p>
+
+      <section
+        v-for="group in groups"
+        :key="group.key"
+        class="prompt-group"
+        :class="`prompt-group--${groupTestKey(group.key)}`"
+        :data-testid="`studio-prompt-group-${groupTestKey(group.key)}`"
+      >
+        <button
+          type="button"
+          class="prompt-group__head"
+          :aria-expanded="!collapsed[group.key]"
+          :aria-label="`${group.title}（${group.items.length} 段）`"
+          :data-testid="`studio-prompt-group-toggle-${groupTestKey(group.key)}`"
+          @click="toggleGroup(group.key)"
+        >
+          <span class="prompt-group__title">{{ group.title }}</span>
+          <span class="prompt-group__meta">
+            {{ group.items.length }} 段 · {{ group.chars }} 字
+          </span>
+          <span v-if="group.labels.length" class="prompt-group__chips">
+            <span
+              v-for="label in group.labels"
+              :key="`${group.key}-${label}`"
+              class="prompt-group__chip"
+            >
+              {{ label }}
+            </span>
+          </span>
+          <span class="prompt-group__toggle">{{ collapsed[group.key] ? '展开' : '收起' }}</span>
+        </button>
+
+        <p
+          v-if="group.key === 'B' && !group.items.length && expectsPersonB"
+          class="prompt-group__empty is-warn"
+          data-testid="studio-prompt-group-b-empty"
+        >
+          当前提示词没有人物B描述：请填写 B 的设定，或确认已选择双人姿势/五图人物B工作流。
+        </p>
+        <p v-else-if="!group.items.length" class="prompt-group__empty">
+          本次提示词没有{{ group.title }}相关条款（{{ group.hint }}）。
+        </p>
+
+        <div v-if="!collapsed[group.key]" class="prompt-group__items">
+          <article
+            v-for="segment in group.items"
+            :key="segment.id"
+            class="prompt-segment"
+            :class="toneClass(segment)"
+            :data-testid="`studio-prompt-segment-${segment.id}`"
           >
-            {{ segmentDisplayLabel(segment) }}
-          </span>
-          <span
-            class="prompt-segment__source"
-            :data-testid="`studio-prompt-segment-source-${segment.id}`"
-          >
-            {{ sourceHint(segment) }}
-          </span>
-          <span class="prompt-segment__chars" :data-testid="`studio-prompt-chars-${segment.id}`">
-            {{ segment.text.trim().length }} 字
-          </span>
-        </header>
-        <textarea
-          v-model="segment.text"
-          class="prompt-segment__input"
-          :rows="segmentRows(segment)"
-          :placeholder="placeholderOf(segment)"
-          :aria-label="`${segmentDisplayLabel(segment)}段内容`"
-          :data-segment-input="segment.id"
-          :data-testid="`studio-prompt-segment-input-${segment.id}`"
-          @input="emitManualText"
-        />
-      </article>
+            <header class="prompt-segment__head">
+              <span
+                class="prompt-segment__label"
+                :data-testid="`studio-prompt-segment-label-${segment.id}`"
+              >
+                {{ segmentDisplayLabel(segment) }}
+              </span>
+              <span
+                class="prompt-segment__source"
+                :data-testid="`studio-prompt-segment-source-${segment.id}`"
+              >
+                {{ sourceHint(segment) }}
+              </span>
+              <span
+                v-if="figureBadgeOf(segment)"
+                class="prompt-segment__figure"
+                :data-testid="`studio-prompt-segment-figure-${segment.id}`"
+              >
+                {{ figureBadgeOf(segment) }}
+              </span>
+              <span class="prompt-segment__chars" :data-testid="`studio-prompt-chars-${segment.id}`">
+                {{ segment.text.trim().length }} 字
+              </span>
+            </header>
+            <textarea
+              v-model="segment.text"
+              class="prompt-segment__input"
+              :rows="segmentRows(segment)"
+              :placeholder="placeholderOf(segment)"
+              :aria-label="`${segmentDisplayLabel(segment)}段内容`"
+              :data-segment-input="segment.id"
+              :data-testid="`studio-prompt-segment-input-${segment.id}`"
+              @input="emitManualText"
+            />
+          </article>
+        </div>
+      </section>
 
       <p
         v-if="manualEmpty"
@@ -358,6 +519,125 @@ function segmentRows(segment: PromptSegment): number {
   gap: var(--gap-sm);
 }
 
+.prompt-editor__group-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+}
+
+/* 图号图例：把「图N」与槽位的对应关系直接写出来 */
+.prompt-editor__figure-legend {
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分组容器：左侧色条即「归属」，人物A 蓝 / 人物B 粉 / 共用中性灰 */
+.prompt-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  box-sizing: border-box;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border-faint);
+  border-left: 4px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--fill-subtle);
+}
+
+.prompt-group--a {
+  border-left-color: var(--tone-blue);
+}
+
+.prompt-group--b {
+  border-left-color: var(--tone-pink);
+}
+
+.prompt-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  box-sizing: border-box;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-group__head:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.prompt-group__title {
+  color: var(--text-strong);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: var(--lh-md);
+}
+
+.prompt-group--a .prompt-group__title {
+  color: var(--tone-blue);
+}
+
+.prompt-group--b .prompt-group__title {
+  color: var(--tone-pink);
+}
+
+.prompt-group__meta {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.prompt-group__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+.prompt-group__chip {
+  padding: 0 6px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+}
+
+.prompt-group__toggle {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+}
+
+.prompt-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.prompt-group__empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+}
+
+.prompt-group__empty.is-warn {
+  color: var(--warn);
+}
+
 .prompt-segment {
   display: flex;
   flex-direction: column;
@@ -369,9 +649,13 @@ function segmentRows(segment: PromptSegment): number {
   background: var(--surface-raised);
 }
 
-/* 段类型用左侧色条区分：人物 / 服装 / 姿势 / 修饰 */
+/* 段类型用左侧色条区分：人物A / 人物B / 服装 / 姿势 / 修饰 */
 .prompt-segment--portrait {
   border-left: 3px solid var(--tone-blue);
+}
+
+.prompt-segment--person-b {
+  border-left: 3px solid var(--tone-pink);
 }
 
 .prompt-segment--costume {
@@ -416,6 +700,10 @@ function segmentRows(segment: PromptSegment): number {
   background: var(--tone-blue);
 }
 
+.prompt-segment--person-b .prompt-segment__label::before {
+  background: var(--tone-pink);
+}
+
 .prompt-segment--costume .prompt-segment__label::before {
   background: var(--tone-green);
 }
@@ -436,6 +724,18 @@ function segmentRows(segment: PromptSegment): number {
   color: var(--text-muted);
   font-size: var(--fs-sm);
   line-height: var(--lh-md);
+}
+
+/* 图号徽标：说明这一段引用的是工作流里的第几张参考图 */
+.prompt-segment__figure {
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--fill-subtle);
+  color: var(--text-body);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-md);
+  font-variant-numeric: tabular-nums;
 }
 
 .prompt-segment__chars {

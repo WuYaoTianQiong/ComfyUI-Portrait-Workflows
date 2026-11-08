@@ -44,6 +44,13 @@ const props = defineProps<{
   showDepthToggle?: boolean
   /** 姿势槽：当前是否深度图 */
   useDepth?: boolean
+  /**
+   * 本槽对应的工作流图号（提示词里的「图N」）。
+   *
+   * 0 / undefined = 该工作流没有这个图位或后端未返回映射 → 不显示徽标。
+   * 空槽也显示：用户才能看懂为什么提示词里跳过了图3 直接出现图4。
+   */
+  figureNo?: number
 }>()
 
 const emit = defineEmits<{
@@ -102,6 +109,14 @@ function setMode(next: RecipeSlotMode): void {
     <header class="slot-panel__head">
       <div class="slot-panel__head-main">
         <span class="slot-panel__label">{{ label }}</span>
+        <span
+          v-if="figureNo"
+          class="slot-panel__figure"
+          :title="`提示词里的「图${figureNo}」就是本槽`"
+          :data-testid="`${prefix}studio-slot-figure-${slotKey}`"
+        >
+          图{{ figureNo }}
+        </span>
         <span
           v-if="selected"
           class="slot-panel__count"
@@ -500,6 +515,19 @@ function setMode(next: RecipeSlotMode): void {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+/* 图号徽标：把提示词里的「图N」标到本槽，空槽也显示 */
+.slot-panel__figure {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--fill-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 数量徽标：显示真实总数（4 / 12 / 30），11px 全圆 */

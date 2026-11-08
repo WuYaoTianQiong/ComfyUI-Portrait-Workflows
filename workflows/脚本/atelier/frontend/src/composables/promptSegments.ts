@@ -25,7 +25,26 @@
 export type PromptSegmentKind = 'head' | 'bullet' | 'tail'
 
 /** 彩色标签的色调枚举（颜色映射在组件 CSS 里，用 `var(--token)`）。 */
-export type PromptSegmentTone = 'portrait' | 'costume' | 'pose' | 'modifier' | 'neutral'
+export type PromptSegmentTone =
+  | 'portrait'
+  | 'person-b'
+  | 'costume'
+  | 'pose'
+  | 'modifier'
+  | 'neutral'
+
+/** 段归属：人物A / 人物B / 两人共用约束（2026-11-08 预览分组）。 */
+export type PromptSegmentOwner = 'A' | 'B' | 'shared'
+
+/** 归属到人物A的标签前缀（人物B 必须先于「人物」判断）。 */
+const PERSON_A_PREFIXES: readonly string[] = [
+  '人物',
+  '服装',
+  '姿势',
+  '发型',
+  '附加参考',
+  '此外需体现',
+]
 
 /** 一个可展示 / 可编辑的提示词段。 */
 export interface PromptSegment {
@@ -167,9 +186,23 @@ export function composePromptSegments(segments: readonly PromptSegment[]): strin
  *
  * 人物 / 服装 / 姿势 → 图片 + 补充碎片；四类修饰 → 碎片；
  * 风格 → 画风预设；补充要求 → 自由文本；其它（双人要求、素体展示…）→ 自动生成。
+ *
+ * 人物B（2026-11-08）：B 的条款不是「图片」来的——身份图/服装图写「图像」，
+ * 文字碎片写「文字碎片」，其余（来源句）交给「自动生成」。
  */
 export function segmentSourceHint(label: string): string {
   const name = label.trim()
+  if (labelStartsWith(name, '人物B')) {
+    if (name.includes('图像参考')) return '图像'
+    if (
+      name.includes('文字设定') ||
+      name.includes('姿态文字') ||
+      name.includes('附加修饰')
+    ) {
+      return '文字碎片'
+    }
+    return '自动生成'
+  }
   for (const [prefix, hint] of SOURCE_HINTS) {
     if (labelStartsWith(name, prefix)) return hint
   }
@@ -179,9 +212,12 @@ export function segmentSourceHint(label: string): string {
 /**
  * 段色调枚举：供模板拼类名 `prompt-segment--${tone}`，颜色映射只写在组件 CSS 里，
  * 纯函数不引入任何色值（硬约束：禁止硬编码十六进制）。
+ *
+ * `人物B` 必须排在「人物」前面：否则 B 会跟 A 一样是蓝色，双人场景看不出区别。
  */
 export function segmentTone(label: string): PromptSegmentTone {
   const name = label.trim()
+  if (labelStartsWith(name, '人物B')) return 'person-b'
   if (labelStartsWith(name, '人物')) return 'portrait'
   if (labelStartsWith(name, '服装')) return 'costume'
   if (labelStartsWith(name, '姿势')) return 'pose'
@@ -189,9 +225,93 @@ export function segmentTone(label: string): PromptSegmentTone {
   return 'neutral'
 }
 
+/** 段归属：人物B 优先判定，其次按 A 的专属前缀，其余（人数/构图/修饰）都算共用。 */
+export function segmentOwner(label: string): PromptSegmentOwner {
+  const name = label.trim()
+  if (labelStartsWith(name, '人物B')) return 'B'
+  for (const prefix of PERSON_A_PREFIXES) {
+    if (labelStartsWith(name, prefix)) return 'A'
+  }
+  return 'shared'
+}
+
 /** 段展示名：head / tail 没有 `• 标签`，用「开头 / 结尾」占位。 */
 export function segmentDisplayLabel(segment: PromptSegment): string {
   if (segment.kind === 'head') return '开头'
   if (segment.kind === 'tail') return '结尾'
   return segment.label
+}
+
+/** 段落引用的参考图角色（与后端 `figure_numbers` 的键一致）。 */
+export type PromptFigureRole =
+  | 'portrait'
+  | 'costume'
+  | 'pose'
+  | 'extra'
+  | 'extra_costume'
+
+/**
+ * 段落引用的图位（2026-11-08）。
+ *
+ * 后端提示词用「图1/图2/图4」指图，用户却只看到槽位名，所以每个引用图片的段
+ * 都要能查到自己的图位并在 UI 上标出来。判定必须与后端 `build_recipe_prompt`
+ * 的图号来源一致：
+ * - 人物 / 人物A → 人像（portrait）；
+ * - 服装 → 服装（costume）；姿势 → 姿势（pose）；
+ * - 人物B（图像参考） → 第 4 槽（extra）；
+ * - 人物B（服装图像参考） → 第 5 槽（extra_costume）；
+ * - 人物B 的纯文字条款 / 双人要求 / 素体展示等 → 不引用具体图位。
+ */
+export function segmentFigureRole(label: string): PromptFigureRole | null {
+  const name = label.trim()
+  if (labelStartsWith(name, '人物B')) {
+    if (name.includes('服装图像')) return 'extra_costume'
+    if (name.includes('图像参考')) return 'extra'
+    return null
+  }
+  if (labelStartsWith(name, '人物')) return 'portrait'
+  if (labelStartsWith(name, '服装')) return 'costume'
+  if (labelStartsWith(name, '姿势')) return 'pose'
+  if (labelStartsWith(name, '发型') || labelStartsWith(name, '附加参考')) return 'extra'
+  return null
+}
+
+/**
+ * 「图N」徽标文案。
+ *
+ * 没有图号映射（旧后端 / 未识别角色）时返回空串 —— 宁可不显示，也不显示错的图号。
+ */
+export function figureBadge(
+  role: PromptFigureRole | null,
+  numbers: Partial<Record<PromptFigureRole, number>> | null | undefined,
+): string {
+  if (!role || !numbers) return ''
+  const value = numbers[role]
+  return typeof value === 'number' && value > 0 ? `图${value}` : ''
+}
+
+/** 图号图例的固定顺序与中文名：只用于展示，不参与提示词。 */
+const FIGURE_LEGEND: ReadonlyArray<readonly [PromptFigureRole, string]> = [
+  ['pose', '姿势'],
+  ['portrait', '人像'],
+  ['costume', '服装'],
+  ['extra', '第 4 张'],
+  ['extra_costume', '第 5 张'],
+]
+
+/**
+ * 图号图例文案（如「姿势=图1 · 人像=图2 · 服装=图3」）。
+ *
+ * 放在预览顶部，直接回答「提示词里的图N 是哪张」；没有映射时返回空串。
+ */
+export function figureLegend(
+  numbers: Partial<Record<PromptFigureRole, number>> | null | undefined,
+): string {
+  if (!numbers) return ''
+  const parts: string[] = []
+  for (const [role, name] of FIGURE_LEGEND) {
+    const value = numbers[role]
+    if (typeof value === 'number' && value > 0) parts.push(`${name}=图${value}`)
+  }
+  return parts.join(' · ')
 }

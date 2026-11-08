@@ -152,6 +152,13 @@ export interface RecipeSubmitRequest {
   orientation?: 'portrait' | 'landscape'
   /** 体态模式；`bare` 时后端不接受服装（提交体不会带 `costume_id`）。 */
   body_mode?: RecipeBodyMode
+  /**
+   * 成人向提示词（2026-11-08）：仅在 18+ 解锁后发送，后端默认 false。
+   *
+   * 作用：去掉素体/双人条款里的「非性化、禁裸露」抑制句，人数与结构约束不变。
+   * 后端另有 `ATELIER_REFERENCE_ALLOW_NSFW` 总闸，未开启时该字段会导致 400。
+   */
+  adult_mode?: boolean
   style: RecipeStyle
   /** 追加要求；手动改写（`prompt_override`）模式不发送。 */
   prompt_suffix?: string
@@ -312,10 +319,49 @@ export interface StudioWorkflowOption {
   slots?: StudioWorkflowSlot[]
   /** 第 4 槽语义（v2-A）：`hair` / `person_b` / 空串；缺省按空串。 */
   extraKind?: StudioExtraKind
+  /**
+   * 角色 → 工作流真实图号（2026-11-08）。
+   *
+   * 提示词里写的是「图1/图2/图4」，而槽位卡与下拉只看得到角色名，用户无法自查
+   * 「图4 是哪张」。后端按文本编码器的 `images.image_N` 键算出这份表，前端据此
+   * 在槽位卡与预览段落上标 `图N`；缺字段（旧后端）时为空对象，一律不显示徽标。
+   */
+  figureNumbers?: StudioFigureNumbers
   /** 后端探测的注入能力；缺失时由 `useWorkflowCaps` 回落到乐观默认值。 */
   caps?: WorkflowCaps
   /** 画质 / 方向参数描述；用于生成真实档位与比例选项。 */
   params?: WorkflowParams
+}
+
+/** 提示词图号可用的业务角色（与后端 `figure_numbers` 的键一致）。 */
+export type StudioFigureRole =
+  | 'portrait'
+  | 'costume'
+  | 'pose'
+  | 'extra'
+  | 'extra_costume'
+
+/** 角色 → 图号；缺失表示该工作流没有这个图位。 */
+export type StudioFigureNumbers = Partial<Record<StudioFigureRole, number>>
+
+/** 图号表解析：只接受正整数，缺字段 / 脏数据一律丢弃（绝不显示错误的图号）。 */
+export function parseFigureNumbers(raw: unknown): StudioFigureNumbers {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: StudioFigureNumbers = {}
+  const roles: readonly StudioFigureRole[] = [
+    'portrait',
+    'costume',
+    'pose',
+    'extra',
+    'extra_costume',
+  ]
+  for (const role of roles) {
+    const value = (raw as Record<string, unknown>)[role]
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      out[role] = Math.trunc(value)
+    }
+  }
+  return out
 }
 
 /** 第 4 槽语义：发型参考 / 人物B身份参考 / 空（附加参考）。 */
@@ -404,6 +450,8 @@ export interface RecipeSlotCounts {
 export interface RecipeRequestOptions {
   style: RecipeStyle
   promptSuffix: string
+  /** 成人向（18+ 解锁）：true 时提交体带 `adult_mode: true`；预览与提交必须同口径。 */
+  adultMode?: boolean
   /** 第 4 张上传图的后端路径；空串表示不带第 4 张 */
   extraPath: string
   /** 第 4 张库条目 id；与 `extraPath` 二选一。 */
@@ -661,6 +709,8 @@ export function buildRecipeRequest(
     // 追加要求（prompt_suffix）只参与自动编译；手动模式按原文提交，不再发它。
     request.prompt_suffix = options.promptSuffix.trim()
   }
+  // 成人向（2026-11-08）：只在解锁时显式发送 true，安全模式下保持后端默认口径。
+  if (options.adultMode) request.adult_mode = true
 
   // 本地上传图（`upload:` 伪条目）发 `*_path`，库条目发 `*_id`：后端二选一。
   // 只有 image 模式才发送图片字段；text 模式即使还有残留图片也不发送。
@@ -703,14 +753,18 @@ export function buildRecipeRequest(
   }
 
   // V2-C 第 5 槽（人物B服装）：整批共享 1 张，与第 4 槽同一二选一规则。
-  const extraCostume = options.extraCostumePath?.trim() ?? ''
-  if (extraCostume) {
-    request.extra_costume_path = extraCostume
-  } else {
-    const extraCostumeId = options.extraCostumeId?.trim()
-    if (extraCostumeId) {
-      request.extra_costume_id = extraCostumeId
-      request.extra_costume_library = options.extraCostumeLibrary?.trim() || ''
+  // 素体展示不穿服装：服装槽选择现在会保留（不再销毁），但 bare 时必须不提交，
+  // 否则后端「素体模式不能同时选择服装」直接 400。
+  if (bodyMode !== 'bare') {
+    const extraCostume = options.extraCostumePath?.trim() ?? ''
+    if (extraCostume) {
+      request.extra_costume_path = extraCostume
+    } else {
+      const extraCostumeId = options.extraCostumeId?.trim()
+      if (extraCostumeId) {
+        request.extra_costume_id = extraCostumeId
+        request.extra_costume_library = options.extraCostumeLibrary?.trim() || ''
+      }
     }
   }
 

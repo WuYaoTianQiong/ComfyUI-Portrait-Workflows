@@ -76,6 +76,8 @@
   --tone-green: #10b981;
   --tone-blue: #0ea5e9;
   --tone-violet: #8b5cf6;
+  /* 人物B 专属色（2026-11-08）：只用于合成台预览的 B 分组与段色条 */
+  --tone-pink: #ec4899;
   --on-solid: #ffffff;
   --text-on-chip: #18181b;
 
@@ -282,6 +284,8 @@
   --tone-green: #10b981;
   --tone-blue: #0ea5e9;
   --tone-violet: #8b5cf6;
+  /* 人物B 专属色（2026-11-08）：只用于合成台预览的 B 分组与段色条 */
+  --tone-pink: #ec4899;
   --on-solid: #ffffff;
   --text-on-chip: #18181b;
 

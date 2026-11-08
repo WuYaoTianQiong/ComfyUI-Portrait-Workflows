@@ -271,7 +271,7 @@ function onPairBatchChange(event: Event): void {
           <span class="switch-row__title">素体展示（无服装）</span>
           <span class="switch-row__hint" data-testid="studio-body-mode-hint">
             {{
-              safeMode ? '安全模式下不可用，请先解锁 18+' : '开启后清空服装槽'
+              safeMode ? '安全模式下不可用，请先解锁 18+' : '开启后保留服装槽但不提交'
             }}
           </span>
         </span>

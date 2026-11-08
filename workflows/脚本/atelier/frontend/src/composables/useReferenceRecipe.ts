@@ -40,6 +40,7 @@ import {
 } from './recipeTextFragments'
 import type { RecipeSlotKey } from './recipeTextFragments'
 import { uploadPathOf, useReferenceRecipeDraft } from './useReferenceRecipeDraft'
+import { useReferenceSafeMode } from './useReferenceSafeMode'
 import { awaitRecipeJobs } from './recipeJobStream'
 import { useWorkflowCaps } from './useWorkflowCaps'
 import type { WorkflowRow } from './useWorkflows'
@@ -53,6 +54,7 @@ import type {
   RecipeStyle,
   RecipeSubmitRequest,
   RecipeSubmitResponse,
+  StudioFigureNumbers,
   StudioWorkflowOption,
   StudioWorkflowSlot,
   WorkflowDowngradePrompt,
@@ -72,6 +74,7 @@ import {
   describeBatchLimit,
   buildBatchGroups,
   parseStudioExtraKind,
+  parseFigureNumbers,
   resolveExtraKindConflict,
   parseWorkflowSlots,
   evaluateWorkflowApplicability,
@@ -285,6 +288,14 @@ function percentOfCompleted(batch: RecipeBatch): number | null {
  */
 export function useReferenceRecipe() {
   const draft = useReferenceRecipeDraft()
+  /**
+   * 18+ 安全模式（模块级单例，与参考库各页签共用同一份）。
+   *
+   * 2026-11-08：安全模式关闭 = 18+ 已解锁 → 预览与提交都下发 `adult_mode: true`，
+   * 后端据此去掉素体/双人条款里的非性化抑制句；安全模式下保持后端默认口径。
+   * 预览与提交必须同口径，否则用户看到的提示词与实际提交的不一致。
+   */
+  const { safeMode } = useReferenceSafeMode()
 
   const workflows = ref<StudioWorkflowOption[]>([])
   const workflowDefault = ref('')
@@ -581,15 +592,25 @@ export function useReferenceRecipe() {
     return bodyMode.value === 'bare' || draft.costumeCount.value === 0 ? 'bare' : 'costume'
   })
 
+  /**
+   * 素体展示时服装一律不计入提交（2026-11-08）。
+   *
+   * 素体开关不再销毁服装选择（关闭素体后可直接恢复），所以「有选择」≠「要提交」：
+   * 批量组合数、非空槽数、适用性判定都必须按 0 计，否则会虚高并让后端判定冲突。
+   */
+  const costumeSubmittable = computed(() => effectiveBodyMode.value !== 'bare')
+
   const slotCounts = computed<RecipeSlotCounts>(() => ({
     portrait: draft.portraitCount.value,
-    costume: draft.costumeCount.value,
+    costume: costumeSubmittable.value ? draft.costumeCount.value : 0,
     pose: draft.poseCount.value,
   }))
 
   /** 某槽本次提交是否真的带图（text / empty 模式即使有残留条目也不算）。 */
   function slotHasImage(slot: RecipeSlotKey): boolean {
     if (draft.slotModes.value[slot] !== 'image') return false
+    // 素体展示的服装槽：选择会保留，但本次不提交（对应 slotCounts 已归零）。
+    if (slot === 'costume' && !costumeSubmittable.value) return false
     return slotCounts.value[slot] > 0
   }
 
@@ -601,9 +622,16 @@ export function useReferenceRecipe() {
     if (slotHasImage('pose')) names.push('姿势')
     // P1：新 B 组生效时，B 人像/服装按逐组输入计入；否则沿用第 4/5 槽。
     const bPortrait = personBGroupPortraitCount.value > 0
-    const bCostume = (personBGroupInput.value?.costumes.length ?? 0) > 0
+    // 素体展示不提交服装：B 服装选择保留但本次不算槽位。
+    const bCostume =
+      costumeSubmittable.value &&
+      (personBGroupInput.value?.costumes.length ?? 0) > 0
     if (personBGroupActive.value ? bPortrait : extraFilled.value) names.push('第 4 张')
-    if (personBGroupActive.value ? bCostume : extraCostumeFilled.value) {
+    if (
+      personBGroupActive.value
+        ? bCostume
+        : costumeSubmittable.value && extraCostumeFilled.value
+    ) {
       names.push('人物B服装')
     }
     return names
@@ -618,9 +646,16 @@ export function useReferenceRecipe() {
     if (slotHasImage('pose')) roles.push('pose')
     // P1：新 B 组走逐组输入，角色判定与第 4/5 槽同构；未生效时保持旧口径。
     const bPortrait = personBGroupPortraitCount.value > 0
-    const bCostume = (personBGroupInput.value?.costumes.length ?? 0) > 0
+    // 素体展示不提交服装：B 服装选择保留但本次不算槽位（2026-11-08）。
+    const bCostume =
+      costumeSubmittable.value &&
+      (personBGroupInput.value?.costumes.length ?? 0) > 0
     if (personBGroupActive.value ? bPortrait : extraFilled.value) roles.push('extra')
-    if (personBGroupActive.value ? bCostume : extraCostumeFilled.value) {
+    if (
+      personBGroupActive.value
+        ? bCostume
+        : costumeSubmittable.value && extraCostumeFilled.value
+    ) {
       roles.push('extra_costume')
     }
     return roles
@@ -866,6 +901,8 @@ export function useReferenceRecipe() {
         personBModifierFragments: bGroup ? bText.personBModifierFragments : '',
         workflow: previewWorkflow.value?.path ?? '',
         bodyMode: effectiveBodyMode.value,
+        // 成人向（2026-11-08）：与提交同口径——18+ 解锁才下发，预览据此去掉抑制句。
+        adultMode: !safeMode.value,
         seed: baseSeed.value,
         seedMode: 'fixed',
         textFragments: draft.textFragments.value,
@@ -883,6 +920,16 @@ export function useReferenceRecipe() {
   /** 预览代表工作流：永远取第一条生效工作流。 */
   const previewWorkflow = computed<StudioWorkflowOption | null>(
     () => effectiveWorkflows.value[0] ?? null,
+  )
+
+  /**
+   * 角色 → 图号（提示词里的「图N」），用于槽位卡与预览段落的图号徽标。
+   *
+   * 取预览工作流（= 实际会提交的那份）的 `figure_numbers`：空槽也保留图号，
+   * 因此「图3 空着」这件事本身是可见的，而不是让用户猜为什么跳到图4。
+   */
+  const figureNumbers = computed<StudioFigureNumbers>(
+    () => previewWorkflow.value?.figureNumbers ?? {},
   )
 
   /**
@@ -1070,6 +1117,8 @@ export function useReferenceRecipe() {
           // 非空=按角色匹配。
           slots: parseWorkflowSlots(item.slots),
           extraKind: parseStudioExtraKind(item.extra_kind),
+          // 图号表：缺字段（旧后端）时为空对象 → 前端不显示「图N」徽标。
+          figureNumbers: parseFigureNumbers(item.figure_numbers),
           caps: parseStudioCaps(item.caps),
           params: parseStudioParams(item.params),
         })
@@ -1114,20 +1163,16 @@ export function useReferenceRecipe() {
   /**
    * 素体开关（契约 C-REF-BODY-MODE@1）。
    *
-   * 开启时**同时清空服装槽**：后端规定 `body_mode='bare'` 与服装同时出现会 400。
-   * 人物B 的新 B 组服装与旧第 5 槽同样属于服装输入，必须一起清空，否则
-   * `extra_costume` 会让提交直接 400。
-   * 关闭时只切回 `costume`，不影响其他槽位。
+   * 2026-11-08 改为**非破坏**：不再清空服装槽（`removeCostume` /
+   * `removePersonBCostume` / `clearExtraCostume` 已移除）。
+   *
+   * 为什么安全：后端拒绝的是「`body_mode=bare` + 提交服装」，而不是「UI 有服装选择」。
+   * 提交层已按生效体态裁掉服装——`slotCounts.costume` 归零、`costumeDimensionForBodyMode`
+   * 组合裁剪、`buildRecipeRequest` 跳过 `costume_*` / `extra_costume_*`。
+   * 这样用户切回服装模式时原选择还在，不必重新挑一遍。
    */
   function setBodyMode(mode: RecipeBodyMode): void {
-    if (mode === 'bare') {
-      bodyMode.value = 'bare'
-      if (draft.costumeCount.value > 0) draft.removeCostume()
-      if (draft.personBCostume.value.length > 0) draft.removePersonBCostume()
-      if (draft.extraCostumeFilled.value) draft.clearExtraCostume()
-      return
-    }
-    bodyMode.value = 'costume'
+    bodyMode.value = mode
   }
 
   /** 消费后清空自动取消提示，避免同一条消息重复弹出。 */
@@ -1404,6 +1449,8 @@ export function useReferenceRecipe() {
           orientation: group.orientation,
           // 缺服装时按素体展示提交（与后端兜底同一规则），否则会出裸体
           bodyMode: effectiveBodyMode.value,
+          // 成人向（2026-11-08）：与预览同口径，整批共用 18+ 安全模式判定。
+          adultMode: !safeMode.value,
           seed: group.seed,
           seedMode: 'fixed',
           // 八类补充文本 / 负向：每组提示词都带同一份（不参与笛卡尔积）。
@@ -1973,6 +2020,8 @@ export function useReferenceRecipe() {
     refreshPreviewPrompt,
     previewWorkflow,
     previewWorkflowSkipReason,
+    /** 角色 → 图号（「图N」徽标的唯一来源；旧后端为空对象）。 */
+    figureNumbers,
     // P3 手动改写：null = 自动模式；字符串 = 用户原文（提交时作为 prompt_override）
     promptOverride,
     setPromptOverride,
