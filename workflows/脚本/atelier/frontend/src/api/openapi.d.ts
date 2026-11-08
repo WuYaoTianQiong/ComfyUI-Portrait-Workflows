@@ -3447,10 +3447,20 @@ export interface components {
              */
             person_b_costume_text: string;
             /**
+             * Person B Modifier Fragments
+             * @default
+             */
+            person_b_modifier_fragments: string;
+            /**
              * Person B Portrait Text
              * @default
              */
             person_b_portrait_text: string;
+            /**
+             * Person B Pose Text
+             * @default
+             */
+            person_b_pose_text: string;
             /**
              * Person B Text
              * @default

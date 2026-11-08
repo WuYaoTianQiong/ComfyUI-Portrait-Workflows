@@ -1001,6 +1001,73 @@ def test_person_b_fragment_fields_reach_pair_prompt(api, recipe_env):
     assert "• 人物B（文字设定）：冷白皮，鹅蛋脸，深棕高马尾；浅蓝衬衫，米色长裙；棕色乐福鞋。" in prompt
 
 
+def test_person_b_pose_and_modifier_reach_pair_prompt(api, recipe_env):
+    """P1：B 姿势只走文字、B 修饰层独立成条款；A 的槽位文本不被 B 污染。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "portrait_text": "人物A：冷白皮",
+            "portrait_supplement": True,
+            "person_b_pose_text": "侧身坐姿，双腿交叠",
+            "person_b_modifier_fragments": "• 拍摄视角：低角度仰拍\n• 场景环境：黄昏天台",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "此外需体现：人物A：冷白皮" in prompt
+    assert "• 人物B（姿态文字）：侧身坐姿，双腿交叠。" in prompt
+    assert "• 人物B（附加修饰）：拍摄视角：低角度仰拍；场景环境：黄昏天台。" in prompt
+    # B 条款不得混进 A 的姿势/修饰段
+    assert "• 姿势：严格复现图1中人体模型的身体姿态与镜头角度。" in prompt
+    assert "低角度仰拍" not in prompt.split("• 人物B（附加修饰）")[0]
+
+
+def test_person_b_pose_and_modifier_ignored_in_single_pose(api, recipe_env):
+    """P1：单人姿势下 B 姿势/修饰字段不得生成任何人物B条款。"""
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "P001_front",
+            "person_b_pose_text": "侧身坐姿，双腿交叠",
+            "person_b_modifier_fragments": "• 场景环境：黄昏天台",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "人物B" not in prompt
+    assert "侧身坐姿" not in prompt
+    assert "黄昏天台" not in prompt
+
+
+def test_person_b_style_fragment_suppresses_fixed_style(api, recipe_env):
+    """P1：B 的画风碎片是整图属性，双人姿势下与固定风格段互斥。"""
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "portrait_id": "p1",
+            "costume_id": "SPR-0001",
+            "pose_id": "psl-D026",
+            "person_b_modifier_fragments": "• 画风技术：赛博朋克霓虹质感",
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "• 人物B（附加修饰）：画风技术：赛博朋克霓虹质感。" in prompt
+    # 固定写实风格段被抑制；主体判定仍按 style
+    assert "写实商业摄影级质感" not in prompt
+    assert "• 人物：图2中的人物" in prompt
+
+
 def test_no_costume_prompt_drops_original_outfit_hint(api, recipe_env):
     """未选服装时不能写「保留图1人物原有可见服装」——否则模型会补全/捏造衣服。"""
     resp = api.post(

@@ -303,6 +303,10 @@ class RecipeRequest(BaseModel):
     #: 仅双人姿势下并入「人物B（文字设定）」，单人姿势忽略。
     person_b_portrait_text: str = ""
     person_b_costume_text: str = ""
+    #: P1（2026-11-08）：人物 B 姿态动作文字；P1 没有 B 独立姿势图位，只走文字。
+    person_b_pose_text: str = ""
+    #: P1（2026-11-08）：人物 B 专属修饰层（视角/场景/光影/画风），只在双人姿势下生效
+    person_b_modifier_fragments: str = ""
     #: 修饰层渲染结果（`• 类型：内容` 多行）；始终追加，插在「补充要求」之前
     modifier_fragments: str = ""
     #: 真负向（透传 FaceswapRequest.negative_prompt）；实际提交内容由编译层合并
@@ -748,6 +752,9 @@ def create_reference_recipe(req: RecipeRequest):
             # v1.5：人物 B 的面部/身材与服饰碎片，只在双人姿势下并入 B 条款
             person_b_portrait_text=req.person_b_portrait_text,
             person_b_costume_text=req.person_b_costume_text,
+            # P1：B 姿势只走文字；B 修饰层独立编译，不混入 A 的修饰层
+            person_b_pose_text=req.person_b_pose_text,
+            person_b_modifier_fragments=req.person_b_modifier_fragments,
             # 第 4 槽文字补充：只在 extra 图片存在时渲染「此外需体现」
             extra_text=extra_text,
         )

@@ -2826,9 +2826,19 @@
             "title": "Person B Costume Text",
             "type": "string"
           },
+          "person_b_modifier_fragments": {
+            "default": "",
+            "title": "Person B Modifier Fragments",
+            "type": "string"
+          },
           "person_b_portrait_text": {
             "default": "",
             "title": "Person B Portrait Text",
+            "type": "string"
+          },
+          "person_b_pose_text": {
+            "default": "",
+            "title": "Person B Pose Text",
             "type": "string"
           },
           "person_b_text": {

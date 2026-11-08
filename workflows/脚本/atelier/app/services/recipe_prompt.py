@@ -152,6 +152,15 @@ def _modifier_types(lines: list[str]) -> set[str]:
     return types
 
 
+def _modifier_body(lines: list[str]) -> str:
+    """修饰层行 → 可嵌入条款的单句正文：去掉行首 `• `，用「；」连接。
+
+    人物 B 的修饰层要包在一条 `• 人物B（附加修饰）：…` 里，若保留每行行首的
+    `• ` 会拼出双项目符号；这里只去符号，不改正文内容与顺序。
+    """
+    return "；".join(re.sub(r"^\s*•\s*", "", line) for line in lines)
+
+
 def _hair_description(portrait: RecipeEntry) -> str:
     """上游：发型名称不是「标准基础款」时用标题，否则用发长。
 
@@ -199,6 +208,10 @@ def build_recipe_prompt(
     extra_text: str = "",
     person_b_portrait_text: str = "",
     person_b_costume_text: str = "",
+    #: P1（2026-11-08）：人物B 姿态动作文字；P1 没有 B 独立姿势图位，只走文字。
+    person_b_pose_text: str = "",
+    #: P1（2026-11-08）：人物B 专属修饰层（视角/场景/光影/画风），格式同 A 的修饰层。
+    person_b_modifier_fragments: str = "",
     #: V2-C 第 5 槽：人物B服装图像参考（只在双人姿势下写 B 条款）
     extra_costume: RecipeEntry | None = None,
 ) -> str:
@@ -231,6 +244,9 @@ def build_recipe_prompt(
     - `extra_costume`（V2-C，2026-11-08）：第 5 槽是人物 B 的服装图像参考。
       B 的服装/配饰/鞋以该图为准，`person_b_costume_text` 不参与；B 的脸/发型仍由
       第 4 槽身份图控制。单人姿势下不写任何 B 条款。
+    - `person_b_pose_text` / `person_b_modifier_fragments`（P1，2026-11-08）：
+      B 的姿态与修饰层独立成条款，仅双人姿势下生效；B 含「画风技术」时同样抑制整图
+      固定风格段（画风是整图属性），其余 B 修饰不回流人物 A。
 
     P2 替代态（方案 §5.1 / §4.4）：对应槽**无图**且文本非空时，用文本句替换图片主句
     （`portrait is None` 等），三槽要么图片句、要么文本句，二选一。
@@ -252,6 +268,10 @@ def build_recipe_prompt(
     faceless = not (portrait or portrait_text) and bool(costume and pose)
     modifier_lines = _modifier_lines(modifier_fragments)
     modifier_types = _modifier_types(modifier_lines)
+    # P1：人物 B 独立修饰层；只在双人姿势下渲染，类型判定与 A 分开。
+    b_pose_text = _replacement_text(person_b_pose_text)
+    b_modifier_lines = _modifier_lines(person_b_modifier_fragments)
+    b_modifier_types = _modifier_types(b_modifier_lines)
 
     clauses: list[str] = []
     #: 图号计数只在有图时递增（文本槽不占图号）；`index_map` 存在时以真实图位为准。
@@ -401,7 +421,7 @@ def build_recipe_prompt(
                 f"两人的相对位置、朝向、远近与肢体关系严格按图{pose_idx}中的两个人形。"
                 "禁止合并成一个人、禁止裁掉其中一人、禁止只画一个人。"
             )
-        elif b_image_idx or b_costume_idx or b_parts:
+        elif b_image_idx or b_costume_idx or b_parts or b_pose_text or b_modifier_lines:
             a_parts: list[str] = []
             if portrait_idx:
                 a_parts.append(f"脸型、五官、发型严格沿用图{portrait_idx}中的人物")
@@ -442,6 +462,17 @@ def build_recipe_prompt(
                 clauses.append(
                     f"• 人物B（{label}）：{_ensure_period('；'.join(b_text_parts))}"
                     "人物B的脸型、五官必须与人物A明显不同，不要复用人物A的脸。"
+                )
+            # P1：B 的姿势/修饰独立成条款，避免与 A 的槽位文本、全局修饰层混用。
+            if b_pose_text:
+                clauses.append(
+                    f"• 人物B（姿态文字）：{_ensure_period(b_pose_text)}"
+                    "人物B的姿态以这段文字为准；两人的相对位置、朝向、远近仍需"
+                    f"严格按图{pose_idx}中的两个人形。"
+                )
+            if b_modifier_lines:
+                clauses.append(
+                    f"• 人物B（附加修饰）：{_modifier_body(b_modifier_lines)}。"
                 )
         else:
             pair_costume = (
@@ -551,7 +582,13 @@ def build_recipe_prompt(
     lines = [f"请根据提供的 {idx - 1} 张参考图，生成一张完整的{subject}：", *clauses]
     # 画风技术碎片与画风预设互斥（§5.4）：选了碎片就不再追加固定风格描述段；
     # 真人/非真人主体判定仍只看 style，不受碎片影响。
-    if style_info["prompt"] and _MODIFIER_ART_STYLE not in modifier_types:
+    if (
+        style_info["prompt"]
+        and _MODIFIER_ART_STYLE not in modifier_types
+        # P1：B 的画风碎片同样是整图属性，双人姿势下与固定风格段互斥；
+        # 单人姿势不渲染 B 条款，也不能被 B 的画风碎片影响。
+        and not (is_pair and _MODIFIER_ART_STYLE in b_modifier_types)
+    ):
         tail = "人物比例协调，手部自然，脸部无五官，光影统一。" if faceless else "人物比例协调，手部与五官自然，光影统一。"
         lines.append(f"• 风格：{style_info['prompt']} {tail}")
     lines.append("画面中没有任何文字、标志或水印。")
