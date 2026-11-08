@@ -112,47 +112,50 @@ export type PairPoseRiskKind = 'multi' | 'missing' | 'unstable' | ''
  *
  * 同一姿势不同角度的实测结果不同（例如 `pair60_P020_diag` 稳定 2 人、
  * `pair60_P020_front` 稳定 3 人），按基 id 归并会误伤正常角度，所以这里
- * 只标记真正跑过的那个条目。数据来自 104 个唯一姿势的 0.5x 全量抽样，
- * 非 2 人条目再做第二 seed 复验；结果见 `_tmp_ui_audit/pair_pose_counts.jsonl`。
+ * 只标记真正跑过的那个条目。数据来自 117 个唯一双人姿势条目的 0.5x
+ * 全量抽样，非 2 人条目再做多 seed 复验；结果见
+ * `_tmp_ui_audit/pair_pose_counts.jsonl`。
  */
 const PAIR_POSE_RISK: Readonly<Record<string, PairPoseRiskKind>> = {
-  // 两次 seed 都稳定 3 人
-  'pair60_P005_front': 'multi',
-  'pair60_P020_front': 'multi',
-  'pair60_P030_front': 'multi',
-  'pair60_P044_front': 'multi',
-  'pair60_P063_front': 'multi',
-  'psl-D003': 'multi',
-  'psl-D005': 'multi',
-  'psl-D017': 'multi',
-  'psl-D040': 'multi',
-  // 两次 seed 都稳定 1 人（丢失其中一人）
-  'pair60_P004_front': 'missing',
-  'pair60_P006_front': 'missing',
-  'pair60_P032_front': 'missing',
-  'pair60_P042_front': 'missing',
-  'pair60_P049_front': 'missing',
-  'psl-D011': 'missing',
-  'psl-D028': 'missing',
+  // 多次 seed 都稳定 3 人
+  'psl-D003': 'multi', // [3,3,3,3,3,3,3]
+  'pair60_P063_front': 'multi', // [3,3]
+  'psl-D005': 'multi', // [3,3]
+  'pair60_P020_front': 'multi', // [3,3]
+  'pair60_P030_front': 'multi', // [3,3]
+  'pair60_P044_front': 'multi', // [3,3]
+  'pair60_P005_front': 'multi', // [3,3]
+  'psl-D040': 'multi', // [3,3]
+  // 多次 seed 都稳定 1 人（丢失其中一人）
+  'pair60_P049_diag': 'missing', // [1,1,1,1,1]
+  'psl-D011': 'missing', // [1,1]
+  'psl-D028': 'missing', // [1,1]
+  'pair60_P032_front': 'missing', // [1,1]
+  'pair60_P042_front': 'missing', // [1,1]
+  'pair60_P049_front': 'missing', // [1,1]
+  'pair60_P004_front': 'missing', // [1,1]
+  'pair60_P006_front': 'missing', // [1,1]
   // 多 seed 间在 1/2/3 之间波动
-  'pair60_P002_diag': 'multi', // 贴脸系：2/3/4 都出现过
-  'pair60_P013_front': 'unstable',
-  'pair60_P015_front': 'unstable',
-  'pair60_P018_front': 'unstable',
-  'pair60_P041_front': 'unstable',
-  'pair60_P053_front': 'unstable',
-  'pair60_P055_diag': 'unstable',
-  'pair60_P057_diag': 'unstable',
-  'pair60_P062_front': 'unstable',
-  'psl-D006': 'unstable',
-  'psl-D008': 'unstable',
-  'psl-D023': 'unstable',
-  'psl-D025': 'unstable',
-  'psl-D031': 'unstable',
-  'psl-D034': 'unstable',
-  'psl-D035': 'unstable',
-  'psl-D037': 'multi', // 深前屈：0.5x/1.0x 均复现 3 人，但 front 角度偶发 2 人
-  'psl-D049': 'unstable',
+  'psl-D037': 'unstable', // [2,3]
+  'pair60_P002_diag': 'unstable', // [2,3,4]
+  'pair60_P042_diag': 'unstable', // [1,2]
+  'pair60_P055_diag': 'unstable', // [1,2]
+  'pair60_P057_diag': 'unstable', // [1,2]
+  'psl-D008': 'unstable', // [1,2]
+  'psl-D017': 'unstable', // [2,3]
+  'psl-D034': 'unstable', // [1,2]
+  'psl-D049': 'unstable', // [1,2]
+  'psl-D035': 'unstable', // [2,3]
+  'psl-D023': 'unstable', // [1,3]
+  'psl-D025': 'unstable', // [1,2]
+  'psl-D031': 'unstable', // [2,3]
+  'pair60_P062_front': 'unstable', // [1,2]
+  'psl-D006': 'unstable', // [2,3]
+  'pair60_P041_front': 'unstable', // [1,3]
+  'pair60_P053_front': 'unstable', // [2,3]
+  'pair60_P013_front': 'unstable', // [2,3]
+  'pair60_P015_front': 'unstable', // [2,3]
+  'pair60_P018_front': 'unstable', // [1,2]
 }
 
 /** 是否双人构图；与后端 `is_pair` 判定口径一致。 */
