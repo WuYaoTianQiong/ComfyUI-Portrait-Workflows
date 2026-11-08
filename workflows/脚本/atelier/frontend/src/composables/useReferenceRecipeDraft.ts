@@ -1357,8 +1357,17 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   personBPortrait.value = nextBPortrait
   personBCostume.value = nextBCostume
   personBPose.value = nextBPose
-  const modeOf = (items: number, storedMode: RecipeSlotMode | null): RecipeSlotMode =>
-    storedMode ?? (items > 0 ? 'image' : 'empty')
+  /**
+   * B 槽模式恢复：`text` 原样保留；其余按「有图 → image」修复。
+   *
+   * 2026-11-08 修复：旧版本从库页签加入 B 素材时没有提升模式，快照会留下
+   * `personBPortraitMode='empty'` + 非空图片。B 槽 UI 没有「空」按钮，
+   * 这个组合只可能是旧 bug 产物；不修复会让 B 人像在提交时被当成空槽。
+   */
+  const modeOf = (items: number, storedMode: RecipeSlotMode | null): RecipeSlotMode => {
+    if (storedMode === 'text') return 'text'
+    return items > 0 ? 'image' : (storedMode ?? 'empty')
+  }
   personBSlotModes.value = {
     portrait: modeOf(nextBPortrait.length, stored.personBPortraitMode),
     costume: modeOf(nextBCostume.length, stored.personBCostumeMode),

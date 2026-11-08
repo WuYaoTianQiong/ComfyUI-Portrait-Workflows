@@ -908,6 +908,29 @@ describe('2026-11-08 人物B 全量角色组', () => {
     expect(draft.personBNegativePrompt.value).toBe('')
   })
 
+  it('旧快照 B 槽有图但模式为 empty → hydrate 修复为 image', () => {
+    writeReferenceStudioSettings({
+      personBEnabled: true,
+      personBPortrait: [
+        { id: 'bpt', library: 'portrait', name: 'B 人像', thumbnail: '' },
+      ],
+      personBCostume: [
+        { id: 'bc', library: 'costume', name: 'B 服装', thumbnail: '' },
+      ],
+      personBPortraitMode: 'empty',
+      personBCostumeMode: 'empty',
+    })
+    flushReferenceStudioSettings()
+    draft.clearDraft()
+
+    draft.hydrate({ portrait: [portrait('bpt')], costume: [costume('bc')], pose: [] })
+
+    expect(draft.personBPortrait.value.map((item) => item.id)).toEqual(['bpt'])
+    expect(draft.personBCostume.value.map((item) => item.id)).toEqual(['bc'])
+    expect(draft.personBSlotModes.value.portrait).toBe('image')
+    expect(draft.personBSlotModes.value.costume).toBe('image')
+  })
+
   it('B 组素材 / 八类碎片 / 负向持久化后 hydrate 读回', () => {
     draft.setPersonBEnabled(true)
     draft.addPersonBPortrait(portrait('bpt'))
