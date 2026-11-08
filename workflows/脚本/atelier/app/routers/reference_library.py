@@ -244,6 +244,25 @@ async def get_reference_image(
         headers={"Cache-Control": "no-cache"},
     )
 
+
+class ResolvedReferencePath(BaseModel):
+    found: bool
+    library: str = ""
+    item_id: str = ""
+    name: str = ""
+    tab: str = ""
+    q: str = ""
+
+
+@router.get("/reference/resolve", response_model=ResolvedReferencePath)
+def resolve_reference_path(path: str = Query("", description="参考图绝对路径")):
+    """把出图记录里的参考图路径反查成参考库条目（画廊「在参考图库中打开」）。"""
+    hit = reference_library.find_item_by_path(path)
+    if hit is None:
+        return ResolvedReferencePath(found=False)
+    return ResolvedReferencePath(found=True, **hit)
+
+
 class RecipeRequest(BaseModel):
     """参考库出图；人像/服装/姿势/第 4 张每个槽都允许留空。
 

@@ -1491,6 +1491,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reference/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve Reference Path
+         * @description 把出图记录里的参考图路径反查成参考库条目（画廊「在参考图库中打开」）。
+         */
+        get: operations["resolve_reference_path_api_reference_resolve_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reference/sheet": {
         parameters: {
             query?: never;
@@ -3833,6 +3853,36 @@ export interface components {
              * @default
              */
             type: string;
+        };
+        /** ResolvedReferencePath */
+        ResolvedReferencePath: {
+            /** Found */
+            found: boolean;
+            /**
+             * Item Id
+             * @default
+             */
+            item_id: string;
+            /**
+             * Library
+             * @default
+             */
+            library: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Q
+             * @default
+             */
+            q: string;
+            /**
+             * Tab
+             * @default
+             */
+            tab: string;
         };
         /** RetryRequest */
         RetryRequest: {
@@ -7010,6 +7060,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_reference_path_api_reference_resolve_get: {
+        parameters: {
+            query?: {
+                /** @description 参考图绝对路径 */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedReferencePath"];
                 };
             };
             /** @description Validation Error */

@@ -3472,6 +3472,44 @@
         "title": "ReplacementItem",
         "type": "object"
       },
+      "ResolvedReferencePath": {
+        "properties": {
+          "found": {
+            "title": "Found",
+            "type": "boolean"
+          },
+          "item_id": {
+            "default": "",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "library": {
+            "default": "",
+            "title": "Library",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "q": {
+            "default": "",
+            "title": "Q",
+            "type": "string"
+          },
+          "tab": {
+            "default": "",
+            "title": "Tab",
+            "type": "string"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "title": "ResolvedReferencePath",
+        "type": "object"
+      },
       "RetryRequest": {
         "properties": {
           "indexes": {
@@ -8900,6 +8938,52 @@
           }
         },
         "summary": "Create Reference Recipe",
+        "tags": [
+          "参考图库"
+        ]
+      }
+    },
+    "/api/reference/resolve": {
+      "get": {
+        "description": "把出图记录里的参考图路径反查成参考库条目（画廊「在参考图库中打开」）。",
+        "operationId": "resolve_reference_path_api_reference_resolve_get",
+        "parameters": [
+          {
+            "description": "参考图绝对路径",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "参考图绝对路径",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedReferencePath"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Reference Path",
         "tags": [
           "参考图库"
         ]

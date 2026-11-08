@@ -660,6 +660,44 @@ def test_search_matches_upstream_search_field(api, ref_root):
     assert costume.json()["items"][0]["id"] == "SPR-0001"
 
 
+def test_resolve_path_to_library_item(
+    api, ref_root, pose_extra_root, costume_extra_root, hair_root
+):
+    """出图记录里的绝对路径反查库条目：四个本地库都要命中，随检索词一起返回。"""
+
+    def resolve(path: Path) -> dict:
+        return api.get("/api/reference/resolve", params={"path": str(path)}).json()
+
+    portrait = resolve(ref_root / "img" / "portrait" / "p1.webp")
+    assert portrait["found"] is True
+    assert portrait["library"] == "portrait"
+    assert portrait["item_id"] == "p1"
+    assert portrait["tab"] == "portrait"
+    assert portrait["q"] == "p1"
+
+    # PSL 多来源：id 带 psl- 前缀，前端检索也要用完整 id
+    psl = resolve(pose_extra_root / "normal" / "P001_front.webp")
+    assert psl["item_id"] == "psl-P001"
+    assert psl["tab"] == "pose"
+    assert psl["q"] == "psl-P001"
+
+    # 角色创作库服装：检索串里没有 char- 前缀
+    costume = resolve(costume_extra_root / "images" / "char-TEST-1.webp")
+    assert costume["item_id"] == "char-TEST-1"
+    assert costume["tab"] == "costume"
+    assert costume["q"] == "TEST-1"
+
+    hair = resolve(hair_root / "images" / "char-hair-001.webp")
+    assert hair["item_id"] == "char-hair-001"
+    assert hair["tab"] == "hair"
+    assert hair["q"] == "hair-001"
+
+    # 上传图 / 非库文件不在任何条目里
+    missing = resolve(ref_root / "img" / "not-a-library-file.png")
+    assert missing["found"] is False
+    assert missing["item_id"] == ""
+
+
 def test_facet_filter_and_facet_indexes(api, ref_root):
     stats = {row["library"]: row for row in api.get("/api/reference/libraries").json()["libraries"]}
     pose_groups = {row["value"]: row["count"] for row in stats["pose"]["groups"]}

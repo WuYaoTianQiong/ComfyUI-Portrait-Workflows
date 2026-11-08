@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+import os
 import threading
 from collections import Counter
 from dataclasses import dataclass
@@ -59,6 +60,15 @@ LIBRARY_LABELS: dict[str, str] = {
     "portrait": "人像库",
     "hair": "发型库",
     "costume-anime": "外链服装",
+}
+
+#: 参考库 → 前端参考图库页签键（外链服装复用服装页签）。
+TAB_BY_LIBRARY: dict[str, str] = {
+    "pose": "pose",
+    "costume": "costume",
+    "portrait": "portrait",
+    "hair": "hair",
+    "costume-anime": "costume",
 }
 
 #: 姿势库的来源注册表（只服务 `pose`，不是新的对外库）。
@@ -1156,6 +1166,55 @@ def get_item(library: str, item_id: str) -> dict[str, Any] | None:
     if record is None or not _visible(record):
         return None
     return _public(record)
+
+
+def _path_key(value: str | Path) -> str:
+    """路径比较键：解析 junction / 去掉 `\\\\?\\` 前缀，再按 Windows 规则归一。"""
+    try:
+        path = Path(value)
+        path = Path(strip_extended_prefix(_resolve_if_reparse(path)))
+        return os.path.normcase(os.path.normpath(str(path)))
+    except (OSError, ValueError):
+        return ""
+
+
+def find_item_by_path(raw_path: str) -> dict[str, str] | None:
+    """把出图记录里的参考图绝对路径反查成参考库条目。
+
+    画廊「在参考图库中打开」用：`prompt_params.inputs[].meta.path` 只存路径，
+    这里按各库记录的「原图 / 缩略图 / 正面 / 背面」路径做一次反向匹配。
+    上传图、临时文件、外链缓存图不属于任何库条目，返回 None。
+    """
+    key = _path_key(raw_path) if raw_path else ""
+    if not key:
+        return None
+    for library in LIBRARIES:
+        # 外链服装只有远端缓存，没有稳定的本地素材路径，不参与反查
+        if library == "costume-anime":
+            continue
+        for record in _load(library):
+            if not _visible(record) or record.get("remote"):
+                continue
+            item_id = str(record.get("id") or "")
+            if not item_id:
+                continue
+            root = record.get("_root") or reference_root()
+            for rel in (
+                record.get("_image_rel"),
+                record.get("_thumb_rel"),
+                record.get("_front_rel"),
+                record.get("_back_rel"),
+            ):
+                if rel and _path_key(Path(root) / rel) == key:
+                    return {
+                        "library": library,
+                        "item_id": item_id,
+                        "name": str(record.get("name") or ""),
+                        "tab": TAB_BY_LIBRARY.get(library, ""),
+                        # 发型 / 角色服装库的 id 带 `char-` 前缀，检索串里没有
+                        "q": item_id.removeprefix("char-"),
+                    }
+    return None
 
 
 def resolve_remote_url(library: str, item_id: str, kind: str) -> str | None:
