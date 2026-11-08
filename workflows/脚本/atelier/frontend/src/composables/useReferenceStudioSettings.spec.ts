@@ -114,6 +114,27 @@ function validSnapshot(): ReferenceStudioSettings {
     poseSupplement: false,
     recipeSourceId: 622,
     recipeSourceName: '粉色卧室·抹胸长裙·韩系',
+    personBEnabled: true,
+    personBPortrait: [
+      { id: 'bpt1', library: 'portrait', name: 'B 发型', thumbnail: '/thumb/bpt1' },
+    ],
+    personBCostume: [
+      { id: 'bc1', library: 'costume', name: 'B 服装', thumbnail: '/thumb/bc1' },
+    ],
+    personBPose: [
+      { id: 'bp1', library: 'pose', name: 'B 姿势', thumbnail: '/thumb/bp1', useDepth: false },
+    ],
+    personBTextFragments: {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: '金色短发' }],
+    },
+    personBNegativePrompt: '低质量',
+    personBPortraitMode: 'image',
+    personBCostumeMode: 'image',
+    personBPoseMode: 'image',
+    personBPortraitSupplement: false,
+    personBCostumeSupplement: true,
+    personBPoseSupplement: false,
   }
 }
 
@@ -170,6 +191,18 @@ describe('默认值', () => {
       poseSupplement: false,
       recipeSourceId: null,
       recipeSourceName: '',
+      personBEnabled: false,
+      personBPortrait: [],
+      personBCostume: [],
+      personBPose: [],
+      personBTextFragments: createEmptyRecipeTextFragments(),
+      personBNegativePrompt: '',
+      personBPortraitMode: null,
+      personBCostumeMode: null,
+      personBPoseMode: null,
+      personBPortraitSupplement: false,
+      personBCostumeSupplement: false,
+      personBPoseSupplement: false,
     })
   })
 })

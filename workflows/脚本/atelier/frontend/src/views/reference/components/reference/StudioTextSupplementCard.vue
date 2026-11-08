@@ -80,7 +80,14 @@ const props = defineProps<{
   supplementFlags?: RecipeSupplementFlags
   /** P4 同源整套随机的来源名；仅展示。 */
   recipeSourceName?: string
+  /** 人物组名（默认人物A；人物B 传「人物B」，避免两卡文案相同）。 */
+  personLabel?: string
+  /** 人物B 等第二组的 testid 前缀（默认空，保持 A 组契约不变）。 */
+  testIdPrefix?: string
 }>()
+
+const prefix = computed(() => props.testIdPrefix ?? '')
+const personLabel = computed(() => props.personLabel ?? '人物A')
 
 const emit = defineEmits<{
   'update:modelValue': [value: RecipeTextFragments]
@@ -145,7 +152,7 @@ function buildRow(type: FragmentType): FragmentRow {
 const columns = computed<FragmentColumn[]>(() => [
   {
     key: 'slot',
-    title: '人物A · 与参考槽对应',
+    title: `${personLabel.value} · 与参考槽对应`,
     rows: SLOT_FRAGMENT_TYPES.map(buildRow),
   },
   {
@@ -272,23 +279,23 @@ defineExpose({ expand })
 </script>
 
 <template>
-  <section ref="cardRef" class="supplement" data-testid="studio-text-supplement">
+  <section ref="cardRef" class="supplement" :data-testid="`${prefix}studio-text-supplement`">
     <header class="supplement__head">
       <button
         type="button"
         class="supplement__toggle"
         :aria-expanded="expanded"
-        data-testid="studio-text-supplement-toggle"
+        :data-testid="`${prefix}studio-text-supplement-toggle`"
         @click="expanded = !expanded"
       >
         <span class="supplement__title">文本补充（八类碎片，可选）</span>
-        <span class="supplement__badge" data-testid="studio-text-supplement-count">
+        <span class="supplement__badge" :data-testid="`${prefix}studio-text-supplement-count`">
           已选 {{ selectedCount }} 条
         </span>
         <span
           v-if="recipeSourceName"
           class="supplement__source"
-          data-testid="studio-recipe-source"
+          :data-testid="`${prefix}studio-recipe-source`"
           :title="recipeSourceName"
         >
           来源：《{{ recipeSourceName }}》
@@ -296,7 +303,7 @@ defineExpose({ expand })
         <span
           v-if="recipeSourceName?.startsWith('跨源实验')"
           class="supplement__experiment"
-          data-testid="studio-atomic-experiment"
+          :data-testid="`${prefix}studio-atomic-experiment`"
         >
           跨源实验 · 建议人工复核
         </span>
@@ -304,7 +311,7 @@ defineExpose({ expand })
       </button>
     </header>
 
-    <div v-if="expanded" class="supplement__body" data-testid="studio-text-supplement-body">
+    <div v-if="expanded" class="supplement__body" :data-testid="`${prefix}studio-text-supplement-body`">
       <p class="supplement__intro">
         图片模式默认不发送前三类文本；需要追加时，在该槽主类型行打开「作为补充」
         （跨源，可能覆盖图片特征）。槽位切到文本模式时，左列对应类碎片作「替代」描述。
@@ -316,7 +323,7 @@ defineExpose({ expand })
           v-for="column in columns"
           :key="column.key"
           class="supplement__column"
-          :data-testid="`studio-supplement-column-${column.key}`"
+          :data-testid="`${prefix}studio-supplement-column-${column.key}`"
         >
           <h3 class="supplement__column-title">{{ column.title }}</h3>
 
@@ -325,7 +332,7 @@ defineExpose({ expand })
             :key="row.type"
             class="supplement__row"
             :class="{ 'is-locked': row.type === '画风技术' && styleLocked }"
-            :data-testid="`studio-supplement-row-${row.type}`"
+            :data-testid="`${prefix}studio-supplement-row-${row.type}`"
           >
             <div class="supplement__row-head">
               <span class="supplement__home" :data-home="row.home">{{ row.homeLabel }}</span>
@@ -336,7 +343,7 @@ defineExpose({ expand })
                 :class="{ 'is-inactive': slotModeOf(row.slot) === 'image' && !supplementOn(row.slot) }"
                 :data-mode="slotModeOf(row.slot)"
                 :data-supplement="supplementOn(row.slot)"
-                :data-testid="`studio-supplement-mode-${row.type}`"
+                :data-testid="`${prefix}studio-supplement-mode-${row.type}`"
               >
                 {{ modeBadgeOf(row) }}
               </span>
@@ -350,7 +357,7 @@ defineExpose({ expand })
                 class="supplement__chip"
                 :title="item.content"
                 :aria-label="`移除${row.type}碎片：${previewContent(item.content)}`"
-                :data-testid="`studio-supplement-chip-${row.type}-${index}`"
+                :data-testid="`${prefix}studio-supplement-chip-${row.type}-${index}`"
                 @click="removeFragment(row.type, index)"
               >
                 <span class="supplement__chip-text">{{ previewContent(item.content) }}</span>
@@ -364,7 +371,7 @@ defineExpose({ expand })
                 type="button"
                 class="supplement__pick"
                 :disabled="row.items.length >= MAX_FRAGMENTS_PER_TYPE"
-                :data-testid="`studio-supplement-pick-${row.type}`"
+                :data-testid="`${prefix}studio-supplement-pick-${row.type}`"
                 @click="openPicker(row.type)"
               >
                 选择碎片
@@ -374,7 +381,7 @@ defineExpose({ expand })
                 v-if="row.primary && row.slot"
                 type="button"
                 class="supplement__mode-toggle"
-                :data-testid="`studio-supplement-toggle-${row.type}`"
+                :data-testid="`${prefix}studio-supplement-toggle-${row.type}`"
                 @click="toggleSlotMode(row)"
               >
                 {{ modeActionLabel(row) }}
@@ -392,7 +399,7 @@ defineExpose({ expand })
                     ? '把该槽文本作为额外特征追加到图片主句'
                     : '该槽还没有文本碎片，先选一条'
                 "
-                :data-testid="`studio-supplement-flag-toggle-${row.type}`"
+                :data-testid="`${prefix}studio-supplement-flag-toggle-${row.type}`"
                 @click="toggleSupplement(row)"
               >
                 {{ supplementOn(row.slot) ? '补充已开' : '作为补充' }}
@@ -403,7 +410,7 @@ defineExpose({ expand })
               <span
                 v-if="row.type === '画风技术' && styleLocked"
                 class="supplement__lock"
-                data-testid="studio-supplement-style-lock"
+                :data-testid="`${prefix}studio-supplement-style-lock`"
               >
                 已用碎片描述画风
               </span>
@@ -412,7 +419,7 @@ defineExpose({ expand })
               v-if="canShowSupplementToggle(row) && supplementOn(row.slot)"
               class="supplement__supplement-warning"
               :class="{ 'is-long': supplementLong(row) }"
-              :data-testid="`studio-supplement-warning-${row.type}`"
+              :data-testid="`${prefix}studio-supplement-warning-${row.type}`"
             >
               跨源补充可能覆盖图片特征{{
                 supplementLong(row)
@@ -425,19 +432,19 @@ defineExpose({ expand })
       </div>
 
       <div class="supplement__negative">
-        <label class="supplement__negative-label" for="studio-negative-prompt">
+        <label class="supplement__negative-label" :for="`${prefix}studio-negative-prompt`">
           负向提示词（可选）
         </label>
         <textarea
-          id="studio-negative-prompt"
+          :id="`${prefix}studio-negative-prompt`"
           class="supplement__negative-input"
           rows="3"
           :value="negativePrompt"
           placeholder="例如：多余手指、文字水印、塑料质感"
-          data-testid="studio-negative-prompt"
+          :data-testid="`${prefix}studio-negative-prompt`"
           @input="onNegativeInput"
         />
-        <p class="supplement__negative-hint" data-testid="studio-negative-hint">
+        <p class="supplement__negative-hint" :data-testid="`${prefix}studio-negative-hint`">
           最终负向 = 后端自动抽取 + 你填写的内容
         </p>
       </div>

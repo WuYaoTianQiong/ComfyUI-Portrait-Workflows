@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { isNsfwPoseItem } from '../../api/reference'
 import type { PoseGroup, PoseItem } from '../../api/reference'
@@ -7,6 +8,7 @@ import { useReferencePoses } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useToast } from '../../composables/useToast'
+import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
 import ReferenceCard from './components/ReferenceCard.vue'
@@ -88,9 +90,38 @@ const {
   pose: poseItems,
   togglePose,
   isPoseSelected,
+  personBPose,
+  togglePersonBPose,
 } = useReferenceRecipeDraft()
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
+
+/** 本次是否在为人物B 全量角色组挑选单人姿势。 */
+const personBGroupPoseTarget = computed(
+  () => readReferenceSelection(route.query) === 'person_b_group_pose',
+)
+
+function backToStudio(): void {
+  void router.replace({
+    path: route.path,
+    query: withReferenceTab(route.query, 'studio'),
+    hash: route.hash,
+  })
+}
+
+/** 卡片选中态：B 选图模式下读人物B姿势槽，否则读 A 姿势槽。 */
+function isSelectedPose(item: PoseItem, useDepth?: boolean): boolean {
+  if (personBGroupPoseTarget.value) {
+    return personBPose.value.some(
+      (entry) =>
+        entry.item.id === item.id &&
+        (useDepth === undefined || entry.useDepth === useDepth),
+    )
+  }
+  return isPoseSelected(item.id, useDepth)
+}
 
 // ---------------------------------------------------------------------------
 // 筛选 / 视图状态
@@ -245,7 +276,7 @@ const singleCards = computed<SingleCard[]>(() =>
   visibleSingles.value.map((item) => ({
     item,
     src: poseThumbnailUrl(item, poseDepthMode.value),
-    selected: isPoseSelected(item.id),
+    selected: isSelectedPose(item),
   })),
 )
 
@@ -317,6 +348,16 @@ function setHoverAngle(group: PoseGroup, next: string): void {
 
 /** 卡片「加入配方 / 已选」：多选 toggle，模式参与移除判定（同 id 同模式才算移除）。 */
 function onTogglePose(item: PoseItem): void {
+  if (personBGroupPoseTarget.value) {
+    const added = togglePersonBPose(item, poseDepthMode.value)
+    const mode = poseDepthMode.value ? ' · 深度图' : ''
+    toast.success(
+      added
+        ? `已加入人物B姿势：${item.姿势名称}（${item.角度}${mode}，B 姿势槽共 ${personBPose.value.length} 张）`
+        : `已移除人物B姿势：${item.姿势名称}（B 姿势槽共 ${personBPose.value.length} 张）`,
+    )
+    return
+  }
   const added = togglePose(item, poseDepthMode.value)
   const mode = poseDepthMode.value ? ' · 深度图' : ''
   if (added) {
@@ -434,7 +475,7 @@ const viewerCounter = computed(() => {
 })
 
 const viewerSelected = computed(() =>
-  viewerItem.value ? isPoseSelected(viewerItem.value.id, poseDepthMode.value) : false,
+  viewerItem.value ? isSelectedPose(viewerItem.value, poseDepthMode.value) : false,
 )
 
 const lightboxSelectLabel = computed(
@@ -594,6 +635,25 @@ onMounted(() => {
         </button>
       </div>
     </header>
+
+    <!-- 人物B单人姿势选择态：与 A 姿势槽一样留在库页签里多选 -->
+    <div
+      v-if="personBGroupPoseTarget"
+      class="person-b-select-banner"
+      data-testid="pose-person-b-banner"
+    >
+      <span class="person-b-select-banner__text">
+        正在为人物B选择单人姿势（可多选，选完手动返回合成台；双人姿势将切换为共用布局）
+      </span>
+      <button
+        type="button"
+        class="person-b-select-banner__back"
+        data-testid="pose-person-b-back"
+        @click="backToStudio"
+      >
+        返回合成台
+      </button>
+    </div>
 
     <template v-if="!initialLoading">
       <!-- 构图横向药丸；计数单位是姿势组数，不是图片数 -->
@@ -755,7 +815,7 @@ onMounted(() => {
           :meta-left="card.group.system"
           :meta-right="poseMetaOf(card.item)"
           :selectable="Boolean(card.item)"
-          :selected="card.item ? isPoseSelected(card.item.id) : false"
+          :selected="card.item ? isSelectedPose(card.item) : false"
           @open="openGroup(card.group, card.index)"
           @toggle-select="card.item && onTogglePose(card.item)"
         >
@@ -847,7 +907,7 @@ onMounted(() => {
     <span class="pose-sr-only" data-testid="pose-selected-id">
       {{ poseItems.map((entry) => `${entry.item.id}${entry.useDepth ? '|depth' : ''}`).join(',') }}
     </span>
-    <span class="pose-sr-only" data-testid="pose-selected-count">{{ poseItems.length }}</span>
+    <span class="pose-sr-only" data-testid="pose-selected-count">{{ personBGroupPoseTarget ? personBPose.length : poseItems.length }}</span>
     <span class="pose-sr-only" data-testid="pose-recipe-count">{{ poseItems.length ? 1 : 0 }}/3</span>
     <span class="pose-sr-only" data-testid="pose-can-unlock">{{ canUnlock ? '1' : '0' }}</span>
   </div>
@@ -866,6 +926,37 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.person-b-select-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.person-b-select-banner__text {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.person-b-select-banner__back {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .pose-head__title {

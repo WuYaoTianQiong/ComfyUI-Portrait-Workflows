@@ -196,6 +196,27 @@ export interface ReferenceStudioSettings {
   /** 最近一次「同源整套随机」的来源；仅用于展示，不参与提交。 */
   recipeSourceId: number | null
   recipeSourceName: string
+
+  // -------------------------------------------------------------------------
+  // 2026-11-08：人物B 全量角色组（UX 壳阶段）
+  // -------------------------------------------------------------------------
+  /** 是否已新增人物B；false = 保持 A 三槽 + 新增入口。 */
+  personBEnabled: boolean
+  /** 人物B 的人像 / 服装 / 单人姿势（与 A 三槽同构，独立持久化）。 */
+  personBPortrait: StoredReferenceSlotEntry[]
+  personBCostume: StoredReferenceSlotEntry[]
+  personBPose: StoredReferenceSlotEntry[]
+  /** 人物B 的八类文本碎片与负向。 */
+  personBTextFragments: RecipeTextFragments
+  personBNegativePrompt: string
+  /** 人物B 三槽模式；null = 旧快照缺字段，由调用方推导。 */
+  personBPortraitMode: RecipeSlotMode | null
+  personBCostumeMode: RecipeSlotMode | null
+  personBPoseMode: RecipeSlotMode | null
+  /** 人物B 跨源补充开关。 */
+  personBPortraitSupplement: boolean
+  personBCostumeSupplement: boolean
+  personBPoseSupplement: boolean
 }
 
 /** 合法库标识；校验时用于收窄字符串。 */
@@ -390,6 +411,14 @@ export function parseReferenceStudioSettings(
   const personBVariants = clonePersonBVariants(value.personBVariants)
   const personBVariantIndex = parsePersonBVariantIndex(value.personBVariantIndex)
 
+  // 人物B 全量角色组（2026-11-08）：全部容错读回，旧快照缺字段按空处理。
+  const personBPortrait = parseSlotEntries(value.personBPortrait) ?? []
+  const personBCostume = parseSlotEntries(value.personBCostume) ?? []
+  const personBPose = parseSlotEntries(value.personBPose) ?? []
+  const personBTextFragments = cloneRecipeTextFragments(value.personBTextFragments)
+  const personBNegativePrompt =
+    typeof value.personBNegativePrompt === 'string' ? value.personBNegativePrompt : ''
+
   return {
     portrait,
     costume,
@@ -407,6 +436,18 @@ export function parseReferenceStudioSettings(
     personBText,
     personBVariants,
     personBVariantIndex,
+    personBEnabled: value.personBEnabled === true,
+    personBPortrait,
+    personBCostume,
+    personBPose,
+    personBTextFragments,
+    personBNegativePrompt,
+    personBPortraitMode: parseSlotMode(value.personBPortraitMode),
+    personBCostumeMode: parseSlotMode(value.personBCostumeMode),
+    personBPoseMode: parseSlotMode(value.personBPoseMode),
+    personBPortraitSupplement: parseSupplementFlag(value.personBPortraitSupplement),
+    personBCostumeSupplement: parseSupplementFlag(value.personBCostumeSupplement),
+    personBPoseSupplement: parseSupplementFlag(value.personBPoseSupplement),
     // V2-C：旧快照缺字段按 false（默认进入双人配对模式）。
     pairBatchExpanded: value.pairBatchExpanded === true,
     // P2 扩展字段：同样容错读回，缺字段 = null（由调用方推导）。
@@ -457,6 +498,19 @@ export function createDefaultReferenceStudioSettings(): ReferenceStudioSettings 
     poseSupplement: false,
     recipeSourceId: null,
     recipeSourceName: '',
+    // 人物B 全量角色组：默认未启用，三槽为空。
+    personBEnabled: false,
+    personBPortrait: [],
+    personBCostume: [],
+    personBPose: [],
+    personBTextFragments: createEmptyRecipeTextFragments(),
+    personBNegativePrompt: '',
+    personBPortraitMode: null,
+    personBCostumeMode: null,
+    personBPoseMode: null,
+    personBPortraitSupplement: false,
+    personBCostumeSupplement: false,
+    personBPoseSupplement: false,
   }
 }
 

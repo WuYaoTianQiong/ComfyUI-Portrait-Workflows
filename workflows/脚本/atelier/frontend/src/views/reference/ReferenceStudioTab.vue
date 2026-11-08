@@ -141,6 +141,26 @@ const negativePrompt = computed<string>({
   },
 })
 
+/** 人物B 八类碎片 / 负向：与 A 同构，壳阶段先持久化与展示，提交待后端接入。 */
+const personBTextFragments = computed<RecipeTextFragments>({
+  get: () => draft.personBTextFragments.value,
+  set: (value) => {
+    draft.personBTextFragments.value = value
+  },
+})
+
+const personBNegativePrompt = computed<string>({
+  get: () => draft.personBNegativePrompt.value,
+  set: (value) => {
+    draft.personBNegativePrompt.value = value
+  },
+})
+
+/** 人物B 的「画风技术」碎片同样锁定画风预设（与 A 一套口径）。 */
+const personBStyleLocked = computed(() =>
+  hasStyleFragment(draft.personBTextFragments.value),
+)
+
 /** 双人姿势专用：B 变体由草稿单例持有，换 seed / 画质不会清空。 */
 const hasPairPose = draft.hasPairPose
 
@@ -196,6 +216,8 @@ const supplementSlotCount = computed(
 
 /** 文本补充卡引用：「去填写」需要展开并滚动到卡片。 */
 const textSupplementRef = ref<InstanceType<typeof StudioTextSupplementCard> | null>(null)
+/** 人物B 文本补充卡引用（与 A 分开，避免「去填写」滚到 A 的卡）。 */
+const personBTextSupplementRef = ref<InstanceType<typeof StudioTextSupplementCard> | null>(null)
 
 const {
   workflows,
@@ -548,6 +570,59 @@ function clearSlot(slot: RecipeSlotKey): void {
   else draft.removePose()
 }
 
+// 人物B 三槽：跳库页签（带 selection 目标）与清空 / 单项删除 / 模式。
+const PERSON_B_SELECTION: Record<RecipeSlotKey, ReferenceSelection> = {
+  portrait: 'person_b_group_portrait',
+  costume: 'person_b_group_costume',
+  pose: 'person_b_group_pose',
+}
+
+function openPersonBSlot(slot: RecipeSlotKey): void {
+  goTab(slot, PERSON_B_SELECTION[slot])
+}
+
+function clearPersonBSlot(slot: RecipeSlotKey): void {
+  if (slot === 'portrait') draft.removePersonBPortrait()
+  else if (slot === 'costume') draft.removePersonBCostume()
+  else draft.removePersonBPose()
+}
+
+function removePersonBSlotItem(slot: RecipeSlotKey, id: string): void {
+  if (slot === 'portrait') draft.removePersonBPortrait(id)
+  else if (slot === 'costume') draft.removePersonBCostume(id)
+  else draft.removePersonBPose(id)
+}
+
+function changePersonBPoseDepth(useDepth: boolean): void {
+  setPoseDepthMode(useDepth)
+  draft.setPersonBPoseMode(useDepth)
+}
+
+function onPersonBSlotModeChange(slot: RecipeSlotKey, mode: RecipeSlotMode): void {
+  draft.setPersonBSlotMode(slot, mode)
+}
+
+/** 人物B 槽位卡「去填写」：展开并定位到 B 的文本补充卡。 */
+function onPersonBFillText(): void {
+  void personBTextSupplementRef.value?.expand()
+}
+
+/** 人物B 跨源补充开关（壳阶段只存状态，不参与提交）。 */
+function onPersonBSupplementChange(slot: RecipeSlotKey, enabled: boolean): void {
+  draft.setPersonBSupplement(slot, enabled)
+}
+
+/** 新增 / 移除人物B。 */
+function addPersonB(): void {
+  draft.setPersonBEnabled(true)
+  toast.success('已新增人物B：可分别选择 B 人像 / 服装 / 单人姿势')
+}
+
+function removePersonB(): void {
+  draft.setPersonBEnabled(false)
+  toast.info('已移除人物B，回到单人布局')
+}
+
 // ---------------------------------------------------------------------------
 // 三槽本地上传图（与库条目同数组，一起参与笛卡尔积）
 // ---------------------------------------------------------------------------
@@ -555,11 +630,19 @@ function clearSlot(slot: RecipeSlotKey): void {
 /** 隐藏的 file input：三个槽共用一个，点击时记住目标槽。 */
 const slotUploadInput = ref<HTMLInputElement | null>(null)
 const slotUploadTarget = ref<RecipeSlotKey>('portrait')
+/** 人物B 上传目标；null = 当前是 A 三槽上传。 */
+const personBUploadTarget = ref<RecipeSlotKey | null>(null)
 const slotUploading = ref(false)
 
 /** 点「上传本地图」：记住目标槽并触发文件选择。 */
 function pickSlotUpload(slot: RecipeSlotKey): void {
+  personBUploadTarget.value = null
   slotUploadTarget.value = slot
+  slotUploadInput.value?.click()
+}
+
+function pickPersonBUpload(slot: RecipeSlotKey): void {
+  personBUploadTarget.value = slot
   slotUploadInput.value?.click()
 }
 
@@ -571,9 +654,20 @@ async function onSlotUploadChange(event: Event): Promise<void> {
   input.value = ''
   if (!files.length) return
 
+  const personBTarget = personBUploadTarget.value
+  personBUploadTarget.value = null
   slotUploading.value = true
   try {
     const result = await uploadReferenceImages(files)
+    if (personBTarget) {
+      for (const item of result.items) {
+        const input = { path: item.path, name: item.name, width: item.width, height: item.height }
+        if (personBTarget === 'portrait') draft.addPersonBPortraitUpload(input)
+        else if (personBTarget === 'costume') draft.addPersonBCostumeUpload(input)
+        else draft.addPersonBPoseUpload(input)
+      }
+      return
+    }
     for (const item of result.items) {
       const payload = {
         path: item.path,
@@ -641,6 +735,77 @@ interface SlotCardView {
   showDepthToggle: boolean
   useDepth: boolean
 }
+
+/** 人物B 三槽卡：与 A 同一套 SlotCardView 结构与提示。 */
+const bSlotCards = computed<SlotCardView[]>(() => {
+  const useDepth = draft.personBPose.value[0]?.useDepth ?? poseDepthMode.value
+  return [
+    {
+      key: 'portrait',
+      label: 'B 人像',
+      items: portraitSlotItems(draft.personBPortrait.value),
+      hint: '+ 选人物B人像（可多选）',
+      showDepthToggle: false,
+      useDepth: false,
+    },
+    {
+      key: 'costume',
+      label: 'B 服装',
+      items: costumeSlotItems(draft.personBCostume.value),
+      hint: '+ 选人物B服装（可多选）',
+      showDepthToggle: false,
+      useDepth: false,
+    },
+    {
+      key: 'pose',
+      label: 'B 单人姿势',
+      items: poseSlotItems(draft.personBPose.value),
+      hint: '+ 选人物B单人姿势（可多选）',
+      showDepthToggle: true,
+      useDepth,
+    },
+  ]
+})
+
+/** 人物B 姿势里是否有双人构图（有则 A/B 共用右侧双人姿势卡）。 */
+const hasPersonBPairPose = computed(() =>
+  draft.personBPose.value.some(
+    (entry) => entry.item.composition === 'pair' || entry.item.id.startsWith('pair'),
+  ),
+)
+
+/** 人物B 存在且任一侧选中双人姿势 → 右侧共用姿势两列布局。 */
+const showPersonBPairLayout = computed(
+  () => draft.personBEnabled.value && (draft.hasPairPose.value || hasPersonBPairPose.value),
+)
+
+/** 双人布局下 A/B 只保留人像 / 服装两槽。 */
+const aVisibleCards = computed(() =>
+  showPersonBPairLayout.value ? slotCards.value.filter((slot) => slot.key !== 'pose') : slotCards.value,
+)
+const bVisibleCards = computed(() =>
+  showPersonBPairLayout.value
+    ? bSlotCards.value.filter((slot) => slot.key !== 'pose')
+    : bSlotCards.value,
+)
+
+/** 右侧共用双人姿势卡：优先用 A 的双人姿势，否则用 B 的。 */
+const sharedPairPoseCard = computed<SlotCardView | null>(() => {
+  if (!showPersonBPairLayout.value) return null
+  const isPair = (entry: { item: { composition?: string; id: string } }) =>
+    entry.item.composition === 'pair' || entry.item.id.startsWith('pair')
+  const aPairs = draft.pose.value.filter(isPair)
+  const bPairs = draft.personBPose.value.filter(isPair)
+  const items = aPairs.length ? aPairs : bPairs
+  return {
+    key: 'pose',
+    label: '共用双人姿势（A + B）',
+    items: poseSlotItems(items),
+    hint: '+ 选双人姿势（A/B 共用）',
+    showDepthToggle: true,
+    useDepth: items[0]?.useDepth ?? poseDepthMode.value,
+  }
+})
 
 const slotCards = computed<SlotCardView[]>(() => {
   const useDepth = draft.pose.value[0]?.useDepth ?? poseDepthMode.value
@@ -1443,9 +1608,28 @@ onMounted(async () => {
         <span class="studio-count" data-testid="studio-recipe-count">{{ slotCountLabel }}</span>
       </template>
 
-      <!-- 素材区：三槽（图墙版）+ 第 4 张上传块；没有工作流支持 extra 时只留三槽 -->
-      <div class="slot-grid" :class="{ 'slot-grid--compact': !supportsExtraSlot }">
-        <div v-for="slot in slotCards" :key="slot.key" class="slot-column">
+      <!--
+        人物A / 人物B 角色组（2026-11-08 UX 壳）：
+        - 单人：A 组在上，B 组（新增后）在下；
+        - 双人姿势：A/B 两行在左，共用双人姿势卡在右、竖向居中。
+      -->
+      <div class="char-layout" :class="{ 'char-layout--pair': showPersonBPairLayout }">
+        <div class="char-a">
+          <div class="char-group-head">
+            <strong>人物 A</strong>
+            <span class="badge">主人物</span>
+            <span class="spacer"></span>
+          </div>
+
+          <!-- 素材区：三槽（图墙版）+ 第 4 张上传块；没有工作流支持 extra 时只留三槽 -->
+          <div
+            class="slot-grid"
+            :class="{
+              'slot-grid--compact': !supportsExtraSlot,
+              'slot-grid--pair': showPersonBPairLayout,
+            }"
+          >
+            <div v-for="slot in aVisibleCards" :key="slot.key" class="slot-column">
           <StudioSlotPanel
             :label="slot.label"
             :slot-key="slot.key"
@@ -1488,8 +1672,11 @@ onMounted(async () => {
           @change="onSlotUploadChange"
         />
 
-        <!-- 第 4 张：与三槽同级，只提交 1 张，仅 uploads；没有工作流接 extra 时整块不渲染 -->
-        <div v-if="supportsExtraSlot" class="extra-block">
+        <!-- 第 4 张：没有工作流接 extra 时整块不渲染；新人物B组启用后不再重复展示 B 身份槽 -->
+        <div
+          v-if="supportsExtraSlot && !(draft.personBEnabled.value && extraKind === 'person_b')"
+          class="extra-block"
+        >
           <div v-if="extraFilled" class="extra-item" data-testid="studio-extra-selected">
             <div class="extra-item__row">
               <span class="extra-item__mark" aria-hidden="true">
@@ -1555,10 +1742,94 @@ onMounted(async () => {
             @select="onHairPick"
           />
         </div>
+        </div>
+        </div>
+
+        <!-- 双人姿势：右侧独立一列，竖向居中，覆盖 A 下半 / B 上半 -->
+        <aside v-if="showPersonBPairLayout && sharedPairPoseCard" class="char-pose">
+          <div class="char-group-head">
+            <strong>共用双人姿势</strong>
+            <span class="badge">A + B</span>
+            <span class="spacer"></span>
+          </div>
+          <StudioSlotPanel
+            :label="sharedPairPoseCard.label"
+            :slot-key="sharedPairPoseCard.key"
+            :items="sharedPairPoseCard.items"
+            :hint="sharedPairPoseCard.hint"
+            :mode="slotModes.pose"
+            :show-depth-toggle="sharedPairPoseCard.showDepthToggle"
+            :use-depth="sharedPairPoseCard.useDepth"
+            @select="goTab('pose')"
+            @clear="draft.removePose()"
+            @depth-change="changePoseDepth"
+            @preview="openSlotPreview('pose', $event)"
+            @remove="removeSlotItem('pose', $event)"
+            @update:mode="onSlotModeChange('pose', $event)"
+            @fill-text="onFillText"
+          />
+        </aside>
+
+        <!-- 人物B：与 A 完全同构的三槽；移除后回到单人布局 -->
+        <div v-if="draft.personBEnabled.value" class="char-b">
+          <div class="char-group-head">
+            <strong>人物 B</strong>
+            <span class="badge b">第二人物</span>
+            <span class="spacer"></span>
+            <button type="button" class="char-remove" data-testid="studio-person-b-remove" @click="removePersonB">
+              移除人物B
+            </button>
+          </div>
+          <div
+            class="slot-grid slot-grid--person"
+            :class="{ 'slot-grid--pair': showPersonBPairLayout }"
+          >
+            <div v-for="slot in bVisibleCards" :key="slot.key" class="slot-column">
+              <StudioSlotPanel
+                :label="slot.label"
+                :slot-key="slot.key"
+                test-id-prefix="b-"
+                :items="slot.items"
+                :hint="slot.hint"
+                :mode="draft.personBSlotModes.value[slot.key]"
+                :show-depth-toggle="slot.showDepthToggle"
+                :use-depth="slot.useDepth"
+                @select="openPersonBSlot(slot.key)"
+                @clear="clearPersonBSlot(slot.key)"
+                @depth-change="changePersonBPoseDepth"
+                @remove="removePersonBSlotItem(slot.key, $event)"
+                @update:mode="onPersonBSlotModeChange(slot.key, $event)"
+                @fill-text="onPersonBFillText"
+              >
+                <template #footer>
+                  <button
+                    v-if="draft.personBSlotModes.value[slot.key] !== 'text'"
+                    type="button"
+                    class="slot-upload"
+                    :data-testid="`studio-slot-upload-b-${slot.key}`"
+                    :disabled="slotUploading"
+                    @click="pickPersonBUpload(slot.key)"
+                  >
+                    {{ slotUploading ? '上传中…' : '＋ 上传本地图' }}
+                  </button>
+                </template>
+              </StudioSlotPanel>
+            </div>
+          </div>
+        </div>
+
+        <!-- 未新增 B：A 组下方的虚线入口 -->
+        <button v-else type="button" class="add-person-b" data-testid="studio-add-person-b" @click="addPersonB">
+          <span class="add-person-b__plus">＋</span>
+          <span class="add-person-b__text">
+            <strong>新增人物B</strong>
+            <small>加入第二个人物：A/B 各自选单人姿势，或共选一张双人姿势</small>
+          </span>
+        </button>
       </div>
 
       <StudioPersonBEditor
-        v-if="showPersonBEditor"
+        v-if="showPersonBEditor && !draft.personBEnabled.value"
         :variants="draft.personBVariants.value"
         :active-index="draft.activePersonBVariantIndex.value"
         :safe-mode="safeMode"
@@ -1606,6 +1877,26 @@ onMounted(async () => {
       @update:slot-mode="onSlotModeChange"
       @update:supplement="onSlotSupplementChange"
     />
+
+    <!-- 人物B 设定：与 A 同构的八类碎片 / 负向，壳阶段先可编辑并持久化 -->
+    <template v-if="draft.personBEnabled.value">
+      <p class="person-b-note" data-testid="studio-person-b-pending">
+        人物B 的独立姿势与八类提示词已可编辑并记忆；当前提交仍复用人物A 的提示词，待后端工作流接入后生效。
+      </p>
+      <StudioTextSupplementCard
+        ref="personBTextSupplementRef"
+        v-model="personBTextFragments"
+        v-model:negative-prompt="personBNegativePrompt"
+        test-id-prefix="b-"
+        person-label="人物B"
+        :safe-mode="safeMode"
+        :style-locked="personBStyleLocked"
+        :slot-modes="draft.personBSlotModes.value"
+        :supplement-flags="draft.personBSupplementFlags.value"
+        @update:slot-mode="onPersonBSlotModeChange"
+        @update:supplement="onPersonBSupplementChange"
+      />
+    </template>
 
     <div class="studio-grid">
       <!--
@@ -2170,6 +2461,200 @@ onMounted(async () => {
 
 @media (max-width: 479px) {
   .slot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 人物 A / 人物B 角色组（2026-11-08 UX 壳）
+ *
+ * 单人：A 在上、B（新增后）在下，纵向堆叠；
+ * 双人：A 与 B 在左列上下排，共用双人姿势在右列 300px，跨两行竖向居中
+ *       （视觉上覆盖 A 下半 / B 上半）。
+ * ------------------------------------------------------------------------- */
+
+.char-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.char-layout--pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.char-a,
+.char-b {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.char-layout--pair .char-a {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.char-layout--pair .char-b {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.char-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.char-group-head strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.char-group-head .badge {
+  padding: 1px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.char-group-head .badge.b {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.char-group-head .spacer {
+  flex: 1;
+}
+
+.char-remove {
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.char-remove:hover {
+  border-color: var(--danger, #cf6679);
+  color: var(--danger, #cf6679);
+}
+
+/* B 组单人三槽：固定 3 列，不跟随 A 的 4 列（B 没有第 4 张） */
+.slot-grid--person {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 双人布局：A / B 各只留人像 + 服装两槽 */
+.slot-grid--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 共用双人姿势：右列跨 A/B 两行，竖向居中 */
+.char-pose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  align-self: center;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  position: sticky;
+  top: 12px;
+}
+
+/* 未新增 B：A 组下方的虚线入口 */
+.add-person-b {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-person-b:hover {
+  border-color: var(--accent);
+  background: var(--fill-subtle);
+}
+
+.add-person-b__plus {
+  flex: none;
+  color: var(--accent);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.add-person-b__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.add-person-b__text strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.add-person-b__text small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 人物B 设定卡上方的壳阶段说明 */
+.person-b-note {
+  margin: 16px 0 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--fill-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 窄屏：双人布局回落单列，顺序 A → 共用姿势 → B */
+@media (max-width: 899px) {
+  .char-layout--pair {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .char-layout--pair .char-a,
+  .char-layout--pair .char-b,
+  .char-pose {
+    grid-column: auto;
+    grid-row: auto;
+    align-self: stretch;
+    position: static;
+  }
+
+  .slot-grid--person {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .slot-grid--person,
+  .slot-grid--pair {
     grid-template-columns: minmax(0, 1fr);
   }
 }

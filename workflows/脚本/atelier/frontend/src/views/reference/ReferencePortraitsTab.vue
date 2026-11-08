@@ -54,16 +54,30 @@ const {
   extra,
   setPersonBIdentityLibrary,
   clearPersonBIdentity,
+  personBPortrait,
+  togglePersonBPortrait,
 } = useReferenceRecipeDraft()
 const toast = useToast()
 
 const route = useRoute()
 const router = useRouter()
 
-/** 本次是否在为人物B挑选身份图（第 4 槽）。 */
+/** 本次是否在为人物B挑选身份图（第 4 槽，旧五图语义）。 */
 const personBIdentityTarget = computed(
   () => readReferenceSelection(route.query) === 'person_b_identity',
 )
+/** 本次是否在为人物B 全量角色组挑选人像。 */
+const personBGroupPortraitTarget = computed(
+  () => readReferenceSelection(route.query) === 'person_b_group_portrait',
+)
+/** 任意人物B人像选择态。 */
+const personBPortraitTarget = computed(
+  () => personBIdentityTarget.value || personBGroupPortraitTarget.value,
+)
+
+function isPersonBGroupPortrait(item: PortraitItem): boolean {
+  return personBPortrait.value.some((entry) => entry.id === item.id)
+}
 
 function backToStudio(): void {
   void router.replace({
@@ -140,9 +154,11 @@ const cards = computed<PortraitCard[]>(() =>
   visibleItems.value.map((item) => ({
     item,
     src: portraitThumbnailUrl(item),
-    selected: personBIdentityTarget.value
-      ? isPersonBIdentity(item)
-      : isPortraitSelected(item.id),
+    selected: personBGroupPortraitTarget.value
+      ? isPersonBGroupPortrait(item)
+      : personBIdentityTarget.value
+        ? isPersonBIdentity(item)
+        : isPortraitSelected(item.id),
   })),
 )
 
@@ -202,6 +218,15 @@ function onPageSizeChange(next: number): void {
 /** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onTogglePortrait(item: PortraitItem): void {
   const label = item.发型名称 || item.标题
+  if (personBGroupPortraitTarget.value) {
+    const added = togglePersonBPortrait(item)
+    toast.success(
+      added
+        ? `已加入人物B人像「${label}」（B 人像槽共 ${personBPortrait.value.length} 张）`
+        : `已移除人物B人像「${label}」（B 人像槽共 ${personBPortrait.value.length} 张）`,
+    )
+    return
+  }
   if (personBIdentityTarget.value) {
     if (isPersonBIdentity(item)) {
       clearPersonBIdentity()
@@ -253,6 +278,7 @@ const viewerCounter = computed(() => {
 const viewerSelected = computed(() => {
   const item = currentItem.value
   if (!item) return false
+  if (personBGroupPortraitTarget.value) return isPersonBGroupPortrait(item)
   return personBIdentityTarget.value
     ? isPersonBIdentity(item)
     : isPortraitSelected(item.id)
@@ -368,12 +394,17 @@ onMounted(() => {
 
     <!-- 人物B身份图选择态：与 A 槽一样留在库页签里自由筛选，单图替换 -->
     <div
-      v-if="personBIdentityTarget"
+      v-if="personBPortraitTarget"
       class="person-b-select-banner"
       data-testid="portrait-person-b-banner"
     >
       <span class="person-b-select-banner__text">
-        正在为人物B选择身份图（单选，点击卡片即替换；再点已选卡片可清除）
+        <template v-if="personBGroupPortraitTarget">
+          正在为人物B选择人像（可多选，选完手动返回合成台）
+        </template>
+        <template v-else>
+          正在为人物B选择身份图（单选，点击卡片即替换；再点已选卡片可清除）
+        </template>
       </span>
       <button
         type="button"

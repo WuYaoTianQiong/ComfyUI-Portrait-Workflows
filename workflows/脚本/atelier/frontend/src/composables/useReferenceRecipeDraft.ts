@@ -129,6 +129,22 @@ const extraCostume = ref<StoredReferenceCostumeSlot>(createEmptyCostumeSlot())
 /** 人物B服装槽是否已选图。 */
 const extraCostumeFilled = computed(() => extraCostume.value.source !== 'empty')
 
+// ---------------------------------------------------------------------------
+// 人物B 全量角色组（2026-11-08，UX 壳阶段）
+// ---------------------------------------------------------------------------
+
+/** 是否已新增人物B。关闭时保持 A 三槽 + 新增入口。 */
+const personBEnabled = ref(false)
+/** 人物B 的人像 / 服装 / 单人姿势（与 A 三槽同构）。 */
+const personBPortrait = ref<PortraitItem[]>([])
+const personBCostume = ref<CostumeItem[]>([])
+const personBPose = ref<PoseSlotSelection[]>([])
+/** 人物B 的八类文本碎片、三槽模式、补充开关与负向。 */
+const personBTextFragments = ref<RecipeTextFragments>(createEmptyRecipeTextFragments())
+const personBSlotModes = ref<RecipeSlotModes>(createEmptySlotModes())
+const personBSupplementFlags = ref<RecipeSupplementFlags>(createEmptySupplementFlags())
+const personBNegativePrompt = ref('')
+
 /**
  * 文本补充八类碎片（2026-11-06）。
  *
@@ -534,6 +550,139 @@ function setPoseMode(useDepth: boolean): void {
 }
 
 // ---------------------------------------------------------------------------
+// 人物B 全量角色组操作（与 A 三槽同构）
+// ---------------------------------------------------------------------------
+
+/** 新增 / 移除人物B；移除时清空 B 的全部素材与设定。 */
+function setPersonBEnabled(enabled: boolean): void {
+  if (personBEnabled.value === enabled) return
+  personBEnabled.value = enabled
+  if (!enabled) clearPersonB()
+}
+
+function clearPersonB(): void {
+  personBPortrait.value = []
+  personBCostume.value = []
+  personBPose.value = []
+  personBTextFragments.value = createEmptyRecipeTextFragments()
+  personBSlotModes.value = createEmptySlotModes()
+  personBSupplementFlags.value = createEmptySupplementFlags()
+  personBNegativePrompt.value = ''
+}
+
+function addPersonBPortrait(item: PortraitItem): void {
+  if (personBPortrait.value.some((entry) => entry.id === item.id)) return
+  personBPortrait.value = [...personBPortrait.value, item]
+}
+
+function togglePersonBPortrait(item: PortraitItem): boolean {
+  const already = personBPortrait.value.some((entry) => entry.id === item.id)
+  personBPortrait.value = already
+    ? personBPortrait.value.filter((entry) => entry.id !== item.id)
+    : [...personBPortrait.value, item]
+  return !already
+}
+
+function removePersonBPortrait(id?: string): void {
+  personBPortrait.value = id
+    ? personBPortrait.value.filter((entry) => entry.id !== id)
+    : []
+}
+
+function addPersonBCostume(item: CostumeItem): void {
+  if (personBCostume.value.some((entry) => entry.id === item.id)) return
+  personBCostume.value = [...personBCostume.value, item]
+}
+
+function togglePersonBCostume(item: CostumeItem): boolean {
+  const already = personBCostume.value.some((entry) => entry.id === item.id)
+  personBCostume.value = already
+    ? personBCostume.value.filter((entry) => entry.id !== item.id)
+    : [...personBCostume.value, item]
+  return !already
+}
+
+function removePersonBCostume(id?: string): void {
+  personBCostume.value = id
+    ? personBCostume.value.filter((entry) => entry.id !== id)
+    : []
+}
+
+function addPersonBPose(item: PoseItem, useDepth = false): void {
+  const normalized = normalizePoseDepth(item, useDepth)
+  const index = personBPose.value.findIndex((entry) => entry.item.id === item.id)
+  if (index < 0) {
+    personBPose.value = [...personBPose.value, { item, useDepth: normalized }]
+    return
+  }
+  const next = [...personBPose.value]
+  next[index] = { item, useDepth: normalized }
+  personBPose.value = next
+}
+
+function togglePersonBPose(item: PoseItem, useDepth = false): boolean {
+  const normalized = normalizePoseDepth(item, useDepth)
+  const index = personBPose.value.findIndex((entry) => entry.item.id === item.id)
+  if (index < 0) {
+    personBPose.value = [...personBPose.value, { item, useDepth: normalized }]
+    return true
+  }
+  if (personBPose.value[index].useDepth === normalized) {
+    personBPose.value = personBPose.value.filter((_, i) => i !== index)
+    return false
+  }
+  const next = [...personBPose.value]
+  next[index] = { item, useDepth: normalized }
+  personBPose.value = next
+  return true
+}
+
+function removePersonBPose(id?: string): void {
+  personBPose.value = id
+    ? personBPose.value.filter((entry) => entry.item.id !== id)
+    : []
+}
+
+function setPersonBPoseMode(useDepth: boolean): void {
+  personBPose.value = personBPose.value.map((entry) => ({
+    ...entry,
+    useDepth: normalizePoseDepth(entry.item, useDepth),
+  }))
+}
+
+/** 人物B 的槽模式；与 A 同一套 image / text / empty 口径。 */
+function setPersonBSlotMode(slot: RecipeSlotKey, mode: RecipeSlotMode): void {
+  if (personBSlotModes.value[slot] === mode) return
+  personBSlotModes.value = { ...personBSlotModes.value, [slot]: mode }
+  if (mode !== 'image' && personBSupplementFlags.value[slot]) {
+    personBSupplementFlags.value = { ...personBSupplementFlags.value, [slot]: false }
+  }
+}
+
+function setPersonBSupplement(slot: RecipeSlotKey, enabled: boolean): void {
+  personBSupplementFlags.value = { ...personBSupplementFlags.value, [slot]: enabled }
+}
+
+/** 人物B 人像 / 服装 / 姿势的本地上传（与 A 同构，不做单图收敛）。 */
+function addPersonBPortraitUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (personBPortrait.value.some((entry) => entry.id === id)) return
+  personBPortrait.value = [...personBPortrait.value, portraitUploadItem(input)]
+}
+
+function addPersonBCostumeUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (personBCostume.value.some((entry) => entry.id === id)) return
+  personBCostume.value = [...personBCostume.value, costumeUploadItem(input)]
+}
+
+function addPersonBPoseUpload(input: UploadSlotInput): void {
+  const id = `${UPLOAD_ID_PREFIX}${input.path}`
+  if (personBPose.value.some((entry) => entry.item.id === id)) return
+  personBPose.value = [...personBPose.value, poseUploadSelection(input)]
+}
+
+// ---------------------------------------------------------------------------
 // 槽位模式（P2 替代态）
 // ---------------------------------------------------------------------------
 
@@ -906,6 +1055,9 @@ function clearDraft(): void {
   negativePrompt.value = ''
   personBVariants.value = []
   activePersonBVariantIndex.value = 0
+  // 人物B 全量角色组也属于草稿。
+  personBEnabled.value = false
+  clearPersonB()
   pairBatchExpanded.value = false
   // 模式与「上次姿势」同属草稿：清空后回到「三槽都是空」的推导起点。
   slotModes.value = createEmptySlotModes()
@@ -1093,6 +1245,76 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   costume.value = nextCostume
   pose.value = nextPose
   if (nextPose[0]) lastPoseId.value = nextPose[0].item.id
+
+  // 人物B 全量角色组（2026-11-08）：与 A 三槽同一套 id + library 匹配规则。
+  personBEnabled.value = stored.personBEnabled
+
+  const seenBPortrait = new Set<string>()
+  const nextBPortrait: PortraitItem[] = []
+  for (const entry of stored.personBPortrait) {
+    if (entry.path) {
+      if (seenBPortrait.has(entry.id)) continue
+      seenBPortrait.add(entry.id)
+      nextBPortrait.push(portraitUploadItem({ path: entry.path, name: entry.name }))
+      continue
+    }
+    if (entry.library !== 'portrait' || seenBPortrait.has(entry.id)) continue
+    const item = portraitByKey.get(slotKey('portrait', entry.id))
+    if (!item) continue
+    seenBPortrait.add(entry.id)
+    nextBPortrait.push(item)
+  }
+
+  const seenBCostume = new Set<string>()
+  const nextBCostume: CostumeItem[] = []
+  for (const entry of stored.personBCostume) {
+    if (entry.path) {
+      const key = slotKey('upload', entry.id)
+      if (seenBCostume.has(key)) continue
+      seenBCostume.add(key)
+      nextBCostume.push(costumeUploadItem({ path: entry.path, name: entry.name }))
+      continue
+    }
+    if (entry.library !== 'costume' && entry.library !== 'costume-anime') continue
+    const key = slotKey(entry.library, entry.id)
+    if (seenBCostume.has(key)) continue
+    const item = costumeByKey.get(key)
+    if (!item) continue
+    seenBCostume.add(key)
+    nextBCostume.push(item)
+  }
+
+  const seenBPose = new Set<string>()
+  const nextBPose: PoseSlotSelection[] = []
+  for (const entry of stored.personBPose) {
+    if (entry.path) {
+      if (seenBPose.has(entry.id)) continue
+      seenBPose.add(entry.id)
+      nextBPose.push(poseUploadSelection({ path: entry.path, name: entry.name }))
+      continue
+    }
+    if (entry.library !== 'pose' || seenBPose.has(entry.id)) continue
+    const item = poseByKey.get(slotKey('pose', entry.id))
+    if (!item) continue
+    seenBPose.add(entry.id)
+    nextBPose.push({ item, useDepth: entry.useDepth === true })
+  }
+
+  personBPortrait.value = nextBPortrait
+  personBCostume.value = nextBCostume
+  personBPose.value = nextBPose
+  const modeOf = (items: number, storedMode: RecipeSlotMode | null): RecipeSlotMode =>
+    storedMode ?? (items > 0 ? 'image' : 'empty')
+  personBSlotModes.value = {
+    portrait: modeOf(nextBPortrait.length, stored.personBPortraitMode),
+    costume: modeOf(nextBCostume.length, stored.personBCostumeMode),
+    pose: modeOf(nextBPose.length, stored.personBPoseMode),
+  }
+  personBSupplementFlags.value = cloneSupplementFlags({
+    portrait: stored.personBPortraitSupplement,
+    costume: stored.personBCostumeSupplement,
+    pose: stored.personBPoseSupplement,
+  })
   // 文本补充与三槽无关：这里一并恢复，保持「同一份快照一次性写进内存」的语义。
   restoreTextFragmentsFromSettings(stored)
   // 模式必须在三槽与碎片都恢复后应用：旧快照缺 mode 时按内容推导。
@@ -1209,6 +1431,8 @@ function restoreTextFragmentsFromSettings(
     | 'personBText'
     | 'personBVariants'
     | 'personBVariantIndex'
+    | 'personBTextFragments'
+    | 'personBNegativePrompt'
     | 'portraitSupplement'
     | 'costumeSupplement'
     | 'poseSupplement'
@@ -1221,6 +1445,9 @@ function restoreTextFragmentsFromSettings(
   extraCostume.value = { ...stored.extraCostume }
   textFragments.value = cloneRecipeTextFragments(stored.textFragments)
   negativePrompt.value = stored.negativePrompt
+  // 人物B 的八类碎片 / 负向与 A 同构，随同一份快照一次性恢复。
+  personBTextFragments.value = cloneRecipeTextFragments(stored.personBTextFragments)
+  personBNegativePrompt.value = stored.personBNegativePrompt
   // v1.5：优先恢复变体列表；旧快照只有 personBText 时迁移成第一条变体。
   const restoredVariants = clonePersonBVariants(stored.personBVariants)
   if (restoredVariants.length) {
@@ -1452,6 +1679,61 @@ watch(
   { deep: true, flush: 'sync' },
 )
 
+// 人物B 全量角色组：逐字段落盘，避免覆盖 A 的槽位与参数。
+watch(
+  personBEnabled,
+  () => writeReferenceStudioSettings({ personBEnabled: personBEnabled.value }),
+  { flush: 'sync' },
+)
+watch(
+  personBPortrait,
+  () => writeReferenceStudioSettings({ personBPortrait: personBPortrait.value.map(storedPortrait) }),
+  { deep: true, flush: 'sync' },
+)
+watch(
+  personBCostume,
+  () => writeReferenceStudioSettings({ personBCostume: personBCostume.value.map(storedCostume) }),
+  { deep: true, flush: 'sync' },
+)
+watch(
+  personBPose,
+  () => writeReferenceStudioSettings({ personBPose: personBPose.value.map(storedPose) }),
+  { deep: true, flush: 'sync' },
+)
+watch(
+  personBTextFragments,
+  () =>
+    writeReferenceStudioSettings({
+      personBTextFragments: cloneRecipeTextFragments(personBTextFragments.value),
+    }),
+  { deep: true, flush: 'sync' },
+)
+watch(
+  personBNegativePrompt,
+  () => writeReferenceStudioSettings({ personBNegativePrompt: personBNegativePrompt.value }),
+  { flush: 'sync' },
+)
+watch(
+  personBSlotModes,
+  () =>
+    writeReferenceStudioSettings({
+      personBPortraitMode: personBSlotModes.value.portrait,
+      personBCostumeMode: personBSlotModes.value.costume,
+      personBPoseMode: personBSlotModes.value.pose,
+    }),
+  { deep: true, flush: 'sync' },
+)
+watch(
+  personBSupplementFlags,
+  () =>
+    writeReferenceStudioSettings({
+      personBPortraitSupplement: personBSupplementFlags.value.portrait,
+      personBCostumeSupplement: personBSupplementFlags.value.costume,
+      personBPoseSupplement: personBSupplementFlags.value.pose,
+    }),
+  { deep: true, flush: 'sync' },
+)
+
 /** 人像槽已选判定；不传 id 时返回「该槽是否非空」。 */
 function isPortraitSelected(id?: string): boolean {
   if (id === undefined) return portrait.value.length > 0
@@ -1503,6 +1785,32 @@ export function useReferenceRecipeDraft() {
     setPersonBCostumeUpload,
     clearPersonBCostume,
     syncPersonBImagesFromVariant,
+    // 2026-11-08：人物B 全量角色组（UX 壳）
+    personBEnabled,
+    personBPortrait,
+    personBCostume,
+    personBPose,
+    personBTextFragments,
+    personBSlotModes,
+    personBSupplementFlags,
+    personBNegativePrompt,
+    setPersonBEnabled,
+    clearPersonB,
+    addPersonBPortrait,
+    togglePersonBPortrait,
+    removePersonBPortrait,
+    addPersonBCostume,
+    togglePersonBCostume,
+    removePersonBCostume,
+    addPersonBPose,
+    togglePersonBPose,
+    removePersonBPose,
+    setPersonBPoseMode,
+    setPersonBSlotMode,
+    setPersonBSupplement,
+    addPersonBPortraitUpload,
+    addPersonBCostumeUpload,
+    addPersonBPoseUpload,
     // 文本补充（八类碎片）与负向提示词（2026-11-06）
     textFragments,
     negativePrompt,

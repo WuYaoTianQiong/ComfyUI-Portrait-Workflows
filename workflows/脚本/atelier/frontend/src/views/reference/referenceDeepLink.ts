@@ -138,11 +138,25 @@ export function withReferenceTab(query: LocationQuery, tab: string): LocationQue
  * 只在合成台按钮跳转时写入 `?selection=`，页签切换 / 回合成台时由
  * {@link withReferenceTab} 自动剔除；刷新仍保留，便于用户继续选。
  */
-export type ReferenceSelection = 'person_b_identity' | 'person_b_costume'
+export type ReferenceSelection =
+  | 'person_b_identity'
+  | 'person_b_costume'
+  // 2026-11-08：人物B 全量角色组（与 A 三槽同构）
+  | 'person_b_group_portrait'
+  | 'person_b_group_costume'
+  | 'person_b_group_pose'
+
+const REFERENCE_SELECTIONS: ReadonlySet<string> = new Set<ReferenceSelection>([
+  'person_b_identity',
+  'person_b_costume',
+  'person_b_group_portrait',
+  'person_b_group_costume',
+  'person_b_group_pose',
+])
 
 /** 从 query 读取合法 selection；非法值返回 null（不阻塞页面）。 */
 export function readReferenceSelection(query: LocationQuery): ReferenceSelection | null {
   const raw = Array.isArray(query.selection) ? query.selection[0] : query.selection
   if (typeof raw !== 'string') return null
-  return raw === 'person_b_identity' || raw === 'person_b_costume' ? raw : null
+  return REFERENCE_SELECTIONS.has(raw) ? (raw as ReferenceSelection) : null
 }

@@ -88,6 +88,8 @@ const {
   extraCostume,
   setPersonBCostumeLibrary,
   clearPersonBCostume,
+  personBCostume,
+  togglePersonBCostume,
 } = useReferenceRecipeDraft()
 
 const toast = useToast()
@@ -95,10 +97,25 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 
-/** 本次是否在为人物B挑选服装（第 5 槽）。 */
+/** 本次是否在为人物B挑选服装（第 5 槽，旧五图语义）。 */
 const personBCostumeTarget = computed(
   () => readReferenceSelection(route.query) === 'person_b_costume',
 )
+/** 本次是否在为人物B 全量角色组挑选服装。 */
+const personBGroupCostumeTarget = computed(
+  () => readReferenceSelection(route.query) === 'person_b_group_costume',
+)
+/** 任意人物B服装选择态。 */
+const personBCostumeAnyTarget = computed(
+  () => personBCostumeTarget.value || personBGroupCostumeTarget.value,
+)
+
+function isPersonBGroupCostume(item: CostumeItem): boolean {
+  const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
+  return personBCostume.value.some(
+    (entry) => entry.id === item.id && (entry.library ?? 'costume') === library,
+  )
+}
 
 function backToStudio(): void {
   void router.replace({
@@ -120,6 +137,7 @@ function isPersonBCostume(item: CostumeItem): boolean {
 
 /** 卡片选中态：B 选图模式下读第 5 槽，否则读 A 服装槽。 */
 function isSelectedCostume(item: CostumeItem): boolean {
+  if (personBGroupCostumeTarget.value) return isPersonBGroupCostume(item)
   return personBCostumeTarget.value
     ? isPersonBCostume(item)
     : isCostumeSelected(item.id)
@@ -246,6 +264,15 @@ function onPageSizeChange(next: number): void {
 
 /** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onToggleCostume(item: CostumeItem): void {
+  if (personBGroupCostumeTarget.value) {
+    const added = togglePersonBCostume(item)
+    toast.success(
+      added
+        ? `已加入人物B服装「${item.服装名称}」（B 服装槽共 ${personBCostume.value.length} 张）`
+        : `已移除人物B服装「${item.服装名称}」（B 服装槽共 ${personBCostume.value.length} 张）`,
+    )
+    return
+  }
   if (personBCostumeTarget.value) {
     if (isPersonBCostume(item)) {
       clearPersonBCostume()
@@ -427,12 +454,17 @@ onBeforeUnmount(() => {
 
     <!-- 人物B服装选择态：与 A 槽一样留在库页签里自由筛选，单图替换 -->
     <div
-      v-if="personBCostumeTarget"
+      v-if="personBCostumeAnyTarget"
       class="person-b-select-banner"
       data-testid="costume-person-b-banner"
     >
       <span class="person-b-select-banner__text">
-        正在为人物B选择服装（单选，点击卡片即替换；再点已选卡片可清除）
+        <template v-if="personBGroupCostumeTarget">
+          正在为人物B选择服装（可多选，选完手动返回合成台）
+        </template>
+        <template v-else>
+          正在为人物B选择服装（单选，点击卡片即替换；再点已选卡片可清除）
+        </template>
       </span>
       <button
         type="button"

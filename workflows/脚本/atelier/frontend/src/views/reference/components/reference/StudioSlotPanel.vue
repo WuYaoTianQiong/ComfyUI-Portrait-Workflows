@@ -27,6 +27,8 @@ const props = defineProps<{
   label: string
   /** 槽位键，同时用于 data-testid 后缀 */
   slotKey: 'portrait' | 'costume' | 'pose'
+  /** 人物B 等第二组的 testid 前缀（默认空，保持 A 组契约不变）。 */
+  testIdPrefix?: string
   /** 已选条目（顺序即加入顺序）；空数组表示空态 */
   items: readonly SlotSelectedItem[]
   /** 空态主文案（如「＋ 选人像」） */
@@ -61,6 +63,7 @@ const emit = defineEmits<{
   fillText: []
 }>()
 
+const prefix = computed(() => props.testIdPrefix ?? '')
 const selected = computed(() => props.items.length > 0)
 /** 缺省按图片模式渲染，兼容旧调用方。 */
 const mode = computed<RecipeSlotMode>(() => props.mode ?? 'image')
@@ -94,7 +97,7 @@ function setMode(next: RecipeSlotMode): void {
           ? `${label}槽，已选 ${items.length} 张`
           : `${label}槽未选择，可选择参考图或改用文本`
     "
-    :data-testid="`studio-slot-${slotKey}`"
+    :data-testid="`${prefix}studio-slot-${slotKey}`"
   >
     <header class="slot-panel__head">
       <div class="slot-panel__head-main">
@@ -102,7 +105,7 @@ function setMode(next: RecipeSlotMode): void {
         <span
           v-if="selected"
           class="slot-panel__count"
-          :data-testid="`studio-slot-count-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-count-${slotKey}`"
         >
           {{ items.length }}
         </span>
@@ -124,7 +127,7 @@ function setMode(next: RecipeSlotMode): void {
           class="mode-toggle__btn"
           :class="{ 'is-active': mode === 'image' }"
           :aria-pressed="mode === 'image'"
-          :data-testid="`studio-slot-mode-${slotKey}-image`"
+          :data-testid="`${prefix}studio-slot-mode-${slotKey}-image`"
           @click="setMode('image')"
         >
           图片
@@ -134,7 +137,7 @@ function setMode(next: RecipeSlotMode): void {
           class="mode-toggle__btn"
           :class="{ 'is-active': mode === 'text' }"
           :aria-pressed="mode === 'text'"
-          :data-testid="`studio-slot-mode-${slotKey}-text`"
+          :data-testid="`${prefix}studio-slot-mode-${slotKey}-text`"
           @click="setMode('text')"
         >
           文本
@@ -159,7 +162,7 @@ function setMode(next: RecipeSlotMode): void {
           class="depth-toggle__btn"
           :class="{ 'is-active': !useDepth }"
           :aria-pressed="!useDepth"
-          data-testid="studio-pose-depth-white"
+          :data-testid="`${prefix}studio-pose-depth-white`"
           @click="emit('depthChange', false)"
         >
           白模
@@ -169,7 +172,7 @@ function setMode(next: RecipeSlotMode): void {
           class="depth-toggle__btn"
           :class="{ 'is-active': useDepth }"
           :aria-pressed="useDepth"
-          data-testid="studio-pose-depth-depth"
+          :data-testid="`${prefix}studio-pose-depth-depth`"
           @click="emit('depthChange', true)"
         >
           深度
@@ -182,7 +185,7 @@ function setMode(next: RecipeSlotMode): void {
           type="button"
           class="slot-panel__change"
           :aria-label="`前往${label}库更换或追加参考图`"
-          :data-testid="`studio-slot-change-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-change-${slotKey}`"
           @click="emit('select')"
         >
           更换
@@ -191,7 +194,7 @@ function setMode(next: RecipeSlotMode): void {
           type="button"
           class="slot-panel__clear"
           :aria-label="`清空${label}槽全部参考图`"
-          :data-testid="`studio-slot-clear-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-clear-${slotKey}`"
           @click="emit('clear')"
         >
           清空
@@ -204,7 +207,7 @@ function setMode(next: RecipeSlotMode): void {
           type="button"
           class="slot-panel__clear"
           :aria-label="`清空${label}槽残留参考图`"
-          :data-testid="`studio-slot-clear-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-clear-${slotKey}`"
           @click="emit('clear')"
         >
           清空
@@ -213,14 +216,14 @@ function setMode(next: RecipeSlotMode): void {
     </header>
 
     <!-- text 模式：只给说明与「去填写」，不显示图墙 / 选图入口 -->
-    <div v-if="textMode" class="slot-panel__text" :data-testid="`studio-slot-text-${slotKey}`">
+    <div v-if="textMode" class="slot-panel__text" :data-testid="`${prefix}studio-slot-text-${slotKey}`">
       <p class="slot-panel__text-hint">
         文本模式：请在下方「文本补充」卡填写 {{ textTypeHint }} 类（当前图片不参与提交）
       </p>
       <button
         type="button"
         class="slot-panel__fill"
-        :data-testid="`studio-slot-fill-text-${slotKey}`"
+        :data-testid="`${prefix}studio-slot-fill-text-${slotKey}`"
         @click="emit('fillText')"
       >
         去填写
@@ -231,7 +234,7 @@ function setMode(next: RecipeSlotMode): void {
     <div
       v-else-if="selected"
       class="slot-panel__media"
-      :data-testid="`studio-slot-media-${slotKey}`"
+      :data-testid="`${prefix}studio-slot-media-${slotKey}`"
     >
       <div v-for="(entry, index) in items" :key="entry.key" class="tile">
         <!-- 缩略图主体：与 × 是同级 sibling，不互相嵌套 -->
@@ -239,7 +242,7 @@ function setMode(next: RecipeSlotMode): void {
           type="button"
           class="tile__open"
           :aria-label="`查看第 ${index + 1} 张：${entry.name}`"
-          :data-testid="`studio-slot-thumb-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-thumb-${slotKey}`"
           :data-index="index"
           @click="emit('preview', index)"
         >
@@ -258,7 +261,7 @@ function setMode(next: RecipeSlotMode): void {
           type="button"
           class="tile__remove"
           :aria-label="`从${label}槽移除 ${entry.name}`"
-          :data-testid="`studio-slot-remove-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-remove-${slotKey}`"
           :data-key="entry.key"
           @click.stop="emit('remove', entry.key)"
         >
@@ -283,7 +286,7 @@ function setMode(next: RecipeSlotMode): void {
     <p
       v-if="showDepthToggle && !textMode && selected"
       class="slot-panel__note"
-      data-testid="studio-pose-depth-note"
+      :data-testid="`${prefix}studio-pose-depth-note`"
     >
       白模 / 深度仅影响预览，不影响出图
     </p>
@@ -301,12 +304,12 @@ function setMode(next: RecipeSlotMode): void {
     </div>
 
     <!-- 空态：保留原选图入口，并增加「改用文本 / 上传本地图」（方案 §8 P2） -->
-    <div v-if="!selected && !textMode" class="slot-panel__empty" :data-testid="`studio-slot-media-${slotKey}`">
+    <div v-if="!selected && !textMode" class="slot-panel__empty" :data-testid="`${prefix}studio-slot-media-${slotKey}`">
       <button
         type="button"
         class="slot-panel__empty-main"
         :aria-label="`前往${label}库选择参考图`"
-        :data-testid="`studio-slot-select-${slotKey}`"
+        :data-testid="`${prefix}studio-slot-select-${slotKey}`"
         @click="emit('select')"
       >
         <span class="slot-panel__empty-media" aria-hidden="true">
@@ -327,7 +330,7 @@ function setMode(next: RecipeSlotMode): void {
         <button
           type="button"
           class="slot-panel__empty-switch"
-          :data-testid="`studio-slot-use-text-${slotKey}`"
+          :data-testid="`${prefix}studio-slot-use-text-${slotKey}`"
           @click="emit('update:mode', 'text')"
         >
           改用文本
