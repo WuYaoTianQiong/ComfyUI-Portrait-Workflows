@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 合成台人物B双角色 UX</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --bg-soft: #12151b;
+    --surface: #171a21;
+    --surface-raised: #1c2029;
+    --surface-inset: #14171d;
+    --border: #2b303b;
+    --border-soft: #242935;
+    --text: #e7e9f0;
+    --text-soft: #aab0c0;
+    --text-muted: #7d8496;
+    --primary: #6c6cf5;
+    --primary-soft: #2a2a55;
+    --b-accent: #e0a458;
+    --b-soft: #3a2f22;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.6 "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  }
+  button { font: inherit; cursor: pointer; }
+
+  /* 顶部壳层：只做视觉参照，不是实现内容 */
+  .topbar {
+    display: flex; align-items: center; gap: 24px;
+    height: 50px; padding: 0 20px;
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border-soft);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, #6c6cf5, #8f7bff);
+    display: grid; place-items: center; font-size: 13px; font-weight: 700;
+  }
+  .topnav { display: flex; gap: 18px; color: var(--text-muted); font-size: 12px; }
+  .topnav .active { color: var(--text); border-bottom: 2px solid var(--primary); padding-bottom: 6px; }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 12px; }
+  .pill { padding: 2px 8px; border: 1px solid var(--border); border-radius: 99px; color: var(--text-soft); }
+  .pill.ok { color: var(--ok); border-color: #27543a; }
+
+  .shell { display: flex; min-height: calc(100vh - 50px); }
+  .sidebar {
+    width: 154px; flex: none; padding: 18px 12px;
+    border-right: 1px solid var(--border-soft);
+    color: var(--text-muted); font-size: 12px;
+  }
+  .sidebar-item { padding: 8px 12px; border-radius: 8px; margin-bottom: 2px; }
+  .sidebar-item.active { background: #22233a; color: #c9c9ff; }
+  /* 原型是静态评审稿：底部操作条跟随文档流，避免全页截图时压住设定卡 */
+  .content { flex: 1; min-width: 0; padding: 22px 26px 24px; }
+
+  .page-head { margin-bottom: 16px; }
+  .page-head h1 { margin: 0 0 6px; font-size: 22px; }
+  .page-head p { margin: 0; color: var(--text-muted); font-size: 12px; max-width: 1080px; }
+
+  /* 原型控制区 */
+  .proto-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 10px 12px; margin-bottom: 14px;
+    background: #13161d;
+    border: 1px dashed #3a3f4d;
+    border-radius: var(--radius-sm);
+  }
+  .proto-bar strong { font-size: 12px; color: var(--warn); }
+  .scene-tab {
+    padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-soft); font-size: 12px;
+  }
+  .scene-tab.is-active { background: var(--primary-soft); border-color: #4c4cc4; color: #dcdcff; }
+  .scene-status { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin: 0 0 18px; color: var(--text-soft); font-size: 12px; }
+  .legend b { color: var(--warn); margin-right: 4px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .card-head h2 { margin: 0; font-size: 15px; }
+  .badge {
+    padding: 1px 8px; border: 1px solid var(--border); border-radius: 99px;
+    color: var(--text-muted); font-size: 11px; line-height: 1.6;
+  }
+  .badge.b { color: var(--b-accent); border-color: #5a4630; background: var(--b-soft); }
+  .card-head .spacer { flex: 1; }
+  .card-head .hint { color: var(--text-muted); font-size: 12px; }
+
+  /* 槽位布局 */
+  .layout { display: none; }
+  body[data-scene="1"] .layout-1,
+  body[data-scene="2"] .layout-2,
+  body[data-scene="3"] .layout-3 { display: block; }
+
+  .group-head { display: flex; align-items: center; gap: 10px; margin: 14px 0 8px; }
+  .group-head:first-child { margin-top: 0; }
+  .group-head strong { font-size: 13px; }
+  .group-head .badge { font-size: 11px; }
+  .group-head .spacer { flex: 1; }
+  .group-head button { border: 1px solid var(--border-soft); background: transparent; color: var(--text-muted); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+
+  .slots-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .slots-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slot {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 10px;
+    min-width: 0;
+  }
+  .slot-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .slot-title { font-size: 12px; color: var(--text-soft); }
+  .slot-count { color: var(--text-muted); font-size: 11px; }
+  .slot-actions { margin-left: auto; display: flex; gap: 6px; }
+  .slot-actions button { border: 0; background: transparent; color: var(--text-muted); font-size: 11px; padding: 0; }
+  .thumb {
+    height: 150px; border-radius: 8px; overflow: hidden;
+    background: #0e1014; display: grid; place-items: center;
+    position: relative;
+  }
+  .thumb.tall { height: 170px; }
+  .thumb svg { width: 100%; height: 100%; }
+  .thumb .tag {
+    position: absolute; left: 8px; bottom: 8px;
+    padding: 1px 7px; border-radius: 99px;
+    background: rgba(12,14,18,.78); color: #d9dce6; font-size: 10px;
+  }
+  .thumb .tag.b { color: #f5d7ac; }
+  .slot-name { margin-top: 8px; color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot-meta { color: var(--text-muted); font-size: 11px; }
+  .slot-foot { display: flex; gap: 6px; margin-top: 10px; }
+  .slot-foot button {
+    flex: 1; padding: 5px 6px; border-radius: 6px;
+    border: 1px solid var(--border-soft); background: transparent;
+    color: var(--text-soft); font-size: 11px;
+  }
+
+  /*
+   * 状态3：左列 A 组 / B 组上下排，右列共用双人姿势竖向居中。
+   * 姿势卡跨两行，视觉上覆盖 A 的下半部分与 B 的上半部分，空间利用率更高。
+   */
+  .pair-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-areas: "a pose" "b pose";
+    gap: 12px 16px;
+    align-items: center;
+  }
+  .pair-a { grid-area: a; }
+  .pair-b { grid-area: b; }
+  .pair-pose-card { grid-area: pose; align-self: center; border-color: #4c4a72; }
+  .pair-pose-card .thumb { height: 210px; }
+  .pair-label { display: inline-flex; align-items: center; gap: 6px; color: #c9c9ff; font-size: 11px; margin-bottom: 6px; }
+
+  .add-b {
+    margin-top: 12px; width: 100%;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    border: 1px dashed #4a4f60; border-radius: 10px;
+    background: #14171d; color: var(--text-soft);
+    text-align: left;
+  }
+  .add-b .plus {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--primary-soft); color: #dcdcff;
+    display: grid; place-items: center; font-size: 18px; flex: none;
+  }
+  .add-b strong { display: block; color: var(--text); font-size: 13px; }
+  .add-b small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+  .add-b .mark { margin-left: auto; }
+
+  .mark {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: inline-grid; place-items: center;
+    background: #3a3320; color: var(--warn); font-size: 11px; font-weight: 700; flex: none;
+  }
+
+  /* A / B 设定：同构复制 */
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  body[data-scene="1"] .settings-grid { grid-template-columns: 1fr; }
+  #settings-b { display: none; border-color: #3a3328; }
+  body[data-scene="2"] #settings-b,
+  body[data-scene="3"] #settings-b { display: block; }
+
+  .settings-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .settings-title h3 { margin: 0; font-size: 14px; }
+  .settings-title .spacer { flex: 1; }
+
+  .modes { display: grid; grid-template-columns: 84px 1fr; gap: 8px 12px; align-items: center; font-size: 12px; }
+  .modes .label { color: var(--text-muted); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg span { padding: 4px 10px; color: var(--text-muted); font-size: 11px; }
+  .seg span.on { background: var(--primary-soft); color: #dcdcff; }
+  .seg.b span.on { background: var(--b-soft); color: #f5d7ac; }
+
+  .sub-title { margin: 14px 0 8px; color: var(--text-soft); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    padding: 3px 9px; border-radius: 99px;
+    border: 1px solid var(--border-soft); background: var(--surface-inset);
+    color: var(--text-soft); font-size: 11px;
+  }
+  .chip.empty { color: var(--text-muted); opacity: .7; }
+  .chip b { color: var(--text); font-weight: 500; }
+
+  .switch-line { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; color: var(--text-soft); font-size: 11px; }
+  .switch-line span { display: inline-flex; align-items: center; gap: 6px; }
+  .fake-switch { width: 26px; height: 14px; border-radius: 99px; background: #2a2e37; position: relative; }
+  .fake-switch::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #8b90a0; position: absolute; top: 2px; left: 2px; }
+  .fake-switch.on { background: #3d3d7a; }
+  .fake-switch.on::after { left: 14px; background: #a9a9ff; }
+
+  .negative { margin-top: 12px; }
+  .negative label { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
+  .negative .box {
+    padding: 8px 10px; min-height: 46px;
+    border: 1px solid var(--border-soft); border-radius: 7px;
+    background: var(--surface-inset); color: var(--text-muted); font-size: 11px;
+  }
+  .pair-note { display: none; margin-top: 10px; padding: 8px 10px; border: 1px solid #4c4a72; border-radius: 7px; color: #c9c9ff; background: #1e1e34; font-size: 11px; }
+  body[data-scene="3"] .pair-note { display: block; }
+
+  /* 生成清单 */
+  .lower-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 14px; margin-top: 16px; }
+  .matrix { overflow-x: auto; }
+  .matrix table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .matrix th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  .matrix td { padding: 8px; border-bottom: 1px solid var(--border-soft); color: var(--text-soft); white-space: nowrap; }
+  .matrix td.name { color: var(--text); }
+  .matrix td.b { color: #f5d7ac; }
+  .matrix-table { display: none; }
+  body[data-scene="1"] .matrix-1,
+  body[data-scene="2"] .matrix-2,
+  body[data-scene="3"] .matrix-3 { display: block; }
+
+  .params .row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); font-size: 11px; }
+  .params .row:last-child { border-bottom: 0; }
+  .params .row span:first-child { color: var(--text-muted); }
+  .params .row span:last-child { color: var(--text-soft); text-align: right; }
+  .params .wf {
+    margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 7px;
+    background: var(--surface-inset); color: var(--text-soft); font-size: 11px;
+  }
+  .params .wf b { display: block; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 提示词预览：只读、A/B/最终三视图 */
+  .prompt-card { margin-top: 14px; }
+  .prompt-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .prompt-tab {
+    padding: 5px 11px; border-radius: 7px;
+    border: 1px solid var(--border-soft); background: var(--surface-inset);
+    color: var(--text-muted); font-size: 11px;
+  }
+  .prompt-tab.is-active { background: var(--primary-soft); border-color: #4c4cc4; color: #dcdcff; }
+  body[data-scene="1"] .prompt-tab-b { display: none; }
+  .prompt-pane { display: none; }
+  .prompt-pane.is-active { display: block; }
+  .prompt-meta { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; margin-bottom: 6px; }
+  .prompt-pre {
+    margin: 0; padding: 10px 12px;
+    background: var(--surface-inset); border: 1px solid var(--border-soft); border-radius: 8px;
+    color: #cfd3df; font: 11px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .bprom { display: none; }
+  body[data-scene="2"] .bprom-2,
+  body[data-scene="3"] .bprom-3 { display: block; }
+  .prompt-negative {
+    margin-top: 10px; padding: 8px 10px;
+    border: 1px solid var(--border-soft); border-radius: 8px;
+    background: var(--surface-inset); color: var(--text-muted); font-size: 11px;
+  }
+  .prompt-negative b { color: var(--text-soft); font-weight: 500; margin-right: 6px; }
+
+  /* 最终提示词：照搬现有分段编辑器结构 */
+  .prompt-editor-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .prompt-editor-head .badge.ok { color: var(--ok); border-color: #27543a; }
+  .prompt-editor-head .meta { color: var(--text-muted); font-size: 11px; }
+  .prompt-editor-head .spacer { flex: 1; }
+  .seg-list { border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden; background: var(--surface-inset); }
+  .seg-row {
+    display: grid; grid-template-columns: 84px 62px minmax(0, 1fr) 44px;
+    gap: 8px; align-items: center;
+    padding: 7px 10px; border-bottom: 1px solid var(--border-soft);
+    font-size: 11px;
+  }
+  .seg-row:last-child { border-bottom: 0; }
+  .seg-label { color: var(--text-soft); }
+  .seg-source { justify-self: start; padding: 0 6px; border: 1px solid var(--border-soft); border-radius: 99px; color: var(--text-muted); font-size: 10px; }
+  .seg-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cfd3df; }
+  .seg-chars { text-align: right; color: var(--text-muted); font-size: 10px; }
+  .seg-text b { color: var(--text); font-weight: 500; }
+  .seg-b, .seg-bpose, .seg-pair { display: none; }
+  body[data-scene="2"] .seg-b,
+  body[data-scene="3"] .seg-b { display: grid; }
+  body[data-scene="2"] .seg-bpose { display: grid; }
+  body[data-scene="3"] .seg-pair { display: grid; }
+  body[data-scene="3"] .seg-apose { display: none; }
+
+  /* 最近一批结果：验证 A/B 字幕也能照搬 */
+  .result-card { margin-top: 14px; }
+  .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .result-item {
+    background: var(--surface-raised); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 10px;
+  }
+  .result-thumb { height: 240px; border-radius: 8px; overflow: hidden; background: #0e1014; position: relative; }
+  .result-thumb svg { width: 100%; height: 100%; }
+  .result-thumb .tag { position: absolute; left: 8px; bottom: 8px; padding: 1px 7px; border-radius: 99px; background: rgba(12,14,18,.78); color: #d9dce6; font-size: 10px; }
+  .result-cap { margin-top: 8px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+  .result-cap b { color: var(--text-soft); font-weight: 500; }
+  .res-1 { display: none; }
+  body[data-scene="1"] .res-1 { display: block; }
+  body[data-scene="1"] .res-23 { display: none; }
+
+  .action-bar {
+    position: static;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 26px;
+    background: var(--bg-soft);
+    border-top: 1px solid var(--border);
+  }
+  .action-bar .summary { color: var(--text-soft); font-size: 12px; }
+  .action-bar .summary b { color: var(--text); }
+  .action-bar .spacer { flex: 1; }
+  .action-bar button { border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); padding: 9px 14px; font-size: 12px; }
+  .action-bar .primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+
+  @media (max-width: 1180px) {
+    .sidebar { display: none; }
+    .settings-grid { grid-template-columns: 1fr; }
+    .lower-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .topnav, .topbar-right, .sidebar { display: none; }
+    .content { padding: 16px 14px 24px; }
+    .slots-row, .slots-row.two { grid-template-columns: 1fr; }
+    /* 手机：A → 双人姿势 → B 单列排列 */
+    .pair-layout { grid-template-columns: 1fr; grid-template-areas: "a" "pose" "b"; }
+    .pair-pose-card .thumb { height: 190px; }
+    .action-bar { flex-wrap: wrap; padding: 12px 14px; }
+    .action-bar .summary { order: 3; width: 100%; }
+  }
+</style>
+</head>
+<body data-scene="1">
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">A</span>画室 Atelier</div>
+  <nav class="topnav">
+    <span>画库</span><span class="active">参考图库</span><span>提示词</span><span>组合器</span><span>图像编辑</span><span>批量跑分</span>
+  </nav>
+  <div class="topbar-right">
+    <span class="pill ok">● ComfyUI 在线</span>
+    <span class="pill">浅色</span>
+    <span class="pill">出图：根目录</span>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-item">图库总览</div>
+    <div class="sidebar-item">姿势</div>
+    <div class="sidebar-item">服装</div>
+    <div class="sidebar-item">人像</div>
+    <div class="sidebar-item">发型</div>
+    <div class="sidebar-item active">合成台</div>
+    <div class="sidebar-item">设置</div>
+  </aside>
+
+  <main class="content">
+    <div class="page-head">
+      <h1>合成台 · 人物B 双角色原型</h1>
+      <p>原型只确认布局与信息层级，不代表已经实现。三个状态通过页面顶部切换；参考图组合、人物设定、生成清单、参数、提示词预览、最近结果都按 A 的样式复制给 B。</p>
+    </div>
+
+    <div class="proto-bar">
+      <strong>原型状态</strong>
+      <button class="scene-tab is-active" data-scene="1">1 · 未新增人物B</button>
+      <button class="scene-tab" data-scene="2">2 · A单人 + B单人</button>
+      <button class="scene-tab" data-scene="3">3 · 共用双人姿势</button>
+      <span class="scene-status">当前：状态 1 · 保持现有 A 三槽，只增加“新增人物B”入口</span>
+    </div>
+
+    <div class="legend">
+      <span><b>①</b>新增人物B入口：A 组下方虚线卡，点击后出现 B 组</span>
+      <span><b>②</b>B 组三槽与 A 组完全同构，选图 / 上传 / 清空 / 提示词都复制 A</span>
+      <span><b>③</b>选中双人姿势后，A/B 单人姿势槽自动收起，改为中间共用一行</span>
+    </div>
+
+    <!-- 参考图组合 -->
+    <section class="card">
+      <header class="card-head">
+        <h2>参考图组合</h2>
+        <span class="badge" id="slot-count-badge">图片槽 3 / 3</span>
+        <span class="spacer"></span>
+        <span class="hint">双人/多角色时，每个人物一组槽位</span>
+      </header>
+
+      <!-- 状态1：A 三槽 + 新增B入口 -->
+      <div class="layout layout-1">
+        <div class="group-head">
+          <strong>人物 A</strong>
+          <span class="badge">主人物</span>
+          <span class="spacer"></span>
+        </div>
+        <div class="slots-row">
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">人像 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <defs><linearGradient id="gA1" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#3a3c58"/><stop offset="1" stop-color="#151722"/></linearGradient></defs>
+                <rect width="120" height="150" fill="url(#gA1)"/>
+                <circle cx="60" cy="48" r="22" fill="#d9b8a7"/>
+                <path d="M22 150c4-38 20-56 38-56s34 18 38 56" fill="#e7e2db"/>
+                <path d="M38 42c2-20 44-20 46 0-6-12-40-12-46 0" fill="#26232b"/>
+              </svg>
+              <span class="tag">正脸参考 · 短发</span>
+            </div>
+            <div class="slot-name">短发・标准款</div>
+            <div class="slot-meta">来自人像库 · 作为人物 A</div>
+            <div class="slot-foot"><button>＋ 继续选人像</button><button>＋ 上传本地图</button></div>
+          </article>
+
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">服装 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <defs><linearGradient id="gA2" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#5b5347"/><stop offset="1" stop-color="#1a1917"/></linearGradient></defs>
+                <rect width="120" height="150" fill="url(#gA2)"/>
+                <path d="M38 34h44l12 88H26Z" fill="#efeae1"/>
+                <path d="M46 34c0 12 28 12 28 0" fill="#d8d1c5"/>
+                <path d="M30 120h60v12H30Z" fill="#c7bfae"/>
+              </svg>
+              <span class="tag">象牙白针织衫</span>
+            </div>
+            <div class="slot-name">象牙白荷叶边针织衫</div>
+            <div class="slot-meta">来自服装库 · 作为人物 A</div>
+            <div class="slot-foot"><button>＋ 继续选服装</button><button>＋ 上传本地图</button></div>
+          </article>
+
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">姿势 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#101218"/>
+                <circle cx="60" cy="38" r="15" fill="#cfd2dd"/>
+                <path d="M60 53v48M60 66l-24 18M60 66l22 10M60 101l-18 34M60 101l18 34" stroke="#cfd2dd" stroke-width="6" stroke-linecap="round" fill="none"/>
+              </svg>
+              <span class="tag">站姿正面 · 单人</span>
+            </div>
+            <div class="slot-name">站姿正面 · 单人姿势</div>
+            <div class="slot-meta">白模 / 深度图可选</div>
+            <div class="slot-foot"><button>＋ 继续选姿势</button><button>＋ 上传本地图</button></div>
+          </article>
+        </div>
+
+        <button class="add-b">
+          <span class="plus">＋</span>
+          <span>
+            <strong>新增人物B</strong>
+            <small>加入第二个人物：A/B 各自选单人姿势，或共选一张双人姿势</small>
+          </span>
+          <span class="mark">①</span>
+        </button>
+      </div>
+
+      <!-- 状态2：A单人 + B单人 -->
+      <div class="layout layout-2">
+        <div class="group-head">
+          <strong>人物 A</strong>
+          <span class="badge">主人物</span>
+          <span class="spacer"></span>
+        </div>
+        <div class="slots-row">
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">人像 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#30334d"/>
+                <circle cx="60" cy="48" r="22" fill="#d9b8a7"/>
+                <path d="M22 150c4-38 20-56 38-56s34 18 38 56" fill="#e7e2db"/>
+                <path d="M38 42c2-20 44-20 46 0-6-12-40-12-46 0" fill="#26232b"/>
+              </svg>
+              <span class="tag">A · 正脸</span>
+            </div>
+            <div class="slot-name">短发・标准款</div>
+            <div class="slot-meta">来自人像库 · 人物 A</div>
+            <div class="slot-foot"><button>＋ 继续选人像</button><button>＋ 上传本地图</button></div>
+          </article>
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">服装 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#514b3f"/>
+                <path d="M38 34h44l12 88H26Z" fill="#efeae1"/>
+                <path d="M46 34c0 12 28 12 28 0" fill="#d8d1c5"/>
+              </svg>
+              <span class="tag">A · 服装</span>
+            </div>
+            <div class="slot-name">象牙白荷叶边针织衫</div>
+            <div class="slot-meta">来自服装库 · 人物 A</div>
+            <div class="slot-foot"><button>＋ 继续选服装</button><button>＋ 上传本地图</button></div>
+          </article>
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">单人姿势 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#101218"/>
+                <circle cx="60" cy="38" r="15" fill="#cfd2dd"/>
+                <path d="M60 53v48M60 66l-24 18M60 66l22 10M60 101l-18 34M60 101l18 34" stroke="#cfd2dd" stroke-width="6" stroke-linecap="round" fill="none"/>
+              </svg>
+              <span class="tag">A · 站姿正面</span>
+            </div>
+            <div class="slot-name">站姿正面 · 单人姿势</div>
+            <div class="slot-meta">A 自己的姿势</div>
+            <div class="slot-foot"><button>＋ 继续选姿势</button><button>＋ 上传本地图</button></div>
+          </article>
+        </div>
+
+        <div class="group-head">
+          <strong>人物 B</strong>
+          <span class="badge b">第二人物</span>
+          <span class="spacer"></span>
+          <button>移除人物B</button>
+        </div>
+        <div class="slots-row">
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">人像 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#3a3328"/>
+                <circle cx="60" cy="48" r="22" fill="#cfa88f"/>
+                <path d="M22 150c4-38 20-56 38-56s34 18 38 56" fill="#e9d9c2"/>
+                <path d="M34 40c8-24 44-18 52 2-10-8-40-10-52-2" fill="#3b2d24"/>
+              </svg>
+              <span class="tag b">B · 正脸</span>
+            </div>
+            <div class="slot-name">收腰感短发（长发尾）</div>
+            <div class="slot-meta">来自人像库 · 人物 B</div>
+            <div class="slot-foot"><button>＋ 继续选人像</button><button>＋ 上传本地图</button></div>
+          </article>
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">服装 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#4b3b2e"/>
+                <path d="M38 34h44l12 88H26Z" fill="#d7a34e"/>
+                <path d="M46 34c0 12 28 12 28 0" fill="#b9853f"/>
+                <path d="M48 78h24v28H48Z" fill="#e7c07a"/>
+              </svg>
+              <span class="tag b">B · 服装</span>
+            </div>
+            <div class="slot-name">黄色碎花吊带衫</div>
+            <div class="slot-meta">来自服装库 · 人物 B</div>
+            <div class="slot-foot"><button>＋ 继续选服装</button><button>＋ 上传本地图</button></div>
+          </article>
+          <article class="slot">
+            <div class="slot-head"><span class="slot-title">单人姿势 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+            <div class="thumb">
+              <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="120" height="150" fill="#101218"/>
+                <circle cx="58" cy="42" r="15" fill="#cfd2dd"/>
+                <path d="M58 57v40M58 70l-20 8M58 70l20 20M58 97l-22 38M58 97l14 32" stroke="#cfd2dd" stroke-width="6" stroke-linecap="round" fill="none"/>
+              </svg>
+              <span class="tag b">B · 侧身坐姿</span>
+            </div>
+            <div class="slot-name">侧身坐姿 · 单人姿势</div>
+            <div class="slot-meta">B 自己的姿势</div>
+            <div class="slot-foot"><button>＋ 继续选姿势</button><button>＋ 上传本地图</button></div>
+          </article>
+        </div>
+      </div>
+
+      <!-- 状态3：A/B 两槽上下排，共用双人姿势在右侧竖向居中 -->
+      <div class="layout layout-3">
+        <div class="pair-layout">
+          <div class="pair-a">
+            <div class="group-head">
+              <strong>人物 A</strong>
+              <span class="badge">主人物</span>
+              <span class="spacer"></span>
+            </div>
+            <div class="slots-row two">
+              <article class="slot">
+                <div class="slot-head"><span class="slot-title">人像 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+                <div class="thumb">
+                  <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                    <rect width="120" height="150" fill="#30334d"/>
+                    <circle cx="60" cy="48" r="22" fill="#d9b8a7"/>
+                    <path d="M22 150c4-38 20-56 38-56s34 18 38 56" fill="#e7e2db"/>
+                  </svg>
+                  <span class="tag">A · 正脸</span>
+                </div>
+                <div class="slot-name">短发・标准款</div>
+                <div class="slot-meta">人物 A</div>
+              </article>
+              <article class="slot">
+                <div class="slot-head"><span class="slot-title">服装 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+                <div class="thumb">
+                  <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                    <rect width="120" height="150" fill="#514b3f"/>
+                    <path d="M38 34h44l12 88H26Z" fill="#efeae1"/>
+                  </svg>
+                  <span class="tag">A · 服装</span>
+                </div>
+                <div class="slot-name">象牙白荷叶边针织衫</div>
+                <div class="slot-meta">人物 A</div>
+              </article>
+            </div>
+          </div>
+
+          <article class="slot pair-pose-card">
+            <div class="pair-label"><span class="mark">③</span> 共用双人姿势（A + B）</div>
+            <div class="thumb">
+              <svg viewBox="0 0 180 150" preserveAspectRatio="xMidYMid slice">
+                <rect width="180" height="150" fill="#101218"/>
+                <circle cx="58" cy="44" r="14" fill="#cfd2dd"/>
+                <path d="M58 58v34M58 68l-18 12M58 68l18 12M58 92l-14 38M58 92l14 38" stroke="#cfd2dd" stroke-width="6" stroke-linecap="round" fill="none"/>
+                <circle cx="124" cy="52" r="14" fill="#e0c2aa"/>
+                <path d="M124 66v34M124 76l-18 10M124 76l18 10M124 100l-14 34M124 100l14 34" stroke="#e0c2aa" stroke-width="6" stroke-linecap="round" fill="none"/>
+              </svg>
+              <span class="tag">肩并肩站立 · 双人</span>
+            </div>
+            <div class="slot-name">肩并肩站立 · 双人姿势</div>
+            <div class="slot-meta">A/B 共用这一张姿势图，不再各自选姿势</div>
+            <div class="slot-foot"><button>＋ 更换双人姿势</button><button>＋ 上传本地图</button></div>
+          </article>
+
+          <div class="pair-b">
+            <div class="group-head">
+              <strong>人物 B</strong>
+              <span class="badge b">第二人物</span>
+              <span class="spacer"></span>
+              <button>移除人物B</button>
+            </div>
+            <div class="slots-row two">
+              <article class="slot">
+                <div class="slot-head"><span class="slot-title">人像 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+                <div class="thumb">
+                  <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                    <rect width="120" height="150" fill="#3a3328"/>
+                    <circle cx="60" cy="48" r="22" fill="#cfa88f"/>
+                    <path d="M22 150c4-38 20-56 38-56s34 18 38 56" fill="#e9d9c2"/>
+                  </svg>
+                  <span class="tag b">B · 正脸</span>
+                </div>
+                <div class="slot-name">收腰感短发（长发尾）</div>
+                <div class="slot-meta">人物 B</div>
+              </article>
+              <article class="slot">
+                <div class="slot-head"><span class="slot-title">服装 <span class="slot-count">1</span></span><span class="slot-actions"><button>更换</button><button>清空</button></span></div>
+                <div class="thumb">
+                  <svg viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">
+                    <rect width="120" height="150" fill="#4b3b2e"/>
+                    <path d="M38 34h44l12 88H26Z" fill="#d7a34e"/>
+                    <path d="M48 78h24v28H48Z" fill="#e7c07a"/>
+                  </svg>
+                  <span class="tag b">B · 服装</span>
+                </div>
+                <div class="slot-name">黄色碎花吊带衫</div>
+                <div class="slot-meta">人物 B</div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 提示词与设定：A 和 B 同构 -->
+    <section class="settings-grid">
+      <div class="card" id="settings-a">
+        <div class="settings-title"><h3>人物 A 设定</h3><span class="badge">主人物</span><span class="spacer"></span><span class="hint">与现有 A 完全一致</span></div>
+        <div class="modes">
+          <span class="label">人像槽</span><span class="seg"><span class="on">图片</span><span>文本</span><span>空</span></span>
+          <span class="label">服装槽</span><span class="seg"><span class="on">图片</span><span>文本</span><span>空</span></span>
+          <span class="label">姿势槽</span><span class="seg"><span class="on">图片</span><span>文本</span><span>空</span></span>
+        </div>
+        <div class="sub-title">文本补充（八类碎片，可选）<span class="badge" style="margin-left:8px">已选 6 类</span></div>
+        <div class="chips">
+          <span class="chip"><b>人物面部</b> 2</span>
+          <span class="chip"><b>人物身材</b> 1</span>
+          <span class="chip"><b>人物服饰</b> 3</span>
+          <span class="chip"><b>姿态动作</b> 1</span>
+          <span class="chip empty">拍摄视角</span>
+          <span class="chip"><b>场景环境</b> 2</span>
+          <span class="chip"><b>光影色调</b> 1</span>
+          <span class="chip"><b>画风技术</b> 1</span>
+        </div>
+        <div class="switch-line">
+          <span><i class="fake-switch on"></i> 人像文本作为补充</span>
+          <span><i class="fake-switch"></i> 服装文本作为补充</span>
+          <span><i class="fake-switch"></i> 姿势文本作为补充</span>
+        </div>
+        <div class="negative"><label>负向提示词（A）</label><div class="box">低质量，模糊，畸形手指，多余肢体…</div></div>
+      </div>
+
+      <div class="card" id="settings-b">
+        <div class="settings-title"><h3>人物 B 设定</h3><span class="badge b">第二人物</span><span class="spacer"></span><span class="hint">照搬 A 的样式与字段</span><span class="mark">②</span></div>
+        <div class="modes">
+          <span class="label">人像槽</span><span class="seg b"><span class="on">图片</span><span>文本</span><span>空</span></span>
+          <span class="label">服装槽</span><span class="seg b"><span class="on">图片</span><span>文本</span><span>空</span></span>
+          <span class="label">姿势槽</span><span class="seg b"><span class="on">图片</span><span>文本</span><span>空</span></span>
+        </div>
+        <div class="sub-title">文本补充（八类碎片，可选）<span class="badge" style="margin-left:8px">已选 4 类</span></div>
+        <div class="chips">
+          <span class="chip"><b>人物面部</b> 1</span>
+          <span class="chip"><b>人物身材</b> 1</span>
+          <span class="chip"><b>人物服饰</b> 2</span>
+          <span class="chip"><b>姿态动作</b> 1</span>
+          <span class="chip empty">拍摄视角</span>
+          <span class="chip"><b>场景环境</b> 1</span>
+          <span class="chip empty">光影色调</span>
+          <span class="chip empty">画风技术</span>
+        </div>
+        <div class="switch-line">
+          <span><i class="fake-switch"></i> 人像文本作为补充</span>
+          <span><i class="fake-switch"></i> 服装文本作为补充</span>
+          <span><i class="fake-switch"></i> 姿势文本作为补充</span>
+        </div>
+        <div class="pair-note">当前是双人姿势：A/B 共用同一张姿势图，B 的「姿态动作」文本不参与提交。</div>
+        <div class="negative"><label>负向提示词（B）</label><div class="box">与 A 相同：低质量，模糊，畸形手指，多余肢体…</div></div>
+      </div>
+    </section>
+
+    <!-- 清单 + 参数 -->
+    <section class="lower-grid">
+      <div class="card matrix">
+        <header class="card-head"><h2>生成清单</h2><span class="badge">1 组</span><span class="spacer"></span><span class="hint">A/B 数据并排展示</span></header>
+
+        <div class="matrix-table matrix-1">
+          <table>
+            <thead><tr><th>#</th><th>A 人像</th><th>A 服装</th><th>A 单人姿势</th><th>工作流</th><th>尺寸</th><th>seed</th></tr></thead>
+            <tbody><tr><td>1</td><td class="name">短发・标准款</td><td>象牙白针织衫</td><td>站姿正面</td><td>五图人物B</td><td>1.0x</td><td>100000</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="matrix-table matrix-2">
+          <table>
+            <thead><tr><th>#</th><th>A 人像</th><th>A 服装</th><th>A 单人姿势</th><th>B 人像</th><th>B 服装</th><th>B 单人姿势</th><th>工作流</th></tr></thead>
+            <tbody><tr><td>1</td><td class="name">短发・标准款</td><td>象牙白针织衫</td><td>站姿正面</td><td class="b">收腰感短发</td><td class="b">黄色碎花吊带</td><td class="b">侧身坐姿</td><td>六图 A+B</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="matrix-table matrix-3">
+          <table>
+            <thead><tr><th>#</th><th>A 人像</th><th>A 服装</th><th>共用双人姿势</th><th>B 人像</th><th>B 服装</th><th>工作流</th></tr></thead>
+            <tbody><tr><td>1</td><td class="name">短发・标准款</td><td>象牙白针织衫</td><td>肩并肩站立</td><td class="b">收腰感短发</td><td class="b">黄色碎花吊带</td><td>五图人物B</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="card params">
+        <header class="card-head"><h2>参数</h2><span class="spacer"></span><span class="hint">共用</span></header>
+        <div class="wf">
+          <span>工作流（可多选）</span>
+          <b>图库专用_Qwen21+VNCCS_五图_可选人物B_25步_双人 <span class="badge" style="color:var(--ok);border-color:#27543a">推荐</span></b>
+          <span style="display:inline-block;margin-top:4px;color:var(--text-muted);font-size:10px">＋ 添加工作流</span>
+        </div>
+        <div class="row"><span>画风预设</span><span>写实人像写真</span></div>
+        <div class="row"><span>基础种子</span><span>100000</span></div>
+        <div class="row"><span>尺寸档</span><span>1.0x · 1 档</span></div>
+        <div class="row"><span>比例</span><span>跟随参考图</span></div>
+        <div class="row"><span>体态模式</span><span>服装展示（默认）</span></div>
+        <div class="row"><span>人物</span><span class="scene-people">仅 A</span></div>
+        <div class="row"><span>组合数</span><span>1 组</span></div>
+      </aside>
+    </section>
+
+    <!-- 提示词预览：现有页面的只读 dry-run 区块，B 也有一份 -->
+    <section class="card prompt-card">
+      <header class="card-head">
+        <h2>提示词预览</h2>
+        <span class="badge">只读 · dry-run</span>
+        <span class="spacer"></span>
+        <span class="hint">预览不产生任务，与正式提交独立</span>
+        <button class="prompt-tab" style="margin-left:8px">刷新预览</button>
+        <button class="prompt-tab">复制</button>
+      </header>
+
+      <div class="prompt-tabs" role="tablist" aria-label="提示词预览视图">
+        <button class="prompt-tab prompt-tab-a" data-pane="a">人物 A 提示词</button>
+        <button class="prompt-tab prompt-tab-b" data-pane="b">人物 B 提示词</button>
+        <button class="prompt-tab is-active" data-pane="final">最终提交提示词</button>
+      </div>
+
+      <div class="prompt-pane prompt-pane-a" data-pane="a">
+        <div class="prompt-meta">人物 A · 自动生成 · 只读</div>
+        <pre class="prompt-pre">masterpiece, best quality, 1girl, short hair, standard face,
+white ruffled knit sweater, standing, front view,
+window light, soft shadow, realistic portrait</pre>
+      </div>
+
+      <div class="prompt-pane prompt-pane-b" data-pane="b">
+        <div class="prompt-meta">人物 B · 自动生成 · 只读</div>
+        <pre class="prompt-pre bprom bprom-2">masterpiece, best quality, 1girl, waist-length hair, slim,
+yellow floral camisole, side sitting, 3/4 view,
+window light, soft shadow, realistic portrait</pre>
+        <pre class="prompt-pre bprom bprom-3">masterpiece, best quality, 1girl, waist-length hair, slim,
+yellow floral camisole, shoulder to shoulder with another girl,
+realistic portrait</pre>
+      </div>
+
+      <div class="prompt-pane prompt-pane-final is-active" data-pane="final">
+        <div class="prompt-editor-head">
+          <span class="badge ok">自动生成</span>
+          <span class="meta">9 段 · 约 520 字</span>
+          <span class="spacer"></span>
+          <span class="meta">任一段可直接改写，改动后变为手动模式</span>
+          <button class="prompt-tab">恢复自动生成</button>
+        </div>
+        <div class="seg-list">
+          <div class="seg-row"><span class="seg-label">开头</span><span class="seg-source">通用</span><span class="seg-text">masterpiece, best quality, <b class="scene-girls">1girl</b>,</span><span class="seg-chars">32 字</span></div>
+          <div class="seg-row"><span class="seg-label">人物A · 人像</span><span class="seg-source">图1</span><span class="seg-text">short hair, standard face,</span><span class="seg-chars">22 字</span></div>
+          <div class="seg-row"><span class="seg-label">人物A · 服装</span><span class="seg-source">图2</span><span class="seg-text">white ruffled knit sweater,</span><span class="seg-chars">26 字</span></div>
+          <div class="seg-row seg-apose"><span class="seg-label">人物A · 姿势</span><span class="seg-source">图3</span><span class="seg-text">standing, front view,</span><span class="seg-chars">20 字</span></div>
+          <div class="seg-row seg-b"><span class="seg-label">人物B · 人像</span><span class="seg-source">图4</span><span class="seg-text">waist-length hair, slim,</span><span class="seg-chars">22 字</span></div>
+          <div class="seg-row seg-b"><span class="seg-label">人物B · 服装</span><span class="seg-source">图5</span><span class="seg-text">yellow floral camisole,</span><span class="seg-chars">22 字</span></div>
+          <div class="seg-row seg-bpose"><span class="seg-label">人物B · 姿势</span><span class="seg-source">图6</span><span class="seg-text">side sitting, 3/4 view,</span><span class="seg-chars">20 字</span></div>
+          <div class="seg-row seg-pair"><span class="seg-label">共用双人姿势</span><span class="seg-source">图3</span><span class="seg-text">shoulder to shoulder, standing,</span><span class="seg-chars">30 字</span></div>
+          <div class="seg-row"><span class="seg-label">场景</span><span class="seg-source">碎片</span><span class="seg-text">window light, soft shadow,</span><span class="seg-chars">26 字</span></div>
+          <div class="seg-row"><span class="seg-label">画风</span><span class="seg-source">预设</span><span class="seg-text">realistic portrait</span><span class="seg-chars">18 字</span></div>
+          <div class="seg-row"><span class="seg-label">结尾</span><span class="seg-source">通用</span><span class="seg-text">best quality, highly detailed</span><span class="seg-chars">30 字</span></div>
+        </div>
+        <div class="prompt-negative"><b>负向</b>低质量，模糊，畸形手指，多余肢体，五官错位</div>
+      </div>
+    </section>
+
+    <!-- 最近一批结果：验证结果字幕和 A/B 数据展示 -->
+    <section class="card result-card">
+      <header class="card-head">
+        <h2>最近一批结果</h2>
+        <span class="badge">1 组 · 1 张 · 完成</span>
+        <span class="spacer"></span>
+        <span class="hint">任务中心 →</span>
+      </header>
+      <div class="result-grid">
+        <article class="result-item res-1">
+          <div class="result-thumb">
+            <svg viewBox="0 0 220 240" preserveAspectRatio="xMidYMid slice">
+              <rect width="220" height="240" fill="#24283a"/>
+              <circle cx="110" cy="78" r="30" fill="#d9b8a7"/>
+              <path d="M50 240c6-58 30-86 60-86s54 28 60 86" fill="#e7e2db"/>
+              <path d="M78 66c4-30 60-30 64 0-10-16-54-16-64 0" fill="#26232b"/>
+            </svg>
+            <span class="tag">单人 · 五图人物B</span>
+          </div>
+          <div class="result-cap"><b>#1</b> · 五图人物B · 1.0x · A：短发・标准款</div>
+        </article>
+
+        <article class="result-item res-23">
+          <div class="result-thumb">
+            <svg viewBox="0 0 220 240" preserveAspectRatio="xMidYMid slice">
+              <rect width="220" height="240" fill="#2a2732"/>
+              <circle cx="82" cy="82" r="28" fill="#d9b8a7"/>
+              <path d="M24 240c6-54 28-80 58-80s52 26 58 80" fill="#e7e2db"/>
+              <circle cx="146" cy="90" r="28" fill="#cfa88f"/>
+              <path d="M104 240c5-50 22-74 42-74s37 24 42 74" fill="#e9d9c2"/>
+              <path d="M112 120l10-18M170 120l-8-16" stroke="#d7a34e" stroke-width="5" stroke-linecap="round"/>
+            </svg>
+            <span class="tag">双人 · 五图人物B</span>
+          </div>
+          <div class="result-cap">
+            <b>#1</b> · 五图人物B · 1.0x ·
+            A：短发・标准款 · B：收腰感短发
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="action-bar">
+  <span class="summary">将生成 <b class="scene-count">1</b> 张 · <span class="scene-people-summary">仅人物 A</span></span>
+  <span class="spacer"></span>
+  <button>随机捏人</button>
+  <button>同源整套随机</button>
+  <button class="primary">生成角色图</button>
+</footer>
+
+<script>
+  const SCENES = {
+    "1": {
+      status: "当前：状态 1 · 保持现有 A 三槽，只增加“新增人物B”入口",
+      people: "仅 A",
+      peopleSummary: "仅人物 A",
+      count: "1",
+      slots: "图片槽 3 / 3"
+    },
+    "2": {
+      status: "当前：状态 2 · A 单人 + B 单人，两组三槽各自选择",
+      people: "A + B（各自姿势）",
+      peopleSummary: "人物 A + 人物 B（各自单人姿势）",
+      count: "1",
+      slots: "图片槽 6 / 6"
+    },
+    "3": {
+      status: "当前：状态 3 · 共用双人姿势，A/B 各两槽",
+      people: "A + B（共用姿势）",
+      peopleSummary: "人物 A + 人物 B（共用双人姿势）",
+      count: "1",
+      slots: "图片槽 5 / 5"
+    }
+  };
+
+  /** 提示词预览的 A / B / 最终三个视图。 */
+  function setPromptPane(pane) {
+    document.querySelectorAll(".prompt-tab[data-pane]").forEach((tab) => {
+      tab.classList.toggle("is-active", tab.dataset.pane === pane);
+    });
+    document.querySelectorAll(".prompt-pane").forEach((view) => {
+      view.classList.toggle("is-active", view.dataset.pane === pane);
+    });
+  }
+
+  function setScene(scene) {
+    document.body.dataset.scene = scene;
+    document.querySelectorAll(".scene-tab").forEach((tab) => {
+      tab.classList.toggle("is-active", tab.dataset.scene === scene);
+    });
+    const data = SCENES[scene];
+    document.querySelector(".scene-status").textContent = data.status;
+    document.querySelector(".scene-people").textContent = data.people;
+    document.querySelector(".scene-people-summary").textContent = data.peopleSummary;
+    document.querySelector(".scene-count").textContent = data.count;
+    document.getElementById("slot-count-badge").textContent = data.slots;
+    document.querySelector(".scene-girls").textContent = scene === "1" ? "1girl" : "2girls";
+    // 状态 1 没有人物 B，若当前停在 B 提示词就回到最终提交视图
+    if (scene === "1" && document.querySelector(".prompt-pane-b").classList.contains("is-active")) {
+      setPromptPane("final");
+    }
+  }
+
+  document.querySelectorAll(".scene-tab").forEach((tab) => {
+    tab.addEventListener("click", () => setScene(tab.dataset.scene));
+  });
+  document.querySelectorAll(".prompt-tab[data-pane]").forEach((tab) => {
+    tab.addEventListener("click", () => setPromptPane(tab.dataset.pane));
+  });
+</script>
+</body>
+</html>
