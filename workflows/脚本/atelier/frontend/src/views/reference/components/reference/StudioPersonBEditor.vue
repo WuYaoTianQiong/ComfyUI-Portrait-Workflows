@@ -58,6 +58,8 @@ const props = defineProps<{
   costumeSlotEnabled?: boolean
   /** 是否已选双人姿势；否则仅为五图工作流的 B 入口。 */
   pairPoseSelected?: boolean
+  /** 当前工作流是否包含人物B槽（身份图 / B 服装）；否时给一键切换入口。 */
+  bSlotsSupported?: boolean
   /** 已选人物B服装名；空串 = 未选，人物服饰碎片仍作文字兜底。 */
   costumeName?: string
 }>()
@@ -69,6 +71,8 @@ const emit = defineEmits<{
   remove: [index: number]
   pickCostume: []
   clearCostume: []
+  /** 当前工作流没有人物B槽时，请求页面切换到五图人物B工作流。 */
+  switchWorkflow: []
   uploadCostume: [items: UploadedReference[]]
   uploadCostumeError: [message: string]
 }>()
@@ -199,6 +203,22 @@ function previewContent(content: string): string {
         {{ bodyOpen ? '收起' : '展开编辑' }}
       </button>
     </header>
+
+    <p
+      v-if="bSlotsSupported === false"
+      class="person-b__notice person-b__unsupported"
+      data-testid="studio-person-b-unsupported"
+    >
+      当前工作流不包含人物B槽（身份图 / B 服装），B 的图片与文字不会进入提交。
+      <button
+        type="button"
+        class="person-b__action person-b__unsupported-switch"
+        data-testid="studio-person-b-switch-workflow"
+        @click="emit('switchWorkflow')"
+      >
+        切换到五图人物B工作流
+      </button>
+    </p>
 
     <div v-show="bodyOpen" class="person-b__body">
     <p class="person-b__hint">
@@ -438,6 +458,10 @@ function previewContent(content: string): string {
   color: var(--warn);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.person-b__unsupported-switch {
+  margin-left: 8px;
 }
 
 /* V2-C 第 5 槽：人物B服装入口（整批共享 1 张） */

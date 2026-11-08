@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import type { PortraitItem } from '../../api/reference'
 import { useReferencePortraits } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useToast } from '../../composables/useToast'
+import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceCard from './components/ReferenceCard.vue'
 import ReferenceGrid from './components/ReferenceGrid.vue'
@@ -49,8 +51,36 @@ const {
   portrait: portraitItems,
   togglePortrait,
   isPortraitSelected,
+  extra,
+  setExtraLibrary,
+  clearExtra,
 } = useReferenceRecipeDraft()
 const toast = useToast()
+
+const route = useRoute()
+const router = useRouter()
+
+/** 本次是否在为人物B挑选身份图（第 4 槽）。 */
+const personBIdentityTarget = computed(
+  () => readReferenceSelection(route.query) === 'person_b_identity',
+)
+
+function backToStudio(): void {
+  void router.replace({
+    path: route.path,
+    query: withReferenceTab(route.query, 'studio'),
+    hash: route.hash,
+  })
+}
+
+/** 当前条目是否就是人物B身份图（第 4 槽 = 人像库单图）。 */
+function isPersonBIdentity(item: PortraitItem): boolean {
+  return (
+    extra.value.source === 'library' &&
+    extra.value.library === 'portrait' &&
+    extra.value.id === item.id
+  )
+}
 
 // ---------------------------------------------------------------------------
 // 筛选 / 展示状态
@@ -110,7 +140,9 @@ const cards = computed<PortraitCard[]>(() =>
   visibleItems.value.map((item) => ({
     item,
     src: portraitThumbnailUrl(item),
-    selected: isPortraitSelected(item.id),
+    selected: personBIdentityTarget.value
+      ? isPersonBIdentity(item)
+      : isPortraitSelected(item.id),
   })),
 )
 
@@ -169,8 +201,18 @@ function onPageSizeChange(next: number): void {
 
 /** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onTogglePortrait(item: PortraitItem): void {
-  const added = togglePortrait(item)
   const label = item.发型名称 || item.标题
+  if (personBIdentityTarget.value) {
+    if (isPersonBIdentity(item)) {
+      clearExtra()
+      toast.info(`已清除人物B身份图「${label}」`)
+    } else {
+      setExtraLibrary('portrait', item.id, item.标题)
+      toast.success(`已设为人物B身份图「${label}」（整批共用这一张）`)
+    }
+    return
+  }
+  const added = togglePortrait(item)
   toast.success(
     added
       ? `已加入${label}（人像槽共 ${portraitItems.value.length} 张）`
@@ -208,9 +250,13 @@ const viewerCounter = computed(() => {
   if (index === null) return ''
   return `${index + 1} / ${filtered.value.length}`
 })
-const viewerSelected = computed(() =>
-  currentItem.value ? isPortraitSelected(currentItem.value.id) : false,
-)
+const viewerSelected = computed(() => {
+  const item = currentItem.value
+  if (!item) return false
+  return personBIdentityTarget.value
+    ? isPersonBIdentity(item)
+    : isPortraitSelected(item.id)
+})
 const viewerDownloadName = computed(() =>
   currentItem.value ? `${currentItem.value.id}.webp` : '',
 )
@@ -319,6 +365,25 @@ onMounted(() => {
       -->
       <h1 class="portrait-head__title tab-placeholder__title">人像库</h1>
     </header>
+
+    <!-- 人物B身份图选择态：与 A 槽一样留在库页签里自由筛选，单图替换 -->
+    <div
+      v-if="personBIdentityTarget"
+      class="person-b-select-banner"
+      data-testid="portrait-person-b-banner"
+    >
+      <span class="person-b-select-banner__text">
+        正在为人物B选择身份图（单选，点击卡片即替换；再点已选卡片可清除）
+      </span>
+      <button
+        type="button"
+        class="person-b-select-banner__back"
+        data-testid="portrait-person-b-back"
+        @click="backToStudio"
+      >
+        返回合成台
+      </button>
+    </div>
 
     <template v-if="!initialLoading">
       <!-- 分区 / 发长药丸：§5 标签尺寸；再次点击同一项取消 -->
@@ -510,6 +575,38 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* 人物B身份图选择横幅 */
+.person-b-select-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.person-b-select-banner__text {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.person-b-select-banner__back {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 /* 药丸：§5 标签行 —— 32px 高 / 全圆 / 内边距 6px 14px / 14px 500 / 同组 gap 8px */

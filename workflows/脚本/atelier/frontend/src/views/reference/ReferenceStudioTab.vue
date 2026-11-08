@@ -32,6 +32,7 @@ import type { UploadedReference } from '../../api/upload'
 import { FRAGMENT_TYPES } from '../../constants'
 import type { FragmentType } from '../../constants'
 import { withReferenceTab } from './referenceDeepLink'
+import type { ReferenceSelection } from './referenceDeepLink'
 import DropZone from '../../components/DropZone.vue'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import {
@@ -81,9 +82,7 @@ import StudioSlotPanel from './components/reference/StudioSlotPanel.vue'
 import StudioTextSupplementCard from './components/reference/StudioTextSupplementCard.vue'
 import StudioPersonBEditor from './components/reference/StudioPersonBEditor.vue'
 import HairPickerModal from './components/reference/HairPickerModal.vue'
-import PortraitPickerModal from './components/reference/PortraitPickerModal.vue'
-import CostumePickerModal from './components/reference/CostumePickerModal.vue'
-import type { CostumeItem, HairItem, PortraitItem } from '../../api/reference'
+import type { HairItem } from '../../api/reference'
 import {
   desiredPoseFacets,
   pickMatchedPose,
@@ -243,7 +242,6 @@ const {
   supportsExtraCostumeSlot,
   extraCostume,
   extraCostumeFilled,
-  setExtraCostumeLibrary,
   clearExtraCostume,
   previewPrompt,
   previewNegativePrompt,
@@ -495,13 +493,43 @@ const showingPrevious = ref(false)
 // 页签跳转（与 ReferenceView.selectTab 同一套 URL 规则）
 // ---------------------------------------------------------------------------
 
-function goTab(tab: 'portrait' | 'costume' | 'pose' | 'studio'): void {
-  if (route.query.tab === tab) return
+function goTab(
+  tab: 'portrait' | 'costume' | 'pose' | 'studio',
+  selection?: ReferenceSelection,
+): void {
+  const query = withReferenceTab(route.query, tab)
+  if (selection) query.selection = selection
+  if (route.query.tab === tab && query.selection === route.query.selection) return
   void router.replace({
     path: route.path,
-    query: withReferenceTab(route.query, tab),
+    query,
     hash: route.hash,
   })
+}
+
+/**
+ * 人物B选图：与 A 槽一致，跳对应库页签自由筛选，而不是弹窗。
+ * `selection` 告诉页签本次点击卡片要写入第 4/5 槽。
+ */
+function pickPersonBIdentity(): void {
+  goTab('portrait', 'person_b_identity')
+}
+
+function pickPersonBCostume(): void {
+  goTab('costume', 'person_b_costume')
+}
+
+/** 当前工作流没有人物B槽时，一键切换到五图人物B工作流（用户显式点击才切）。 */
+function switchToPersonBWorkflow(): void {
+  const target = workflows.value.find(
+    (item) => item.extraKind === 'person_b' && (item.inputCount || item.imageSlots) >= 5,
+  )
+  if (!target) {
+    toast.error('目录里没有可用的五图人物B工作流')
+    return
+  }
+  workflowSelection.value = [target.path]
+  toast.success(`已切换到「${workflowDisplayName(target.name)}」`)
 }
 
 /**
@@ -1093,8 +1121,6 @@ const extraText = computed<string>({
 })
 
 const hairPickerOpen = ref(false)
-const portraitPickerOpen = ref(false)
-const costumePickerOpen = ref(false)
 
 /** 第 5 槽展示名；空串 = 未选，仍由人物服饰碎片兜底。 */
 const extraCostumeName = computed(() => extraCostume.value.name)
@@ -1117,19 +1143,6 @@ function onHairPick(item: HairItem): void {
   setExtraLibrary('hair', item.id, item.标题)
   hairPickerOpen.value = false
   toast.success(`已选发型「${item.标题}」，提交时使用背面无脸图`)
-}
-
-function onPortraitPick(item: PortraitItem): void {
-  setExtraLibrary('portrait', item.id, item.标题)
-  portraitPickerOpen.value = false
-  toast.success(`已选人物B身份参考「${item.标题}」，提交时使用该人像原图`)
-}
-
-function onExtraCostumePick(item: CostumeItem): void {
-  const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
-  setExtraCostumeLibrary(library, item.id, item.服装名称)
-  costumePickerOpen.value = false
-  toast.success(`已选人物B服装「${item.服装名称}」，整批共用这一张`)
 }
 
 /** V2-C：上传人物B服装（整批共享 1 张）。 */
@@ -1497,7 +1510,7 @@ onMounted(async () => {
               type="button"
               class="extra-library"
               data-testid="studio-extra-portrait-library"
-              @click="portraitPickerOpen = true"
+              @click="pickPersonBIdentity"
             >
               从人像库选择
             </button>
@@ -1507,16 +1520,6 @@ onMounted(async () => {
             :open="hairPickerOpen"
             @close="hairPickerOpen = false"
             @select="onHairPick"
-          />
-          <PortraitPickerModal
-            :open="portraitPickerOpen"
-            @close="portraitPickerOpen = false"
-            @select="onPortraitPick"
-          />
-          <CostumePickerModal
-            :open="costumePickerOpen"
-            @close="costumePickerOpen = false"
-            @select="onExtraCostumePick"
           />
         </div>
       </div>
@@ -1532,13 +1535,15 @@ onMounted(async () => {
         :costume-slot-enabled="supportsExtraCostumeSlot"
         :pair-pose-selected="hasPairPose"
         :costume-name="extraCostumeName"
+        :b-slots-supported="extraKind === 'person_b'"
         :identity-image-selected="extraKind === 'person_b' && extraFilled"
         :identity-image-name="extraKind === 'person_b' && extraFilled ? extraName : ''"
         @update:variants="draft.personBVariants.value = $event"
         @update:active-index="draft.setActivePersonBVariant($event)"
         @add="onAddPersonBVariant"
         @remove="onRemovePersonBVariant"
-        @pick-costume="costumePickerOpen = true"
+        @pick-costume="pickPersonBCostume"
+        @switch-workflow="switchToPersonBWorkflow"
         @clear-costume="clearExtraCostume"
         @upload-costume="onExtraCostumeUploaded"
         @upload-costume-error="onExtraCostumeError"

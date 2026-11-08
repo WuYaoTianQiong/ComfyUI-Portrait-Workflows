@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import type { CostumeItem } from '../../api/reference'
 import { useReferenceCostumes } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useToast } from '../../composables/useToast'
+import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
 import ReferenceCard from './components/ReferenceCard.vue'
@@ -83,9 +85,45 @@ const {
   costume: costumeItems,
   toggleCostume,
   isCostumeSelected,
+  extraCostume,
+  setExtraCostumeLibrary,
+  clearExtraCostume,
 } = useReferenceRecipeDraft()
 
 const toast = useToast()
+
+const route = useRoute()
+const router = useRouter()
+
+/** 本次是否在为人物B挑选服装（第 5 槽）。 */
+const personBCostumeTarget = computed(
+  () => readReferenceSelection(route.query) === 'person_b_costume',
+)
+
+function backToStudio(): void {
+  void router.replace({
+    path: route.path,
+    query: withReferenceTab(route.query, 'studio'),
+    hash: route.hash,
+  })
+}
+
+/** 当前条目是否就是人物B服装（第 5 槽 = 服装库单图）。 */
+function isPersonBCostume(item: CostumeItem): boolean {
+  const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
+  return (
+    extraCostume.value.source === 'library' &&
+    extraCostume.value.library === library &&
+    extraCostume.value.id === item.id
+  )
+}
+
+/** 卡片选中态：B 选图模式下读第 5 槽，否则读 A 服装槽。 */
+function isSelectedCostume(item: CostumeItem): boolean {
+  return personBCostumeTarget.value
+    ? isPersonBCostume(item)
+    : isCostumeSelected(item.id)
+}
 
 // ---------------------------------------------------------------------------
 // 筛选 / 视图状态
@@ -208,6 +246,17 @@ function onPageSizeChange(next: number): void {
 
 /** 卡片「加入配方 / 已选」：多选 toggle，同一 id 再点即移除。 */
 function onToggleCostume(item: CostumeItem): void {
+  if (personBCostumeTarget.value) {
+    if (isPersonBCostume(item)) {
+      clearExtraCostume()
+      toast.info(`已清除人物B服装「${item.服装名称}」`)
+    } else {
+      const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
+      setExtraCostumeLibrary(library, item.id, item.服装名称)
+      toast.success(`已设为人物B服装「${item.服装名称}」（整批共用这一张）`)
+    }
+    return
+  }
   const added = toggleCostume(item)
   toast.success(
     added
@@ -283,7 +332,7 @@ const viewerCounter = computed(() =>
 )
 
 const viewerSelected = computed(() =>
-  viewerItem.value ? isCostumeSelected(viewerItem.value.id) : false,
+  viewerItem.value ? isSelectedCostume(viewerItem.value) : false,
 )
 
 const viewerDownloadName = computed(() =>
@@ -375,6 +424,25 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+
+    <!-- 人物B服装选择态：与 A 槽一样留在库页签里自由筛选，单图替换 -->
+    <div
+      v-if="personBCostumeTarget"
+      class="person-b-select-banner"
+      data-testid="costume-person-b-banner"
+    >
+      <span class="person-b-select-banner__text">
+        正在为人物B选择服装（单选，点击卡片即替换；再点已选卡片可清除）
+      </span>
+      <button
+        type="button"
+        class="person-b-select-banner__back"
+        data-testid="costume-person-b-back"
+        @click="backToStudio"
+      >
+        返回合成台
+      </button>
+    </div>
 
     <template v-if="!initialLoading">
       <!-- 一级分类按钮组：`aria-pressed` 语义（不是药丸） -->
@@ -512,7 +580,7 @@ onBeforeUnmount(() => {
         aspect="2/3"
         fit="contain"
         selectable
-        :selected="isCostumeSelected(item.id)"
+        :selected="isSelectedCostume(item)"
         @open="openViewer(pageOffset + index)"
         @toggle-select="onToggleCostume(item)"
       >
@@ -658,6 +726,38 @@ onBeforeUnmount(() => {
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* 人物B服装选择横幅 */
+.person-b-select-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.person-b-select-banner__text {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.person-b-select-banner__back {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .costume-head__actions {

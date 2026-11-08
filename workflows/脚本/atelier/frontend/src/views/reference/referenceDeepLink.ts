@@ -124,5 +124,25 @@ export function withReferenceTab(query: LocationQuery, tab: string): LocationQue
   const next: LocationQuery = { ...query, tab }
   delete next.shell
   delete next.path
+  // 页签跳转一律清除「选图目标」，避免从人物B选择态误进其它页签后继续写 B 槽
+  delete next.selection
   return next
+}
+
+/**
+ * 库页签的「选图目标」（2026-11-08）。
+ *
+ * - `person_b_identity`：人像页签里点卡片 = 设置第 4 槽人物B身份图；
+ * - `person_b_costume`：服装页签里点卡片 = 设置第 5 槽人物B服装。
+ *
+ * 只在合成台按钮跳转时写入 `?selection=`，页签切换 / 回合成台时由
+ * {@link withReferenceTab} 自动剔除；刷新仍保留，便于用户继续选。
+ */
+export type ReferenceSelection = 'person_b_identity' | 'person_b_costume'
+
+/** 从 query 读取合法 selection；非法值返回 null（不阻塞页面）。 */
+export function readReferenceSelection(query: LocationQuery): ReferenceSelection | null {
+  const raw = Array.isArray(query.selection) ? query.selection[0] : query.selection
+  if (typeof raw !== 'string') return null
+  return raw === 'person_b_identity' || raw === 'person_b_costume' ? raw : null
 }
