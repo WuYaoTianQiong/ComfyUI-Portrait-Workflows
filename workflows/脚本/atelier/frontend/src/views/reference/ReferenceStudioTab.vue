@@ -529,14 +529,6 @@ function goTab(
   })
 }
 
-/**
- * 人物B选图：与 A 槽一致，跳对应库页签自由筛选，而不是弹窗。
- * `selection` 告诉页签本次点击卡片要写入第 4/5 槽。
- */
-function pickPersonBIdentity(): void {
-  goTab('portrait', 'person_b_identity')
-}
-
 function pickPersonBCostume(): void {
   goTab('costume', 'person_b_costume')
 }
@@ -1672,9 +1664,9 @@ onMounted(async () => {
           @change="onSlotUploadChange"
         />
 
-        <!-- 第 4 张：没有工作流接 extra 时整块不渲染；新人物B组启用后不再重复展示 B 身份槽 -->
+        <!-- 第 4 张：没有工作流接 extra 时整块不渲染；人物B 身份槽已由新 B 角色组取代 -->
         <div
-          v-if="supportsExtraSlot && !(draft.personBEnabled.value && extraKind === 'person_b')"
+          v-if="supportsExtraSlot && extraKind !== 'person_b'"
           class="extra-block"
         >
           <div v-if="extraFilled" class="extra-item" data-testid="studio-extra-selected">
@@ -1688,7 +1680,7 @@ onMounted(async () => {
               <span class="extra-item__body">
                 <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
                 <span class="extra-item__meta">
-                  {{ extraLibrary === 'hair' ? '来自发型库 · 提交背面无脸裁切图' : extraLibrary === 'portrait' ? '来自人像库 · 作为人物B身份参考' : '来自 uploads' }} · 作为{{ extraSlotLabel }}<template v-if="extraKind === 'person_b'">（当前 B 变体 {{ draft.activePersonBVariantIndex.value + 1 }}）</template>
+                  {{ extraLibrary === 'hair' ? '来自发型库 · 提交背面无脸裁切图' : extraLibrary === 'portrait' ? '来自人像库 · 作为人物B身份参考' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
                 </span>
               </span>
               <button type="button" class="extra-item__remove" @click="clearExtraSlot">移除</button>
@@ -1724,15 +1716,6 @@ onMounted(async () => {
               @click="hairPickerOpen = true"
             >
               从发型库选择
-            </button>
-            <button
-              v-else-if="extraKind === 'person_b'"
-              type="button"
-              class="extra-library"
-              data-testid="studio-extra-portrait-library"
-              @click="pickPersonBIdentity"
-            >
-              从人像库选择
             </button>
           </div>
 
@@ -1864,31 +1847,39 @@ onMounted(async () => {
 
     </ReferenceSectionCard>
 
-    <!-- 文本补充（八类碎片）+ 负向：素材区之后、组合清单之前（方案 §5.5） -->
-    <StudioTextSupplementCard
-      ref="textSupplementRef"
-      v-model="textFragments"
-      v-model:negative-prompt="negativePrompt"
-      :safe-mode="safeMode"
-      :style-locked="styleLocked"
-      :slot-modes="slotModes"
-      :supplement-flags="supplementFlags"
-      :recipe-source-name="recipeSourceName"
-      @update:slot-mode="onSlotModeChange"
-      @update:supplement="onSlotSupplementChange"
-    />
-
-    <!-- 人物B 设定：与 A 同构的八类碎片 / 负向，壳阶段先可编辑并持久化 -->
+    <!-- 文本补充：A 与 B 并列；B 未新增时保持 A 单卡全宽 -->
     <template v-if="draft.personBEnabled.value">
       <p class="person-b-note" data-testid="studio-person-b-pending">
         人物B 的独立姿势与八类提示词已可编辑并记忆；当前提交仍复用人物A 的提示词，待后端工作流接入后生效。
       </p>
+    </template>
+
+    <div
+      class="supplement-grid"
+      :class="{ 'supplement-grid--pair': draft.personBEnabled.value }"
+    >
       <StudioTextSupplementCard
+        ref="textSupplementRef"
+        v-model="textFragments"
+        v-model:negative-prompt="negativePrompt"
+        :safe-mode="safeMode"
+        :style-locked="styleLocked"
+        :slot-modes="slotModes"
+        :supplement-flags="supplementFlags"
+        :recipe-source-name="recipeSourceName"
+        :stacked-columns="draft.personBEnabled.value"
+        @update:slot-mode="onSlotModeChange"
+        @update:supplement="onSlotSupplementChange"
+      />
+
+      <StudioTextSupplementCard
+        v-if="draft.personBEnabled.value"
         ref="personBTextSupplementRef"
         v-model="personBTextFragments"
         v-model:negative-prompt="personBNegativePrompt"
         test-id-prefix="b-"
         person-label="人物B"
+        stacked-columns
         :safe-mode="safeMode"
         :style-locked="personBStyleLocked"
         :slot-modes="draft.personBSlotModes.value"
@@ -1896,7 +1887,7 @@ onMounted(async () => {
         @update:slot-mode="onPersonBSlotModeChange"
         @update:supplement="onPersonBSupplementChange"
       />
-    </template>
+    </div>
 
     <div class="studio-grid">
       <!--
@@ -2622,13 +2613,34 @@ onMounted(async () => {
 
 /* 人物B 设定卡上方的壳阶段说明 */
 .person-b-note {
-  margin: 16px 0 8px;
+  margin: 16px 0 0;
   padding: 8px 12px;
   border-radius: 8px;
   background: var(--fill-soft);
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* 文本补充区：与上方素材卡留出间距；B 存在时 A/B 两卡并列 */
+.supplement-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.supplement-grid--pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .supplement-grid--pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* 窄屏：双人布局回落单列，顺序 A → 共用姿势 → B */

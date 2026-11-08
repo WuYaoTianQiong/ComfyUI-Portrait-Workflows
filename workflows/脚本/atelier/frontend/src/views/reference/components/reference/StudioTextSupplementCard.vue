@@ -84,6 +84,8 @@ const props = defineProps<{
   personLabel?: string
   /** 人物B 等第二组的 testid 前缀（默认空，保持 A 组契约不变）。 */
   testIdPrefix?: string
+  /** A/B 并列时内部八类改单列，避免半宽卡里三列行挤爆。 */
+  stackedColumns?: boolean
 }>()
 
 const prefix = computed(() => props.testIdPrefix ?? '')
@@ -318,7 +320,7 @@ defineExpose({ expand })
         右侧四类始终追加到修饰层。
       </p>
 
-      <div class="supplement__columns">
+      <div class="supplement__columns" :class="{ 'supplement__columns--stacked': stackedColumns }">
         <section
           v-for="column in columns"
           :key="column.key"
@@ -541,6 +543,11 @@ defineExpose({ expand })
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--gap-md) var(--gap-lg);
+}
+
+/* A/B 并列时半宽卡：内部直接单列，行内容才有足够宽度 */
+.supplement__columns--stacked {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .supplement__column {
