@@ -126,7 +126,20 @@ export function withReferenceTab(query: LocationQuery, tab: string): LocationQue
   delete next.path
   // 页签跳转一律清除「选图目标」，避免从人物B选择态误进其它页签后继续写 B 槽
   delete next.selection
+  // 「在参考图库中打开」带来的预填检索词只属于目标页签，切页签后必须剔除
+  delete next.q
   return next
+}
+
+/**
+ * 读取「在参考图库中打开」写入的预填检索词（`?q=`）。
+ *
+ * 画廊出图档案按路径反查到库条目后，会带着 `tab` 与 `q` 跳进来；页签组件
+ * 在挂载时用它初始化搜索框。非法 / 缺失一律返回空串，不阻塞页面。
+ */
+export function readReferenceSearch(query: LocationQuery): string {
+  const raw = Array.isArray(query.q) ? query.q[0] : query.q
+  return typeof raw === 'string' ? raw.trim() : ''
 }
 
 /**

@@ -6,7 +6,7 @@ import type { PortraitItem } from '../../api/reference'
 import { useReferencePortraits } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useToast } from '../../composables/useToast'
-import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
+import { readReferenceSearch, readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceCard from './components/ReferenceCard.vue'
 import ReferenceGrid from './components/ReferenceGrid.vue'
@@ -106,7 +106,7 @@ const section = ref('')
 const hair = ref('')
 /** 发型细分；`ALL_STYLES` = 全部（React 的 `styleName` 默认 `'all'`）。 */
 const styleName = ref<string>(ALL_STYLES)
-const query = ref('')
+const query = ref(readReferenceSearch(route.query))
 /** 当前页码（从 1 开始）；筛选 / 每页条数变化一律回第 1 页。 */
 const page = ref(1)
 /** 每页条数；三库共用 `pb.reference_page_size_v1`（默认 60）。 */

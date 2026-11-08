@@ -8,7 +8,7 @@ import { useReferencePoses } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useToast } from '../../composables/useToast'
-import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
+import { readReferenceSearch, readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
 import ReferenceCard from './components/ReferenceCard.vue'
@@ -140,7 +140,7 @@ const style = ref('all')
 /** 视角胶囊；空串 = 全部视角 */
 const angle = ref('')
 /** 搜索词 */
-const query = ref('')
+const query = ref(readReferenceSearch(route.query))
 const viewMode = ref<'group' | 'single'>('group')
 /** 当前页码（从 1 开始）；筛选 / 视图 / 每页条数变化一律回第 1 页。 */
 const page = ref(1)

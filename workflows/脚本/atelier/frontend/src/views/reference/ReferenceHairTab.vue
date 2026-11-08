@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import type { HairItem } from '../../api/reference'
 import { useReferenceHairs } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useToast } from '../../composables/useToast'
+import { readReferenceSearch } from './referenceDeepLink'
 import {
   clampPage,
   loadReferencePageSize,
@@ -23,7 +25,8 @@ const toast = useToast()
 
 const view = ref('')
 const group = ref('')
-const query = ref('')
+const route = useRoute()
+const query = ref(readReferenceSearch(route.query))
 const page = ref(1)
 const pageSize = ref(loadReferencePageSize())
 const viewerIndex = ref<number | null>(null)

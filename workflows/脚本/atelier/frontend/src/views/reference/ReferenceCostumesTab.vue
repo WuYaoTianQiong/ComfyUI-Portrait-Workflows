@@ -7,7 +7,7 @@ import { useReferenceCostumes } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useToast } from '../../composables/useToast'
-import { readReferenceSelection, withReferenceTab } from './referenceDeepLink'
+import { readReferenceSearch, readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
 import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
 import ReferenceCard from './components/ReferenceCard.vue'
@@ -154,7 +154,7 @@ const category = ref('')
 /** 标签；`all` = 全部单品与颜色标签（与 React 一致，用字符串哨兵）。 */
 const tag = ref<string>(COSTUME_ALL_TAGS)
 /** 搜索词 */
-const query = ref('')
+const query = ref(readReferenceSearch(route.query))
 /** 当前页码（从 1 开始）；筛选 / 每页条数变化一律回第 1 页。 */
 const page = ref(1)
 /** 每页条数；三库共用 `pb.reference_page_size_v1`（默认 60）。 */

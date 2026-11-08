@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  readReferenceSearch,
   referenceTabFromDeepLink,
   resolveExplicitReferencePath,
   sanitizeReferencePath,
+  withReferenceTab,
 } from './referenceDeepLink'
 
 /**
@@ -75,4 +77,26 @@ describe('referenceTabFromDeepLink', () => {
       expect(referenceTabFromDeepLink(path)).toBeNull()
     },
   )
+})
+
+describe('readReferenceSearch', () => {
+  it('读取并裁剪 q', () => {
+    expect(readReferenceSearch({ q: ' p1 ' })).toBe('p1')
+    expect(readReferenceSearch({ q: ['atlas2k-1201', 'x'] })).toBe('atlas2k-1201')
+  })
+
+  it('缺失 / 非法值返回空串', () => {
+    expect(readReferenceSearch({})).toBe('')
+    expect(readReferenceSearch({ q: null })).toBe('')
+  })
+})
+
+describe('withReferenceTab', () => {
+  it('切页签剔除预填检索词与选图目标，保留其它 query', () => {
+    const next = withReferenceTab(
+      { tab: 'pose', q: 'P001', selection: 'person_b_group_pose', x: '1' },
+      'costume',
+    )
+    expect(next).toEqual({ tab: 'costume', x: '1' })
+  })
 })
