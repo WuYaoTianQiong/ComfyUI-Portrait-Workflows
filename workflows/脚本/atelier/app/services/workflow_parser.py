@@ -1143,10 +1143,11 @@ def detect_workflow_params(api_workflow: dict) -> dict:
     return params
 
 
-DEFAULT_QUALITY_TIERS = ("0.75x", "1.0x", "1.25x", "1.5x", "2.0x")
+DEFAULT_QUALITY_TIERS = ("0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x")
 
 #: SeedVR 档位直接对应真实输出分辨率；与 _inject_resolution 的表保持一致。
 _SEEDVR_SIZE_BY_QUALITY = {
+    "0.25x": (640, 1024), "0.5x": (1280, 2048),
     "0.75x": (2160, 3840), "1.0x": (2560, 4096),
     "1.25x": (3200, 5120), "1.5x": (3840, 6400),
     "2.0x": (5120, 8192),
@@ -1272,12 +1273,8 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
     scale = quality_scale(quality)
     quality_key = normalize_quality(quality)
 
-    seedvr_quality_map = {
-        "0.75x": (2160, 3840), "1.0x": (2560, 4096),
-        "1.25x": (3200, 5120), "1.5x": (3840, 6400), "2.0x": (5120, 8192),
-    }
-    if quality_key in seedvr_quality_map:
-        res, max_res = seedvr_quality_map[quality_key]
+    if quality_key in _SEEDVR_SIZE_BY_QUALITY:
+        res, max_res = _SEEDVR_SIZE_BY_QUALITY[quality_key]
         for node in api_workflow.values():
             if isinstance(node, dict) and node.get("class_type") == "SeedVR2VideoUpscaler":
                 node["inputs"]["resolution"] = res

@@ -69,7 +69,10 @@ def test_qwen21_encoder_resolution_exposes_quality_only():
 
 def test_qwen21_encoder_resolution_injection_scales_linearly():
     """quality 档按线性倍率写到 TextEncodeQwenImage21.resolution；比例输入被忽略。"""
-    cases = {"0.75x": 768, "1.0x": 1024, "1.25x": 1280, "1.5x": 1536, "2.0x": 2048}
+    cases = {
+        "0.25x": 256, "0.5x": 512,
+        "0.75x": 768, "1.0x": 1024, "1.25x": 1280, "1.5x": 1536, "2.0x": 2048,
+    }
     for quality, expected in cases.items():
         workflow = _load_real(QWEN21)
         inject_prompt(workflow, {

@@ -7,6 +7,10 @@
 from __future__ import annotations
 
 QUALITY_SCALES: dict[str, float] = {
+    # 0.25x / 0.5x 是 2026-11-08 新增的「低画质快速验证」档：
+    # 0.25x 约 0.066MP、0.5x 约 0.26MP，仅用于人眼/检测器能看清基本要素的场景。
+    "0.25x": 0.25,
+    "0.5x": 0.5,
     "0.75x": 0.75,
     "1.0x": 1.0,
     "1.25x": 1.25,
@@ -26,7 +30,7 @@ ALIASES: dict[str, str] = {
 
 
 def normalize_quality(value: str | None) -> str:
-    """把任意历史写法归一成 `0.75x…2.0x`；未知值原样保留，避免静默改数据。"""
+    """把任意历史写法归一成 `0.25x…2.0x`；未知值原样保留，避免静默改数据。"""
     if not value:
         return "1.0x"
     text = str(value).strip()

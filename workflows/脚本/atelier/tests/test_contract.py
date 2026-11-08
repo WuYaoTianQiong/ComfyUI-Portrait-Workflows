@@ -14,7 +14,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_quality_keys_normalize_to_scale():
-    """画质键只该存 0.75x…2.0x；旧 K 键在读写两端都要兼容。"""
+    """画质键只该存 0.25x…2.0x；旧 K 键在读写两端都要兼容。"""
     from app.services.quality_keys import normalize_quality, quality_scale
 
     assert normalize_quality("8K") == "1.5x"
@@ -22,6 +22,8 @@ def test_quality_keys_normalize_to_scale():
     assert normalize_quality("high") == "1.0x"
     assert quality_scale("8K") == 1.5
     assert quality_scale("1.25x") == 1.25
+    assert quality_scale("0.25x") == 0.25
+    assert quality_scale("0.5x") == 0.5
     assert quality_scale("unknown") == 1.0
 
 
