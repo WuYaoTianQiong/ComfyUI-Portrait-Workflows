@@ -8,14 +8,24 @@ import type { HistoryItem } from '../api/types'
 
 enableAutoUnmount(afterEach)
 
+const { routerPush } = vi.hoisted(() => ({ routerPush: vi.fn() }))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
+
 vi.mock('../api/client', () => ({
   viewUrl: (item: { filename: string }) => '/api/media/image?filename=' + item.filename,
   thumbnailUrl: (item: { filename: string }) => '/api/thumb?filename=' + item.filename,
-  apiGet: vi.fn(async (path: string) =>
-    path.includes('/api/prompts/')
-      ? { prompt: '库里的当前正文', negative_prompt: '库负面' }
-      : { run: {} },
-  ),
+  apiGet: vi.fn(async (path: string) => {
+    if (path.includes('/api/reference/resolve')) {
+      return { found: true, library: 'portrait', item_id: 'p1', name: '测试', tab: 'portrait', q: 'p1' }
+    }
+    if (path.includes('/api/prompts/')) {
+      return { prompt: '库里的当前正文', negative_prompt: '库负面' }
+    }
+    return { run: {} }
+  }),
   apiPost: vi.fn(async () => ({ success: true, path: 'a.png' })),
 }))
 
@@ -403,6 +413,144 @@ describe('Lightbox', () => {
     const wrapper = mount(Lightbox, { props: { items: [noSource], index: 0 } })
     await wrapper.find('.prompt-link').trigger('click')
     expect(document.body.querySelector('.prompt-side')?.textContent ?? '').not.toContain('来源提示词')
+  })
+
+  it('出图档案展示合成台落库的参考图缩略图，点击后页内放大', async () => {
+    const withRefs = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: {
+        prompt: '合成正文',
+        source: 'faceswap',
+        inputs: [
+          { role: 'target', node: '2', meta: { source: 'file', path: 'F:\\ref\\portrait.webp' } },
+          { role: 'ref1', node: '3', meta: { source: 'file', path: 'F:\\ref\\costume.webp' } },
+          { role: 'ref2', node: '1', meta: { source: 'file', path: 'F:\\ref\\pose.webp' } },
+        ],
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withRefs], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+
+    const cards = Array.from(document.body.querySelectorAll('.ref-card')) as HTMLButtonElement[]
+    expect(cards).toHaveLength(3)
+    expect(cards[0].querySelector('.ref-label')?.textContent).toBe('主图')
+    expect(cards[1].querySelector('.ref-label')?.textContent).toBe('参考1')
+    const thumb = cards[1].querySelector('.ref-thumb') as HTMLImageElement
+    expect(thumb.getAttribute('src')).toContain('/api/browser/thumb?path=')
+
+    cards[1].click()
+    await wrapper.vm.$nextTick()
+    const preview = document.body.querySelector('.ref-preview')
+    expect(preview).not.toBeNull()
+    expect(preview?.textContent).toContain('参考1')
+    const previewImg = preview?.querySelector('.ref-preview-img') as HTMLImageElement
+    expect(previewImg.getAttribute('src')).toContain('/api/browser/image?path=')
+    expect(previewImg.getAttribute('src')).toContain(
+      encodeURIComponent('F:\\ref\\costume.webp'),
+    )
+    const external = preview?.querySelector('a') as HTMLAnchorElement
+    expect(external.getAttribute('href')).toContain('/api/browser/image?path=')
+    expect(external.getAttribute('target')).toBe('_blank')
+  })
+
+  it('参考图放大层按 Esc 只关闭自己，档案保持打开', async () => {
+    const withRefs = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: {
+        prompt: '合成正文',
+        source: 'faceswap',
+        inputs: [{ role: 'target', meta: { path: 'F:\\ref\\portrait.webp' } }],
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withRefs], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    const card = document.body.querySelector('.ref-card') as HTMLButtonElement
+    card.click()
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('.ref-preview')).not.toBeNull()
+
+    press('Escape')
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('.ref-preview')).toBeNull()
+    expect(wrapper.findComponent(Modal).props('open')).toBe(true)
+  })
+
+  it('参考图预览工具条支持翻转 / 旋转 / 1:1', async () => {
+    const withRefs = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: {
+        prompt: '合成正文',
+        source: 'faceswap',
+        inputs: [{ role: 'target', meta: { path: 'F:\\ref\\portrait.webp' } }],
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withRefs], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    ;(document.body.querySelector('.ref-card') as HTMLButtonElement).click()
+    await wrapper.vm.$nextTick()
+
+    const preview = document.body.querySelector('.ref-preview') as HTMLElement
+    const img = preview.querySelector('.ref-preview-img') as HTMLImageElement
+    Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 1600 })
+    img.dispatchEvent(new Event('load'))
+    await wrapper.vm.$nextTick()
+
+    const buttons = Array.from(
+      preview.querySelectorAll('.ref-preview-bar button'),
+    ) as HTMLButtonElement[]
+    const flip = buttons.find((b) => b.textContent?.trim() === '⇋') as HTMLButtonElement
+    const rotate = buttons.find((b) => b.textContent?.trim() === '⟳') as HTMLButtonElement
+    const actual = buttons.find((b) => b.textContent?.trim() === '1:1') as HTMLButtonElement
+
+    flip.click()
+    await wrapper.vm.$nextTick()
+    expect(img.style.transform).toContain('scale(-')
+
+    rotate.click()
+    await wrapper.vm.$nextTick()
+    expect(img.style.transform).toContain('rotate(90deg)')
+
+    actual.click()
+    await wrapper.vm.$nextTick()
+    expect(actual.classList.contains('active')).toBe(true)
+  })
+
+  it('「在参考图库中打开」按反查结果跳到对应页签并预填检索词', async () => {
+    const withRefs = {
+      ...item(1, 'a.png'),
+      prompt_id: 0,
+      prompt_params: {
+        prompt: '合成正文',
+        source: 'faceswap',
+        inputs: [{ role: 'target', meta: { path: 'F:\\ref\\portrait.webp' } }],
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withRefs], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    ;(document.body.querySelector('.ref-card') as HTMLButtonElement).click()
+    await wrapper.vm.$nextTick()
+
+    const open = Array.from(
+      document.body.querySelectorAll('.ref-preview-bar button'),
+    ).find((b) => b.textContent?.includes('在参考图库中打开')) as HTMLButtonElement
+    open.click()
+    await flushPromises()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/reference',
+      query: { tab: 'portrait', q: 'p1' },
+    })
+    expect(document.body.querySelector('.ref-preview')).toBeNull()
+  })
+
+  it('没有输入图路径时不出现参考图区块', async () => {
+    const wrapper = mount(Lightbox, { props: { items: [item(1, 'a.png')], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    expect(document.body.querySelector('.ref-card')).toBeNull()
   })
 
   it('刷新后自动恢复临时提示词弹窗', async () => {

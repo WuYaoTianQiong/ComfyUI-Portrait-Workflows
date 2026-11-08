@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { apiDelete, apiGet, apiPost, viewUrl } from '../api/client'
 import { useToast } from '../composables/useToast'
@@ -81,6 +82,7 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
+const router = useRouter()
 const { revealImage } = useImageLocation()
 
 const item = computed<HistoryItem | undefined>(() => props.items[props.index])
@@ -399,6 +401,153 @@ const promptParams = computed<Record<string, unknown>>(
 
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
+}
+
+/** 输入图角色 → 档案里的展示文案（合成台与图像编辑共用同一套角色名）。 */
+const INPUT_ROLE_LABEL: Record<string, string> = {
+  target: '主图',
+  ref1: '参考1',
+  ref2: '参考2',
+  ref3: '参考3',
+  ref4: '参考4',
+}
+
+interface ReferenceInput {
+  label: string
+  path: string
+}
+
+/**
+ * 合成台 / 图像编辑提交时，每张输入图的绝对路径都写进了
+ * `prompt_params.inputs[].meta.path`；这里原样取出交给 `/api/browser/*` 读取。
+ * 只有提示词出图这类没有输入图的记录才为空，档案里也不会出现空区块。
+ */
+const referenceInputs = computed<ReferenceInput[]>(() => {
+  const raw = promptParams.value.inputs
+  if (!Array.isArray(raw)) return []
+  const out: ReferenceInput[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Record<string, unknown>
+    const rawMeta = row.meta
+    const meta = rawMeta && typeof rawMeta === 'object'
+      ? (rawMeta as Record<string, unknown>)
+      : {}
+    const path = textOf(meta.path)
+    if (!path) continue
+    const role = textOf(row.role)
+    out.push({ label: INPUT_ROLE_LABEL[role] ?? (role || '参考图'), path })
+  }
+  return out
+})
+
+function referenceThumb(path: string): string {
+  return `/api/browser/thumb?path=${encodeURIComponent(path)}&size=200`
+}
+
+function referenceImage(path: string): string {
+  return `/api/browser/image?path=${encodeURIComponent(path)}`
+}
+
+/** 参考图放大预览（只读）：复用画廊灯箱的缩放引擎，不绑定出图记录。 */
+const previewRef = ref<ReferenceInput | null>(null)
+const previewError = ref(false)
+const previewReloadNonce = ref(0)
+
+const {
+  stageEl: previewStageEl,
+  imgEl: previewImgEl,
+  imgLoaded: previewImgLoaded,
+  fitMode: previewFitMode,
+  initView: previewInitView,
+  setNaturalSize: previewSetNaturalSize,
+  onWheel: previewOnWheel,
+  onPanStart: previewOnPanStart,
+  onStageClick: previewOnStageClick,
+  rotate90: previewRotate90,
+  flip: previewFlip,
+  toggleFit: previewToggleFit,
+  reset: previewReset,
+} = useViewerTransform({
+  onStageClick: () => closeReferencePreview(),
+  fitPadding: 32,
+})
+
+function closeReferencePreview() {
+  previewRef.value = null
+  previewError.value = false
+  previewReset()
+}
+
+useEscapeLayer(() => !!previewRef.value, closeReferencePreview)
+
+function openReferencePreview(ref: ReferenceInput) {
+  previewRef.value = ref
+  previewError.value = false
+  previewReloadNonce.value += 1
+  void nextTick(() => {
+    // 图片可能已在缓存里，load 事件不会再触发
+    const img = previewImgEl.value
+    if (img && img.complete && img.naturalWidth) {
+      previewSetNaturalSize(img)
+      previewInitView()
+    }
+  })
+}
+
+function onPreviewImageLoad(event: Event) {
+  previewError.value = false
+  previewSetNaturalSize(event.target as HTMLImageElement)
+  previewInitView()
+}
+
+function onPreviewImageError() {
+  previewError.value = true
+  previewImgLoaded.value = false
+}
+
+function retryPreviewImage() {
+  previewError.value = false
+  previewReloadNonce.value += 1
+}
+
+interface ReferenceResolveResult {
+  found: boolean
+  library?: string
+  item_id?: string
+  name?: string
+  tab?: string
+  q?: string
+}
+
+const referenceResolving = ref(false)
+
+/**
+ * 「在参考图库中打开」：后端按绝对路径反查出库条目，再跳到对应页签并预填检索词。
+ * 上传图 / 临时文件不属于任何库条目，给明确提示而不是跳到一个空搜索。
+ */
+async function openInReferenceLibrary() {
+  const current = previewRef.value
+  if (!current || referenceResolving.value) return
+  referenceResolving.value = true
+  try {
+    const hit = await apiGet<ReferenceResolveResult>('/api/reference/resolve', {
+      path: current.path,
+    })
+    if (!hit?.found || !hit.tab) {
+      toast.info('该参考图不在参考图库中（上传图或缓存图）')
+      return
+    }
+    closeReferencePreview()
+    void router.push({
+      path: '/reference',
+      query: { tab: hit.tab, q: hit.q || hit.item_id || '' },
+    })
+  } catch (e) {
+    toast.error(`定位参考图失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    referenceResolving.value = false
+  }
 }
 
 /**
@@ -876,6 +1025,7 @@ function toggleInfo() {
  * Esc 由 useEscapeLayer 统一处理（弹层栈只有最上面一层响应）。
  */
 function onKey(event: KeyboardEvent) {
+  if (previewRef.value) return
   if (event.defaultPrevented) return
   if (event.key === 'ArrowLeft') go(-1)
   else if (event.key === 'ArrowRight') go(1)
@@ -1079,6 +1229,74 @@ function onKey(event: KeyboardEvent) {
       @close="promptInfoOpen = false"
     >
       <div class="prompt-info">
+        <div v-if="previewRef" class="ref-preview" @click.self="closeReferencePreview">
+          <div class="ref-preview-bar">
+            <span class="ref-preview-title">{{ previewRef.label }}</span>
+            <span class="ref-preview-path" :title="previewRef.path">{{ previewRef.path }}</span>
+            <span class="spacer" />
+            <button class="btn btn-sm" type="button" title="水平翻转" @click="previewFlip">
+              ⇋
+            </button>
+            <button class="btn btn-sm" type="button" title="旋转 90°" @click="previewRotate90">
+              ⟳
+            </button>
+            <button
+              class="btn btn-sm"
+              :class="{ active: !previewFitMode }"
+              type="button"
+              title="适应 / 原始尺寸"
+              @click="previewToggleFit"
+            >
+              1:1
+            </button>
+            <button
+              class="btn btn-sm"
+              type="button"
+              :disabled="referenceResolving"
+              @click="openInReferenceLibrary"
+            >
+              {{ referenceResolving ? '定位中…' : '在参考图库中打开' }}
+            </button>
+            <a
+              class="btn btn-sm"
+              :href="referenceImage(previewRef.path)"
+              target="_blank"
+              rel="noopener"
+            >
+              新窗口打开原图
+            </a>
+            <button class="btn btn-sm" type="button" @click="closeReferencePreview">关闭</button>
+          </div>
+          <div
+            ref="previewStageEl"
+            class="ref-preview-stage"
+            @wheel.prevent="previewOnWheel"
+            @mousedown="previewOnPanStart"
+            @click="previewOnStageClick"
+          >
+            <span v-if="!previewImgLoaded && !previewError" class="ref-preview-state">
+              加载中…
+            </span>
+            <div v-else-if="previewError" class="ref-preview-state error" @click.stop>
+              <span>参考图加载失败，请检查文件是否存在</span>
+              <button class="btn btn-sm" type="button" @click.stop="retryPreviewImage">
+                重试
+              </button>
+            </div>
+            <img
+              :key="`${previewRef.path}-${previewReloadNonce}`"
+              ref="previewImgEl"
+              class="ref-preview-img"
+              :class="{ loaded: previewImgLoaded }"
+              :src="referenceImage(previewRef.path)"
+              :alt="previewRef.label"
+              :draggable="false"
+              @load="onPreviewImageLoad"
+              @error="onPreviewImageError"
+            />
+          </div>
+        </div>
+
         <div class="prompt-cols">
           <div class="prompt-main">
             <section class="text-section">
@@ -1248,6 +1466,28 @@ function onKey(event: KeyboardEvent) {
                   <dd>{{ row.value }}</dd>
                 </div>
               </dl>
+            </section>
+
+            <section v-if="referenceInputs.length" class="side-block">
+              <h3 class="side-title">参考图</h3>
+              <div class="ref-grid">
+                <button
+                  v-for="ref in referenceInputs"
+                  :key="ref.path"
+                  class="ref-card"
+                  type="button"
+                  :title="ref.path"
+                  @click="openReferencePreview(ref)"
+                >
+                  <img
+                    class="ref-thumb"
+                    :src="referenceThumb(ref.path)"
+                    :alt="ref.label"
+                    loading="lazy"
+                  />
+                  <span class="ref-label">{{ ref.label }}</span>
+                </button>
+              </div>
             </section>
 
             <section v-if="extraRows.length" class="side-block">
@@ -1773,6 +2013,135 @@ function onKey(event: KeyboardEvent) {
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
+}
+
+/* 参考图缩略图：右栏宽度内自适应列数，点开看原图 */
+.ref-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: var(--gap-sm);
+}
+
+.ref-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ref-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.ref-card:hover .ref-thumb {
+  border-color: var(--primary);
+}
+
+.ref-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 参考图放大预览：盖在档案弹窗之上，Esc / 点空白关闭 */
+.ref-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: rgb(0 0 0 / .88);
+}
+
+.ref-preview-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ref-preview-title {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.ref-preview-path {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-preview-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.ref-preview-stage:active {
+  cursor: grabbing;
+}
+
+.ref-preview-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  max-height: none;
+  transform-origin: center center;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  user-select: none;
+  -webkit-user-drag: none;
+  /* 加载完再显示，避免先按错误尺寸闪一下 */
+  opacity: 0;
+}
+
+.ref-preview-img.loaded {
+  opacity: 1;
+}
+
+.ref-preview-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
+.ref-preview-state.error {
+  pointer-events: auto;
 }
 
 /* 文件名：右栏里需要被一眼看到，放大加粗 */
