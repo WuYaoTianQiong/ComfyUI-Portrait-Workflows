@@ -163,6 +163,12 @@ export interface RecipeBatch {
   submittedAt: number | null
   /** 批次进入终态的时间；未结束为 null。 */
   finishedAt: number | null
+  /**
+   * 新 B 组（UX 壳阶段）在提交瞬间的预览摘要。
+   *
+   * 只在 `personBEnabled` 时写入；明确标注「待接入」，避免被误认为已真实提交。
+   */
+  personBPreview?: string
 }
 
 /** 单组提交结果（内部聚合用）。 */
@@ -993,12 +999,16 @@ export function useReferenceRecipe() {
    * 素体开关（契约 C-REF-BODY-MODE@1）。
    *
    * 开启时**同时清空服装槽**：后端规定 `body_mode='bare'` 与服装同时出现会 400。
+   * 人物B 的新 B 组服装与旧第 5 槽同样属于服装输入，必须一起清空，否则
+   * `extra_costume` 会让提交直接 400。
    * 关闭时只切回 `costume`，不影响其他槽位。
    */
   function setBodyMode(mode: RecipeBodyMode): void {
     if (mode === 'bare') {
       bodyMode.value = 'bare'
       if (draft.costumeCount.value > 0) draft.removeCostume()
+      if (draft.personBCostume.value.length > 0) draft.removePersonBCostume()
+      if (draft.extraCostumeFilled.value) draft.clearExtraCostume()
       return
     }
     bodyMode.value = 'costume'
@@ -1141,6 +1151,29 @@ export function useReferenceRecipe() {
   }
 
   /**
+   * 新 B 组（UX 壳阶段）的预览摘要，供结果区按提交时快照展示。
+   *
+   * 不参与请求体，也不伪造已提交数据；只把「提交那一刻 B 组选了什么」记在批次上，
+   * 避免历史批次被当前设置误标。
+   */
+  function describePersonBPreview(): string {
+    if (!draft.personBEnabled.value) return ''
+    const parts: string[] = []
+    const summarize = (label: string, names: readonly string[]): void => {
+      const unique = [...new Set(names.filter(Boolean))]
+      if (!unique.length) return
+      const head = unique.slice(0, 2).join('、')
+      parts.push(`${label}「${head}${unique.length > 2 ? ` 等 ${unique.length} 张` : ''}」`)
+    }
+    summarize('B 人像', draft.personBPortrait.value.map((item) => item.发型名称 || item.标题))
+    summarize('B 服装', draft.personBCostume.value.map((item) => item.服装名称))
+    summarize('B 姿势', draft.personBPose.value.map((entry) => entry.item.姿势名称))
+    return parts.length
+      ? `B 组预览（待接入）：${parts.join(' · ')}`
+      : 'B 组预览（待接入）：未选择素材'
+  }
+
+  /**
    * 执行**一个独立批次**：逐组提交 + 聚合轮询。
    *
    * - 提交并发上限 2；同一时刻只会有一个批次处于提交阶段（`submit()` 拦截），
@@ -1165,6 +1198,7 @@ export function useReferenceRecipe() {
       errorMessage: '',
       submittedAt: null,
       finishedAt: null,
+      personBPreview: describePersonBPreview(),
     })
     batches.value.push(batch)
     syncLatestView(batch)

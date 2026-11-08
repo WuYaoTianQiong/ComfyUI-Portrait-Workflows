@@ -1247,7 +1247,39 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   if (nextPose[0]) lastPoseId.value = nextPose[0].item.id
 
   // 人物B 全量角色组（2026-11-08）：与 A 三槽同一套 id + library 匹配规则。
-  personBEnabled.value = stored.personBEnabled
+  // 旧单张 B 数据（第 4 槽人像 / 第 5 槽服装）迁移到新 B 组：
+  // 只在两组新字段都为空时迁移，绝不覆盖新格式；发型库的 extra 不迁移。
+  const legacyGroupReady =
+    stored.personBPortrait.length === 0 && stored.personBCostume.length === 0
+  let legacyBPortrait: PortraitItem | null = null
+  if (
+    legacyGroupReady &&
+    stored.extra.source === 'library' &&
+    stored.extra.library === 'portrait' &&
+    stored.extra.id
+  ) {
+    legacyBPortrait = portraitByKey.get(slotKey('portrait', stored.extra.id)) ?? null
+  }
+  let legacyBCostume: CostumeItem | null = null
+  if (legacyGroupReady && stored.extraCostume.source !== 'empty') {
+    if (stored.extraCostume.source === 'upload' && stored.extraCostume.path) {
+      legacyBCostume = costumeUploadItem({
+        path: stored.extraCostume.path,
+        name: stored.extraCostume.name,
+      })
+    } else if (
+      (stored.extraCostume.library === 'costume' ||
+        stored.extraCostume.library === 'costume-anime') &&
+      stored.extraCostume.id
+    ) {
+      legacyBCostume =
+        costumeByKey.get(
+          slotKey(stored.extraCostume.library, stored.extraCostume.id),
+        ) ?? null
+    }
+  }
+  personBEnabled.value =
+    stored.personBEnabled || Boolean(legacyBPortrait || legacyBCostume)
 
   const seenBPortrait = new Set<string>()
   const nextBPortrait: PortraitItem[] = []
@@ -1300,6 +1332,9 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
     nextBPose.push({ item, useDepth: entry.useDepth === true })
   }
 
+  if (legacyBPortrait) nextBPortrait.push(legacyBPortrait)
+  if (legacyBCostume) nextBCostume.push(legacyBCostume)
+
   personBPortrait.value = nextBPortrait
   personBCostume.value = nextBCostume
   personBPose.value = nextBPose
@@ -1319,6 +1354,10 @@ function hydrate(libraries: ReferenceDraftLibraries): boolean {
   restoreTextFragmentsFromSettings(stored)
   // 模式必须在三槽与碎片都恢复后应用：旧快照缺 mode 时按内容推导。
   applyStoredSlotModes(stored, true)
+  // 迁移是「移动」而不是「复制」：旧槽位继续保留会让同一张图被二次提交
+  // （default 四图工作流还会因缺少人物B服装输入直接 400），迁移成功后清空来源。
+  if (legacyBPortrait) extra.value = createEmptyExtraSlot()
+  if (legacyBCostume) extraCostume.value = createEmptyCostumeSlot()
   return true
 }
 

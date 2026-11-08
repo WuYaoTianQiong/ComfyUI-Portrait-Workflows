@@ -728,3 +728,191 @@ describe('v1.5 人物B变体持久化与旧数据迁移', () => {
     expect(draft.personBText.value).toBe('旧版 B 文字设定')
   })
 })
+
+describe('2026-11-08 人物B 全量角色组', () => {
+  it('旧快照的 extra/extraCostume 迁移到新 B 组，且重复 hydrate 不重复迁移', () => {
+    writeReferenceStudioSettings({
+      extra: {
+        source: 'library',
+        library: 'portrait',
+        id: 'pt1',
+        path: '',
+        name: '人像 A',
+        text: '',
+      },
+      extraCostume: {
+        source: 'library',
+        library: 'costume',
+        id: 'c1',
+        path: '',
+        name: '服装 C',
+      },
+      personBEnabled: false,
+      personBPortrait: [],
+      personBCostume: [],
+    })
+    flushReferenceStudioSettings()
+
+    const libraries = {
+      portrait: [portrait('pt1')],
+      costume: [costume('c1')],
+      pose: [],
+    }
+    draft.hydrate(libraries)
+
+    expect(draft.personBEnabled.value).toBe(true)
+    expect(draft.personBPortrait.value.map((item) => item.id)).toEqual(['pt1'])
+    expect(draft.personBCostume.value.map((item) => item.id)).toEqual(['c1'])
+    expect(draft.personBSlotModes.value).toEqual({
+      portrait: 'image',
+      costume: 'image',
+      pose: 'empty',
+    })
+    // 迁移是移动：旧槽位必须清空，否则会被当成 A 的第 4 张 / 旧 B 服装重复提交。
+    expect(draft.extra.value.source).toBe('empty')
+    expect(draft.extraCostume.value.source).toBe('empty')
+
+    // 迁移结果已被 watcher 落盘；再次 hydrate 必须读新字段，不能重复追加。
+    flushReferenceStudioSettings()
+    draft.hydrate(libraries)
+    expect(draft.personBPortrait.value).toHaveLength(1)
+    expect(draft.personBCostume.value).toHaveLength(1)
+  })
+
+  it('新 B 字段已有任一 entry 时整体不迁移，绝不覆盖新格式', () => {
+    writeReferenceStudioSettings({
+      extra: {
+        source: 'library',
+        library: 'portrait',
+        id: 'pt1',
+        path: '',
+        name: '旧人像',
+        text: '',
+      },
+      extraCostume: {
+        source: 'library',
+        library: 'costume',
+        id: 'c1',
+        path: '',
+        name: '旧服装',
+      },
+      personBEnabled: true,
+      personBPortrait: [
+        { id: 'pt2', library: 'portrait', name: '新人像', thumbnail: '' },
+      ],
+      personBCostume: [],
+    })
+    flushReferenceStudioSettings()
+
+    draft.hydrate({
+      portrait: [portrait('pt1'), portrait('pt2')],
+      costume: [costume('c1')],
+      pose: [],
+    })
+
+    expect(draft.personBEnabled.value).toBe(true)
+    expect(draft.personBPortrait.value.map((item) => item.id)).toEqual(['pt2'])
+    expect(draft.personBCostume.value).toEqual([])
+    // 已有新格式时不迁移，也不能把旧槽位当成迁移来源清空。
+    expect(draft.extra.value.source).toBe('library')
+    expect(draft.extra.value.id).toBe('pt1')
+  })
+
+  it('发型库 extra 不迁移', () => {
+    writeReferenceStudioSettings({
+      extra: {
+        source: 'library',
+        library: 'hair',
+        id: 'hair-1',
+        path: '',
+        name: '背面发型',
+        text: '',
+      },
+      personBEnabled: false,
+      personBPortrait: [],
+      personBCostume: [],
+    })
+    flushReferenceStudioSettings()
+
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(draft.personBEnabled.value).toBe(false)
+    expect(draft.personBPortrait.value).toEqual([])
+    expect(draft.personBCostume.value).toEqual([])
+  })
+
+  it('旧 B 服装是上传图时按 path 迁移（不依赖库数据）', () => {
+    writeReferenceStudioSettings({
+      extra: {
+        source: 'empty', library: '', id: '', path: '', name: '', text: '',
+      },
+      extraCostume: {
+        source: 'upload',
+        library: '',
+        id: '',
+        path: '/uploads/b-costume.png',
+        name: 'B 服装上传',
+      },
+      personBEnabled: false,
+      personBPortrait: [],
+      personBCostume: [],
+    })
+    flushReferenceStudioSettings()
+
+    draft.hydrate({ portrait: [], costume: [], pose: [] })
+
+    expect(draft.personBEnabled.value).toBe(true)
+    expect(draft.personBCostume.value).toHaveLength(1)
+    expect(uploadPathOf(draft.personBCostume.value[0]!)).toBe('/uploads/b-costume.png')
+  })
+
+  it('B 组三槽增删、模式与补充开关、移除时整体清空', () => {
+    draft.setPersonBEnabled(true)
+    draft.addPersonBPortrait(portrait('bpt'))
+    draft.addPersonBCostume(costume('bc'))
+    draft.addPersonBPose(pose('bp'), true)
+
+    expect(draft.personBPortrait.value.map((item) => item.id)).toEqual(['bpt'])
+    expect(draft.personBCostume.value.map((item) => item.id)).toEqual(['bc'])
+    expect(draft.personBPose.value.map((entry) => entry.item.id)).toEqual(['bp'])
+    expect(draft.personBPose.value[0].useDepth).toBe(true)
+
+    draft.setPersonBSlotMode('costume', 'text')
+    expect(draft.personBSlotModes.value.costume).toBe('text')
+    draft.setPersonBSupplement('portrait', true)
+    expect(draft.personBSupplementFlags.value.portrait).toBe(true)
+
+    draft.removePersonBPortrait('bpt')
+    expect(draft.personBPortrait.value).toEqual([])
+
+    draft.setPersonBEnabled(false)
+    expect(draft.personBEnabled.value).toBe(false)
+    expect(draft.personBPortrait.value).toEqual([])
+    expect(draft.personBCostume.value).toEqual([])
+    expect(draft.personBPose.value).toEqual([])
+    expect(draft.personBNegativePrompt.value).toBe('')
+  })
+
+  it('B 组素材 / 八类碎片 / 负向持久化后 hydrate 读回', () => {
+    draft.setPersonBEnabled(true)
+    draft.addPersonBPortrait(portrait('bpt'))
+    draft.setPersonBSlotMode('portrait', 'image')
+    draft.personBTextFragments.value = {
+      ...createEmptyRecipeTextFragments(),
+      人物面部: [{ type: '人物面部', content: 'B 的鹅蛋脸', person: 'B' }],
+    }
+    draft.personBNegativePrompt.value = '低质量'
+    flushReferenceStudioSettings()
+
+    draft.clearDraft()
+    draft.hydrate({ portrait: [portrait('bpt')], costume: [], pose: [] })
+
+    expect(draft.personBEnabled.value).toBe(true)
+    expect(draft.personBPortrait.value.map((item) => item.id)).toEqual(['bpt'])
+    expect(draft.personBSlotModes.value.portrait).toBe('image')
+    expect(draft.personBTextFragments.value.人物面部).toEqual([
+      { type: '人物面部', content: 'B 的鹅蛋脸', person: 'B' },
+    ])
+    expect(draft.personBNegativePrompt.value).toBe('低质量')
+  })
+})

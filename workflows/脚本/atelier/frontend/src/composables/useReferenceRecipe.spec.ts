@@ -70,6 +70,7 @@ import type {
   RecipeTextFragments,
   StudioWorkflowOption,
 } from './useReferenceRecipe'
+import { useReferenceRecipeDraft } from './useReferenceRecipeDraft'
 
 function portrait(overrides: Partial<PortraitItem> = {}): PortraitItem {
   return {
@@ -1493,5 +1494,35 @@ describe('第 4 槽语义互斥（v2-A 收尾）', () => {
     expect(result.notice).toContain('原因：第 4 槽不能同时用作')
     expect(result.notice).toContain('只保留最新选择的「人物B身份参考」')
     expect(result.notice).toContain('下一步：')
+  })
+})
+
+describe('素体展示清空人物B服装（2026-11-08）', () => {
+  it('bare 同时清空 A 服装、B 新组服装与旧第 5 槽', () => {
+    const draft = useReferenceRecipeDraft()
+    draft.clearDraft()
+    draft.setCostume(costume())
+    draft.setPersonBEnabled(true)
+    draft.addPersonBCostume(costume({ id: 'b-costume' }))
+    draft.setExtraCostumeLibrary('costume', 'legacy-costume', '旧 B 服装')
+
+    let recipe!: ReturnType<typeof useReferenceRecipe>
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          recipe = useReferenceRecipe()
+          return () => h('div')
+        },
+      }),
+    )
+
+    recipe.setBodyMode('bare')
+    expect(recipe.bodyMode.value).toBe('bare')
+    expect(draft.costume.value).toEqual([])
+    expect(draft.personBCostume.value).toEqual([])
+    expect(draft.extraCostume.value.source).toBe('empty')
+
+    wrapper.unmount()
+    draft.clearDraft()
   })
 })
