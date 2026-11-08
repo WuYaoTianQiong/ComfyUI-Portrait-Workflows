@@ -5,7 +5,7 @@
       "image": "pose_ref.webp"
     },
     "_meta": {
-      "title": "图3：姿势参考 (Pose) · 深度图"
+      "title": "图1：姿势参考 (Pose) · 深度图"
     }
   },
   "2": {
@@ -14,7 +14,7 @@
       "image": "portrait_ref.webp"
     },
     "_meta": {
-      "title": "图1：人像参考 (Portrait)"
+      "title": "图2：人像参考 (Portrait)"
     }
   },
   "3": {
@@ -23,7 +23,7 @@
       "image": "costume_ref.webp"
     },
     "_meta": {
-      "title": "图2：服装参考 (Costume)"
+      "title": "图3：服装参考 (Costume)"
     }
   },
   "4": {
@@ -64,10 +64,10 @@
         0
       ],
       "lora_name": "VNCCS_QI2_PoseStudioV1.1.safetensors",
-      "strength_model": 1.0
+      "strength_model": 0.7
     },
     "_meta": {
-      "title": "VNCCS 姿势 LoRA（QI2 v1.1，必须 1.0）"
+      "title": "VNCCS 姿势 LoRA（QI2 v1.1，双人实测 0.7）"
     }
   },
   "8": {
