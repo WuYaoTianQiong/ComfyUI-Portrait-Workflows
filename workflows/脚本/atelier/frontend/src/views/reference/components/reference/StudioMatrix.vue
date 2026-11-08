@@ -178,15 +178,23 @@ function groupKeyOf(group: RecipeBatchGroup): string {
   return group.personBVariant ? `${key}${GROUP_KEY_SEPARATOR}b:${group.personBVariant.id}` : key
 }
 
-/** B 变体组头文案：面部/身材 + 服饰 + 自由文字的前 12 字。 */
+/** B 变体组头文案：身份图 / 服装图名称 + 文字前 12 字。 */
 function personBLabelOf(group: RecipeBatchGroup): string {
   const variant = group.personBVariant
   if (!variant) return ''
+  const parts: string[] = []
+  if (variant.identity.source !== 'empty' && variant.identity.name) {
+    parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+  }
+  if (variant.costume.source !== 'empty' && variant.costume.name) {
+    parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+  }
   const compiled = compilePersonBVariant(variant)
   const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
     .filter(Boolean)
     .join('；')
-  return text ? `B：${slotTextPreview(text)}` : 'B（空设定）'
+  if (text) parts.push(`文字「${slotTextPreview(text)}」`)
+  return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
 }
 
 /** 泛型去重计数（保持简单：只关心「有几个不同值」）。 */

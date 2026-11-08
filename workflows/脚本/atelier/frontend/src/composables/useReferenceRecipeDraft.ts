@@ -40,6 +40,7 @@ import {
   deriveSlotModes,
 } from './recipeTextFragments'
 import type {
+  RecipePersonBImage,
   RecipePersonBVariant,
   RecipeSlotKey,
   RecipeSlotMode,
@@ -741,6 +742,155 @@ function clearExtraCostume(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 人物B变体绑图（2026-11-08）
+// ---------------------------------------------------------------------------
+
+/** 当前激活变体下标（越界回落到最后一个合法项）。 */
+function activeVariantPosition(): number {
+  const last = personBVariants.value.length - 1
+  return Math.min(Math.max(activePersonBVariantIndex.value, 0), last)
+}
+
+/** 只替换激活变体的一张图，其余变体保持不变。 */
+function updateActiveVariantImage(
+  kind: 'identity' | 'costume',
+  image: RecipePersonBImage,
+): void {
+  const position = activeVariantPosition()
+  if (position < 0) return
+  personBVariants.value = personBVariants.value.map((item, index) =>
+    index === position ? { ...item, [kind]: image } : item,
+  )
+}
+
+/** 变体的 B 身份图（人像库单图）；同时同步页面全局第 4 槽。 */
+function setPersonBIdentityLibrary(id: string, name: string): void {
+  ensurePersonBVariant()
+  updateActiveVariantImage('identity', {
+    source: 'library',
+    library: 'portrait',
+    id,
+    path: '',
+    name,
+  })
+  setExtraLibrary('portrait', id, name)
+}
+
+/** 变体的 B 身份图（本地上传）；同时同步页面全局第 4 槽。 */
+function setPersonBIdentityUpload(path: string, name: string): void {
+  ensurePersonBVariant()
+  updateActiveVariantImage('identity', {
+    source: 'upload',
+    library: '',
+    id: '',
+    path,
+    name,
+  })
+  setExtraUpload(path, name)
+}
+
+/** 清空变体的 B 身份图与页面全局第 4 槽。 */
+function clearPersonBIdentity(): void {
+  updateActiveVariantImage('identity', {
+    source: 'empty',
+    library: '',
+    id: '',
+    path: '',
+    name: '',
+  })
+  clearExtra()
+}
+
+/** 变体的 B 服装图（库条目）；同时同步页面全局第 5 槽。 */
+function setPersonBCostumeLibrary(
+  library: 'costume' | 'costume-anime',
+  id: string,
+  name: string,
+): void {
+  ensurePersonBVariant()
+  updateActiveVariantImage('costume', {
+    source: 'library',
+    library,
+    id,
+    path: '',
+    name,
+  })
+  setExtraCostumeLibrary(library, id, name)
+}
+
+/** 变体的 B 服装图（本地上传）；同时同步页面全局第 5 槽。 */
+function setPersonBCostumeUpload(path: string, name: string): void {
+  ensurePersonBVariant()
+  updateActiveVariantImage('costume', {
+    source: 'upload',
+    library: '',
+    id: '',
+    path,
+    name,
+  })
+  setExtraCostumeUpload(path, name)
+}
+
+/** 清空变体的 B 服装图与页面全局第 5 槽。 */
+function clearPersonBCostume(): void {
+  updateActiveVariantImage('costume', {
+    source: 'empty',
+    library: '',
+    id: '',
+    path: '',
+    name: '',
+  })
+  clearExtraCostume()
+}
+
+/**
+ * 把激活变体绑定的两张图投影回全局第 4/5 槽。
+ *
+ * 页面只在「人物B工作流」下调用；切变体后第 4 槽展示、预览与槽位计数都跟着走。
+ */
+function syncPersonBImagesFromVariant(): void {
+  const variant = activePersonBVariant.value
+  if (!variant) return
+
+  const identity = variant.identity
+  if (identity.source === 'library' && (identity.library === 'portrait' || identity.library === 'hair')) {
+    if (
+      extra.value.source !== 'library' ||
+      extra.value.library !== identity.library ||
+      extra.value.id !== identity.id
+    ) {
+      setExtraLibrary(identity.library, identity.id, identity.name)
+    }
+  } else if (identity.source === 'upload' && identity.path) {
+    if (extra.value.source !== 'upload' || extra.value.path !== identity.path) {
+      setExtraUpload(identity.path, identity.name)
+    }
+  } else if (extra.value.source !== 'empty') {
+    clearExtra()
+  }
+
+  const costume = variant.costume
+  if (
+    costume.source === 'library' &&
+    (costume.library === 'costume' || costume.library === 'costume-anime')
+  ) {
+    if (
+      extraCostume.value.source !== 'library' ||
+      extraCostume.value.library !== costume.library ||
+      extraCostume.value.id !== costume.id
+    ) {
+      setExtraCostumeLibrary(costume.library, costume.id, costume.name)
+    }
+  } else if (costume.source === 'upload' && costume.path) {
+    if (extraCostume.value.source !== 'upload' || extraCostume.value.path !== costume.path) {
+      setExtraCostumeUpload(costume.path, costume.name)
+    }
+  } else if (extraCostume.value.source !== 'empty') {
+    clearExtraCostume()
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 通用
 // ---------------------------------------------------------------------------
 
@@ -1001,6 +1151,49 @@ function normalizeSupplementFlags(): void {
 }
 
 /**
+ * 旧快照的单张 B 身份 / B 服装迁移到第一条变体（2026-11-08）。
+ *
+ * 只在变体本身还没有绑图时迁移，绝不覆盖新格式数据；发型库的 extra 不迁移
+ * （第 4 槽在发型工作流下是背面发型图，不属于 B 身份）。
+ */
+function migratePersonBVariantImages(
+  variants: RecipePersonBVariant[],
+  extraSlot: StoredReferenceExtraSlot,
+  costumeSlot: StoredReferenceCostumeSlot,
+): RecipePersonBVariant[] {
+  const identityFromSlot: RecipePersonBImage | null =
+    extraSlot.source === 'library' && extraSlot.library === 'portrait'
+      ? {
+          source: 'library',
+          library: 'portrait',
+          id: extraSlot.id,
+          path: '',
+          name: extraSlot.name,
+        }
+      : null
+  const costumeFromSlot: RecipePersonBImage | null =
+    costumeSlot.source === 'empty'
+      ? null
+      : {
+          source: costumeSlot.source,
+          library: costumeSlot.library,
+          id: costumeSlot.id,
+          path: costumeSlot.path,
+          name: costumeSlot.name,
+        }
+  if (!identityFromSlot && !costumeFromSlot) return variants
+
+  const list = variants.length ? variants : [createEmptyPersonBVariant('b-1')]
+  const first = list[0]!
+  const identity =
+    first.identity.source === 'empty' && identityFromSlot ? identityFromSlot : first.identity
+  const costume =
+    first.costume.source === 'empty' && costumeFromSlot ? costumeFromSlot : first.costume
+  if (identity === first.identity && costume === first.costume) return list
+  return [{ ...first, identity, costume }, ...list.slice(1)]
+}
+
+/**
  * 把快照里的文本补充 / 负向写进内存。
  *
  * 同一会话只写一次（见 `textFragmentsRestoredFromStorage`）：页面可能多次挂载，
@@ -1044,6 +1237,12 @@ function restoreTextFragmentsFromSettings(
   } else {
     personBVariants.value = []
   }
+  // 2026-11-08：旧单张 B 身份/服装 → 第一条变体的绑定图（已是新格式则不动）。
+  personBVariants.value = migratePersonBVariantImages(
+    personBVariants.value,
+    stored.extra,
+    stored.extraCostume,
+  )
   // 记住用户最后编辑的变体；越界时回落到最后一组。
   activePersonBVariantIndex.value = Math.min(
     stored.personBVariantIndex,
@@ -1239,6 +1438,20 @@ watch(
   { deep: true, flush: 'sync' },
 )
 
+/**
+ * 第 5 槽单独落盘（2026-11-08 补漏）。
+ *
+ * 此前只有 `persist()` 里带 `extraCostume`，但 `persist()` 没有调用方，
+ * 导致 B 服装刷新后丢失；补上独立 watcher，与第 4 槽同口径。
+ */
+watch(
+  extraCostume,
+  () => {
+    writeReferenceStudioSettings({ extraCostume: { ...extraCostume.value } })
+  },
+  { deep: true, flush: 'sync' },
+)
+
 /** 人像槽已选判定；不传 id 时返回「该槽是否非空」。 */
 function isPortraitSelected(id?: string): boolean {
   if (id === undefined) return portrait.value.length > 0
@@ -1282,6 +1495,14 @@ export function useReferenceRecipeDraft() {
     setExtraCostumeUpload,
     setExtraCostumeLibrary,
     clearExtraCostume,
+    // 2026-11-08：B 变体绑定身份图/服装图（多选配对由此实现）
+    setPersonBIdentityLibrary,
+    setPersonBIdentityUpload,
+    clearPersonBIdentity,
+    setPersonBCostumeLibrary,
+    setPersonBCostumeUpload,
+    clearPersonBCostume,
+    syncPersonBImagesFromVariant,
     // 文本补充（八类碎片）与负向提示词（2026-11-06）
     textFragments,
     negativePrompt,

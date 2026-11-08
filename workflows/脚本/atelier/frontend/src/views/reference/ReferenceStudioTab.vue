@@ -1125,19 +1125,47 @@ const hairPickerOpen = ref(false)
 /** 第 5 槽展示名；空串 = 未选，仍由人物服饰碎片兜底。 */
 const extraCostumeName = computed(() => extraCostume.value.name)
 
-/** P0-5：整批共享的人物B信息摘要（生成清单头展示）。 */
+/** P0-5：人物B信息摘要（生成清单头展示；图片按变体绑定统计）。 */
 const personBInfo = computed(() => {
   if (!showPersonBEditor.value) return ''
-  const parts: string[] = []
-  if (extraKind.value === 'person_b' && extraFilled.value) {
-    parts.push(`身份图「${extraName.value}」`)
-  }
-  if (supportsExtraCostumeSlot.value && extraCostumeFilled.value) {
-    parts.push(`B服装「${extraCostumeName.value}」`)
-  }
-  parts.push(`${draft.personBVariants.value.length} 组文字变体`)
+  const variants = draft.personBVariants.value
+  const identityBound = variants.filter((item) => item.identity.source !== 'empty').length
+  const costumeBound = variants.filter((item) => item.costume.source !== 'empty').length
+  const parts = [
+    `${variants.length} 组 B 变体`,
+    `身份图 ${identityBound} 组`,
+    `服装图 ${costumeBound} 组`,
+  ]
   return `人物B：${parts.join(' · ')}`
 })
+
+/**
+ * 人物B工作流下，切换变体时把变体绑定的两张图投影回第 4/5 槽。
+ * 三槽/发型工作流不投影，避免把发型背面图误当 B 身份图。
+ */
+watch(
+  [
+    extraKind,
+    () => draft.activePersonBVariantIndex.value,
+    () => draft.personBVariants.value.length,
+  ],
+  () => {
+    if (extraKind.value !== 'person_b') return
+    draft.syncPersonBImagesFromVariant()
+  },
+  { immediate: true },
+)
+
+/** 第 4 槽移除：人物B工作流下同时清空当前变体绑定的身份图。 */
+function clearExtraSlot(): void {
+  if (extraKind.value === 'person_b') draft.clearPersonBIdentity()
+  else clearExtra()
+}
+
+/** 第 5 槽移除：同时清空当前变体绑定的 B 服装图。 */
+function clearPersonBCostumeSlot(): void {
+  draft.clearPersonBCostume()
+}
 
 function onHairPick(item: HairItem): void {
   setExtraLibrary('hair', item.id, item.标题)
@@ -1155,8 +1183,8 @@ function onExtraCostumeUploaded(items: UploadedReference[]): void {
     )
     return
   }
-  draft.setExtraCostumeUpload(first.path, first.name)
-  toast.success('已添加人物B服装参考图（整批共用这 1 张）')
+  draft.setPersonBCostumeUpload(first.path, first.name)
+  toast.success('已添加人物B服装参考图（绑定到当前 B 变体）')
 }
 
 function onExtraCostumeError(message: string): void {
@@ -1172,6 +1200,11 @@ function onExtraUploaded(items: UploadedReference[]): void {
     toast.error(
       `${extraSlotLabel.value}参考图被拒绝。原因：上传结果不在 uploads 上传目录内。下一步：用本页的上传入口重新选择图片。`,
     )
+    return
+  }
+  if (extraKind.value === 'person_b') {
+    draft.setPersonBIdentityUpload(first.path, first.name)
+    toast.success('已添加人物B身份图（绑定到当前 B 变体）')
     return
   }
   setExtra(first.path, first.name)
@@ -1468,10 +1501,10 @@ onMounted(async () => {
               <span class="extra-item__body">
                 <span class="extra-item__name" :title="extraName">{{ extraName }}</span>
                 <span class="extra-item__meta">
-                  {{ extraLibrary === 'hair' ? '来自发型库 · 提交背面无脸裁切图' : extraLibrary === 'portrait' ? '来自人像库 · 作为人物B身份参考' : '来自 uploads' }} · 作为{{ extraSlotLabel }}
+                  {{ extraLibrary === 'hair' ? '来自发型库 · 提交背面无脸裁切图' : extraLibrary === 'portrait' ? '来自人像库 · 作为人物B身份参考' : '来自 uploads' }} · 作为{{ extraSlotLabel }}<template v-if="extraKind === 'person_b'">（当前 B 变体 {{ draft.activePersonBVariantIndex.value + 1 }}）</template>
                 </span>
               </span>
-              <button type="button" class="extra-item__remove" @click="clearExtra">移除</button>
+              <button type="button" class="extra-item__remove" @click="clearExtraSlot">移除</button>
             </div>
             <!-- 图为主 + 文本补充：有图时文字作为「此外需体现」，不做纯文字第 4 槽 -->
             <p v-if="manualPromptActive" class="extra-item__hint" data-testid="studio-extra-text-manual">
@@ -1544,7 +1577,7 @@ onMounted(async () => {
         @remove="onRemovePersonBVariant"
         @pick-costume="pickPersonBCostume"
         @switch-workflow="switchToPersonBWorkflow"
-        @clear-costume="clearExtraCostume"
+        @clear-costume="clearPersonBCostumeSlot"
         @upload-costume="onExtraCostumeUploaded"
         @upload-costume-error="onExtraCostumeError"
       />

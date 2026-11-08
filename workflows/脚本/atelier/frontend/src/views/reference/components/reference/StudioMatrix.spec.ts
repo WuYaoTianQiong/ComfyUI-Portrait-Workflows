@@ -257,8 +257,8 @@ describe('StudioMatrix 生成清单', () => {
     const titles = wrapper
       .findAll('[data-testid="studio-matrix-group"]')
       .map((group) => group.text())
-    expect(titles.some((text) => text.includes('B：金色齐肩短发'))).toBe(true)
-    expect(titles.some((text) => text.includes('B：深棕高马尾'))).toBe(true)
+    expect(titles.some((text) => text.includes('文字「金色齐肩短发」'))).toBe(true)
+    expect(titles.some((text) => text.includes('文字「深棕高马尾」'))).toBe(true)
   })
 
   it('删掉 1 张人像导致原首组键失效时，自动展开新的首组而不是整块收起', async () => {

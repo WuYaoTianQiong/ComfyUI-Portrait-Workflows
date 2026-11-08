@@ -1173,18 +1173,31 @@ export function useReferenceRecipe() {
       groups,
       MAX_SUBMIT_CONCURRENCY,
       async (group): Promise<SubmitOutcome> => {
+        // 2026-11-08：人物B工作流下，每个 B 变体绑定自己的身份图/服装图；
+        // 非人物B工作流（发型/三槽）仍用页面全局的第 4 槽。
+        const useVariantImages =
+          previewWorkflow.value?.extraKind === 'person_b' && draft.hasPairPose.value
+        const variantForGroup = useVariantImages
+          ? (group.personBVariant ?? draft.activePersonBVariant.value)
+          : null
+        const variantIdentity = variantForGroup?.identity
+        const variantCostume = variantForGroup?.costume
         const request = buildRecipeRequest(group.slots, {
           style: style.value,
           promptSuffix: promptSuffix.value,
-          extraPath: extraPath.value,
-          extraId: extraId.value,
-          extraLibrary: extraLibrary.value,
-          // 第 4 槽不进入批次维度：每组共用同一份 extra / extra_text。
+          extraPath: variantForGroup ? (variantIdentity?.path ?? '') : extraPath.value,
+          extraId: variantForGroup ? (variantIdentity?.id ?? '') : extraId.value,
+          extraLibrary: variantForGroup
+            ? (variantIdentity?.library ?? '')
+            : extraLibrary.value,
+          // 第 4 槽文字补充仍按页面全局发送（B 文字走变体自己的碎片）。
           extraText: extraText.value,
-          // V2-C 第 5 槽（人物B服装）同样整批共享，不进入批次维度。
-          extraCostumePath: extraCostumePath.value,
-          extraCostumeId: extraCostumeId.value,
-          extraCostumeLibrary: extraCostumeLibrary.value,
+          // V2-C 第 5 槽（人物B服装）：有变体绑图时逐组发送，否则整批共享。
+          extraCostumePath: variantForGroup ? (variantCostume?.path ?? '') : extraCostumePath.value,
+          extraCostumeId: variantForGroup ? (variantCostume?.id ?? '') : extraCostumeId.value,
+          extraCostumeLibrary: variantForGroup
+            ? (variantCostume?.library ?? '')
+            : extraCostumeLibrary.value,
           // v1.5：每组提交自己的 B 变体；无变体时回退到当前变体 / 旧自由文字。
           personBVariant: draft.hasPairPose.value
             ? (group.personBVariant ?? draft.activePersonBVariant.value)

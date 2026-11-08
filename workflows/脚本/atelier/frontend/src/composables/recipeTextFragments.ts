@@ -435,6 +435,48 @@ export interface RecipePersonBVariant {
   id: string
   fragments: RecipeTextFragments
   freeText: string
+  /** 2026-11-08：本变体绑定的 B 身份图（第 4 槽单图）。 */
+  identity: RecipePersonBImage
+  /** 2026-11-08：本变体绑定的 B 服装图（第 5 槽单图）。 */
+  costume: RecipePersonBImage
+}
+
+/**
+ * 人物B变体内绑定的单张图片。
+ *
+ * 与 `StoredReferenceExtraSlot` / `StoredReferenceCostumeSlot` 同构（少一个
+ * text 字段），让「变体」在持久化里自包含，不依赖页面全局的第 4/5 槽。
+ */
+export interface RecipePersonBImage {
+  source: 'empty' | 'library' | 'upload'
+  library: string
+  id: string
+  path: string
+  name: string
+}
+
+/** 空图片（未选）。 */
+export function createEmptyPersonBImage(): RecipePersonBImage {
+  return { source: 'empty', library: '', id: '', path: '', name: '' }
+}
+
+/** 单张图片容错归一；非法 / 缺字段按空处理。 */
+export function clonePersonBImage(source: unknown): RecipePersonBImage {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return createEmptyPersonBImage()
+  }
+  const record = source as Record<string, unknown>
+  const kind =
+    record.source === 'library' || record.source === 'upload' ? record.source : 'empty'
+  if (kind === 'empty') return createEmptyPersonBImage()
+  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+  return {
+    source: kind,
+    library: text(record.library),
+    id: text(record.id),
+    path: text(record.path),
+    name: text(record.name),
+  }
 }
 
 /** 变体数量软上限：超过后批量配对产物过多，UI 直接禁止新增。 */
@@ -442,7 +484,13 @@ export const MAX_PERSON_B_VARIANTS = 8
 
 /** 新建一个空变体（只清空三类人物碎片，其余类不使用但保持结构完整）。 */
 export function createEmptyPersonBVariant(id: string): RecipePersonBVariant {
-  return { id, fragments: createEmptyRecipeTextFragments(), freeText: '' }
+  return {
+    id,
+    fragments: createEmptyRecipeTextFragments(),
+    freeText: '',
+    identity: createEmptyPersonBImage(),
+    costume: createEmptyPersonBImage(),
+  }
 }
 
 /** 变体只描述 B 的人物特征：保留三类人物碎片，强制 person='B'，其余类清空。 */
@@ -464,7 +512,13 @@ export function clonePersonBVariant(
   index = 0,
 ): RecipePersonBVariant | null {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null
-  const record = source as { id?: unknown; fragments?: unknown; freeText?: unknown }
+  const record = source as {
+    id?: unknown
+    fragments?: unknown
+    freeText?: unknown
+    identity?: unknown
+    costume?: unknown
+  }
   const id =
     typeof record.id === 'string' && record.id.trim()
       ? record.id.trim()
@@ -473,6 +527,8 @@ export function clonePersonBVariant(
     id,
     fragments: normalizeVariantFragments(record.fragments),
     freeText: typeof record.freeText === 'string' ? record.freeText : '',
+    identity: clonePersonBImage(record.identity),
+    costume: clonePersonBImage(record.costume),
   }
 }
 

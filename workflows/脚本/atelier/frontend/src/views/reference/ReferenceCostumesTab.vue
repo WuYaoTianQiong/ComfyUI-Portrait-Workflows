@@ -86,8 +86,8 @@ const {
   toggleCostume,
   isCostumeSelected,
   extraCostume,
-  setExtraCostumeLibrary,
-  clearExtraCostume,
+  setPersonBCostumeLibrary,
+  clearPersonBCostume,
 } = useReferenceRecipeDraft()
 
 const toast = useToast()
@@ -248,12 +248,12 @@ function onPageSizeChange(next: number): void {
 function onToggleCostume(item: CostumeItem): void {
   if (personBCostumeTarget.value) {
     if (isPersonBCostume(item)) {
-      clearExtraCostume()
-      toast.info(`已清除人物B服装「${item.服装名称}」`)
+      clearPersonBCostume()
+      toast.info(`已清除当前B变体的服装「${item.服装名称}」`)
     } else {
       const library = item.library === 'costume-anime' ? 'costume-anime' : 'costume'
-      setExtraCostumeLibrary(library, item.id, item.服装名称)
-      toast.success(`已设为人物B服装「${item.服装名称}」（整批共用这一张）`)
+      setPersonBCostumeLibrary(library, item.id, item.服装名称)
+      toast.success(`已设为当前B变体的服装「${item.服装名称}」`)
     }
     return
   }

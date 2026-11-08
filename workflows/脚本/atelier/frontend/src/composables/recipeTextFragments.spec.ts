@@ -278,6 +278,47 @@ describe('v1.5 人物A / 人物B 碎片隔离', () => {
     expect(variants[0].fragments.场景环境).toEqual([])
   })
 
+  it('旧变体没有绑定图时，克隆后身份图/服装图为空', () => {
+    const variants = clonePersonBVariants([
+      { id: 'b-old', fragments: createEmptyRecipeTextFragments(), freeText: '旧数据' },
+    ])
+    expect(variants[0].identity.source).toBe('empty')
+    expect(variants[0].costume.source).toBe('empty')
+  })
+
+  it('新变体保留绑定的身份图与服装图', () => {
+    const variants = clonePersonBVariants([
+      {
+        id: 'b-new',
+        fragments: createEmptyRecipeTextFragments(),
+        freeText: '',
+        identity: {
+          source: 'library',
+          library: 'portrait',
+          id: 'p-1',
+          path: '',
+          name: '短发',
+        },
+        costume: {
+          source: 'upload',
+          library: '',
+          id: '',
+          path: 'uploads/b.png',
+          name: 'b.png',
+        },
+      },
+    ])
+    expect(variants[0].identity).toEqual({
+      source: 'library',
+      library: 'portrait',
+      id: 'p-1',
+      path: '',
+      name: '短发',
+    })
+    expect(variants[0].costume.source).toBe('upload')
+    expect(variants[0].costume.path).toBe('uploads/b.png')
+  })
+
   it('compilePersonBVariant 返回 B 的面/身、服饰与自由文字', () => {
     const variant = {
       ...createEmptyPersonBVariant('b-1'),

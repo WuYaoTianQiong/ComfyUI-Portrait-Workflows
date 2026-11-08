@@ -284,7 +284,7 @@ function previewContent(content: string): string {
         @error="emit('uploadCostumeError', $event)"
       />
       <p class="person-b__meta">
-        选择后人物B的服装 / 配饰 / 鞋以该图为准，整批共用这一张。
+        选择后人物B的服装 / 配饰 / 鞋以该图为准，绑定到当前 B 变体。
       </p>
     </div>
 

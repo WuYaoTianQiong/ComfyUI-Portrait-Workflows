@@ -52,8 +52,8 @@ const {
   togglePortrait,
   isPortraitSelected,
   extra,
-  setExtraLibrary,
-  clearExtra,
+  setPersonBIdentityLibrary,
+  clearPersonBIdentity,
 } = useReferenceRecipeDraft()
 const toast = useToast()
 
@@ -204,11 +204,11 @@ function onTogglePortrait(item: PortraitItem): void {
   const label = item.发型名称 || item.标题
   if (personBIdentityTarget.value) {
     if (isPersonBIdentity(item)) {
-      clearExtra()
-      toast.info(`已清除人物B身份图「${label}」`)
+      clearPersonBIdentity()
+      toast.info(`已清除当前B变体的身份图「${label}」`)
     } else {
-      setExtraLibrary('portrait', item.id, item.标题)
-      toast.success(`已设为人物B身份图「${label}」（整批共用这一张）`)
+      setPersonBIdentityLibrary(item.id, item.标题)
+      toast.success(`已设为当前B变体的身份图「${label}」`)
     }
     return
   }

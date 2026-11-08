@@ -117,17 +117,25 @@ function workflowNameOf(group: RecipeBatchGroup): string {
 /**
  * P0-5：结果字幕补人物 B 变体（与生成清单同口径）。
  *
- * 只展示本组自己的 B 文字；身份图 / B 服装是整批共享输入，不写入批次对象，
- * 仍以提交前的清单摘要为准，避免结果区用「当前选择」误标历史批次。
+ * 2026-11-08 起 B 身份图 / B 服装按变体绑定并写入每个批次组，因此结果区直接读
+ * 本组自己的图名，不用「当前选择」误标历史批次。
  */
 function personBLabelOf(group: RecipeBatchGroup): string {
   const variant = group.personBVariant
   if (!variant) return ''
+  const parts: string[] = []
+  if (variant.identity.source !== 'empty' && variant.identity.name) {
+    parts.push(`身份「${slotTextPreview(variant.identity.name)}」`)
+  }
+  if (variant.costume.source !== 'empty' && variant.costume.name) {
+    parts.push(`服装「${slotTextPreview(variant.costume.name)}」`)
+  }
   const compiled = compilePersonBVariant(variant)
   const text = [compiled.portraitText, compiled.costumeText, compiled.freeText]
     .filter(Boolean)
     .join('；')
-  return text ? `B：${slotTextPreview(text)}` : 'B（空设定）'
+  if (text) parts.push(`文字「${slotTextPreview(text)}」`)
+  return parts.length ? `B：${parts.join(' · ')}` : 'B（空设定）'
 }
 
 /** 尺寸文案：画质与比例都有 → `quality · ratio`；都空表示跟随参考图。 */

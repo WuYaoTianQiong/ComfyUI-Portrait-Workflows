@@ -24,6 +24,7 @@ import {
   NO_IMAGE_SLOT_HINT,
   POSE_TEXT_PAIR_CONFLICT_HINT,
   TEXT_MODE_FRAGMENT_REQUIRED_HINT,
+  createEmptyPersonBVariant,
   createEmptyRecipeTextFragments,
   describeAlternateModeConflicts,
 } from './recipeTextFragments'
@@ -373,7 +374,7 @@ describe('buildRecipeRequest', () => {
         promptSuffix: '',
         extraPath: '',
         personBVariant: {
-          id: 'b-1',
+          ...createEmptyPersonBVariant('b-1'),
           fragments: {
             ...createEmptyRecipeTextFragments(),
             人物面部: [{ type: '人物面部', content: '鹅蛋脸', person: 'B' }],
