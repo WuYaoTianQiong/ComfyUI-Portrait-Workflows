@@ -345,9 +345,11 @@ function onToggleBodyMode(enabled: boolean): void {
     return
   }
   const hadCostume = draft.costumeCount.value > 0
+  const hadPersonBCostume =
+    draft.personBCostume.value.length > 0 || draft.extraCostumeFilled.value
   setBodyMode(enabled ? 'bare' : 'costume')
-  if (enabled && hadCostume) {
-    toast.info('已清空服装槽：素体展示不提交服装，避免后端拒绝 bare + 服装的组合')
+  if (enabled && (hadCostume || hadPersonBCostume)) {
+    toast.info('已清空服装槽（含人物B）：素体展示不提交服装，避免后端拒绝 bare + 服装的组合')
   }
 }
 
@@ -770,6 +772,17 @@ const hasPersonBPairPose = computed(() =>
 const showPersonBPairLayout = computed(
   () => draft.personBEnabled.value && (draft.hasPairPose.value || hasPersonBPairPose.value),
 )
+
+/** 双人布局下 B 单人姿势被隐藏时提示，避免用户以为数据丢失。 */
+const hiddenPersonBPoseNotice = computed(() => {
+  if (!showPersonBPairLayout.value) return ''
+  const hiddenCount = draft.personBPose.value.filter(
+    (entry) =>
+      entry.item.composition !== 'pair' && !entry.item.id.startsWith('pair'),
+  ).length
+  if (!hiddenCount) return ''
+  return `双人姿势布局下已隐藏人物B单人姿势（已保留 ${hiddenCount} 张，移除双人姿势后可见）`
+})
 
 /** 双人布局下 A/B 只保留人像 / 服装两槽。 */
 const aVisibleCards = computed(() =>
@@ -1282,8 +1295,34 @@ const hairPickerOpen = ref(false)
 /** 第 5 槽展示名；空串 = 未选，仍由人物服饰碎片兜底。 */
 const extraCostumeName = computed(() => extraCostume.value.name)
 
-/** P0-5：人物B信息摘要（生成清单头展示；图片按变体绑定统计）。 */
+/** B 组素材名摘要；同名去重，超过 2 个折叠成「等 N 张」。 */
+function personBMaterialNames(names: readonly string[]): string {
+  const unique = [...new Set(names.filter(Boolean))]
+  if (!unique.length) return ''
+  const head = unique.slice(0, 2).join('、')
+  return unique.length > 2 ? `${head} 等 ${unique.length} 张` : head
+}
+
+/** P0-4：人物B信息摘要（生成清单头展示；新 B 组为预览态，旧变体保留原口径）。 */
 const personBInfo = computed(() => {
+  if (draft.personBEnabled.value) {
+    const parts: string[] = []
+    const portrait = personBMaterialNames(
+      draft.personBPortrait.value.map((item) => item.发型名称 || item.标题),
+    )
+    const costume = personBMaterialNames(
+      draft.personBCostume.value.map((item) => item.服装名称),
+    )
+    const pose = personBMaterialNames(
+      draft.personBPose.value.map((entry) => entry.item.姿势名称),
+    )
+    if (portrait) parts.push(`B 人像「${portrait}」`)
+    if (costume) parts.push(`B 服装「${costume}」`)
+    if (pose) parts.push(`B 姿势「${pose}」`)
+    return parts.length
+      ? `人物B组（预览·待接入）：${parts.join(' · ')}`
+      : '人物B组（预览·待接入）：未选择素材'
+  }
   if (!showPersonBEditor.value) return ''
   const variants = draft.personBVariants.value
   const identityBound = variants.filter((item) => item.identity.source !== 'empty').length
@@ -1810,6 +1849,14 @@ onMounted(async () => {
           </span>
         </button>
       </div>
+
+      <p
+        v-if="hiddenPersonBPoseNotice"
+        class="person-b-note"
+        data-testid="studio-person-b-pose-hidden"
+      >
+        {{ hiddenPersonBPoseNotice }}
+      </p>
 
       <StudioPersonBEditor
         v-if="showPersonBEditor && !draft.personBEnabled.value"
@@ -2550,6 +2597,11 @@ onMounted(async () => {
 /* 双人布局：A / B 各只留人像 + 服装两槽 */
 .slot-grid--pair {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 双人布局：A 组第 4 张跨两列，避免只占半行留下空洞 */
+.char-layout--pair .slot-grid--pair .extra-block {
+  grid-column: 1 / -1;
 }
 
 /* 共用双人姿势：右列跨 A/B 两行，竖向居中 */

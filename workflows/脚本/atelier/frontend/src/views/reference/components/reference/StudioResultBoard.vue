@@ -287,6 +287,15 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
             </button>
           </header>
 
+          <!-- 壳阶段：本批提交时人物B组的预览摘要（明确标注待接入，不代表已提交） -->
+          <p
+            v-if="batch.personBPreview"
+            class="result-board__personb"
+            data-testid="studio-batch-personb-preview"
+          >
+            {{ batch.personBPreview }}
+          </p>
+
           <!-- 运行中批次：进度条 + 任务号（折叠按钮已 disabled） -->
           <div v-if="isRecipeBatchRunning(batch)" class="result-board__running">
             <div
@@ -464,6 +473,17 @@ function openPreview(entry: RecipeGroupResult, index: number): void {
   padding: var(--gap-sm) var(--gap);
   border-bottom: 1px solid var(--border-faint);
   background: var(--surface-panel);
+}
+
+/* 壳阶段人物B组摘要：与批次头同底色，避免被当成真实提交结果 */
+.result-board__personb {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap);
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--surface-panel);
+  color: var(--text-body-soft);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 .result-board__toggle {
