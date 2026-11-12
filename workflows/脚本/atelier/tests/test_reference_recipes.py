@@ -1266,8 +1266,32 @@ def test_adult_bare_removes_neutral_clauses(api, recipe_env, monkeypatch):
     assert resp.status_code == 200
     prompt = resp.json()["prompt"]
     assert "不穿任何服装与配饰" in prompt
+    # 2026-11-08 措辞修订：「素体」引导塑料模特感，成人向改写实表述
+    assert "全身赤裸" in prompt
+    assert "素体" not in prompt
     for word in ("非性化", "性暗示", "不得出现性器官"):
         assert word not in prompt, f"成人向提示词不应出现「{word}」"
+
+
+def test_adult_bare_pair_drops_mannequin_wording(api, recipe_env, monkeypatch):
+    """V4b：18+ + bare + 双人 → 素体措辞改为全身赤裸，四肢/人数约束保留。"""
+    monkeypatch.setattr(settings, "reference_allow_nsfw", True)
+    _seed_pair_pose(recipe_env)
+    resp = api.post(
+        "/api/reference/recipes",
+        json={
+            "pose_id": PAIR_ITEM["id"],
+            "body_mode": "bare",
+            "adult_mode": True,
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200
+    prompt = resp.json()["prompt"]
+    assert "两位成年女性，全身赤裸" in prompt
+    assert "素体" not in prompt
+    assert "每人只有两条腿、两只脚、两只手" in prompt
+    assert "禁止合并成一个人" in prompt
 
 
 def test_adult_pair_removes_modesty_clause_keeps_limbs(api, recipe_env, monkeypatch):

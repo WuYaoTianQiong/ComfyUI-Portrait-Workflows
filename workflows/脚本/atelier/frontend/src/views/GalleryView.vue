@@ -741,7 +741,36 @@ async function cleanupMissing() {
     const preview = await cleanupMissingImages(cleanupScope(), { dryRun: true })
 
     if (preview.guarded) {
-      toast.error(preview.message || '疑似路径异常，已阻止清理')
+      // 熔断说明缺失占比过半：可能是路径异常，也可能是图真的被删了。
+      // 给一次显式强制清理的机会，但必须二次确认，且仍只软删记录。
+      const sampleLines = preview.samples
+        .slice(0, 5)
+        .map((s) => `  · ${s.subfolder ? s.subfolder + '/' : ''}${s.filename}`)
+        .join('\n')
+      const forceOk = await confirmDialog({
+        title: '熔断：缺失比例过高',
+        content:
+          `扫描 ${preview.total} 条记录，其中 ${preview.will_clean} 条找不到文件，已阻止清理。\n\n` +
+          `${sampleLines}${preview.will_clean > 5 ? `\n  … 另有 ${preview.will_clean - 5} 条` : ''}\n\n` +
+          '请先确认 ComfyUI output 目录可访问、这些图确实已不在磁盘上。\n' +
+          '强制清理只会把这些记录标记为已删除，不动磁盘文件。确认继续？',
+        positiveText: '强制清理',
+        negativeText: '取消',
+      })
+      if (!forceOk) return
+
+      const forced = await cleanupMissingImages(cleanupScope(), {
+        dryRun: false,
+        force: true,
+      })
+      if (!forced.success) {
+        toast.error(forced.message || '强制清理未执行')
+        return
+      }
+      toast.success(
+        `已清理 ${forced.cleaned ?? 0} 条失效记录（共扫描 ${forced.total} 条）`,
+      )
+      queryClient.invalidateQueries({ queryKey: ['history'] })
       return
     }
     if (!preview.will_clean) {

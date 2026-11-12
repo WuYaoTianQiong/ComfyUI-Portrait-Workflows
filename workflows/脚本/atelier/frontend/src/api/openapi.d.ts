@@ -559,6 +559,7 @@ export interface paths {
          *
          *     默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。
          *     真正执行要同时传 `dry_run=false&confirm=true`。
+         *     缺失占比过半会熔断；确认路径无误、文件确实丢失后可传 `force=true` 强制放行。
          *
          *     筛选参数与画廊一致，避免"看着筛过的列表点清理，却清掉了范围外的记录"。
          */
@@ -5357,6 +5358,8 @@ export interface operations {
                 dry_run?: boolean;
                 /** @description dry_run=false 时必须显式传 true */
                 confirm?: boolean;
+                /** @description 确认路径无误、文件确实丢失时绕过熔断 */
+                force?: boolean;
                 favorite?: boolean;
                 search?: string;
                 category_id?: number;

@@ -710,6 +710,25 @@ def test_cleanup_missing_guard_blocks_mass_delete(api, seed_history):
     assert _deleted_count() == 0
 
 
+def test_cleanup_missing_force_bypasses_guard(api, seed_history):
+    """确认文件确实丢失后可强制清理：仍要求 confirm，但绕过 50% 熔断。"""
+    for i in range(25):
+        seed_history(filename=f"gone_{i}.png")
+
+    body = api.post(
+        "/api/images/cleanup_missing?dry_run=false&confirm=true&force=true"
+    ).json()
+    assert body["success"] is True
+    assert body["guarded"] is False
+    assert body["cleaned"] == 25
+    assert _deleted_count() == 25
+
+    assert (
+        api.post("/api/images/cleanup_missing?dry_run=false&force=true").json()["success"]
+        is False
+    )
+
+
 def test_cleanup_missing_scoped_by_category(api, seed_history, seed_taxonomy):
     """只清理当前筛选范围内的记录，范围外的一条都不能动。"""
     from app.models import Image, ImageCategory

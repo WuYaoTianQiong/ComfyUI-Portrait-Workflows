@@ -59,14 +59,15 @@ export function backfillImageTaxonomy() {
 
 /**
  * 缺失记录清理：默认只预览；执行必须显式 `dryRun: false`（后端还要求 confirm）。
- * 缺失占比过半时后端会熔断拒绝。
+ * 缺失占比过半时后端会熔断拒绝，确认文件确实丢失后可传 `force: true` 强制放行。
  */
 export function cleanupMissingImages(
   params: QueryParams = {},
-  options: { dryRun: boolean } = { dryRun: true },
+  options: { dryRun: boolean; force?: boolean } = { dryRun: true },
 ) {
   const query: QueryParams = { ...params, dry_run: options.dryRun }
   if (!options.dryRun) query.confirm = true
+  if (options.force) query.force = true
   return apiPost<CleanupPreview & { cleaned?: number }>(
     '/api/images/cleanup_missing',
     undefined,

@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -23,7 +23,7 @@ from peewee import fn
 from pydantic import BaseModel
 
 from app.config import settings
-from app.models import Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
+from app.models import FileTombstone, Image, GenJob, Prompt, EntityTag, ImageCategory, Category, Tag, inherit_prompt_taxonomy, backfill_image_taxonomy
 from app.services.comfyui_client import get_history_for_prompt, get_sync_client
 from app.services.image_meta import (
     compute_orientation,
@@ -59,6 +59,9 @@ _sync_lock = threading.Lock()
 _dir_mtimes: dict[str, float] = {}
 _last_full_scan = -1e9
 _FULL_SCAN_INTERVAL = 600.0
+# 同名新文件至少要比墓碑/软删记录晚这么多秒，才允许自动恢复；
+# 抵消 SQLite CURRENT_TIMESTAMP 的秒级精度与 mtime 浮点误差。
+_REVIVE_MIN_NEWER_SEC = 1.0
 # 一次性尺寸回填：旧磁盘扫描记录把 width/height 写成 0，列表接口会逐页回退到
 # PIL 解码。启动后第一次 sync 补一次即可；新记录在入库时已经写真实宽高。
 _dimensions_backfilled = False
@@ -337,6 +340,32 @@ def _safe_mtime(path: Path) -> float:
         return 0.0
 
 
+def _is_newer_than_db_time(fpath: Path, when, assume_utc: bool) -> bool:
+    """文件 mtime 是否明显晚于 DB 时间：用于区分「同路径旧图」与「同名新图」。
+
+    墓碑 deleted_at 由 SQLite CURRENT_TIMESTAMP 写入（UTC，仅秒精度），而
+    gen_history.captured_at 由 `datetime.fromtimestamp()` 写入（本地时区）；
+    两者语义不同，必须分别解释，否则会差出一个时区的误判。
+
+    另外要求至少晚 `_REVIVE_MIN_NEWER_SEC` 秒：captured_at 来自同一个文件的
+    mtime，浮点/秒级截断会让"刚被删的同一文件"看起来比记录更新；只有明显更晚
+    的 mtime 才算用户重新出了这张图。
+    """
+    if when is None:
+        return False
+    if isinstance(when, str):
+        try:
+            when = datetime.fromisoformat(when)
+        except ValueError:
+            return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc if assume_utc else None)
+    try:
+        return fpath.stat().st_mtime > when.timestamp() + _REVIVE_MIN_NEWER_SEC
+    except OSError:
+        return False
+
+
 def _source_version(filename: str, subfolder: str, img_type: str) -> str:
     """源文件的内容版本：`st_mtime_ns` 的十进制字符串；取不到返回空串。
 
@@ -404,12 +433,25 @@ def _sync_disk_orphans(force: bool = False) -> int:
         return 0
 
     # 收集 DB 中已有的所有 (filename, subfolder, img_type) 组合。
-    # 必须包含软删除行：否则只删记录、保留文件的软删除会在下一轮扫描被重新入库。
+    # 软删除行单独记录：文件若被同名新图覆盖（mtime 晚于入库时间），说明用户
+    # 重新出了这张图，应恢复该行；否则保持隐藏。必须把软删除行排除在 existing
+    # 之外，否则只删记录、保留文件的软删除会在下一轮扫描被重新入库。
     existing = set()
-    for r in Image.select(Image.filename, Image.subfolder, Image.img_type).tuples():
-        existing.add((r[0], r[1] or "", r[2] or "output"))
-    # 行被墓碑回收后仍要拦住同一路径。
-    blocked = tombstoned_keys()
+    deleted_rows: dict[tuple[str, str, str], tuple[int, datetime | None]] = {}
+    for r in Image.select(
+        Image.id, Image.filename, Image.subfolder, Image.img_type,
+        Image.is_deleted, Image.captured_at,
+    ).tuples():
+        path_key = (r[1], r[2] or "", r[3] or "output")
+        if r[4]:
+            deleted_rows[path_key] = (r[0], r[5])
+        else:
+            existing.add(path_key)
+    # 行被墓碑回收后仍要拦住同一路径；只有文件比墓碑更新时才视为重新出图。
+    tombstones = {
+        t.asset_key: t.deleted_at
+        for t in FileTombstone.select(FileTombstone.asset_key, FileTombstone.deleted_at)
+    }
 
     _build_job_index()
     added = 0
@@ -418,9 +460,35 @@ def _sync_disk_orphans(force: bool = False) -> int:
         candidates.sort(key=lambda item: _safe_mtime(item[0]))
         for fpath, subfolder in candidates:
             fname = fpath.name
-            if (fname, subfolder, "output") in existing:
+            path_key = (fname, subfolder, "output")
+            if path_key in existing:
                 continue
-            if tombstone_key(fname, subfolder, "output") in blocked:
+            tkey = tombstone_key(fname, subfolder, "output")
+            tombstoned_at = tombstones.get(tkey)
+            if tombstoned_at is not None:
+                if not _is_newer_than_db_time(fpath, tombstoned_at, assume_utc=True):
+                    continue
+                # 同名新文件覆盖了旧文件：旧墓碑不再代表这张图
+                clear_tombstone(fname, subfolder, "output")
+                tombstones.pop(tkey, None)
+            dead = deleted_rows.get(path_key)
+            if dead is not None:
+                if not _is_newer_than_db_time(fpath, dead[1], assume_utc=False):
+                    continue
+                # 软删行对应的是旧文件；同名新文件应恢复该行，而不是再插一条
+                try:
+                    Image.update(
+                        is_deleted=False,
+                        missing_since=None,
+                        captured_at=datetime.fromtimestamp(_safe_mtime(fpath)),
+                        view_url=build_view_url(fname, subfolder, "output"),
+                    ).where(Image.id == dead[0]).execute()
+                    existing.add(path_key)
+                    deleted_rows.pop(path_key, None)
+                    added += 1
+                    prewarm_thumbnail(fname, subfolder, "output", 600)
+                except Exception:
+                    pass
                 continue
             try:
                 sz = fpath.stat().st_size
@@ -933,6 +1001,7 @@ _GUARD_MIN_TOTAL = 20
 def cleanup_missing_files(
     dry_run: bool = Query(True, description="true=只预览将清理哪些，不写库"),
     confirm: bool = Query(False, description="dry_run=false 时必须显式传 true"),
+    force: bool = Query(False, description="确认路径无误、文件确实丢失时绕过熔断"),
     favorite: bool = Query(None),
     search: str = Query(""),
     category_id: int = Query(None),
@@ -947,6 +1016,7 @@ def cleanup_missing_files(
 
     默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。
     真正执行要同时传 `dry_run=false&confirm=true`。
+    缺失占比过半会熔断；确认路径无误、文件确实丢失后可传 `force=true` 强制放行。
 
     筛选参数与画廊一致，避免"看着筛过的列表点清理，却清掉了范围外的记录"。
     """
@@ -961,7 +1031,11 @@ def cleanup_missing_files(
     ]
     total = len(rows)
     will_clean = len(missing)
-    guarded = total >= _GUARD_MIN_TOTAL and will_clean / total > _GUARD_RATIO
+    guarded = (
+        not force
+        and total >= _GUARD_MIN_TOTAL
+        and will_clean / total > _GUARD_RATIO
+    )
     samples = [
         {
             "id": r.id,

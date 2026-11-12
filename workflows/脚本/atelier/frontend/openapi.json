@@ -5928,7 +5928,7 @@
     },
     "/api/images/cleanup_missing": {
       "post": {
-        "description": "把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。\n\n默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。\n真正执行要同时传 `dry_run=false&confirm=true`。\n\n筛选参数与画廊一致，避免\"看着筛过的列表点清理，却清掉了范围外的记录\"。",
+        "description": "把「图片文件已不在磁盘」的记录标记为软删除（可逆，不动磁盘文件）。\n\n默认 dry_run：只返回将清理多少条 + 样本文件名，不写库。\n真正执行要同时传 `dry_run=false&confirm=true`。\n缺失占比过半会熔断；确认路径无误、文件确实丢失后可传 `force=true` 强制放行。\n\n筛选参数与画廊一致，避免\"看着筛过的列表点清理，却清掉了范围外的记录\"。",
         "operationId": "cleanup_missing_files_api_images_cleanup_missing_post",
         "parameters": [
           {
@@ -5952,6 +5952,18 @@
               "default": false,
               "description": "dry_run=false 时必须显式传 true",
               "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "确认路径无误、文件确实丢失时绕过熔断",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "确认路径无误、文件确实丢失时绕过熔断",
+              "title": "Force",
               "type": "boolean"
             }
           },
