@@ -118,12 +118,12 @@
       },
       "widgets_values": [
         "1:1 (Square)",
-        0.4,
+        1.0,
         32
       ],
       "widgets_values_named": {
         "aspect_ratio": "1:1 (Square)",
-        "megapixels": 0.4,
+        "megapixels": 1.0,
         "multiple": 32
       }
     },

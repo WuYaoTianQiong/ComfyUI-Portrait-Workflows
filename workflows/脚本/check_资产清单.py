@@ -22,10 +22,11 @@ r"""
 设计原则：只读不写。校验结果由人工确认后才改 `资产清单.md`（清单里「用途」列是人工知识，不可自动覆盖）。
 """
 import argparse
+import io
+import json
 import os
 import re
 import sys
-import io
 
 ASSET_EXTS = {".safetensors", ".gguf", ".ckpt", ".pth", ".pt", ".onnx", ".bin"}
 SKIP_DIRS = {"_tmp", ".git", "__pycache__"}
@@ -85,6 +86,8 @@ def scan_models(models_root):
 
 def scan_dir_jsons(*dirs):
     """扫描若干目录（含一层子目录）里的工作流 JSON。"""
+    # 索引/清单类 JSON 不是工作流，不计入磁盘实际
+    IGNORE = {"工作流清单.json"}
     found = {}
     for root in dirs:
         if not root or not os.path.isdir(root):
@@ -96,7 +99,7 @@ def scan_dir_jsons(*dirs):
                 continue
             for fn in filenames:
                 # 跳过隐藏文件（.merkle-snapshot.json 这类索引/快照，不是工作流）
-                if fn.startswith("."):
+                if fn.startswith(".") or fn in IGNORE:
                     continue
                 if fn.lower().endswith(".json"):
                     found.setdefault(fn.lower(), os.path.join(dirpath, fn))
@@ -157,13 +160,22 @@ def main():
     # ---- 磁盘实际 ----
     disk_models = scan_models(models_root) if os.path.isdir(models_root) else {}
     wf_root = workflows_root
+    # 2026-11-06 起工作流已迁到「通用工作流/」，2026-11-11 起本脚本把这两个子目录一并算作“当前在用”
+    cur_dirs = [
+        wf_root,
+        os.path.join(workflows_root, "通用工作流"),
+        os.path.join(workflows_root, "图库专用工作流"),
+    ]
     hist = os.path.join(workflows_root, "历史工作流")
-    disk_wf = scan_dir_jsons(wf_root, hist)
+    disk_wf = scan_dir_jsons(*cur_dirs, hist)
 
     # ---- 清单登记 ----
     # 逐行解析：明确标注"已归档 / 已删除 / 找不到"的行不算"在用登记"（清单里就是这么写的）
     # 注意：不能只匹配 "❌"——工作流速查表里"骨骼控图"列的取值就是 ❌，会误伤整行。
-    SKIP_LINE = re.compile(r"已归档|未找到|已无此文件|已废弃|勿照抄|❌\s*`|历史工作流|workflows_local_bak")
+    # 2026-11-11 修：原来要求行内不出现「历史工作流 / 已归档」，导致 1.1 里带
+    # “实验数据已归档至 `_cleanup/…`”的说明行被整行跳过（等于没登记）。
+    # 现在只认“明确指向归档位置的写法”（`历史工作流\` 在反引号内）与 ❌ 前缀。
+    SKIP_LINE = re.compile(r"未找到|已无此文件|已废弃|勿照抄|❌\s*`|`历史工作流[\\/]|`workflows_local_bak")
     reg_models, reg_wf, skipped = {}, {}, []
     for line in text.splitlines():
         if SKIP_LINE.search(line):
@@ -203,10 +215,75 @@ def main():
     report("模型资产", reg_models, disk_models, outer_disk)
 
     # 工作流：区分“当前在用”与“历史工作流”
-    cur = scan_dir_jsons(wf_root)
-    hist_disk = scan_dir_jsons(hist)
-    wf_cur = {k: v for k, v in cur.items() if os.path.dirname(v) == wf_root}
-    report("工作流", reg_wf, wf_cur, hist_disk, title="（对照的是 workflows 根目录，不含 历史工作流\\）")
+    cur = scan_dir_jsons(*cur_dirs)
+
+    def scan_all_jsons(root):
+        """递归扫全部层级（历史工作流里的子目录也要能提示“实际在哪”）。"""
+        found = {}
+        for dirpath, _, filenames in os.walk(root):
+            for fn in filenames:
+                if fn.startswith(".") or fn in {"工作流清单.json"}:
+                    continue
+                if fn.lower().endswith(".json"):
+                    found.setdefault(fn.lower(), os.path.join(dirpath, fn))
+        return found
+
+    hist_disk = scan_all_jsons(hist)
+    wf_cur = {k: v for k, v in cur.items() if os.path.dirname(v) in cur_dirs}
+    report("工作流", reg_wf, wf_cur, hist_disk,
+           title="（对照 根目录 + 通用工作流\\ + 图库专用工作流\\，不含 历史工作流\\）")
+
+    # ---------- 交叉校验：工作流清单.json（Atelier 机器视图） ↔ 资产清单 1.1/1.2（人读视图） ----------
+    # 两套记录并存是对的（一份给程序认身份、一份给人讲用法），但必须能自动比对，否则会漂。
+    manifest_path = os.path.join(workflows_root, "工作流清单.json")
+    sec11, sec12, section = {}, {}, None
+    for line in text.splitlines():
+        if line.startswith("### 1.1"):
+            section = "1.1"
+            continue
+        if line.startswith("### 1.2"):
+            section = "1.2"
+            continue
+        if line.startswith("### 1.3") or line.startswith("## "):
+            section = None
+            continue
+        if section is None or SKIP_LINE.search(line):
+            continue
+        for tok in backticked(line):
+            c = classify_token(tok)
+            if c and c[0] == "工作流":
+                (sec11 if section == "1.1" else sec12)[c[1].lower()] = c[1]
+
+    o.write("\n=== 交叉校验（工作流清单.json ↔ 资产清单 1.1/1.2） ===\n")
+    if not os.path.isfile(manifest_path):
+        o.write("  工作流清单.json 不存在，跳过（可跑 脚本/atelier/tools/gen_workflow_manifest.py 生成）\n")
+    else:
+        try:
+            mf = json.loads(open(manifest_path, encoding="utf-8").read())
+        except ValueError as exc:
+            mf = {}
+            o.write(f"  工作流清单.json 解析失败：{exc}\n")
+        mfw = mf.get("workflows", []) if isinstance(mf, dict) else []
+        active = {w["name"].lower(): w for w in mfw if w.get("status") == "active"}
+        archived = {w["name"].lower(): w for w in mfw if w.get("status") != "active"}
+        drift = []
+        for k, w in sorted(active.items()):
+            if k not in sec11:
+                drift.append(f"  ✗ 清单 active 但不在 1.1：{w['name']}（清单 file={w.get('file')}）")
+        for k, w in sorted(archived.items()):
+            if k in sec11:
+                drift.append(f"  ✗ 已归档但仍在 1.1：{w['name']}（清单 file={w.get('file')}）")
+        manifest_names = {w["name"].lower() for w in mfw}
+        for k in sorted({os.path.basename(v).lower() for v in wf_cur.values()} - manifest_names):
+            drift.append(f"  ✗ 磁盘有但清单未收录：{k}（重跑 gen_workflow_manifest.py）")
+        o.write(f"  清单 active={len(active)} / archived={len(archived)}；"
+                f"资产清单 1.1={len(sec11)} 项、1.2={len(sec12)} 项\n")
+        if drift:
+            o.write(f"  发现 {len(drift)} 处漂移（改任一侧后都要同步另一侧）：\n")
+            for d in drift:
+                o.write(d + "\n")
+        else:
+            o.write("  ✅ 两侧一致\n")
 
     out = o.getvalue()
     try:  # Windows 控制台默认 GBK，遇到符号会崩
