@@ -204,3 +204,10 @@ workflows/脚本/atelier/frontend/vitest.config.ts.timestamp-*.mjs
 # 会话内的临时脚本与产物（诊断、探针、一次性的 *_tmp_* 输出）
 workflows/脚本/atelier/_tmp_*
 
+# 2026-11-12 清理：模型 A/B 实测图（H3 Dials 五档 / FLUX3 / MOSS 对比），共约 105MB
+# 结论已写进 文档/日志/，图片只作本机证据留存，绝不入库 / 不进发布物
+workflows/_abtest/
+workflows/脚本/_abtest/
+# 一次性工作流节点 dump（可从对应 JSON 重新生成）
+workflows/_tmp_wf.txt
+
