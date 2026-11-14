@@ -199,3 +199,13 @@ def test_workflow_list_scope_all_keeps_empty_slots(api):
     rows = resp.json()["workflows"]
     assert isinstance(rows, list)
     assert all(row["slots"] == [] for row in rows)
+
+
+def test_caps_marks_image_output():
+    """图片处理入口据此排除图生文 / 视频类工作流。"""
+    image_wf = {"1": {"class_type": "SaveImage", "inputs": {}}}
+    custom_save = {"1": {"class_type": "SaveImageFromSource", "inputs": {}}}
+    text_wf = {"1": {"class_type": "ShowText|pysssss", "inputs": {}}}
+    assert detect_workflow_caps(image_wf)["image_output"] is True
+    assert detect_workflow_caps(custom_save)["image_output"] is True
+    assert detect_workflow_caps(text_wf)["image_output"] is False

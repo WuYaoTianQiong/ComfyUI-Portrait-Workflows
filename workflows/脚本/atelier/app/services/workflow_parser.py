@@ -1009,6 +1009,12 @@ def detect_workflow_caps(api_workflow: dict) -> dict[str, object]:
         "negative_cfg": negative_cfg,
         "quality": False,
         "orientation": False,
+        "image_output": any(
+            isinstance(n, dict)
+            and ("SaveImage" in str(n.get("class_type", ""))
+                 or "PreviewImage" in str(n.get("class_type", "")))
+            for n in api_workflow.values()
+        ),
     }
     if text_nodes:
         spec = _TEXT_ENCODE_NODES[text_nodes[0].get("class_type")]

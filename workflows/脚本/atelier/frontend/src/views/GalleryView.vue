@@ -476,13 +476,13 @@ const { revealImage } = useImageLocation()
 const { run, runText, busy: regenerating, error: generateError } = useGenerate()
 
 /**
- * 用这张图的记录重新出图。
+ * 用这张图的提示词和当前工作流再抽一张。
  *
- * 两条路：
- * - 有 `prompt_id` → `/api/runs`，出图关联回那条提示词
- * - 没有 `prompt_id`（同步进来的图）→ 用 `prompt_params` 里存的文本与参数走
- *   `/api/runs/text`。记录里参数是全的（prompt / seed / model / 宽高），所以
- *   「拿这张图再出一版」不需要先有提示词记录。
+ * 明确不承诺复现原图：
+ * - 有 `prompt_id` → `/api/runs`，seed 传 0（后端视为未指定并随机）；
+ * - 没有 `prompt_id`（试跑/同步图）→ 用 `prompt_params.prompt` 走 `/api/runs/text`，
+ *   seed 传 null 同样随机。
+ * 原实现会在试跑图上沿用原 seed，导致“再出一张”和原图几乎一样。
  */
 async function regenerate(target: HistoryItem) {
   const params = (target.prompt_params ?? {}) as Record<string, unknown>
@@ -493,12 +493,13 @@ async function regenerate(target: HistoryItem) {
         quality: caps.value.quality ? quality.value : '1.0x',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
         aspectRatio: aspectRatio.value || defaultRatio.value,
+        seed: 0,
       })
     } else if (typeof params.prompt === 'string' && params.prompt.trim()) {
       await runText({
         prompt: params.prompt,
         negative_prompt: typeof params.negative_prompt === 'string' ? params.negative_prompt : '',
-        seed: Number(params.seed) || null,
+        seed: null,
         workflowPath: workflowPath.value,
         quality: caps.value.quality ? quality.value : '1.0x',
         orientation: caps.value.orientation ? outOrientation.value : 'keep',
@@ -510,7 +511,7 @@ async function regenerate(target: HistoryItem) {
     }
     // 提交完才关灯箱：期间按钮转圈，关掉后也有 toast，不会出现"点了没反应"
     if (generateError.value) toast.error(`提交失败：${generateError.value}`)
-    else toast.success('已提交重新出图，可在「任务」页看进度')
+    else toast.success('已提交再抽一张，可在「任务」页看进度')
   } finally {
     closeLightbox()
   }

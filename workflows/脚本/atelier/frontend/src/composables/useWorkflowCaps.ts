@@ -22,6 +22,8 @@ export interface WorkflowCaps {
   negative_cfg: number | null
   quality: boolean
   orientation: boolean
+  /** 工作流是否真的产出图片；旧响应可能没有该字段，按 true 处理。 */
+  image_output?: boolean
 }
 
 export type QualityMode = 'seedvr' | 'scale' | 'megapixels' | 'none'

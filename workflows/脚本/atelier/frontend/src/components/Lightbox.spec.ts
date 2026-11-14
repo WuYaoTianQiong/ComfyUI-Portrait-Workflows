@@ -197,7 +197,7 @@ describe('Lightbox', () => {
 
     // 写操作：投喂 / 重出图 / 提示词 / 收藏 / 删除（图标化后按 data-tip 断言）
     expect(tips.some((t) => t.startsWith('把这张图作为输入运行工作流'))).toBe(false)
-    expect(tips.some((t) => t.startsWith('用这张图的记录重新出图'))).toBe(false)
+    expect(tips.some((t) => t.startsWith('用当前工作流再抽一张'))).toBe(false)
     expect(tools).not.toContain('↗')
     expect(tools).not.toContain('☆')
     expect(tips).not.toContain('删除记录')
@@ -247,10 +247,16 @@ describe('Lightbox', () => {
     const wfs = [
       { path: '/wf/t2i.json', name: '文生图', image_slots: 0 },
       {
+        path: '/wf/text.json',
+        name: '图生文',
+        image_slots: 1,
+        caps: { image_output: false },
+      },
+      {
         path: '/wf/up.json',
         name: '超分工作流',
         image_slots: 1,
-        caps: { prompt: true, negative: true, quality: true, orientation: false },
+        caps: { prompt: true, negative: true, quality: true, orientation: false, image_output: true },
         params: { quality_mode: 'scale', quality_tiers: ['1.0x'] },
         size_preview: {},
       },
@@ -262,6 +268,7 @@ describe('Lightbox', () => {
     expect(wrapper.find('.wf-picker').exists()).toBe(true)
     expect(wrapper.find('.wf-picker').text()).toContain('超分工作流')
     expect(wrapper.find('.wf-picker').text()).not.toContain('文生图')
+    expect(wrapper.find('.wf-picker').text()).not.toContain('图生文')
 
     await wrapper.find('.wf-picker input').setValue('一只猫')
     await wrapper.find('.wf-actions .primary').trigger('click')

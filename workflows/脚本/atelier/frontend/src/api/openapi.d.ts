@@ -4267,6 +4267,11 @@ export interface components {
          */
         WorkflowCaps: {
             /**
+             * Image Output
+             * @default true
+             */
+            image_output: boolean;
+            /**
              * Negative
              * @default true
              */

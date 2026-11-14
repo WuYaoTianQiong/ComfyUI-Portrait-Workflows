@@ -395,9 +395,11 @@ const processPrompt = ref('')
 const processNegative = ref('')
 const processQuality = useWorkflowQuality(processWf)
 const processWorkflowRows = computed(() => (props.workflows ?? []) as WorkflowRow[])
-/** `/process` 只注入第一个 LoadImage：只列单图工作流，避免选到文生图/多图流直接失败。 */
+/** `/process` 只注入第一个 LoadImage：只列单图且确实产出图片的工作流。 */
 const processWorkflows = computed(() =>
-  processWorkflowRows.value.filter((wf) => (wf.image_slots ?? 0) === 1),
+  processWorkflowRows.value.filter(
+    (wf) => (wf.image_slots ?? 0) === 1 && wf.caps?.image_output !== false,
+  ),
 )
 const { caps: processCaps, qualityOptions: processQualityOptions } =
   useWorkflowCaps(processWf, processWorkflowRows)
@@ -1258,8 +1260,8 @@ function onKey(event: KeyboardEvent) {
         class="tool"
         :class="{ loading: regenerating }"
         :disabled="regenerating"
-        :data-tip="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
-        :aria-label="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
+        :data-tip="regenerating ? '正在提交/生成…' : '用当前工作流再抽一张（随机种子）'"
+        :aria-label="regenerating ? '正在提交/生成…' : '用当前工作流再抽一张（随机种子）'"
         @click="emit('regenerate', item)"
       >
         <Icon v-if="!regenerating" name="refresh-cw" />

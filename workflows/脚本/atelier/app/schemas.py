@@ -277,6 +277,9 @@ class WorkflowCaps(BaseModel):
     negative_cfg: float | None = None
     quality: bool = True
     orientation: bool = True
+    #: 工作流是否真的产出图片（有 SaveImage/PreviewImage 类节点）。
+    #: 图生文 / 视频类工作流为 False，图片处理入口应排除。
+    image_output: bool = True
 
 
 class WorkflowParams(BaseModel):
