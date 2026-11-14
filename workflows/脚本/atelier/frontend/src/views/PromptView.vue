@@ -44,6 +44,7 @@ import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { usePromptWorkspace } from '../composables/usePromptWorkspace'
 import { usePromptList } from '../composables/usePromptList'
 import { usePromptMatrix } from '../composables/usePromptMatrix'
+import { useMatrixFlowParams } from '../composables/useMatrixFlowParams'
 import { resolveHistoryItems } from '../composables/useImagePreview'
 import type { MatrixImage } from '../composables/useWorkflowMatrix'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
@@ -478,6 +479,8 @@ function onShotChanged() {
  * 一格一 job：图片的工作流归属取 job 级字段，混流塞进一个 batch job
  * 会让灯箱把模型标错。提交仍走 useGenerate 的共享底座（幂等键 / 输出目录 / SSE）。
  */
+const { overrides: flowOverrides } = useMatrixFlowParams()
+
 const matrix = usePromptMatrix({
   scope: () => (selectedId.value === null ? '' : `p:${selectedId.value}`),
   promptText: () => draft.value?.prompt ?? '',
@@ -487,6 +490,8 @@ const matrix = usePromptMatrix({
   currentWorkflow: () => workflowPath.value,
   ratio: () => aspectRatio.value || defaultRatio.value,
   tier: () => quality.value,
+  // 横评按逐流参数提交；未覆盖时回落到上面的全局比例/档位
+  overrides: (paths) => flowOverrides(paths),
   orientation: () => orientation.value,
   submit: (req) =>
     submitAndTrack<{ success: boolean; job_id?: number | null }>('/api/runs', {

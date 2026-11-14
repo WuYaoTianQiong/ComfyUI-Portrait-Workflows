@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import WorkflowPicker from './WorkflowPicker.vue'
 import Icon from './Icon.vue'
 import WorkflowParams from './WorkflowParams.vue'
+import FlowParamsRow from './FlowParamsRow.vue'
 import PromptMatrixStack from './PromptMatrixStack.vue'
 import TagInput from './TagInput.vue'
 import QueryState from './QueryState.vue'
@@ -122,6 +123,11 @@ const alignOptions: Array<{ value: MatrixAlign; label: string }> = [
   { value: 'first', label: '对齐到首个' },
   { value: 'ref', label: '对齐到 1024×1536' },
 ]
+
+/** 各流比例不同时尺寸对齐没有统一口径：计划层已自动按原生档，控件也要如实显示。 */
+const mixedRatio = computed(
+  () => new Set(props.matrix.plan.usable.map((row) => row.ratio)).size > 1,
+)
 /** 标签为空时压成一行；展开过一次后先收起（切换条目再重置），避免边填边塌。 */
 const tagsExpanded = ref(false)
 
@@ -204,8 +210,11 @@ watch(
             <label v-if="matrix.enabled" class="matrix-align">
               <span>尺寸对齐</span>
               <select
-                :value="matrix.align"
-                title="各工作流的档位机制不同，同一档出的尺寸并不一样"
+                :value="mixedRatio ? 'native' : matrix.align"
+                :disabled="mixedRatio"
+                :title="mixedRatio
+                  ? '各流比例不同，已自动按各自原生档对齐；比例统一后可再选对齐方式'
+                  : '各工作流的档位机制不同，同一档出的尺寸并不一样'"
                 @change="matrix.setAlign(($event.target as HTMLSelectElement).value as MatrixAlign)"
               >
                 <option v-for="opt in alignOptions" :key="opt.value" :value="opt.value">
@@ -218,6 +227,7 @@ watch(
               同种子
             </label>
             <WorkflowParams
+              v-if="!matrix.enabled"
               :quality="quality"
               :orientation="orientation"
               :aspect-ratio="aspectRatio"
@@ -307,6 +317,18 @@ watch(
                 : (generating ? '生成中…' : '出图') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="matrix.enabled" class="matrix-flows">
+          <FlowParamsRow
+            v-for="path in matrix.paths"
+            :key="path"
+            :path="path"
+            :workflows="workflows"
+          />
+          <p v-if="!matrix.paths.length" class="matrix-flows-empty">
+            勾选工作流后，这里逐个设置比例与分辨率。
+          </p>
         </div>
 
         <div v-if="matrix.enabled" class="matrix-plan">
@@ -626,6 +648,23 @@ watch(
   align-items: center;
   gap: var(--gap-xs);
   flex: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* 逐流参数：横评态下每个工作流一行，各自比例与分辨率 */
+.matrix-flows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.matrix-flows-empty {
+  margin: 0;
   color: var(--muted);
   font-size: var(--fs-xs);
 }
