@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { apiDelete, apiGet, apiPost, viewUrl } from '../api/client'
+import Icon from './Icon.vue'
 import { useToast } from '../composables/useToast'
 import { useImageLocation } from '../composables/useImageLocation'
 import type { HistoryItem, ImageDetail, PromptDetail } from '../api/types'
@@ -1111,9 +1112,9 @@ function onKey(event: KeyboardEvent) {
         :title="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
         @click="processOpen = !processOpen"
       >
-        ⚡
+        <Icon name="zap" />
       </button>
-      <button v-if="showFileActions" class="tool" title="下载原图" @click="download">⬇</button>
+      <button v-if="showFileActions" class="tool" title="下载原图" @click="download"><Icon name="download" /></button>
       <button
         v-if="showFileActions"
         class="tool"
@@ -1128,7 +1129,7 @@ function onKey(event: KeyboardEvent) {
         title="到画廊里按文件名定位这张图"
         @click="emit('open-in-gallery', item.filename)"
       >
-        🗂
+        <Icon name="crosshair" />
       </button>
       <button
         v-if="canRegenerate && !readonly"
@@ -1138,7 +1139,7 @@ function onKey(event: KeyboardEvent) {
         :title="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
         @click="emit('regenerate', item)"
       >
-        {{ regenerating ? '' : '🔄' }}
+        <Icon v-if="!regenerating" name="refresh-cw" />
       </button>
       <button
         v-if="item.prompt_id && !readonly"
@@ -1168,7 +1169,7 @@ function onKey(event: KeyboardEvent) {
       <button class="tool" :class="{ active: showInfo }" title="显示/隐藏信息" @click="toggleInfo">
         ⓘ
       </button>
-      <button v-if="!readonly" class="tool danger" title="删除记录" @click="removeItem">🗑</button>
+      <button v-if="!readonly" class="tool danger" title="删除记录" @click="removeItem"><Icon name="trash-2" /></button>
       <button class="tool close" title="关闭 (Esc)" @click="emit('close')">✕</button>
     </header>
 
@@ -1249,7 +1250,7 @@ function onKey(event: KeyboardEvent) {
           title="查看这张图的提示词、工作流与出图参数"
           @click="promptInfoOpen = true"
         >
-          📋 出图档案
+          <Icon name="clipboard-list" /> 出图档案
         </button>
 
         <div v-if="item.tags.length" class="tags">
@@ -1264,7 +1265,7 @@ function onKey(event: KeyboardEvent) {
         </div>
 
         <p v-if="item.missing" class="missing-tip">
-          🚫 磁盘上已找不到这个文件，记录与标签仍保留
+          <Icon name="ban" /> 磁盘上已找不到这个文件，记录与标签仍保留
         </p>
 
         <p class="hint">

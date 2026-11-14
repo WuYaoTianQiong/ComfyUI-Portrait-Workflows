@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import WorkflowPicker from './WorkflowPicker.vue'
+import Icon from './Icon.vue'
 import WorkflowParams from './WorkflowParams.vue'
 import PromptMatrixStack from './PromptMatrixStack.vue'
 import TagInput from './TagInput.vue'
@@ -299,9 +300,10 @@ watch(
                 : generating || !workflowPath || !caps.prompt"
               @click="onGenerate"
             >
+              <Icon v-if="!matrix.enabled && !generating" name="play" />
               {{ matrix.enabled
                 ? (matrix.submitting ? '提交中…' : `⇄ 横评出图 ${matrix.plan.total} 张`)
-                : (generating ? '生成中…' : '🚀 出图') }}
+                : (generating ? '生成中…' : '出图') }}
             </button>
           </div>
         </div>
@@ -335,7 +337,7 @@ watch(
             :title="draft.is_pinned ? '已置顶，点击取消' : '置顶这条提示词'"
             @click="emit('pin')"
           >
-            {{ draft.is_pinned ? '📌 已置顶' : '📌 置顶' }}
+            <Icon name="pin" /> {{ draft.is_pinned ? '已置顶' : '置顶' }}
           </button>
           <button class="btn btn-sm" :disabled="!dirty" @click="emit('revert')">撤销</button>
           <button

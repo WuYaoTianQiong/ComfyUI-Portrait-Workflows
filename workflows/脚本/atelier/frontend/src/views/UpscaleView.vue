@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
 import DiskPathList from '../components/DiskPathList.vue'
+import Icon from '../components/Icon.vue'
 import FilePicker from '../components/FilePicker.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { getFaceswapNodes } from '../api/editor'
@@ -137,7 +138,7 @@ async function submit() {
         <span>待超分图片（画廊多选）</span>
         <span class="count">已选 {{ total }} 张</span>
         <button class="btn btn-sm" title="从磁盘任意目录多选图片" @click="pickerOpen = true">
-          📁 磁盘<template v-if="paths.length"> {{ paths.length }}</template>
+          <Icon name="folder" /> 磁盘<template v-if="paths.length"> {{ paths.length }}</template>
         </button>
       </div>
       <ImagePicker v-model="ids" title="" />
@@ -212,7 +213,7 @@ async function submit() {
           :disabled="!canSubmit"
           @click="submit"
         >
-          {{ submitting ? '提交中…' : '🚀 开始超分' }}
+          <Icon v-if="!submitting" name="play" /> {{ submitting ? '提交中…' : '开始超分' }}
         </button>
       </div>
     </aside>

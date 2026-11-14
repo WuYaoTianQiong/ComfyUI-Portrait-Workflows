@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 
 import type { QualityOption, WorkflowCaps } from '../composables/useWorkflowCaps'
+import Icon from './Icon.vue'
 
 type Orientation = 'portrait' | 'landscape'
 
@@ -148,7 +149,7 @@ const isLandscape = computed(() => {
     :title="canFlipRatio ? '切换横竖（互为倒数的比例）' : '当前比例没有横竖对'"
     @click="toggleOrientation"
   >
-    {{ isLandscape ? '🖥️ 横' : '📱 竖' }}
+    <Icon :name="isLandscape ? 'rectangle-horizontal' : 'rectangle-vertical'" /> {{ isLandscape ? '横' : '竖' }}
   </button>
   <span
     v-if="workflowPath && !caps.quality"

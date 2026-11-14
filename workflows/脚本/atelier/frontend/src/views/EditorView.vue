@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import ImagePicker from '../components/ImagePicker.vue'
 import DiskPathList from '../components/DiskPathList.vue'
+import Icon from '../components/Icon.vue'
 import DropZone from '../components/DropZone.vue'
 import FilePicker from '../components/FilePicker.vue'
 import MaskEditorModal from '../components/MaskEditorModal.vue'
@@ -498,7 +499,7 @@ async function submit() {
       <div class="picker-head">
         <span>{{ roleMeta(i).label }}（{{ roleMeta(i).hint }}）</span>
         <button class="btn btn-sm" title="从磁盘任意目录选图" @click="group.pickerOpen = true">
-          📁 磁盘<template v-if="group.paths.length"> {{ group.paths.length }}</template>
+          <Icon name="folder" /> 磁盘<template v-if="group.paths.length"> {{ group.paths.length }}</template>
         </button>
       </div>
       <p v-if="i === 3" class="pick-hint">
@@ -709,7 +710,7 @@ async function submit() {
           :disabled="!canSubmit"
           @click="submit"
         >
-          {{ generating ? '生成中…' : '🚀 开始编辑' }}
+          <Icon v-if="!generating" name="play" /> {{ generating ? '生成中…' : '开始编辑' }}
         </button>
       </div>
     </aside>

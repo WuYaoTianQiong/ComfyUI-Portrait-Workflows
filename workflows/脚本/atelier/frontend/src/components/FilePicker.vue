@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
+import Icon from './Icon.vue'
 import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
 import JustifiedGrid from './JustifiedGrid.vue'
@@ -211,7 +212,7 @@ function rememberRatio(img: FsEntry, event: Event) {
     </template>
 
       <div class="nav">
-        <button class="btn btn-sm" :disabled="!data?.parent" title="上一级" @click="goUp">⬆ 上级</button>
+        <button class="btn btn-sm" :disabled="!data?.parent" title="上一级" @click="goUp"><Icon name="arrow-up" /> 上级</button>
         <select class="jump" @change="enter(($event.target as HTMLSelectElement).value)">
           <option value="">快速跳转…</option>
           <option v-for="r in data?.roots ?? []" :key="r.path" :value="r.path">
@@ -262,7 +263,7 @@ function rememberRatio(img: FsEntry, event: Event) {
             :title="d.path"
             @click="enter(d.path)"
           >
-            📁 {{ d.name }}
+            <Icon name="folder" /> {{ d.name }}
           </button>
           <EmptyState
             v-if="!(data?.dirs ?? []).length"

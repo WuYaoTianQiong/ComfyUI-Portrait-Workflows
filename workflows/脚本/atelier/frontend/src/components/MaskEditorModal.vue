@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
 
 import Modal from './Modal.vue'
+import Icon from './Icon.vue'
 
 /**
  * 涂抹遮罩编辑器。
@@ -609,16 +610,16 @@ onBeforeUnmount(() => {
     <div class="mask-editor">
       <div class="toolbar">
         <button class="btn btn-sm" :class="{ active: tool === 'brush' }" @click="tool = 'brush'">
-          🖌 画笔
+          <Icon name="paintbrush" /> 画笔
         </button>
         <button class="btn btn-sm" :class="{ active: tool === 'eraser' }" @click="tool = 'eraser'">
-          🧽 橡皮
+          <Icon name="eraser" /> 橡皮
         </button>
         <button class="btn btn-sm" :class="{ active: tool === 'wand' }" @click="tool = 'wand'">
-          🪄 魔棒
+          <Icon name="wand-2" /> 魔棒
         </button>
         <button class="btn btn-sm" :class="{ active: tool === 'pan' }" @click="tool = 'pan'">
-          ✋ 平移
+          <Icon name="hand" /> 平移
         </button>
         <label v-if="tool !== 'wand'" class="size">
           粗细

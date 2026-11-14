@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import Modal from './Modal.vue'
+import Icon from './Icon.vue'
 import WorkflowPicker from './WorkflowPicker.vue'
 import WorkflowParams from './WorkflowParams.vue'
 import PromptMatrixStack from './PromptMatrixStack.vue'
@@ -381,7 +382,7 @@ async function onCreated(id: number) {
               <span>基准种子</span>
               <input v-model="seedInput" type="number" min="0" step="1" placeholder="空 = 随机" />
             </label>
-            <button class="btn btn-sm" type="button" @click="randomSeed">🎲 随机</button>
+            <button class="btn btn-sm" type="button" @click="randomSeed"><Icon name="dices" /> 随机</button>
             <label class="lock" title="锁定后各工作流同列用同一个种子，差异才归因于模型">
               <input v-model="matrix.lockSeed" type="checkbox" />
               同种子

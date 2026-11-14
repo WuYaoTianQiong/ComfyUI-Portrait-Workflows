@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { viewUrl } from '../api/client'
 import EmptyState from './EmptyState.vue'
+import Icon from './Icon.vue'
 import type { HistoryItem } from '../api/types'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useImageLocation } from '../composables/useImageLocation'
@@ -247,7 +248,7 @@ onBeforeUnmount(() => {
         title="开启后，缩放与拖动会同时作用于所有图片"
         @click="linkZoom = !linkZoom"
       >
-        {{ linkZoom ? '🔗 缩放联动' : '🔗 独立缩放' }}
+        <Icon :name="linkZoom ? 'link-2' : 'unlink'" /> {{ linkZoom ? '缩放联动' : '独立缩放' }}
       </button>
       <button
         v-if="items.length === 3"

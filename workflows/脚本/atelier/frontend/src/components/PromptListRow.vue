@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PromptListItem } from '../api/types'
+import Icon from './Icon.vue'
 
 defineProps<{
   item: PromptListItem
@@ -31,7 +32,7 @@ defineEmits<{
     </button>
     <div class="row-body">
       <div class="row-title">
-        <span v-if="item.is_pinned" class="pin" title="置顶">📌</span>
+        <span v-if="item.is_pinned" class="pin" title="置顶"><Icon name="pin" /></span>
         <span v-if="item.is_favorite" class="star" title="收藏">★</span>
         <span class="name">{{ item.name || `#${item.id}` }}</span>
         <span v-if="item.rating" class="rating">{{ '★'.repeat(item.rating) }}</span>

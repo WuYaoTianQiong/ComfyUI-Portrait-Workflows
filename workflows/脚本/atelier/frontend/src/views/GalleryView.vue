@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 
 import Lightbox from '../components/Lightbox.vue'
+import Icon from '../components/Icon.vue'
 import CompareModal from '../components/CompareModal.vue'
 import Modal from '../components/Modal.vue'
 import GalleryFilterSidebar from '../components/GalleryFilterSidebar.vue'
@@ -936,7 +937,7 @@ function clearFilters() {
           title="扫描当前筛选下的记录，先预览再确认；只标记不动磁盘文件"
           @click="cleanupMissing"
         >
-          🧹 清理失效
+          <Icon name="brush-cleaning" /> 清理失效
         </button>
         <div class="pager">
           <button class="btn btn-sm" :disabled="page <= 1" @click="page--">上一页</button>

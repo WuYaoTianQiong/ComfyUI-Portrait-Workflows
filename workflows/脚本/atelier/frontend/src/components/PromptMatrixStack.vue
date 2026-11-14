@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import EmptyState from './EmptyState.vue'
 import PromptMatrixBoard from './PromptMatrixBoard.vue'
+import Icon from './Icon.vue'
 import type { PromptMatrixApi, MatrixBatch } from '../composables/usePromptMatrix'
 import type { MatrixImage, MatrixPlan } from '../composables/useWorkflowMatrix'
 
@@ -94,7 +95,7 @@ function fmtTime(iso: string): string {
           title="把这一批的文本存为提示词，并认领这批出好的图"
           @click="emit('save', batch)"
         >
-          💾 存为提示词{{ doneCount(batch) ? `（${doneCount(batch)} 张）` : '' }}
+          <Icon name="save" /> 存为提示词{{ doneCount(batch) ? `（${doneCount(batch)} 张）` : '' }}
         </button>
       </div>
       <PromptMatrixBoard

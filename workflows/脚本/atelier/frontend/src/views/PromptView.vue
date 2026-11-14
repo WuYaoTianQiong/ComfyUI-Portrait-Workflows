@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import MissingImageRunPanel from '../components/MissingImageRunPanel.vue'
 import PromptTrialPanel from '../components/PromptTrialPanel.vue'
+import Icon from '../components/Icon.vue'
 import PromptCreateModal from '../components/PromptCreateModal.vue'
 import PromptImportModal from '../components/PromptImportModal.vue'
 import Lightbox from '../components/Lightbox.vue'
@@ -1089,7 +1090,7 @@ onBeforeUnmount(() => {
               导出
             </button>
             <button class="btn btn-sm" title="临时试跑：粘贴外来提示词直接出图，不写回提示词库" @click="trialOpen = true">
-              🧪 试跑
+              <Icon name="flask-conical" /> 试跑
             </button>
             <details
               ref="moreMenu"
@@ -1176,7 +1177,7 @@ onBeforeUnmount(() => {
       <button class="btn btn-sm" title="展开侧栏" @click="sidebarCollapsed = false">»</button>
       <span class="rail-count" :title="`共 ${total} 条`">{{ total }}</span>
       <button class="btn btn-sm" title="新建提示词" @click="createOpen = true">＋</button>
-      <button class="btn btn-sm" title="临时试跑" @click="trialOpen = true">🧪</button>
+      <button class="btn btn-sm" title="临时试跑" @click="trialOpen = true"><Icon name="flask-conical" /></button>
     </aside>
 
     <div v-if="!sidebarCollapsed" class="resizer" title="拖动调整侧栏宽度" @mousedown.prevent="startResize" />

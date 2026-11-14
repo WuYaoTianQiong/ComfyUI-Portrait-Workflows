@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import WorkflowPicker from './WorkflowPicker.vue'
+import Icon from './Icon.vue'
 import WorkflowParams from './WorkflowParams.vue'
 import type { JobSnapshot } from '../api/types'
 import type { QualityOption, WorkflowCaps } from '../composables/useWorkflowCaps'
@@ -112,7 +113,7 @@ function onSearchInput(event: Event) {
       :title="negativeTip"
       @click="emit('open-negative')"
     >
-      🚫 负面提示词
+      <Icon name="ban" /> 负面提示词
       <span v-if="!negativeEffective" class="cap-badge">不生效</span>
     </button>
     <button
@@ -121,20 +122,20 @@ function onSearchInput(event: Event) {
       title="查看编译后的正向/负向（只编译，不出图）"
       @click="emit('open-compile')"
     >
-      🧩 编译
+      <Icon name="code-2" /> 编译
     </button>
     <button class="btn btn-sm" @click="emit('open-templates')">
-      📚 模板 {{ templatesCount }}
+      <Icon name="library" /> 模板 {{ templatesCount }}
     </button>
     <button class="btn btn-sm" title="随机抽一版并滚动定位，不出图" @click="emit('roll-one')">
-      🎲 随机一版
+      <Icon name="dices" /> 随机一版
     </button>
     <button
       class="btn btn-sm"
       :title="pinnedCount ? `锁定 ${pinnedCount} 列，其余随机` : '预览随机组合，确认后才出图'"
       @click="emit('preview-random')"
     >
-      🎲 预览
+      <Icon name="dices" /> 预览
     </button>
     <button
       class="btn btn-sm primary"
@@ -142,7 +143,7 @@ function onSearchInput(event: Event) {
       :disabled="generating || !canvasCount"
       @click="emit('run-once')"
     >
-      {{ generating ? '提交中…' : '🚀 试跑' }}
+      <Icon v-if="!generating" name="play" /> {{ generating ? '提交中…' : '试跑' }}
     </button>
     <span v-if="generateErrorText" class="gen-error">{{ generateErrorText }}</span>
     <button

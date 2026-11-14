@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 
 import { clearThumbnailCache } from '../api/system'
+import Icon from '../components/Icon.vue'
 import {
   autoClassifyAll as autoClassifyAllRequest,
   createCategory,
@@ -377,7 +378,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
       <template v-else>
         <div class="wf-toolbar">
           <label class="btn btn-sm wf-upload">
-            📁 上传自定义工作流
+            <Icon name="folder-up" /> 上传自定义工作流
             <input type="file" accept=".json,application/json" @change="uploadWorkflow" />
           </label>
           <span class="count">共 {{ workflowRows.length }} 个</span>
@@ -401,7 +402,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
             :title="w.hidden ? '恢复显示' : '隐藏（从下拉里移除）'"
             @click="setHidden(w.path, !w.hidden)"
           >
-            {{ w.hidden ? '👁' : '🚫' }}
+            <Icon :name="w.hidden ? 'eye' : 'eye-off'" />
           </button>
         </div>
         <EmptyState v-if="!workflowRows.length" text="没有找到工作流" />

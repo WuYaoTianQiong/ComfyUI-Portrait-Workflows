@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 
 import EmptyState from './EmptyState.vue'
 import Modal from './Modal.vue'
+import Icon from './Icon.vue'
 import { statusLabel } from '../utils/format'
 import { thumbnailUrl } from '../api/client'
 import { useImageLocation } from '../composables/useImageLocation'
@@ -242,7 +243,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
           :disabled="generating || !canvasCount"
           @click="emit('run-canvas')"
         >
-          {{ generating ? '提交中…' : '🚀 试跑' }}
+          <Icon v-if="!generating" name="play" /> {{ generating ? '提交中…' : '试跑' }}
         </button>
       </template>
       <template v-else-if="tab === 'random'">

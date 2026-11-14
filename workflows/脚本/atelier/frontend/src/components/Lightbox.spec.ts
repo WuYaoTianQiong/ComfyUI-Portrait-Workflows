@@ -193,15 +193,16 @@ describe('Lightbox', () => {
       props: { items: [withPrompt], index: 0, readonly: true },
     })
     const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+    const titles = wrapper.findAll('.bar .tool').map((button) => button.attributes('title') ?? '')
 
-    // 写操作：投喂 / 重出图 / 提示词 / 收藏 / 删除
-    expect(tools).not.toContain('⚡')
-    expect(tools).not.toContain('🔄')
+    // 写操作：投喂 / 重出图 / 提示词 / 收藏 / 删除（图标化后按 title 断言）
+    expect(titles.some((t) => t.startsWith('投喂给工作流处理'))).toBe(false)
+    expect(titles.some((t) => t.startsWith('用这张图的记录重新出图'))).toBe(false)
     expect(tools).not.toContain('↗')
     expect(tools).not.toContain('☆')
-    expect(tools).not.toContain('🗑')
+    expect(titles).not.toContain('删除记录')
     // 查看类：下载 / 翻转 / 旋转 / 1:1 / 缩放 / 信息 / 关闭
-    expect(tools).toContain('⬇')
+    expect(titles).toContain('下载原图')
     expect(tools).toContain('⇋')
     expect(tools).toContain('⟳')
     expect(tools).toContain('1:1')
@@ -214,8 +215,9 @@ describe('Lightbox', () => {
       props: { items: [item(1, 'a.png')], index: 0, fileActions: false },
     })
     const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+    const titles = wrapper.findAll('.bar .tool').map((button) => button.attributes('title') ?? '')
 
-    expect(tools).not.toContain('⬇')
+    expect(titles).not.toContain('下载原图')
     expect(tools).not.toContain('目录')
     expect(wrapper.find('.prompt-link').exists()).toBe(false)
     expect(wrapper.find('.info').exists()).toBe(true)
@@ -232,8 +234,9 @@ describe('Lightbox', () => {
   it('默认 fileActions=true：下载 / 目录 / 出片档案照常渲染', () => {
     const wrapper = mount(Lightbox, { props: { items: [item(1, 'a.png')], index: 0 } })
     const tools = wrapper.findAll('.bar .tool').map((button) => button.text())
+    const titles = wrapper.findAll('.bar .tool').map((button) => button.attributes('title') ?? '')
 
-    expect(tools).toContain('⬇')
+    expect(titles).toContain('下载原图')
     expect(tools).toContain('目录')
     expect(wrapper.find('.prompt-link').exists()).toBe(true)
   })

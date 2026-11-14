@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import EmptyState from './EmptyState.vue'
+import Icon from './Icon.vue'
 import { thumbnailUrl } from '../api/client'
 import type { MatrixCell, MatrixImage, MatrixPlan } from '../composables/useWorkflowMatrix'
 import { useImageLocation } from '../composables/useImageLocation'
@@ -227,7 +228,7 @@ function fallbackReason(row: MatrixPlan['usable'][number]): string {
                 <div class="cell-foot">
                   <span>{{ cell.width }}×{{ cell.height }}</span>
                   <span class="grow" />
-                  <button class="mini" type="button" title="在资源管理器定位" @click="reveal(cell)">📂</button>
+                  <button class="mini" type="button" title="在资源管理器定位" @click="reveal(cell)"><Icon name="folder-open" /></button>
                   <button
                     v-if="cell.image.id"
                     class="mini"

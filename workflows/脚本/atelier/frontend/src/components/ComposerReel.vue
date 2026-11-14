@@ -2,6 +2,7 @@
 import type { ComponentPublicInstance } from 'vue'
 
 import EmptyState from './EmptyState.vue'
+import Icon from './Icon.vue'
 import type { CanvasSlot } from '../composables/useComposerCanvas'
 
 interface FragmentItem {
@@ -81,7 +82,7 @@ function textParts(text: string): Array<{ text: string; hit: boolean }> {
       "
       @click="emit('toggle-lock', type)"
     >
-      <span class="pin-ico">{{ pinned ? '🔒' : '🔓' }}</span>
+      <span class="pin-ico"><Icon :name="pinned ? 'lock' : 'lock-open'" /></span>
       <button
         class="locate-ico"
         :title="`定位「${type}」已选碎片到列中间`"
