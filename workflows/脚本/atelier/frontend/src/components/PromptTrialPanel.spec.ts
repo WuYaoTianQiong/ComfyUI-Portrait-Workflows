@@ -22,11 +22,16 @@ function wf(path: string, name: string) {
     name,
     image_slots: 0,
     caps: { prompt: true, negative: false, negative_effective: false, negative_cfg: null, quality: true, orientation: true },
-    params: { quality_mode: 'scale', orientation_mode: 'swap', default_ratio: '2:3' },
+    params: {
+      quality_mode: 'scale',
+      orientation_mode: 'swap',
+      default_ratio: '2:3',
+      aspect_ratios: ['2:3', '3:2', '9:16'],
+    },
     size_preview: {
-      '0.5x': { '2:3': { width: 512, height: 768 } },
-      '1.0x': { '2:3': { width: 1024, height: 1536 } },
-      '1.25x': { '2:3': { width: 1280, height: 1920 } },
+      '0.5x': { '2:3': { width: 512, height: 768 }, '3:2': { width: 768, height: 512 } },
+      '1.0x': { '2:3': { width: 1024, height: 1536 }, '3:2': { width: 1536, height: 1024 } },
+      '1.25x': { '2:3': { width: 1280, height: 1920 }, '3:2': { width: 1920, height: 1280 } },
     },
   }
 }
@@ -166,6 +171,39 @@ describe('PromptTrialPanel 试跑工作台', () => {
     await flushPromises()
 
     expect(bodies().map((b) => b.seed)).toEqual([100, 101, 102])
+  })
+
+  it('逐流参数：每个勾选的工作流各自控制比例与分辨率', async () => {
+    stubStorage({
+      'pb.trialMatrix': JSON.stringify({ enabled: true, paths: ['/wf/a.json', '/wf/b.json'], align: 'native' }),
+    })
+    const wrapper = await mountPanel()
+    const rows = wrapper.findAll('.flow-row')
+    expect(rows).toHaveLength(2)
+
+    // 第二个流改成 3:2 + 0.5x，第一个保持默认
+    await rows[1].find('.wf-param-ratio').setValue('3:2')
+    await flushPromises()
+    // 比例变化会重排画质选项，必须重新取节点，旧 wrapper 可能已脱离文档
+    const bRow = wrapper.findAll('.flow-row')[1]
+    await bRow.find('.wf-param-quality').setValue('0.5x')
+    await wrapper.find('.big-text').setValue('逐流参数')
+    await findButton(wrapper, '跑')!.trigger('click')
+    await flushPromises()
+
+    const sent = bodies()
+    const b = sent.filter((s) => s.workflow_path === '/wf/b.json')
+    const a = sent.filter((s) => s.workflow_path === '/wf/a.json')
+    expect(new Set(b.map((s) => s.aspect_ratio))).toEqual(new Set(['3:2']))
+    expect(new Set(b.map((s) => s.quality))).toEqual(new Set(['0.5x']))
+    expect(new Set(a.map((s) => s.aspect_ratio))).toEqual(new Set(['2:3']))
+    expect(new Set(a.map((s) => s.quality))).toEqual(new Set(['1.0x']))
+
+    // 比例/画质按工作流记忆（模块级缓存），还原以免污染后续用例
+    const restore = wrapper.findAll('.flow-row')[1]
+    await restore.find('.wf-param-ratio').setValue('2:3')
+    await flushPromises()
+    await wrapper.findAll('.flow-row')[1].find('.wf-param-quality').setValue('1.0x')
   })
 
   it('需要喂图的编辑类工作流在选择器里置灰', async () => {

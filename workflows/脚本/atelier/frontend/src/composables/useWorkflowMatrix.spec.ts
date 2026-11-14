@@ -261,6 +261,38 @@ describe('buildMatrixPlan 对齐', () => {
   })
 })
 
+describe('buildMatrixPlan 逐流覆盖', () => {
+  it('每个流各用自己的比例与档位，未覆盖的沿用全局', () => {
+    const p = plan({
+      overrides: {
+        moss: { ratio: '9:16', tier: '0.5x' },
+        moody: { ratio: '2:3', tier: '1.0x' },
+      },
+    })
+    const moss = p.usable.find((r) => r.path === 'moss')
+    expect(moss?.ratio).toBe('9:16')
+    expect(`${moss?.width}×${moss?.height}`).toBe('464×832')
+    expect(moss?.tier).toBe('0.5x')
+    expect(p.usable.find((r) => r.path === 'qwen')?.ratio).toBe('2:3')
+  })
+
+  it('各流比例不同 + 选了尺寸对齐：自动转原生档并提示', () => {
+    const p = plan({ align: 'ref', overrides: { moss: { ratio: '9:16' } } })
+    expect(p.targetSize).toBeNull()
+    expect(p.warnings.some((w) => w.text.includes('自动切回'))).toBe(true)
+    expect(p.usable.find((r) => r.path === 'moss')?.tier).toBe('1.0x')
+  })
+
+  it('各流比例一致时尺寸对齐照常生效', () => {
+    const p = plan({
+      align: 'ref',
+      overrides: { moss: { ratio: '2:3' }, moody: { ratio: '2:3' } },
+    })
+    expect(p.targetSize).toEqual([1024, 1536])
+    expect(p.warnings.some((w) => w.text.includes('自动切回'))).toBe(false)
+  })
+})
+
 describe('seedForCell', () => {
   it('锁定时列方向 +1，各工作流同列同种子', () => {
     expect(seedForCell(20261112, 0, true)).toBe(20261112)

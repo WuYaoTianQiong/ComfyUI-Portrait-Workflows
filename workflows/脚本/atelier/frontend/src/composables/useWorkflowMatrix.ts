@@ -33,6 +33,8 @@ export interface MatrixRow {
   path: string
   name: string
   shortName: string
+  /** 该行实际使用的出图比例（逐流覆盖后的值） */
+  ratio: string
   /** 实际提交的档位（可能已回退） */
   tier: string
   /** 请求档位不可用、被换成了别的档 */
@@ -119,11 +121,18 @@ export function buildCells(plan: MatrixPlan, baseSeed: number, lock: boolean): M
   return cells
 }
 
+export interface MatrixFlowOverride {
+  ratio?: string
+  tier?: string
+}
+
 export interface MatrixPlanInput {
   workflows: readonly WorkflowRow[]
   paths: readonly string[]
   ratio: string
   tier: string
+  /** 逐流覆盖：试跑可以给每个工作流单独一套比例/档位；缺省沿用全局 ratio/tier。 */
+  overrides?: Record<string, MatrixFlowOverride>
   align: MatrixAlign
   count: number
 }
@@ -234,16 +243,26 @@ export function matrixSupport(wf: WorkflowRow): { supported: boolean; reason: st
 function alignTarget(
   align: MatrixAlign,
   rows: readonly WorkflowRow[],
-  ratio: string,
-  tier: string,
+  ratioOf: (wf: WorkflowRow) => string,
+  tierOf: (wf: WorkflowRow) => string,
 ): [number, number] | null {
   if (align === 'ref') return [MATRIX_REF_SIZE[0], MATRIX_REF_SIZE[1]]
   if (align === 'first') {
     const first = rows[0]
     if (!first) return null
-    return previewSize(first, resolveTier(first, tier).tier, ratio)
+    return previewSize(first, resolveTier(first, tierOf(first)).tier, ratioOf(first))
   }
   return null
+}
+
+/** 逐行取比例：独立覆盖优先，其次全局值，最后退回该工作流原生比例。 */
+function ratioOfRow(wf: WorkflowRow, input: MatrixPlanInput): string {
+  return input.overrides?.[wf.path]?.ratio || input.ratio || wf.params?.default_ratio || ''
+}
+
+/** 逐行取档位：独立覆盖优先，否则沿用全局档位。 */
+function tierOfRow(wf: WorkflowRow, input: MatrixPlanInput): string {
+  return input.overrides?.[wf.path]?.tier || input.tier
 }
 
 /** 把「选中的工作流 + 目标条件」求解成逐行真实参数与公平性提示。 */
@@ -252,20 +271,27 @@ export function buildMatrixPlan(input: MatrixPlanInput): MatrixPlan {
   const picked = input.paths
     .map((path) => input.workflows.find((wf) => wf.path === path))
     .filter((wf): wf is WorkflowRow => Boolean(wf))
-  const target = alignTarget(input.align, picked, input.ratio, input.tier)
+  const ratioOf = (wf: WorkflowRow) => ratioOfRow(wf, input)
+  const tierOf = (wf: WorkflowRow) => tierOfRow(wf, input)
+  // 各流比例不同时，「同尺寸对齐」已无统一口径：自动退回各自原生档，并显式提示。
+  const mixedRatio = new Set(picked.map(ratioOf)).size > 1
+  const align: MatrixAlign = mixedRatio && input.align !== 'native' ? 'native' : input.align
+  const target = alignTarget(align, picked, ratioOf, tierOf)
 
   const rows: MatrixRow[] = picked.map((wf) => {
     const support = matrixSupport(wf)
-    const resolved = resolveTier(wf, input.tier)
+    const ratio = ratioOf(wf)
+    const requestedTier = tierOf(wf)
+    const resolved = resolveTier(wf, requestedTier)
     let tier = resolved.tier
     let fallback = resolved.fallback
-    let size = previewSize(wf, tier, input.ratio)
+    let size = previewSize(wf, tier, ratio)
     if (target) {
-      const near = nearestTier(wf, input.ratio, target)
+      const near = nearestTier(wf, ratio, target)
       if (near) {
         tier = near.tier
         size = near.size
-        fallback = tier !== input.tier
+        fallback = tier !== requestedTier
       }
     }
     const width = size?.[0] ?? 0
@@ -279,9 +305,10 @@ export function buildMatrixPlan(input: MatrixPlanInput): MatrixPlan {
       // 与 WorkflowPicker 的展示名一致：去扩展名 + 下划线换空格，
       // 否则选择器里叫「MOSS 文生图」、矩阵里叫「MOSS_文生图」，看起来像两个流。
       shortName: workflowDisplayName(wf.name).replace(/_/g, ' '),
+      ratio,
       tier,
       tierFallback: fallback,
-      requestedTier: input.tier,
+      requestedTier,
       tiers: availableTiers(wf),
       qualityMode: wf.params?.quality_mode ?? 'scale',
       width,
@@ -290,7 +317,7 @@ export function buildMatrixPlan(input: MatrixPlanInput): MatrixPlan {
       deviation,
       negativeEffective: wf.caps?.negative_effective === true,
       supported: support.supported && !noSize,
-      reason: support.reason || (noSize ? `没有「${input.ratio} × ${tier}」的预演尺寸` : ''),
+      reason: support.reason || (noSize ? `没有「${ratio} × ${tier}」的预演尺寸` : ''),
     }
   })
 
@@ -306,27 +333,35 @@ export function buildMatrixPlan(input: MatrixPlanInput): MatrixPlan {
     })
   }
 
+  if (mixedRatio && input.align !== 'native') {
+    warnings.push({
+      kind: 'warn',
+      text: '各流比例不同，尺寸对齐已自动切回「各自原生档」；要比同条件请把各流比例设成同一个。',
+    })
+  }
+
   const fallbacks = usable.filter((r) => r.tierFallback)
   if (fallbacks.length) {
     warnings.push({
       kind: 'warn',
       text: `${fallbacks
-        .map((r) => `${r.shortName} 不支持 ${input.tier}，改用 ${r.tier}（${r.width}×${r.height}）`)
+        .map((r) => `${r.shortName} 不支持 ${r.requestedTier}，改用 ${r.tier}（${r.width}×${r.height}）`)
         .join('；')}。横评条件已被改写。`,
     })
   }
 
-  if (input.align === 'native' && usable.length > 1) {
+  if (align === 'native' && usable.length > 1) {
     const sizes = Array.from(new Set(usable.map((r) => `${r.width}×${r.height}`)))
     if (sizes.length > 1) {
+      const condition = mixedRatio ? '' : `同一「${input.ratio} × ${input.tier}」下`
       warnings.push({
         kind: 'warn',
-        text: `同一「${input.ratio} × ${input.tier}」下各流原生尺寸不同：${sizes.join(' / ')}。要严格同条件，把尺寸对齐切到「对齐到 ${MATRIX_REF_SIZE[0]}×${MATRIX_REF_SIZE[1]}」。`,
+        text: `${condition}各流原生尺寸不同：${sizes.join(' / ')}。要严格同条件，把尺寸对齐切到「对齐到 ${MATRIX_REF_SIZE[0]}×${MATRIX_REF_SIZE[1]}」。`,
       })
     }
   }
 
-  if (input.align !== 'native' && usable.length) {
+  if (align !== 'native' && usable.length) {
     const off = usable.filter((r) => Math.abs(r.deviation) > MATRIX_ALIGN_TOLERANCE)
     if (off.length) {
       warnings.push({

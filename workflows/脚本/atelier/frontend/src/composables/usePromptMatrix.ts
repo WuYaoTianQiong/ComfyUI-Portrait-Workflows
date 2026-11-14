@@ -12,6 +12,7 @@ import {
   useWorkflowMatrix,
   type MatrixAlign,
   type MatrixCell,
+  type MatrixFlowOverride,
   type MatrixRow,
 } from './useWorkflowMatrix'
 
@@ -58,6 +59,8 @@ export interface PromptMatrixDeps {
   currentWorkflow: () => string
   ratio: () => string
   tier: () => string
+  /** 逐流比例/档位覆盖（试跑用）：不传则整批共用 ratio/tier。 */
+  overrides?: (paths: readonly string[]) => Record<string, MatrixFlowOverride> | undefined
   orientation: () => string
   /**
    * 由调用方决定投哪个端点：详情页 `/api/runs`（挂提示词），
@@ -172,6 +175,7 @@ export function usePromptMatrix(deps: PromptMatrixDeps) {
       paths: paths.value,
       ratio: deps.ratio(),
       tier: deps.tier(),
+      overrides: deps.overrides?.(paths.value),
       align: align.value,
       count: count.value,
     }),
@@ -455,7 +459,8 @@ export function usePromptMatrix(deps: PromptMatrixDeps) {
       const result = await deps.submit({
         path: cell.path,
         tier: row.tier,
-        ratio: ctx.ratio,
+        // 逐流覆盖时每行带自己的比例；旧批次没有 row.ratio 时回落到批次条件。
+        ratio: row.ratio || ctx.ratio,
         orientation: ctx.orientation,
         seed: cell.seed,
         prompt: ctx.prompt,

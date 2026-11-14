@@ -5,15 +5,13 @@ import { useQueryClient } from '@tanstack/vue-query'
 import Modal from './Modal.vue'
 import Icon from './Icon.vue'
 import WorkflowPicker from './WorkflowPicker.vue'
-import WorkflowParams from './WorkflowParams.vue'
+import FlowParamsRow from './FlowParamsRow.vue'
 import PromptMatrixStack from './PromptMatrixStack.vue'
 import PromptCreateModal from './PromptCreateModal.vue'
 import CompareModal from './CompareModal.vue'
 import Lightbox from './Lightbox.vue'
 import { useSettings } from '../composables/useSettings'
-import { useWorkflowQuality } from '../composables/useWorkflowQuality'
-import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
-import { useWorkflowCaps } from '../composables/useWorkflowCaps'
+import { useMatrixFlowParams } from '../composables/useMatrixFlowParams'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useGenerate } from '../composables/useGenerate'
 import { usePromptMatrix } from '../composables/usePromptMatrix'
@@ -60,12 +58,14 @@ const queryClient = useQueryClient()
 /** 本面板自己的工作流/方向：改这里不该顺带改掉详情页的单跑默认。 */
 const workflowPath = ref(settings.workflowPath.value)
 const orientation = ref(settings.orientation.value)
-const quality = useWorkflowQuality(workflowPath)
-const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { workflows, allWorkflows } = useWorkflows()
-const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
-  workflowPath, allWorkflows, aspectRatio,
-)
+
+/**
+ * 逐流参数的读写句柄：比例/画质都沿用「按工作流记忆」的同一份存储，
+ * 计划层与逐流行读到的是同一组 ref，改一行只影响那一个工作流。
+ */
+const { overrides: flowOverrides } = useMatrixFlowParams()
+
 const { queue, error: runError, submitAndTrack, trackQueued } = useGenerate('prompt-trial', { queue: true })
 
 function readDraft(): { prompt: string; negative: string } {
@@ -118,9 +118,11 @@ const matrix = usePromptMatrix({
   savedSeed: () => null,
   workflows: () => workflows.value,
   currentWorkflow: () => workflowPath.value,
-  ratio: () => aspectRatio.value || defaultRatio.value,
-  tier: () => quality.value,
-  orientation: () => (caps.value.orientation ? orientation.value : 'keep'),
+  // 试跑没有「全局一套参数」：每行用自己的比例/档位，这里只做兜底。
+  ratio: () => '',
+  tier: () => '1.0x',
+  overrides: (paths) => flowOverrides(paths),
+  orientation: () => orientation.value,
   submit: (req) =>
     submitAndTrack<{ success: boolean; job_id?: number | null }>('/api/runs/text', {
       prompt: req.prompt,
@@ -148,6 +150,19 @@ const matrix = usePromptMatrix({
     else toast.info(message)
   },
 })
+
+/** 负向提示词至少有一个勾选流真正生效：逐流能力不同，不能只看单个工作流。 */
+const negativeEffective = computed(() => {
+  if (!matrix.paths.length) return true
+  return matrix.paths.some(
+    (path) => allWorkflows.value.find((w) => w.path === path)?.caps?.negative_effective === true,
+  )
+})
+
+/** 各流比例不同时尺寸对齐没有统一口径：计划层已自动按原生档，控件也要如实显示。 */
+const mixedRatio = computed(
+  () => new Set(matrix.plan.usable.map((row) => row.ratio)).size > 1,
+)
 
 const alignOptions: Array<{ value: MatrixAlign; label: string }> = [
   { value: 'native', label: '各自原生档' },
@@ -306,8 +321,8 @@ async function onCreated(id: number) {
         <div class="neg">
           <div class="neg-head">
             <span class="pane-title">负面提示词</span>
-            <span v-if="negative.trim() && caps.negative_effective === false" class="warn-text">
-              当前工作流负向不生效
+            <span v-if="negative.trim() && !negativeEffective" class="warn-text">
+              当前勾选的工作流负向不生效
             </span>
             <span class="grow" />
             <button class="btn btn-sm" type="button" @click="negativeExpanded = !negativeExpanded">
@@ -337,32 +352,31 @@ async function onCreated(id: number) {
               @update:selected="matrix.setPaths($event)"
             />
           </div>
-          <div class="control-row">
-            <WorkflowParams
-              :quality="quality"
-              :orientation="orientation"
-              :aspect-ratio="aspectRatio"
-              :aspect-ratios="aspectRatios"
-              :default-ratio="defaultRatio"
-              :workflow-path="workflowPath"
-              :caps="caps"
-              :quality-options="qualityOptions"
-              @update:quality="quality = $event"
-              @update:orientation="orientation = $event"
-              @update:aspect-ratio="aspectRatio = $event"
+          <div class="flow-params">
+            <FlowParamsRow
+              v-for="path in matrix.paths"
+              :key="path"
+              :path="path"
+              :workflows="allWorkflows"
             />
+            <p v-if="!matrix.paths.length" class="flow-empty">
+              勾选工作流后，这里逐个设置比例与分辨率。
+            </p>
+          </div>
+          <div class="control-row">
             <label class="mini-field">
               <span>尺寸对齐</span>
               <select
-                :value="matrix.align"
-                title="各工作流档位机制不同，同一档出的尺寸并不一样"
+                :value="mixedRatio ? 'native' : matrix.align"
+                :disabled="mixedRatio"
+                :title="mixedRatio
+                  ? '各流比例不同，已自动按各自原生档对齐；比例统一后可再选对齐方式'
+                  : '各工作流档位机制不同，同一档出的尺寸并不一样'"
                 @change="matrix.setAlign(($event.target as HTMLSelectElement).value as MatrixAlign)"
               >
                 <option v-for="opt in alignOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
               </select>
             </label>
-          </div>
-          <div class="control-row">
             <div class="mini-field">
               <span>每个工作流张数</span>
               <span class="counts">
@@ -620,6 +634,20 @@ async function onCreated(id: number) {
   align-items: flex-end;
   flex-wrap: wrap;
   gap: var(--gap-sm);
+}
+
+/* 逐流参数：一行一个工作流，选择器宽度不够时自然折行 */
+.flow-params {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+}
+
+.flow-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 
 .mini-field {
