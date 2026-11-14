@@ -355,12 +355,14 @@ describe('Lightbox', () => {
     const main = document.body.querySelector('.prompt-main')?.textContent ?? ''
     expect(side).toContain('出图档案')
     expect(side).toContain('临时提示词')
-    expect(side).toContain('文件信息')
+    expect(side).toContain('概览')
+    expect(side).toContain('文件与任务')
     expect(main).toContain('临时正文')
-    expect(main).not.toContain('文件信息')
+    expect(main).not.toContain('文件与任务')
     expect(document.body.querySelector('.modal-head')).toBeNull()
-    // 短字段两列、长字段整行
-    expect(document.body.querySelectorAll('.side-facts .kv:not(.wide)').length).toBeGreaterThan(0)
+    // 概览指标格 + 长字段整行
+    expect(document.body.querySelectorAll('.side-card').length).toBeGreaterThanOrEqual(2)
+    expect(document.body.querySelectorAll('.stat').length).toBeGreaterThan(0)
     expect(document.body.querySelectorAll('.side-facts .kv.wide').length).toBeGreaterThan(0)
 
     // 文件名点击复制

@@ -876,6 +876,30 @@ const extraRows = computed<ArchiveRow[]>(() => {
   return rows
 })
 
+/** 右栏概览指标：短字段做成 2×2 指标格，重点值比键值对更醒目。 */
+const OVERVIEW_ORDER = ['分辨率', '体积', '执行耗时', '出图时间']
+const overviewStats = computed(() =>
+  OVERVIEW_ORDER
+    .map((label) => fileRows.value.find((row) => row.label === label))
+    .filter((row): row is ArchiveRow => !!row)
+    .map((row) => ({
+      label: row.label === '执行耗时' ? '耗时' : row.label,
+      value: row.value,
+      title: row.title,
+    })),
+)
+const sourceText = computed(() => fileRows.value.find((row) => row.label === '来源')?.value ?? '')
+const modelValue = computed(() => runParamRows.value.find((row) => row.label === '模型')?.value ?? '')
+const workflowRow = computed(() => workflowRows.value.find((row) => row.label === '工作流'))
+/** 生成卡的参数格：采样参数 + 质量档 / 比例。 */
+const genCells = computed(() => [
+  ...runParamRows.value.filter((row) => row.label !== '模型'),
+  ...workflowRows.value.filter((row) => row.label === '质量档位' || row.label === '出图比例'),
+])
+const fileTaskRows = computed(() =>
+  workflowRows.value.filter((row) => ['输出目录', '提交时间', '完成时间'].includes(row.label)),
+)
+
 async function copyText(text: string, label: string) {
   if (!text) return
   try {
@@ -1502,8 +1526,12 @@ function onKey(event: KeyboardEvent) {
                 <span class="prompt-tip">正在汇总工作流与运行参数…</span>
               </section>
 
-              <section class="side-block">
-                <h3 class="side-title">文件信息</h3>
+              <!-- 概览：文件名 + 关键指标 -->
+              <section class="side-card">
+                <div class="side-card-head">
+                  <h3 class="side-card-title">概览</h3>
+                  <span v-if="sourceText" class="side-chip">{{ sourceText }}</span>
+                </div>
                 <div
                   class="side-filename copyable"
                   title="点击复制文件名"
@@ -1511,16 +1539,50 @@ function onKey(event: KeyboardEvent) {
                 >
                   {{ item.filename }}
                 </div>
-                <dl class="facts side-facts">
-                  <div
-                    v-for="row in fileRows"
-                    :key="row.label"
-                    class="kv"
-                    :class="{ wide: row.wide }"
-                  >
-                    <dt>{{ row.label }}</dt>
-                    <dd :title="row.title">{{ row.value }}</dd>
+                <dl v-if="overviewStats.length" class="stat-grid">
+                  <div v-for="stat in overviewStats" :key="stat.label" class="stat">
+                    <dt>{{ stat.label }}</dt>
+                    <dd :title="stat.title">{{ stat.value }}</dd>
                   </div>
+                </dl>
+              </section>
+
+              <!-- 生成：模型/工作流作为重点，采样参数做成小格 -->
+              <section v-if="modelValue || workflowRow || genCells.length" class="side-card">
+                <div class="side-card-head">
+                  <h3 class="side-card-title">生成</h3>
+                </div>
+                <dl class="strong-facts">
+                  <div v-if="modelValue" class="kv">
+                    <dt>模型</dt>
+                    <dd :title="modelValue">{{ modelValue }}</dd>
+                  </div>
+                  <div v-if="workflowRow" class="kv">
+                    <dt>工作流</dt>
+                    <dd :title="workflowRow.title">{{ workflowRow.value }}</dd>
+                  </div>
+                </dl>
+                <dl v-if="genCells.length" class="param-grid">
+                  <div v-for="cell in genCells" :key="cell.label" class="param">
+                    <dt>{{ cell.label }}</dt>
+                    <dd :title="cell.value">{{ cell.value }}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <!-- 文件与任务：路径 + 任务/时间 + 清理入口 -->
+              <section class="side-card">
+                <div class="side-card-head">
+                  <h3 class="side-card-title">文件与任务</h3>
+                  <button
+                    class="btn btn-sm"
+                    :disabled="busy"
+                    @click="promptInfoOpen = false; manualCleanupOpen = true"
+                  >
+                    框选清理
+                  </button>
+                </div>
+                <dl class="facts side-facts">
                   <div v-if="showFileActions" class="kv wide">
                     <dt>存储位置</dt>
                     <dd
@@ -1531,32 +1593,12 @@ function onKey(event: KeyboardEvent) {
                       {{ outputPath }}
                     </dd>
                   </div>
-                </dl>
-              </section>
-
-              <section class="side-block cleanup-block">
-                <h3 class="side-title">后期清理</h3>
-                <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
-                <div class="cleanup-actions">
-                  <button
-                    class="btn btn-sm"
-                    :disabled="busy"
-                    @click="promptInfoOpen = false; manualCleanupOpen = true"
-                  >
-                    框选清理
-                  </button>
-                </div>
-              </section>
-
-              <section v-if="workflowRows.length || jobRow" class="side-block">
-                <h3 class="side-title">工作流与任务</h3>
-                <dl class="facts side-facts">
                   <div v-if="jobRow" class="kv wide">
                     <dt>任务</dt>
                     <dd :title="jobRow.title">{{ jobRow.text }}</dd>
                   </div>
                   <div
-                    v-for="row in workflowRows"
+                    v-for="row in fileTaskRows"
                     :key="row.label"
                     class="kv"
                     :class="{ wide: row.wide }"
@@ -1565,27 +1607,13 @@ function onKey(event: KeyboardEvent) {
                     <dd :title="row.title">{{ row.value }}</dd>
                   </div>
                 </dl>
+                <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
               </section>
 
-              <section v-if="runParamRows.length" class="side-block">
-                <h3 class="side-title">运行参数</h3>
-                <dl class="facts side-facts">
-                  <div
-                    v-for="row in runParamRows"
-                    :key="row.label"
-                    class="kv"
-                    :class="{ wide: row.wide }"
-                  >
-                    <dt>{{ row.label }}</dt>
-                    <dd>{{ row.value }}</dd>
-                  </div>
-                </dl>
-              </section>
-
-              <section v-if="referenceInputs.length" class="side-block">
+              <section v-if="referenceInputs.length" class="side-card">
                 <button
                   type="button"
-                  class="side-title side-toggle"
+                  class="side-card-title side-toggle"
                   :aria-expanded="referenceOpen"
                   @click="referenceOpen = !referenceOpen"
                 >
@@ -1612,10 +1640,10 @@ function onKey(event: KeyboardEvent) {
                 </div>
               </section>
 
-              <section v-if="extraRows.length" class="side-block">
+              <section v-if="extraRows.length" class="side-card">
                 <button
                   type="button"
-                  class="side-title side-toggle"
+                  class="side-card-title side-toggle"
                   :aria-expanded="extraOpen"
                   @click="extraOpen = !extraOpen"
                 >
@@ -2127,14 +2155,14 @@ function onKey(event: KeyboardEvent) {
   gap: var(--gap-sm);
 }
 
-/* 档案分区全部展开，只保留一个滚动条 */
+/* 档案分卡展示，只保留一个滚动条 */
 .side-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: var(--gap-sm);
   padding-right: 2px;
 }
 
@@ -2145,17 +2173,147 @@ function onKey(event: KeyboardEvent) {
   flex: none;
 }
 
-.side-title {
-  margin: 0 0 2px;
-  font-size: var(--fs-xs);
+/* 每类信息一张卡：标题色条 + 浅底，避免连成一张长表 */
+.side-card {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.side-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+}
+
+.side-card-title {
+  position: relative;
+  margin: 0;
+  padding-left: 7px;
+  font-size: var(--fs-sm);
   font-weight: 600;
+  color: var(--text);
+}
+
+.side-card-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.side-chip {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--accent-link);
+  font-size: var(--fs-xs);
+}
+
+/* 概览指标：值大字、标签小字 */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+}
+
+.stat dt {
+  font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.stat dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 模型 / 工作流：整行重点值 */
+.strong-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.strong-facts .kv {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.strong-facts dt {
+  padding-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.strong-facts dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* 采样参数：3 列小格 */
+.param-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.param {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+}
+
+.param dt {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.param dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 长区块标题做成按钮：默认展开，点击收起 */
 .side-toggle {
   width: 100%;
-  padding: 0;
+  padding: 0 0 0 7px;
   border: 0;
   background: none;
   font-family: inherit;
@@ -2357,7 +2515,7 @@ function onKey(event: KeyboardEvent) {
 .side-facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 14px;
+  gap: 6px 14px;
   flex: none;
 }
 
@@ -2366,6 +2524,7 @@ function onKey(event: KeyboardEvent) {
   gap: 6px;
   min-width: 0;
   font-size: var(--fs-sm);
+  line-height: 1.6;
 }
 
 .side-facts .kv.wide {
@@ -2424,13 +2583,6 @@ function onKey(event: KeyboardEvent) {
   line-height: 1.6;
 }
 
-.cleanup-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: var(--gap-sm);
-}
-
 @media (max-width: 820px) {
   .prompt-cols {
     flex-direction: column;
@@ -2449,6 +2601,10 @@ function onKey(event: KeyboardEvent) {
 
   .side-facts .kv {
     grid-column: 1 / -1;
+  }
+
+  .param-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .prompt-jump {
