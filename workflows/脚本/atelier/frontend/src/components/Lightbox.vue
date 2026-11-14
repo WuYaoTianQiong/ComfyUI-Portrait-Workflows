@@ -1160,16 +1160,26 @@ function onKey(event: KeyboardEvent) {
       <button
         v-if="!readonly"
         class="tool"
-        :title="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
+        :data-tip="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
+        :aria-label="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
         @click="processOpen = !processOpen"
       >
         <Icon name="zap" />
       </button>
-      <button v-if="showFileActions" class="tool" title="下载原图" @click="download"><Icon name="download" /></button>
       <button
         v-if="showFileActions"
         class="tool"
-        title="在资源管理器中打开所在目录"
+        data-tip="下载原图"
+        aria-label="下载原图"
+        @click="download"
+      >
+        <Icon name="download" />
+      </button>
+      <button
+        v-if="showFileActions"
+        class="tool"
+        data-tip="在资源管理器中打开所在目录"
+        aria-label="在资源管理器中打开所在目录"
         @click="revealImage(item)"
       >
         目录
@@ -1177,7 +1187,8 @@ function onKey(event: KeyboardEvent) {
       <button
         v-if="canOpenGallery"
         class="tool"
-        title="到画廊里按文件名定位这张图"
+        data-tip="到画廊里按文件名定位这张图"
+        aria-label="到画廊里按文件名定位这张图"
         @click="emit('open-in-gallery', item.filename)"
       >
         <Icon name="crosshair" />
@@ -1187,7 +1198,8 @@ function onKey(event: KeyboardEvent) {
         class="tool"
         :class="{ loading: regenerating }"
         :disabled="regenerating"
-        :title="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
+        :data-tip="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
+        :aria-label="regenerating ? '正在提交/生成…' : '用这张图的记录重新出图'"
         @click="emit('regenerate', item)"
       >
         <Icon v-if="!regenerating" name="refresh-cw" />
@@ -1195,7 +1207,8 @@ function onKey(event: KeyboardEvent) {
       <button
         v-if="item.prompt_id && !readonly"
         class="tool"
-        title="跳到这条提示词"
+        data-tip="跳到这条提示词"
+        aria-label="跳到这条提示词"
         @click="emit('jump-to-prompt', item.prompt_id!)"
       >
         ↗
@@ -1203,25 +1216,46 @@ function onKey(event: KeyboardEvent) {
       <button
         v-if="!readonly"
         class="tool"
-        :title="item.is_favorite ? '取消收藏' : '收藏'"
+        :data-tip="item.is_favorite ? '取消收藏' : '收藏'"
+        :aria-label="item.is_favorite ? '取消收藏' : '收藏'"
         @click="toggleFavorite"
       >
         {{ item.is_favorite ? '★' : '☆' }}
       </button>
-      <button class="tool" title="水平翻转 (F)" @click="flip">⇋</button>
-      <button class="tool" title="旋转 90° (R)" @click="rotate90">⟳</button>
-      <button class="tool" :class="{ active: !fitMode }" title="适应 / 原始尺寸" @click="toggleFit">
+      <button class="tool" data-tip="水平翻转 (F)" aria-label="水平翻转 (F)" @click="flip">⇋</button>
+      <button class="tool" data-tip="旋转 90° (R)" aria-label="旋转 90° (R)" @click="rotate90">⟳</button>
+      <button
+        class="tool"
+        :class="{ active: !fitMode }"
+        data-tip="适应 / 原始尺寸"
+        aria-label="适应 / 原始尺寸"
+        @click="toggleFit"
+      >
         1:1
       </button>
-      <button class="tool" title="缩小 (-)" @click="zoomBy(1 / 1.2)">−</button>
+      <button class="tool" data-tip="缩小 (-)" aria-label="缩小 (-)" @click="zoomBy(1 / 1.2)">−</button>
       <span class="zoom">{{ zoomPercent }}%</span>
-      <button class="tool" title="放大 (+)" @click="zoomBy(1.2)">+</button>
-      <button class="tool" title="重置视图 (0)" @click="resetView">重置</button>
-      <button class="tool" :class="{ active: showInfo }" title="显示/隐藏信息" @click="toggleInfo">
+      <button class="tool" data-tip="放大 (+)" aria-label="放大 (+)" @click="zoomBy(1.2)">+</button>
+      <button class="tool" data-tip="重置视图 (0)" aria-label="重置视图 (0)" @click="resetView">重置</button>
+      <button
+        class="tool"
+        :class="{ active: showInfo }"
+        data-tip="显示/隐藏信息"
+        aria-label="显示/隐藏信息"
+        @click="toggleInfo"
+      >
         ⓘ
       </button>
-      <button v-if="!readonly" class="tool danger" title="删除记录" @click="removeItem"><Icon name="trash-2" /></button>
-      <button class="tool close" title="关闭 (Esc)" @click="emit('close')">✕</button>
+      <button
+        v-if="!readonly"
+        class="tool danger"
+        data-tip="删除记录"
+        aria-label="删除记录"
+        @click="removeItem"
+      >
+        <Icon name="trash-2" />
+      </button>
+      <button class="tool close" data-tip="关闭 (Esc)" aria-label="关闭 (Esc)" @click="emit('close')">✕</button>
     </header>
 
     <button class="nav prev" :disabled="!hasPrev" title="上一张 (←)" @click="go(-1)">‹</button>
@@ -1773,6 +1807,40 @@ function onKey(event: KeyboardEvent) {
 .tool:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* 原生 title 有 1–2 秒延迟、部分环境不显示：工具栏统一走即时提示 */
+.tool[data-tip] {
+  position: relative;
+}
+
+.tool[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+  pointer-events: none;
+}
+
+.tool[data-tip]:hover::after,
+.tool[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: none;
 }
 
 /* 重新出图提交中：复用 tokens.css 里的 btn-spin 转圈 */
