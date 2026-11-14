@@ -315,3 +315,60 @@ def read_embedded_run_params(filename: str, subfolder: str, img_type: str) -> di
             return params
     return {}
 
+
+def read_embedded_prompt(filename: str, subfolder: str = "", img_type: str = "output") -> dict:
+    """从 PNG 内嵌的 ComfyUI `prompt` 元数据还原提交时的正向/负向文本。
+
+    任务轮询遗漏、只剩磁盘文件的图也能从文件本身读回提示词，不依赖
+    ComfyUI history（只保留最近若干条）。负向是否生效按同一套工作流能力探测。
+    """
+    path = resolve_image_path(filename, subfolder or "", img_type or "output")
+    if path is None:
+        return {}
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as img:
+            raw = img.info.get("prompt")
+    except Exception:
+        return {}
+    if not raw:
+        return {}
+    try:
+        api_wf = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(api_wf, dict):
+        return {}
+
+    from app.services.workflow_parser import _TEXT_ENCODE_NODES, detect_workflow_caps
+
+    nodes = [
+        node for node in api_wf.values()
+        if isinstance(node, dict)
+        and node.get("class_type") in _TEXT_ENCODE_NODES
+        and (node.get("inputs") or {}).get("clip") is not None
+    ]
+    if not nodes:
+        return {}
+    first_inputs = nodes[0].get("inputs") or {}
+    pos_field, neg_field = _TEXT_ENCODE_NODES[nodes[0]["class_type"]]
+    positive = str(first_inputs.get(pos_field) or "")
+    if not positive.strip():
+        return {}
+
+    negative = ""
+    if neg_field:
+        negative = str(first_inputs.get(neg_field) or "")
+    elif len(nodes) >= 2:
+        second_inputs = nodes[1].get("inputs") or {}
+        second_pos, _ = _TEXT_ENCODE_NODES[nodes[1]["class_type"]]
+        negative = str(second_inputs.get(second_pos) or "")
+
+    caps = detect_workflow_caps(api_wf)
+    return {
+        "prompt": positive,
+        "negative_prompt": negative,
+        "negative_effective": bool(caps.get("negative_effective")),
+    }
+

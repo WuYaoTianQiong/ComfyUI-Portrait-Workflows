@@ -141,6 +141,28 @@ def test_refresh_active_jobs_does_not_call_comfyui_when_idle(api, monkeypatch):
     assert job_state.refresh_active_jobs() == 0
 
 
+def test_refresh_active_jobs_round_robins_oldest(api, monkeypatch):
+    """超过 limit 的活跃任务必须轮转：先推进最久没刷新的，而不是永远只刷最新 20 个。"""
+    from app.services import job_state
+
+    ids = [
+        job_state.create_job(
+            "single", f"任务{i}",
+            [{"prompt_id": 0, "status": "queued"}],
+            "", "portrait", "4K",
+        )
+        for i in range(25)
+    ]
+
+    seen: list[int] = []
+    monkeypatch.setattr(job_state, "fetch_comfy_snapshot", lambda: None)
+    monkeypatch.setattr(job_state, "refresh_job", lambda job_id, snapshot=None: seen.append(job_id))
+
+    assert job_state.refresh_active_jobs() == 20
+    assert seen == ids[:20]
+    assert ids[-1] not in seen
+
+
 def test_batch_replace_detaches_from_source_prompt(api, seed_prompt, monkeypatch):
     """替换碎片出的图应挂到临时提示词，而不是原提示词名下。"""
     from app.config import settings

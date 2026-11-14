@@ -944,10 +944,13 @@ def stop_all() -> int:
 # ---------------------------------------------------------------------------
 
 def refresh_active_jobs(limit: int = 20) -> int:
+    # 按「最久未刷新」轮转，而不是永远只取最新 20 个：横评一次提交几十个 job 时，
+    # 较早的 job 会掉出窗口后再也得不到推进，任务永远停在 submitted，
+    # 出图只能被磁盘扫描捡进库（没有 prompt_params）。
     ids = [
         r.id for r in GenJob.select(GenJob.id)
         .where(GenJob.status.in_(["pending", "running"]))
-        .order_by(GenJob.id.desc())
+        .order_by(GenJob.updated_at.asc(), GenJob.id.asc())
         .limit(limit)
     ]
     if not ids:
