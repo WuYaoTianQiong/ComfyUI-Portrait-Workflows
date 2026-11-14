@@ -655,6 +655,31 @@ const stringList = (value: unknown): string[] =>
 const compiledNotes = computed(() => stringList(compiled.value?.notes))
 const compiledWarnings = computed(() => stringList(compiled.value?.warnings))
 
+type PromptTab = 'source' | 'submitted'
+type ArchiveTab = 'file' | 'workflow' | 'params'
+const promptTab = ref<PromptTab>('source')
+const archiveTab = ref<ArchiveTab>('file')
+
+/** 实际提交的负向：工作流不支持时只给状态，不展示未提交的文本。 */
+const submittedNegativeVisible = computed(() => {
+  if (!compiled.value) return false
+  return !compiledEffective.value || !!compiledNegative.value
+})
+const submittedNegativeText = computed(() =>
+  compiledEffective.value ? compiledNegative.value : '（工作流负向不生效，实际提交为空）',
+)
+
+const activeCopyText = computed(() =>
+  promptTab.value === 'submitted' ? compiledPositive.value : shownPrompt.value,
+)
+
+function copyActivePrompt() {
+  void copyText(
+    activeCopyText.value,
+    promptTab.value === 'submitted' ? '编译后正向' : '正向提示词',
+  )
+}
+
 const PARAM_SOURCE_LABEL: Record<string, string> = {
   prompt_run: '提示词出图',
   text_run: '文本跑图',
@@ -687,6 +712,8 @@ watch(
       detailLoading.value = false
       return
     }
+    promptTab.value = 'source'
+    archiveTab.value = 'file'
     const seq = ++detailSeq
     detailLoading.value = true
     const promptId = item.value?.prompt_id ?? 0
@@ -1278,8 +1305,8 @@ function onKey(event: KeyboardEvent) {
       :open="promptInfoOpen"
       headless
       raised
-      width="min(1100px, 94vw)"
-      height="86vh"
+      width="min(1280px, 94vw)"
+      height="88vh"
       @close="promptInfoOpen = false"
     >
       <div class="prompt-info">
@@ -1353,83 +1380,111 @@ function onKey(event: KeyboardEvent) {
 
         <div class="prompt-cols">
           <div class="prompt-main">
-            <section class="text-section">
-              <header class="text-head">
-                <span>
-                  正向提示词
-                  <span v-if="promptNote" class="text-note">{{ promptNote }}</span>
-                </span>
-                <div class="text-actions">
-                  <button
-                    v-if="item.prompt_id"
-                    class="btn btn-sm prompt-jump"
-                    :title="item.prompt_name || `#${item.prompt_id}`"
-                    @click="jumpToPrompt(item.prompt_id!)"
-                  >
-                    ↗ 提示词库{{ item.prompt_name ? `：${item.prompt_name}` : '' }}
+            <div class="pane-tabs">
+              <button
+                class="btn btn-sm"
+                :class="{ active: promptTab === 'source' }"
+                @click="promptTab = 'source'"
+              >
+                原文
+              </button>
+              <button
+                class="btn btn-sm"
+                :class="{ active: promptTab === 'submitted' }"
+                @click="promptTab = 'submitted'"
+              >
+                实际提交
+              </button>
+              <span class="spacer" />
+              <button
+                v-if="item.prompt_id && promptTab === 'source'"
+                class="btn btn-sm prompt-jump"
+                :title="item.prompt_name || `#${item.prompt_id}`"
+                @click="jumpToPrompt(item.prompt_id!)"
+              >
+                ↗ 提示词库{{ item.prompt_name ? `：${item.prompt_name}` : '' }}
+              </button>
+              <button
+                class="btn btn-sm"
+                :disabled="!activeCopyText"
+                @click="copyActivePrompt"
+              >
+                复制
+              </button>
+            </div>
+
+            <div v-show="promptTab === 'source'" class="prompt-tab-pane">
+              <section class="text-section">
+                <header class="text-head">
+                  <span>
+                    原文
+                    <span v-if="promptNote" class="text-note">{{ promptNote }}</span>
+                  </span>
+                </header>
+                <div class="prompt-box">
+                  <pre
+                    ref="promptTextEl"
+                    class="prompt-text main-prompt"
+                    @scroll.passive="onPromptScroll"
+                  >{{ shownPrompt || promptPlaceholder }}</pre>
+                </div>
+              </section>
+
+              <section v-if="shownNegative" class="neg-block">
+                <header class="text-head">
+                  <span>负向提示词</span>
+                  <button class="btn btn-sm" @click="copyText(shownNegative, '负向提示词')">
+                    复制
                   </button>
+                </header>
+                <pre class="prompt-text neg-prompt">{{ shownNegative }}</pre>
+              </section>
+            </div>
+
+            <div v-show="promptTab === 'submitted'" class="prompt-tab-pane">
+              <section class="text-section">
+                <header class="text-head">
+                  <span>
+                    实际提交
+                    <span class="text-note">· 编译快照</span>
+                  </span>
+                </header>
+                <div class="prompt-box">
+                  <pre
+                    class="prompt-text main-prompt compiled-positive"
+                  >{{ compiledPositive || '（这张出图记录没有编译快照）' }}</pre>
+                </div>
+              </section>
+
+              <section v-if="submittedNegativeVisible" class="neg-block">
+                <header class="text-head">
+                  <span>
+                    实际负向
+                    <span class="text-note">· {{ compiledEffective ? '提交' : '不生效' }}</span>
+                  </span>
                   <button
+                    v-if="compiledEffective && compiledNegative"
                     class="btn btn-sm"
-                    :disabled="!shownPrompt"
-                    @click="copyText(shownPrompt, '正向提示词')"
+                    @click="copyText(compiledNegative, '负向提示词')"
                   >
                     复制
                   </button>
-                </div>
-              </header>
-              <div class="prompt-box">
-                <pre
-                  ref="promptTextEl"
-                  class="prompt-text main-prompt"
-                  @scroll.passive="onPromptScroll"
-                >{{ shownPrompt || promptPlaceholder }}</pre>
-              </div>
-            </section>
+                </header>
+                <pre class="prompt-text compiled-negative">{{ submittedNegativeText }}</pre>
+              </section>
 
-            <section v-if="shownNegative" class="text-section neg-section">
-              <header class="text-head">
-                <span>负面提示词</span>
-                <button class="btn btn-sm" @click="copyText(shownNegative, '负面提示词')">
-                  复制
-                </button>
-              </header>
-              <pre class="prompt-text neg-prompt">{{ shownNegative }}</pre>
-            </section>
-
-            <section v-if="compiledPositive" class="text-section compiled-section">
-              <header class="text-head">
-                <span>
-                  编译后
-                  <span class="text-note">· 负向{{ compiledEffective ? '生效' : '不生效' }}</span>
-                </span>
-                <button class="btn btn-sm" @click="copyText(compiledPositive, '编译后正向')">
-                  复制
-                </button>
-              </header>
-              <div class="compiled-grid">
-                <div>
-                  <h4>正向（提交）</h4>
-                  <pre class="prompt-text compiled-text compiled-positive">{{ compiledPositive }}</pre>
-                </div>
-                <div>
-                  <h4>实际负向（{{ compiledEffective ? '提交' : '不提交' }}）</h4>
-                  <pre class="prompt-text compiled-text compiled-negative">{{ compiledEffective ? (compiledNegative || '（空）') : '（工作流负向不生效）' }}</pre>
-                </div>
+              <div>
+                <ul v-if="compiledNotes.length" class="compiled-notes">
+                  <li v-for="(note, i) in compiledNotes" :key="`compiled-note-${i}`">{{ note }}</li>
+                </ul>
+                <ul v-if="compiledWarnings.length" class="compiled-notes warn">
+                  <li v-for="(warn, i) in compiledWarnings" :key="`compiled-warn-${i}`">{{ warn }}</li>
+                </ul>
               </div>
-              <ul v-if="compiledNotes.length" class="compiled-notes">
-                <li v-for="(note, i) in compiledNotes" :key="`compiled-note-${i}`">{{ note }}</li>
-              </ul>
-              <ul v-if="compiledWarnings.length" class="compiled-notes warn">
-                <li v-for="(warn, i) in compiledWarnings" :key="`compiled-warn-${i}`">{{ warn }}</li>
-              </ul>
-            </section>
+            </div>
           </div>
 
-          <aside
-            ref="promptSideEl"
-            class="prompt-side"
-            @scroll.passive="onPromptScroll"
-          >
+          <aside class="prompt-side">
             <div class="side-head">
               <h3 class="side-heading">
                 出图档案
@@ -1438,144 +1493,180 @@ function onKey(event: KeyboardEvent) {
               <button class="btn btn-sm" @click="promptInfoOpen = false">关闭</button>
             </div>
 
-            <section class="side-block">
-              <h3 class="side-title">文件信息</h3>
-              <div
-                class="side-filename copyable"
-                title="点击复制文件名"
-                @click="copyFilename"
+            <div class="pane-tabs">
+              <button
+                class="btn btn-sm"
+                :class="{ active: archiveTab === 'file' }"
+                @click="archiveTab = 'file'"
               >
-                {{ item.filename }}
-              </div>
-              <dl class="facts side-facts">
-                <div
-                  v-for="row in fileRows"
-                  :key="row.label"
-                  class="kv"
-                  :class="{ wide: row.wide }"
-                >
-                  <dt>{{ row.label }}</dt>
-                  <dd :title="row.title">{{ row.value }}</dd>
-                </div>
-                <div v-if="showFileActions" class="kv wide">
-                  <dt>存储位置</dt>
-                  <dd
-                    class="path linkable"
-                    :title="`在资源管理器中定位：${outputPath}`"
-                    @click.stop="revealImage(item)"
+                文件
+              </button>
+              <button
+                class="btn btn-sm"
+                :class="{ active: archiveTab === 'workflow' }"
+                @click="archiveTab = 'workflow'"
+              >
+                工作流
+              </button>
+              <button
+                class="btn btn-sm"
+                :class="{ active: archiveTab === 'params' }"
+                @click="archiveTab = 'params'"
+              >
+                参数
+              </button>
+            </div>
+
+            <div
+              ref="promptSideEl"
+              class="side-body"
+              @scroll.passive="onPromptScroll"
+            >
+              <section v-if="detailLoading" class="side-block">
+                <span class="prompt-tip">正在汇总工作流与运行参数…</span>
+              </section>
+
+              <div v-show="archiveTab === 'file'" class="side-tab-pane">
+                <section class="side-block">
+                  <h3 class="side-title">文件信息</h3>
+                  <div
+                    class="side-filename copyable"
+                    title="点击复制文件名"
+                    @click="copyFilename"
                   >
-                    {{ outputPath }}
-                  </dd>
-                </div>
-              </dl>
-            </section>
+                    {{ item.filename }}
+                  </div>
+                  <dl class="facts side-facts">
+                    <div
+                      v-for="row in fileRows"
+                      :key="row.label"
+                      class="kv"
+                      :class="{ wide: row.wide }"
+                    >
+                      <dt>{{ row.label }}</dt>
+                      <dd :title="row.title">{{ row.value }}</dd>
+                    </div>
+                    <div v-if="showFileActions" class="kv wide">
+                      <dt>存储位置</dt>
+                      <dd
+                        class="path linkable"
+                        :title="`在资源管理器中定位：${outputPath}`"
+                        @click.stop="revealImage(item)"
+                      >
+                        {{ outputPath }}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
 
-            <section class="side-block cleanup-block">
-              <h3 class="side-title">后期清理</h3>
-              <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
-              <div class="cleanup-actions">
-                <button
-                  class="btn btn-sm"
-                  :disabled="busy"
-                  @click="promptInfoOpen = false; manualCleanupOpen = true"
-                >
-                  框选清理
-                </button>
+                <section class="side-block cleanup-block">
+                  <h3 class="side-title">后期清理</h3>
+                  <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
+                  <div class="cleanup-actions">
+                    <button
+                      class="btn btn-sm"
+                      :disabled="busy"
+                      @click="promptInfoOpen = false; manualCleanupOpen = true"
+                    >
+                      框选清理
+                    </button>
+                  </div>
+                </section>
               </div>
-            </section>
 
-            <section v-if="detailLoading" class="side-block">
-              <span class="prompt-tip">正在汇总工作流与运行参数…</span>
-            </section>
+              <div v-show="archiveTab === 'workflow'" class="side-tab-pane">
+                <section v-if="workflowRows.length || jobRow" class="side-block">
+                  <h3 class="side-title">工作流与任务</h3>
+                  <dl class="facts side-facts">
+                    <div v-if="jobRow" class="kv wide">
+                      <dt>任务</dt>
+                      <dd :title="jobRow.title">{{ jobRow.text }}</dd>
+                    </div>
+                    <div
+                      v-for="row in workflowRows"
+                      :key="row.label"
+                      class="kv"
+                      :class="{ wide: row.wide }"
+                    >
+                      <dt>{{ row.label }}</dt>
+                      <dd :title="row.title">{{ row.value }}</dd>
+                    </div>
+                  </dl>
+                </section>
 
-            <section v-if="workflowRows.length || jobRow" class="side-block">
-              <h3 class="side-title">工作流与任务</h3>
-              <dl class="facts side-facts">
-                <div v-if="jobRow" class="kv wide">
-                  <dt>任务</dt>
-                  <dd :title="jobRow.title">{{ jobRow.text }}</dd>
-                </div>
-                <div
-                  v-for="row in workflowRows"
-                  :key="row.label"
-                  class="kv"
-                  :class="{ wide: row.wide }"
-                >
-                  <dt>{{ row.label }}</dt>
-                  <dd :title="row.title">{{ row.value }}</dd>
-                </div>
-              </dl>
-            </section>
+                <section v-if="referenceInputs.length" class="side-block">
+                  <h3 class="side-title">参考图</h3>
+                  <div class="ref-grid">
+                    <button
+                      v-for="ref in referenceInputs"
+                      :key="ref.path"
+                      class="ref-card"
+                      type="button"
+                      :title="ref.path"
+                      @click="openReferencePreview(ref)"
+                    >
+                      <img
+                        class="ref-thumb"
+                        :src="referenceThumb(ref.path)"
+                        :alt="ref.label"
+                        loading="lazy"
+                      />
+                      <span class="ref-label">{{ ref.label }}</span>
+                    </button>
+                  </div>
+                </section>
 
-            <section v-if="runParamRows.length" class="side-block">
-              <h3 class="side-title">运行参数</h3>
-              <dl class="facts side-facts">
-                <div
-                  v-for="row in runParamRows"
-                  :key="row.label"
-                  class="kv"
-                  :class="{ wide: row.wide }"
-                >
-                  <dt>{{ row.label }}</dt>
-                  <dd>{{ row.value }}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <section v-if="referenceInputs.length" class="side-block">
-              <h3 class="side-title">参考图</h3>
-              <div class="ref-grid">
-                <button
-                  v-for="ref in referenceInputs"
-                  :key="ref.path"
-                  class="ref-card"
-                  type="button"
-                  :title="ref.path"
-                  @click="openReferencePreview(ref)"
-                >
-                  <img
-                    class="ref-thumb"
-                    :src="referenceThumb(ref.path)"
-                    :alt="ref.label"
-                    loading="lazy"
-                  />
-                  <span class="ref-label">{{ ref.label }}</span>
-                </button>
+                <section v-if="extraRows.length" class="side-block">
+                  <h3 class="side-title">来源与输入</h3>
+                  <dl class="facts side-facts">
+                    <div
+                      v-for="row in extraRows"
+                      :key="row.label"
+                      class="kv"
+                      :class="{ wide: row.wide }"
+                    >
+                      <dt>{{ row.label }}</dt>
+                      <dd
+                        v-if="row.promptId"
+                        class="linkable"
+                        :title="row.title"
+                        @click.stop="jumpToPrompt(row.promptId!)"
+                      >
+                        {{ row.value }}
+                      </dd>
+                      <dd v-else :title="row.title">{{ row.value }}</dd>
+                    </div>
+                  </dl>
+                </section>
               </div>
-            </section>
 
-            <section v-if="extraRows.length" class="side-block">
-              <h3 class="side-title">来源与输入</h3>
-              <dl class="facts side-facts">
-                <div
-                  v-for="row in extraRows"
-                  :key="row.label"
-                  class="kv"
-                  :class="{ wide: row.wide }"
-                >
-                  <dt>{{ row.label }}</dt>
-                  <dd
-                    v-if="row.promptId"
-                    class="linkable"
-                    :title="row.title"
-                    @click.stop="jumpToPrompt(row.promptId!)"
-                  >
-                    {{ row.value }}
-                  </dd>
-                  <dd v-else :title="row.title">{{ row.value }}</dd>
-                </div>
-              </dl>
-            </section>
+              <div v-show="archiveTab === 'params'" class="side-tab-pane">
+                <section v-if="runParamRows.length" class="side-block">
+                  <h3 class="side-title">运行参数</h3>
+                  <dl class="facts side-facts">
+                    <div
+                      v-for="row in runParamRows"
+                      :key="row.label"
+                      class="kv"
+                      :class="{ wide: row.wide }"
+                    >
+                      <dt>{{ row.label }}</dt>
+                      <dd>{{ row.value }}</dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
 
-            <p class="prompt-tip">
-              <template v-if="item.prompt_id">
-                这张图关联了提示词库记录；参数来自任务记录、出图参数快照与 ComfyUI 执行记录。
-                提示词正文优先展示出图时的快照，缺失时回退到提示词库当前版本。
-              </template>
-              <template v-else>
-                这张图没有关联提示词库记录；以上内容来自任务记录、出图参数快照与 ComfyUI 执行记录。
-              </template>
-            </p>
+              <p class="prompt-tip">
+                <template v-if="item.prompt_id">
+                  这张图关联了提示词库记录；参数来自任务记录、出图参数快照与 ComfyUI 执行记录。
+                  提示词正文优先展示出图时的快照，缺失时回退到提示词库当前版本。
+                </template>
+                <template v-else>
+                  这张图没有关联提示词库记录；以上内容来自任务记录、出图参数快照与 ComfyUI 执行记录。
+                </template>
+              </p>
+            </div>
           </aside>
         </div>
       </div>
@@ -1963,42 +2054,47 @@ function onKey(event: KeyboardEvent) {
   gap: var(--gap-sm);
 }
 
-/* 正向占满剩余高度；负面按内容高度（上限 30%），不再挤在右栏 */
+/* 原文 / 实际提交：同一时间只展示一份，滚动只发生一次 */
+.pane-tabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+/* 正向占满剩余高度，负向块固定在下方，常规长度不额外滚动 */
+.prompt-tab-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.neg-block {
+  flex: none;
+  max-height: 30%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.neg-block .prompt-text {
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+/* 页签内容占满剩余高度，滚动交给内部的提示词容器 */
 .text-section {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.neg-section {
-  flex: 0 1 auto;
-  max-height: 30%;
-}
-
-.compiled-section {
-  flex: 0 1 auto;
-  max-height: 42%;
-  overflow-y: auto;
-}
-
-.compiled-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--gap-sm);
-}
-
-.compiled-grid h4 {
-  margin: 0 0 4px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.compiled-text {
-  max-height: 160px;
-  overflow-y: auto;
 }
 
 .compiled-notes {
@@ -2011,12 +2107,6 @@ function onKey(event: KeyboardEvent) {
 
 .compiled-notes.warn {
   color: var(--warn);
-}
-
-@media (max-width: 900px) {
-  .compiled-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .text-head {
@@ -2033,13 +2123,6 @@ function onKey(event: KeyboardEvent) {
   color: var(--muted);
 }
 
-.text-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
 /* 提示词名可能很长：入口本身给足点击宽度，但别把标题挤掉 */
 .prompt-jump {
   max-width: 320px;
@@ -2053,11 +2136,26 @@ function onKey(event: KeyboardEvent) {
   /* 两列短字段需要的最小宽度；长字段（路径/模型）仍独占整行 */
   width: 440px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+/* 文件 / 工作流 / 参数：页签固定，内容区独立滚动 */
+.side-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--gap);
   padding-right: 2px;
+}
+
+.side-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
 }
 
 .side-block {
@@ -2309,20 +2407,10 @@ function onKey(event: KeyboardEvent) {
   background: transparent;
 }
 
-/* 左栏正向提示词占满整个高度 */
+/* 提示词页签内容占满整个高度 */
 .main-prompt {
   flex: 1;
   min-height: 0;
-}
-
-/* 负面提示词在左栏底部，按内容高度、上限 30% */
-.neg-prompt {
-  flex: 0 1 auto;
-  min-height: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
 }
 
 .prompt-tip {
