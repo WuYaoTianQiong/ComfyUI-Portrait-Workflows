@@ -96,10 +96,30 @@
 明确不做：布局 / 信息架构 / 7 Tab / 主题 / 密度 / 框架（已拍板，见状态文档 §2.3）。
 
 **开工前置（2026-11-14 用户拍板）**：批次 1 与并行会话未提交改动重叠 5 个文件——`Lightbox.vue`、`PromptDetailPane.vue`、`PromptTrialPanel.vue`（含 spec）、`WorkflowParams.vue`、`PromptView.vue`，且 `web/` 构建产物处于该批半更新态。**等该批提交后再开工**（沿用 2026-11-12 对 A15 的同文件不并行决定）；开工时不重建 `web/` 混入对方 bundle，vitest 先跑基线区分对方既有失败。无重叠的 14 个目标文件清单见 §2-A。
+**前置已满足**：并行批于 2026-11-14 收尾提交（`f258ef4f`），批次 1–3 同日交付，见 §6。
 
 ## 5. 复现方法
 
 证据目录内 `unslop_probe.py`（18 页截图 + 计算样式盘点 → `unslop_report.json`）、`unslop_followup.py`（transition 时长过滤复测 + 色点定位 → `unslop_followup.json`）。注意：`transition-property` 默认值即 `all`，盘点必须过滤时长>0，否则假阳性（首版探针曾报每页 441–1060，复测修正为 10–40）。
+
+---
+
+## 6. 交付记录（2026-11-14，批次 1–3 已交付）
+
+| 批 | commit | 内容 | 验收 |
+|---|---|---|---|
+| 1 | `8b1be99` | 新增 `Icon.vue`（lucide-vue-next，31 图标，16px / 1.5 stroke / currentColor）；约 40 处彩色 emoji 换线性图标；保留 ✓✕★☆♥✎☰ 排版符号；`Lightbox.spec` 下载/写操作断言改按 title（意图不变） | vue-tsc 0；vitest 830/830；探针 18/18 页彩色 emoji=0、零 console 错误零溢出 |
+| 2 | `f1c744f` | 4 处 `transition` 简写（=all）点名属性；GalleryGrid 去 hover scale(1.02)（卡片已有边框+阴影反馈）；job-badge / 标签 ✕ / 矩阵悬浮徽标 / 参考库首页槽位计数与标签 10px→`--fs-xs` | 探针 realTransitionAll 全 0、tinyBtn 全 0 |
+| 3 | `c31429d` | 暗色 `--primary` #5b5bd6（白字 5.37）；主色作文字/链接的 31 文件改 `--accent-link` #818cf8（暗底 6.34、活跃页签 soft 底 5.02，原约 2.8）；`--text-faint` #8a8a8a（5.19）；浅色主题不变 | 探针对比度复测达标；`color: var(--primary)` 落点清零 |
+
+每批共同验收：vue-tsc 0 错误、vitest 830/830、vite build 成功、`web/` 同步入库；e2e 无选择器漂移（不依赖被改 emoji 文本/结构）。批次 3 的 `primary/bg 3.53` 复测值对应**实底色**（非文字），作边框/填充满足 ≥3:1；文字口径看 `--accent-link` 6.34。
+
+**新发现观察项（并入批次 4，待拍板）**：
+
+- `.cat-chip.on` 暗色主题直接用用户分类色实底 + 白字（如琥珀 #f59e0b 白字 ≈2.2）；浅色已有「调暗 40%」保护（`PromptDetailPane.vue` 浅色规则），暗色没有 → 建议暗色复用同一条 color-mix 调暗。
+- 参考库首页圆角方言（20px / 9999px）与参考皮肤其余 10px（ReferenceCard 等）维持「各自内部一致」现状，是否统一待拍板。
+- accent 色相（保留 indigo 族或从暗房世界推导）待拍板；本轮只调明度、未改色相。
+- 提示词详情右栏未设参数的 6 个「-」空盒可选收敛。
 
 ---
 
