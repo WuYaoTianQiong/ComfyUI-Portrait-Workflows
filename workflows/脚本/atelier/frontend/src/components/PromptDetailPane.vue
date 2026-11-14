@@ -1123,7 +1123,8 @@ watch(
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  transition: 0.12s;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .cat-chip:hover {
@@ -1172,10 +1173,10 @@ watch(
   border-radius: 4px;
   background: rgb(22 27 34 / 82%);
   color: var(--text);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   opacity: 0;
-  transition: 0.12s;
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
 .shot:hover .shot-locate,

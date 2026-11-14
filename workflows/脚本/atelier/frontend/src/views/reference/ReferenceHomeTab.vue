@@ -907,15 +907,15 @@ onMounted(() => {
 .home-slot__count {
   flex: none;
   color: var(--text-strong);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 1.4;
 }
 
-/* 槽位标签 10px，名称 12px / 500（React text-[10px] / text-xs） */
+/* 槽位标签 11px（令牌下限），名称 12px / 500 */
 .home-slot__label {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
 }
 

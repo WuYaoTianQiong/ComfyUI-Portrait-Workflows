@@ -130,7 +130,7 @@ function remove(name: string) {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   padding: 0;
   line-height: 1;
   opacity: 0.7;

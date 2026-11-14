@@ -164,11 +164,6 @@ function isBatchReplace(item: HistoryItem): boolean {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform var(--dur) var(--ease);
-}
-
-.card:hover .thumb img {
-  transform: scale(1.02);
 }
 
 .card.missing .thumb img {

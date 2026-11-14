@@ -300,7 +300,8 @@ function facetValue(key: FacetKey): string {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  transition: 0.12s;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .chip:hover {

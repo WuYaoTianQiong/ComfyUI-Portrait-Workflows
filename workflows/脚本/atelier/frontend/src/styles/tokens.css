@@ -408,7 +408,8 @@ select:focus {
   background: var(--panel-2);
   border-radius: var(--radius-sm);
   padding: 5px 10px;
-  transition: 0.12s;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .btn:hover {
