@@ -1,4 +1,5 @@
 """工作流格式转换 —— 将 ComfyUI 内部格式转换为 API 格式"""
+import itertools
 import json
 import logging
 import math
@@ -1439,6 +1440,28 @@ def resolve_seed(*candidates) -> int:
     return random.randint(1, 2**32 - 1)
 
 
+#: 出图唯一后缀的自增序号：同一进程内避免同批任务撞名
+_UID_SEQ = itertools.count()
+
+
+def _b36(n: int, width: int = 0) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while n:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+    return (out or "0").rjust(width, "0")
+
+
+def _short_uid() -> str:
+    """出图唯一后缀：`a` + 3 位 36 进制序号。
+
+    文件名前缀里的 `%hour%%minute%%second%` 已记录执行时间，文件系统也有 mtime；
+    后缀只负责同一进程内避免同批任务撞名，4 字符足够。
+    """
+    return f"a{_b36(next(_UID_SEQ) % 46656, 3)}"
+
+
 def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     """
     向工作流注入提示词 / 种子 / 方向 / 画质。
@@ -1515,11 +1538,7 @@ def inject_prompt(api_workflow: dict, prompt_data: dict) -> dict:
     _inject_resolution(api_workflow, prompt_data)
 
     # 5. 为输出节点注入唯一文件名前缀，避免批量跑图时文件互相覆盖
-    import time
-    import random as _random
-    _ts = int(time.time() * 1000)
-    _rand = _random.randint(1000, 9999)
-    _unique_prefix = f"atelier_{_ts}_{_rand}"
+    _unique_prefix = _short_uid()
     # 常见输出节点类型
     for node_id, node in api_workflow.items():
         if not isinstance(node, dict):

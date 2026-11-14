@@ -73,7 +73,7 @@ def test_retry_prompt_item_uses_saved_prompt_params(api, monkeypatch):
     assert new_items[0]["status"] == "submitted"
     assert new_items[0]["comfyui_prompt_id"] == "pid-retry"
     assert new_items[0]["prompt_params"] == item["prompt_params"]
-    assert pushed[0]["2"]["inputs"]["filename_prefix"].startswith("retry-test/orig_atelier_")
+    assert pushed[0]["2"]["inputs"]["filename_prefix"].startswith("retry-test/orig_a")
 
     again = api.post(f"/api/jobs/{old.id}/retry")
     assert again.status_code == 200

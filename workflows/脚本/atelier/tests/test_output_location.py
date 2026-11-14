@@ -172,7 +172,7 @@ def test_run_text_applies_output_subfolder(api, monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     prefix = captured["workflow"]["1"]["inputs"]["filename_prefix"]
-    assert re.match(r"^\d{4}-\d{2}-\d{2}/x/orig_atelier_\d+_\d+$", prefix), prefix
+    assert re.match(r"^\d{4}-\d{2}-\d{2}/x/orig_a[0-9a-z]+$", prefix), prefix
 
     bad = api.post(
         "/api/runs/text",
