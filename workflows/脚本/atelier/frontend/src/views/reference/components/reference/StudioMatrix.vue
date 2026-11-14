@@ -837,7 +837,7 @@ function sizeTextOf(group: RecipeBatchGroup): string {
   border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--accent-green-text);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   pointer-events: none;
 }

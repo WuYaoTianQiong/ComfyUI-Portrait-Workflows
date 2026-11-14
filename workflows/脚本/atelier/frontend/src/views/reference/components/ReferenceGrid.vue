@@ -175,7 +175,7 @@ function onPageSizeChange(event: Event): void {
   display: flex;
   flex-direction: column;
   padding: 8px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--surface-card);
 }
 
@@ -183,7 +183,7 @@ function onPageSizeChange(event: Event): void {
   position: relative;
   width: 100%;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
 }
 
@@ -226,7 +226,7 @@ function onPageSizeChange(event: Event): void {
   gap: 12px;
   padding: 48px 16px;
   border: 1px solid var(--danger-border-soft);
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--danger-surface-faint);
   text-align: center;
 }

@@ -2656,7 +2656,7 @@ onMounted(async () => {
 .char-group-head .badge {
   padding: 1px 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 11px;
   line-height: 16px;
@@ -2845,7 +2845,7 @@ onMounted(async () => {
 
 .studio-count {
   padding: 1px 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--fill-soft);
   color: var(--text-muted);
   font-size: 12px;
@@ -3282,7 +3282,7 @@ onMounted(async () => {
   padding: 16px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--surface-result);
 }
 
@@ -3375,7 +3375,7 @@ onMounted(async () => {
   min-height: 28px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-strong);
   font-size: 12px;

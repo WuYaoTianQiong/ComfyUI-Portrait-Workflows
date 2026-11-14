@@ -662,7 +662,7 @@ function previewContent(content: string): string {
 @media (max-width: 639px) {
   .person-b {
     padding: 16px;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
   }
 
   .person-b__row {

@@ -75,6 +75,13 @@ if ($hardcodedColors -gt $colorBaseline) {
 }
 Write-Host "硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
 
+# 样式事实守护（体检批次 4）：emoji/transition 简写/字阶下限/圆角方言/令牌对比度。
+# 目前只警告不阻断；升级成门禁待拍板（见 文档/归档/atelier_UI_unslop体检_20261114.md §6）。
+& $PY tools\style_lint.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'WARNING: style_lint 有红灯（不阻断 CI；升级门禁待拍板）' -ForegroundColor Yellow
+}
+
 $frontend = Join-Path $root 'frontend'
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     Write-Host 'FAILED: 前端依赖未安装（frontend/node_modules 缺失），无法执行第 3–7 关' -ForegroundColor Red

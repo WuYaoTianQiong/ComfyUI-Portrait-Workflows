@@ -883,7 +883,7 @@ defineExpose({ expand })
 @media (max-width: 639px) {
   .supplement {
     padding: 16px;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
   }
 
   .supplement__row {

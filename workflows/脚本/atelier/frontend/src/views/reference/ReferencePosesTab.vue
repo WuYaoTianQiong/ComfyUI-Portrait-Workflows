@@ -1098,7 +1098,7 @@ onMounted(() => {
   height: 32px;
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-panel);
   color: var(--text-muted);
   font-size: 14px;
@@ -1343,7 +1343,7 @@ onMounted(() => {
 .angle-cell__label {
   display: block;
   margin-top: 2px;
-  font-size: 9px;
+  font-size: var(--fs-xs);
   line-height: 13.5px;
   text-align: center;
 }

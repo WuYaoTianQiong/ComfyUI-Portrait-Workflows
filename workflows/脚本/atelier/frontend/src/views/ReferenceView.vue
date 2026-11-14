@@ -662,7 +662,7 @@ onBeforeUnmount(() => {
     width: auto;
     height: 32px;
     padding: 6px 14px;
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
     background: var(--surface-inset);
   }
 

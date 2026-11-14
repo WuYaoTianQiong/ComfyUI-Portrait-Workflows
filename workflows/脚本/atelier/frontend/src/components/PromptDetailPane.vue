@@ -1133,19 +1133,11 @@ watch(
 }
 
 .cat-chip.on {
-  background: var(--c, var(--primary));
-  border-color: var(--c, var(--primary));
-  color: var(--on-primary);
-}
-
-/**
- * 浅色主题：分类色来自用户数据，可能是高亮度色，
- * 白字只有 2.15:1。把底色调暗 40%（保留色相）后，8 个默认色板上的白字
- * 均回到 5.4:1 以上。深色主题不命中此规则，外观不变。
- */
-:root[data-theme='light'] .cat-chip.on {
+  /* 分类色来自用户数据，可能是高亮度色（琥珀白字仅 2.15:1）。
+     底色调暗 40%（保留色相）后 8 个默认色板白字均 ≥5.4:1；明暗两主题共用同一条护色规则。 */
   background: color-mix(in srgb, var(--c, var(--primary)) 60%, var(--mix-base-black));
   border-color: color-mix(in srgb, var(--c, var(--primary)) 60%, var(--mix-base-black));
+  color: var(--on-primary);
 }
 
 .shot-grid {

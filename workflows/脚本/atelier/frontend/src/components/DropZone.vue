@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
 }
 
 .dz-hint {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   color: var(--muted);
   overflow: hidden;
@@ -318,7 +318,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
   color: var(--accent-link);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-family: ui-monospace, monospace;
 }
 

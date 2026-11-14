@@ -412,7 +412,7 @@ function onPairBatchChange(event: Event): void {
   min-height: 28px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-strong);
   font-size: 12px;

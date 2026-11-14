@@ -778,7 +778,7 @@ async function copyId() {
   border-radius: 8px;
   background: var(--fill-medium);
   color: var(--text-strong);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 15px;
   white-space: nowrap;
@@ -919,12 +919,12 @@ async function copyId() {
   place-items: center;
   width: 100%;
   height: 100%;
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--text-faint);
 }
 
 .ref-lightbox__thumb-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.2;
   text-align: center;
 }

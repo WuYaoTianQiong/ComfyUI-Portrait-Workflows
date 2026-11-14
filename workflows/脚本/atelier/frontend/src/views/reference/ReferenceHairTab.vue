@@ -389,7 +389,7 @@ onMounted(() => {
   height: 32px;
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-panel);
   color: var(--text-muted);
   font-size: 14px;

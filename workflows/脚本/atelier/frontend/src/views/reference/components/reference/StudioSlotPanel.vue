@@ -842,7 +842,7 @@ function setMode(next: RecipeSlotMode): void {
   border-radius: 3px;
   background: var(--surface-overlay);
   color: var(--text-body-soft);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 13px;
   pointer-events: none;

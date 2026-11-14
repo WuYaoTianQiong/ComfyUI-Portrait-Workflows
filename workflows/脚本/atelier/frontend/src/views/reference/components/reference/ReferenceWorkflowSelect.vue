@@ -384,7 +384,7 @@ onBeforeUnmount(() => {
 .wf-chip__count {
   flex: none;
   padding: 0 5px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--fill-soft);
   color: var(--text-body-soft);
   font-size: 11px;
@@ -500,7 +500,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   background: var(--accent-green-soft);
   color: var(--accent-green);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -607,7 +607,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--on-inverse);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1;
 }
 
@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
 /* 不适用原因：红色可读，不靠浅灰 */
 .wf-option__reason {
   color: var(--danger-text-soft);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   word-break: break-word;
 }

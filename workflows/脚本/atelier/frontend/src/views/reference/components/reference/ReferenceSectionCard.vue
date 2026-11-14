@@ -90,7 +90,7 @@ withDefaults(
 @media (max-width: 639px) {
   .section-card {
     padding: 16px;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
   }
 }
 </style>

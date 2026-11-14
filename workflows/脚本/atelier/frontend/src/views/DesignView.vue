@@ -204,7 +204,7 @@ const SCALES = [
 }
 
 .swatch-desc {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 

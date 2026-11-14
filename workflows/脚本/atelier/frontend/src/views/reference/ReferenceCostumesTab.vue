@@ -894,7 +894,7 @@ onBeforeUnmount(() => {
   height: 32px;
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-panel);
   color: var(--text-muted);
   font-size: 14px;
@@ -1045,7 +1045,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   background: var(--surface-inset);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 16px;
 }
 
@@ -1053,7 +1053,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -4,14 +4,15 @@ import { computed } from 'vue'
 /**
  * 参考图库统一卡片（阶段 2.1 共享底座）。
  *
- * 视觉数值严格对齐《施工手册》§5 与「§5 补充实测项」：
- * - 卡片：圆角 20px、内边距 8px、底色 #262626；
- * - 缩略图容器：圆角 18px，比例由页面决定（姿势 3:4 / 服装 2:3 / 人像 4:5）；
+ * 视觉数值原对齐《施工手册》§5 与「§5 补充实测项」；2026-11-14 体检批次 4 起
+ * 圆角 / 字阶收敛到全局令牌（手册旧值 20px / 18px / 10px 退役，见归档审计报告 §6）：
+ * - 卡片：圆角 var(--radius-lg) 14px、内边距 8px、底色 #262626；
+ * - 缩略图容器：圆角 var(--radius-sm) 6px（嵌套圆角 = 外 14 − 内边距 8），比例由页面决定（姿势 3:4 / 服装 2:3 / 人像 4:5）；
  * - 标题：12px / 600、行高 16.5px、两行截断、最小高 36px；
- * - 辅助行：11px / 400 #a1a1a1（人像 ID 行 10px）；
- * - 左上编号角标：高 19px、圆角 8px、底 rgba(0,0,0,.7)、白字 10px / 700、内边距 2px 6px、
+ * - 辅助行：11px / 400 #a1a1a1（人像 ID 行同 11px）；
+ * - 左上编号角标：高 19px、圆角 8px、底 rgba(0,0,0,.7)、白字 11px / 700、内边距 2px 6px、
  *   距缩略图左 / 上各 8px；
- * - 右上角度角标：高 19px、圆角 8px、底 rgba(255,255,255,.9)、字 #18181b 10px / 600；
+ * - 右上角度角标：高 19px、圆角 8px、底 rgba(255,255,255,.9)、字 #18181b 11px / 600；
  * - 「加入配方 / 已选」：未选 80 × 24.5、已选 58 × 24.5、圆角 10px、11px / 600、
  *   内边距 4px 10px，未选底 rgba(0,0,0,.75)、已选底 #009966。
  *
@@ -157,7 +158,7 @@ const imageAlt = computed(() => props.alt || props.title)
   min-width: 0;
   overflow: hidden;
   padding: 8px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--surface-card);
   transition:
     transform var(--dur-fast) var(--ease),
@@ -173,7 +174,7 @@ const imageAlt = computed(() => props.alt || props.title)
   position: relative;
   width: 100%;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--radius-sm);
   background: var(--surface-thumb);
   cursor: zoom-in;
 }
@@ -225,7 +226,7 @@ const imageAlt = computed(() => props.alt || props.title)
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.7);
   color: var(--on-solid);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   line-height: 15px;
   white-space: nowrap;
@@ -242,7 +243,7 @@ const imageAlt = computed(() => props.alt || props.title)
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   color: var(--text-on-chip);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 15px;
   white-space: nowrap;
@@ -323,7 +324,7 @@ const imageAlt = computed(() => props.alt || props.title)
 
 .ref-card__meta.is-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .ref-card__meta-left {

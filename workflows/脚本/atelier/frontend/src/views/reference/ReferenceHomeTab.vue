@@ -598,7 +598,7 @@ onMounted(() => {
   height: 190px;
   padding: 16px;
   border: 0;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--surface-card);
   color: inherit;
   text-align: left;
@@ -648,7 +648,7 @@ onMounted(() => {
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 .home-card__dot.is-emerald {
@@ -668,7 +668,7 @@ onMounted(() => {
   flex: none;
   min-width: 32px;
   padding: 2px 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--fill-soft);
   color: var(--text-strong);
   font-size: 12px;
@@ -730,7 +730,7 @@ onMounted(() => {
 .home-recipe {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--surface-panel);
 }
 
@@ -762,7 +762,7 @@ onMounted(() => {
 .home-recipe__total {
   flex: none;
   padding: 1px 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--fill-medium);
   color: var(--text-strong);
   font-size: 11px;
