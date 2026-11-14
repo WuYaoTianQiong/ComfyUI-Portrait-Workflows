@@ -442,6 +442,16 @@ describe('Lightbox', () => {
     const thumb = cards[1].querySelector('.ref-thumb') as HTMLImageElement
     expect(thumb.getAttribute('src')).toContain('/api/browser/thumb?path=')
 
+    // 参考图区块默认展开，点标题可收起/再展开
+    const refToggle = Array.from(document.body.querySelectorAll('.side-toggle'))
+      .find((el) => el.textContent?.includes('参考图')) as HTMLButtonElement
+    refToggle.click()
+    await wrapper.vm.$nextTick()
+    expect((document.body.querySelector('.ref-grid') as HTMLElement).style.display).toBe('none')
+    refToggle.click()
+    await wrapper.vm.$nextTick()
+    expect((document.body.querySelector('.ref-grid') as HTMLElement).style.display).toBe('')
+
     cards[1].click()
     await wrapper.vm.$nextTick()
     const preview = document.body.querySelector('.ref-preview')

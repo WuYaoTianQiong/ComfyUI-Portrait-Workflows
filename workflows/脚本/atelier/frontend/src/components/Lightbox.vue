@@ -656,9 +656,10 @@ const compiledNotes = computed(() => stringList(compiled.value?.notes))
 const compiledWarnings = computed(() => stringList(compiled.value?.warnings))
 
 type PromptTab = 'source' | 'submitted'
-type ArchiveTab = 'file' | 'workflow' | 'params'
 const promptTab = ref<PromptTab>('source')
-const archiveTab = ref<ArchiveTab>('file')
+/** 右栏默认全部展开；只有参考图 / 来源这类长区块提供收起。 */
+const referenceOpen = ref(true)
+const extraOpen = ref(true)
 
 /** 实际提交的负向：工作流不支持时只给状态，不展示未提交的文本。 */
 const submittedNegativeVisible = computed(() => {
@@ -713,7 +714,6 @@ watch(
       return
     }
     promptTab.value = 'source'
-    archiveTab.value = 'file'
     const seq = ++detailSeq
     detailLoading.value = true
     const promptId = item.value?.prompt_id ?? 0
@@ -1493,30 +1493,6 @@ function onKey(event: KeyboardEvent) {
               <button class="btn btn-sm" @click="promptInfoOpen = false">关闭</button>
             </div>
 
-            <div class="pane-tabs">
-              <button
-                class="btn btn-sm"
-                :class="{ active: archiveTab === 'file' }"
-                @click="archiveTab = 'file'"
-              >
-                文件
-              </button>
-              <button
-                class="btn btn-sm"
-                :class="{ active: archiveTab === 'workflow' }"
-                @click="archiveTab = 'workflow'"
-              >
-                工作流
-              </button>
-              <button
-                class="btn btn-sm"
-                :class="{ active: archiveTab === 'params' }"
-                @click="archiveTab = 'params'"
-              >
-                参数
-              </button>
-            </div>
-
             <div
               ref="promptSideEl"
               class="side-body"
@@ -1526,136 +1502,146 @@ function onKey(event: KeyboardEvent) {
                 <span class="prompt-tip">正在汇总工作流与运行参数…</span>
               </section>
 
-              <div v-show="archiveTab === 'file'" class="side-tab-pane">
-                <section class="side-block">
-                  <h3 class="side-title">文件信息</h3>
+              <section class="side-block">
+                <h3 class="side-title">文件信息</h3>
+                <div
+                  class="side-filename copyable"
+                  title="点击复制文件名"
+                  @click="copyFilename"
+                >
+                  {{ item.filename }}
+                </div>
+                <dl class="facts side-facts">
                   <div
-                    class="side-filename copyable"
-                    title="点击复制文件名"
-                    @click="copyFilename"
+                    v-for="row in fileRows"
+                    :key="row.label"
+                    class="kv"
+                    :class="{ wide: row.wide }"
                   >
-                    {{ item.filename }}
+                    <dt>{{ row.label }}</dt>
+                    <dd :title="row.title">{{ row.value }}</dd>
                   </div>
-                  <dl class="facts side-facts">
-                    <div
-                      v-for="row in fileRows"
-                      :key="row.label"
-                      class="kv"
-                      :class="{ wide: row.wide }"
+                  <div v-if="showFileActions" class="kv wide">
+                    <dt>存储位置</dt>
+                    <dd
+                      class="path linkable"
+                      :title="`在资源管理器中定位：${outputPath}`"
+                      @click.stop="revealImage(item)"
                     >
-                      <dt>{{ row.label }}</dt>
-                      <dd :title="row.title">{{ row.value }}</dd>
-                    </div>
-                    <div v-if="showFileActions" class="kv wide">
-                      <dt>存储位置</dt>
-                      <dd
-                        class="path linkable"
-                        :title="`在资源管理器中定位：${outputPath}`"
-                        @click.stop="revealImage(item)"
-                      >
-                        {{ outputPath }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section class="side-block cleanup-block">
-                  <h3 class="side-title">后期清理</h3>
-                  <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
-                  <div class="cleanup-actions">
-                    <button
-                      class="btn btn-sm"
-                      :disabled="busy"
-                      @click="promptInfoOpen = false; manualCleanupOpen = true"
-                    >
-                      框选清理
-                    </button>
+                      {{ outputPath }}
+                    </dd>
                   </div>
-                </section>
-              </div>
+                </dl>
+              </section>
 
-              <div v-show="archiveTab === 'workflow'" class="side-tab-pane">
-                <section v-if="workflowRows.length || jobRow" class="side-block">
-                  <h3 class="side-title">工作流与任务</h3>
-                  <dl class="facts side-facts">
-                    <div v-if="jobRow" class="kv wide">
-                      <dt>任务</dt>
-                      <dd :title="jobRow.title">{{ jobRow.text }}</dd>
-                    </div>
-                    <div
-                      v-for="row in workflowRows"
-                      :key="row.label"
-                      class="kv"
-                      :class="{ wide: row.wide }"
-                    >
-                      <dt>{{ row.label }}</dt>
-                      <dd :title="row.title">{{ row.value }}</dd>
-                    </div>
-                  </dl>
-                </section>
+              <section class="side-block cleanup-block">
+                <h3 class="side-title">后期清理</h3>
+                <p class="prompt-tip">手动框选印章/文字并局部擦除，生成新图，不覆盖原图。</p>
+                <div class="cleanup-actions">
+                  <button
+                    class="btn btn-sm"
+                    :disabled="busy"
+                    @click="promptInfoOpen = false; manualCleanupOpen = true"
+                  >
+                    框选清理
+                  </button>
+                </div>
+              </section>
 
-                <section v-if="referenceInputs.length" class="side-block">
-                  <h3 class="side-title">参考图</h3>
-                  <div class="ref-grid">
-                    <button
-                      v-for="ref in referenceInputs"
-                      :key="ref.path"
-                      class="ref-card"
-                      type="button"
-                      :title="ref.path"
-                      @click="openReferencePreview(ref)"
-                    >
-                      <img
-                        class="ref-thumb"
-                        :src="referenceThumb(ref.path)"
-                        :alt="ref.label"
-                        loading="lazy"
-                      />
-                      <span class="ref-label">{{ ref.label }}</span>
-                    </button>
+              <section v-if="workflowRows.length || jobRow" class="side-block">
+                <h3 class="side-title">工作流与任务</h3>
+                <dl class="facts side-facts">
+                  <div v-if="jobRow" class="kv wide">
+                    <dt>任务</dt>
+                    <dd :title="jobRow.title">{{ jobRow.text }}</dd>
                   </div>
-                </section>
+                  <div
+                    v-for="row in workflowRows"
+                    :key="row.label"
+                    class="kv"
+                    :class="{ wide: row.wide }"
+                  >
+                    <dt>{{ row.label }}</dt>
+                    <dd :title="row.title">{{ row.value }}</dd>
+                  </div>
+                </dl>
+              </section>
 
-                <section v-if="extraRows.length" class="side-block">
-                  <h3 class="side-title">来源与输入</h3>
-                  <dl class="facts side-facts">
-                    <div
-                      v-for="row in extraRows"
-                      :key="row.label"
-                      class="kv"
-                      :class="{ wide: row.wide }"
-                    >
-                      <dt>{{ row.label }}</dt>
-                      <dd
-                        v-if="row.promptId"
-                        class="linkable"
-                        :title="row.title"
-                        @click.stop="jumpToPrompt(row.promptId!)"
-                      >
-                        {{ row.value }}
-                      </dd>
-                      <dd v-else :title="row.title">{{ row.value }}</dd>
-                    </div>
-                  </dl>
-                </section>
-              </div>
+              <section v-if="runParamRows.length" class="side-block">
+                <h3 class="side-title">运行参数</h3>
+                <dl class="facts side-facts">
+                  <div
+                    v-for="row in runParamRows"
+                    :key="row.label"
+                    class="kv"
+                    :class="{ wide: row.wide }"
+                  >
+                    <dt>{{ row.label }}</dt>
+                    <dd>{{ row.value }}</dd>
+                  </div>
+                </dl>
+              </section>
 
-              <div v-show="archiveTab === 'params'" class="side-tab-pane">
-                <section v-if="runParamRows.length" class="side-block">
-                  <h3 class="side-title">运行参数</h3>
-                  <dl class="facts side-facts">
-                    <div
-                      v-for="row in runParamRows"
-                      :key="row.label"
-                      class="kv"
-                      :class="{ wide: row.wide }"
+              <section v-if="referenceInputs.length" class="side-block">
+                <button
+                  type="button"
+                  class="side-title side-toggle"
+                  :aria-expanded="referenceOpen"
+                  @click="referenceOpen = !referenceOpen"
+                >
+                  <span>{{ referenceOpen ? '▾' : '▸' }} 参考图</span>
+                  <span class="side-count">{{ referenceInputs.length }}</span>
+                </button>
+                <div v-show="referenceOpen" class="ref-grid">
+                  <button
+                    v-for="ref in referenceInputs"
+                    :key="ref.path"
+                    class="ref-card"
+                    type="button"
+                    :title="ref.path"
+                    @click="openReferencePreview(ref)"
+                  >
+                    <img
+                      class="ref-thumb"
+                      :src="referenceThumb(ref.path)"
+                      :alt="ref.label"
+                      loading="lazy"
+                    />
+                    <span class="ref-label">{{ ref.label }}</span>
+                  </button>
+                </div>
+              </section>
+
+              <section v-if="extraRows.length" class="side-block">
+                <button
+                  type="button"
+                  class="side-title side-toggle"
+                  :aria-expanded="extraOpen"
+                  @click="extraOpen = !extraOpen"
+                >
+                  <span>{{ extraOpen ? '▾' : '▸' }} 来源与输入</span>
+                  <span class="side-count">{{ extraRows.length }}</span>
+                </button>
+                <dl v-show="extraOpen" class="facts side-facts">
+                  <div
+                    v-for="row in extraRows"
+                    :key="row.label"
+                    class="kv"
+                    :class="{ wide: row.wide }"
+                  >
+                    <dt>{{ row.label }}</dt>
+                    <dd
+                      v-if="row.promptId"
+                      class="linkable"
+                      :title="row.title"
+                      @click.stop="jumpToPrompt(row.promptId!)"
                     >
-                      <dt>{{ row.label }}</dt>
-                      <dd>{{ row.value }}</dd>
-                    </div>
-                  </dl>
-                </section>
-              </div>
+                      {{ row.value }}
+                    </dd>
+                    <dd v-else :title="row.title">{{ row.value }}</dd>
+                  </div>
+                </dl>
+              </section>
 
               <p class="prompt-tip">
                 <template v-if="item.prompt_id">
@@ -2141,7 +2127,7 @@ function onKey(event: KeyboardEvent) {
   gap: var(--gap-sm);
 }
 
-/* 文件 / 工作流 / 参数：页签固定，内容区独立滚动 */
+/* 档案分区全部展开，只保留一个滚动条 */
 .side-body {
   flex: 1;
   min-height: 0;
@@ -2150,12 +2136,6 @@ function onKey(event: KeyboardEvent) {
   flex-direction: column;
   gap: var(--gap);
   padding-right: 2px;
-}
-
-.side-tab-pane {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
 }
 
 .side-block {
@@ -2170,6 +2150,30 @@ function onKey(event: KeyboardEvent) {
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
+}
+
+/* 长区块标题做成按钮：默认展开，点击收起 */
+.side-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.side-toggle:hover {
+  color: var(--text);
+}
+
+.side-count {
+  color: var(--muted);
+  font-weight: 400;
 }
 
 /* 参考图缩略图：右栏宽度内自适应列数，点开看原图 */
