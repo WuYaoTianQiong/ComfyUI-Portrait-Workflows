@@ -235,7 +235,21 @@ def main():
 
     # ---------- 交叉校验：工作流清单.json（Atelier 机器视图） ↔ 资产清单 1.1/1.2（人读视图） ----------
     # 两套记录并存是对的（一份给程序认身份、一份给人讲用法），但必须能自动比对，否则会漂。
-    manifest_path = os.path.join(workflows_root, "工作流清单.json")
+    # 清单是 Atelier 的运行数据，默认在 脚本\atelier\data\；库根旧位置只作兼容回退
+    # （库根 = ComfyUI\user\default\workflows，放根目录会被它的工作流列表列出来、点开报错）。
+    def atelier_manifest_path():
+        explicit = os.environ.get("ATELIER_DATA_DIR")
+        candidates = []
+        if explicit:
+            candidates.append(os.path.join(explicit, "工作流清单.json"))
+        candidates.append(os.path.join(workflows_root, "脚本", "atelier", "data", "工作流清单.json"))
+        candidates.append(os.path.join(workflows_root, "工作流清单.json"))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        return candidates[0]
+
+    manifest_path = atelier_manifest_path()
     sec11, sec12, section = {}, {}, None
     for line in text.splitlines():
         if line.startswith("### 1.1"):

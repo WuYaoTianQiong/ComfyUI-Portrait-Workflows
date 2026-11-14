@@ -1937,6 +1937,32 @@
         "title": "JobSnapshot",
         "type": "object"
       },
+      "LinkPromptRequest": {
+        "properties": {
+          "image_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Image Ids",
+            "type": "array"
+          },
+          "inherit_taxonomy": {
+            "default": true,
+            "title": "Inherit Taxonomy",
+            "type": "boolean"
+          },
+          "prompt_id": {
+            "title": "Prompt Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "image_ids",
+          "prompt_id"
+        ],
+        "title": "LinkPromptRequest",
+        "type": "object"
+      },
       "MaskSaveRequest": {
         "properties": {
           "data_url": {
@@ -6311,6 +6337,46 @@
           }
         },
         "summary": "History Ids",
+        "tags": [
+          "图片"
+        ]
+      }
+    },
+    "/api/images/link_prompt": {
+      "post": {
+        "description": "把已出的图挂到一条提示词名下。\n\n临时试跑用 `source_prompt_id=0` 出图时 `prompt_id` 为空，用户满意后\n「存为提示词」需要把整批图认领过去，否则新提示词的出图历史是空的。\n只改归属与分类/标签继承，不动文件，也不动 `prompt_params` 里当次的实际文本。",
+        "operationId": "link_images_to_prompt_api_images_link_prompt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkPromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Images To Prompt",
         "tags": [
           "图片"
         ]

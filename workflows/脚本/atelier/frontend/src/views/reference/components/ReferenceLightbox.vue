@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import Skeleton from '../../../components/Skeleton.vue'
 import { useToast } from '../../../composables/useToast'
+import { useLoadTimeout } from '../../../composables/useLoadTimeout'
 import { useViewerTransform } from '../../../composables/useViewerTransform'
 
 /**
@@ -160,9 +161,24 @@ const displayZoom = computed(() => {
 const imageError = ref(false)
 /** 递增后通过 key 重建 img，强制重新拉取。 */
 const reloadNonce = ref(0)
+/** 加载超时（请求挂起）：与失败共用错误态，但文案区分。 */
+const loadTimedOut = ref(false)
+const loadTimeout = useLoadTimeout(() => {
+  loadTimedOut.value = true
+  imgLoaded.value = false
+})
+
+/** 重试时给 URL 追加 nonce，绕过可能卡死的浏览器/代理缓存条目。 */
+const imgSrc = computed(() => {
+  const url = props.imageUrl
+  if (!url || !reloadNonce.value) return url ?? ''
+  return `${url}${url.includes('?') ? '&' : '?'}_r=${reloadNonce.value}`
+})
 
 function onImageLoad(event: Event) {
   imageError.value = false
+  loadTimedOut.value = false
+  loadTimeout.stop()
   setNaturalSize(event.target as HTMLImageElement)
   fitImage()
 }
@@ -170,11 +186,14 @@ function onImageLoad(event: Event) {
 function onImageError() {
   imageError.value = true
   imgLoaded.value = false
+  loadTimeout.stop()
 }
 
 function retryImage() {
   imageError.value = false
+  loadTimedOut.value = false
   reloadNonce.value += 1
+  loadTimeout.start()
 }
 
 /** stage 尺寸变化：适应模式重新贴合，手动缩放保持当前比例并重新约束边界。 */
@@ -210,14 +229,18 @@ watch(
     if (!open) {
       observer?.disconnect()
       observer = null
+      loadTimeout.stop()
+      loadTimedOut.value = false
       resetViewer()
       return
     }
     imageError.value = false
+    loadTimedOut.value = false
     await nextTick()
     syncStageSize()
     observeStage()
     initFromCache()
+    if (!imgLoaded.value) loadTimeout.start()
   },
   { immediate: true },
 )
@@ -226,10 +249,13 @@ watch(
   () => props.imageUrl,
   async () => {
     imageError.value = false
+    loadTimedOut.value = false
+    loadTimeout.stop()
     resetViewer()
     await nextTick()
     syncStageSize()
     initFromCache()
+    if (!imgLoaded.value) loadTimeout.start()
   },
 )
 
@@ -291,7 +317,7 @@ const imageAlt = computed(() => props.alt || props.title)
 const showDepthSwitch = computed(() => props.depthMode !== null)
 const downloadFileName = computed(() => props.downloadName || props.copyValue || 'reference')
 const hasThumbs = computed(() => props.thumbnails.length > 0)
-const showLoading = computed(() => Boolean(props.imageUrl) && !imgLoaded.value && !imageError.value)
+const showLoading = computed(() => Boolean(props.imageUrl) && !imgLoaded.value && !imageError.value && !loadTimedOut.value)
 
 async function copyId() {
   if (!props.copyValue) return
@@ -354,15 +380,15 @@ async function copyId() {
               <Skeleton variant="block" width="min(320px, 52%)" height="80%" radius="10px" />
               <span>加载中…</span>
             </div>
-            <div v-else-if="imageError" class="ref-lightbox__placeholder is-error">
-              <span>图片加载失败，请检查文件是否存在</span>
+            <div v-else-if="imageError || loadTimedOut" class="ref-lightbox__placeholder is-error">
+              <span>{{ loadTimedOut ? '图片加载超时（30 秒无响应），请重试' : '图片加载失败，请检查文件是否存在' }}</span>
               <button type="button" class="ref-lightbox__retry" @click.stop="retryImage">重试</button>
             </div>
             <img
               v-if="imageUrl && !imageError"
               ref="imgEl"
               :key="`${imageUrl}-${reloadNonce}`"
-              :src="imageUrl"
+              :src="imgSrc"
               :alt="imageAlt"
               :class="{ loaded: imgLoaded }"
               :draggable="false"
@@ -650,6 +676,11 @@ async function copyId() {
   font-size: 12px;
   text-align: center;
   pointer-events: none;
+}
+
+/* Skeleton 根节点满宽、骨架条默认左对齐，居中容器里要显式居中 */
+.ref-lightbox__loading :deep(.skeleton) {
+  align-items: center;
 }
 
 .ref-lightbox__placeholder.is-error {

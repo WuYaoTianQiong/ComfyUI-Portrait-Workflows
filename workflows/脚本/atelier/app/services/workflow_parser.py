@@ -72,6 +72,12 @@ NATIVE_RESOLVER_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21
 # 底部货架/地面拼贴；2048 是 9:16 三 seed 验证过的安全阈值。
 MAX_FINAL_LONG_SIDE = 2048
 
+# 单程 latent 边长上限：写进 EmptyLatentImage 的宽高统一截断到这个范围，
+# 避免高倍率档位把边长推到显存红线。**预演必须用同一个上限**，否则界面标注
+# 会比真实出图虚高（2.0× 长边 4.7k 实际只跑 4096）。
+MAX_LATENT_SIDE = 4096
+MIN_LATENT_SIDE = 256
+
 
 class RatioNotSupported(ValueError):
     """请求的比例超出工作流安全范围（例如 ZIT 预设链路 + 9:21）。"""
@@ -1217,6 +1223,15 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
     )
     base_mp = float(info.get("megapixels") or 0)
 
+    # resolver 旋钮认这个比例时才走 megapixels（不写 width/height，也就不截断）；
+    # 不认时注入会退回字面量，落进 _set_latent_size 的边长上限。预览必须同步，
+    # 否则标签比真实出图虚高。
+    src = info.get("src") or {}
+    resolver_options = (
+        _get_combo_options(src.get("class_type", ""), "aspect_ratio")
+        if info["mode"] == "resolver" and isinstance(src, dict) else []
+    )
+
     preview = {}
     for tier in tiers:
         scale = quality_scale(tier)
@@ -1241,6 +1256,8 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
             width, height = _cap_latent_to_final_long_side(
                 width, height, post_scale, multiple,
             )
+            if info["mode"] != "resolver" or not _pick_ratio_option(resolver_options, ratio):
+                width, height = _fit_latent_size(width, height, multiple)
             per_ratio[ratio] = {
                 "width": int(width),
                 "height": int(height),
@@ -1254,11 +1271,40 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
     return preview
 
 
+def _fit_latent_size(width: float, height: float, multiple: int) -> tuple[int, int]:
+    """把 latent 宽高收进 [MIN_LATENT_SIDE, MAX_LATENT_SIDE]，越界时**等比**缩放。
+
+    不能只截断超限的那一边：9:16 的 2352×4176 截成 2352×4096 只有 0.574，
+    用户选的比例被悄悄压走样，而档位本来只是相对倍率，少几个像素看不出来。
+    所以越界时整体缩放到长边正好 4096（或短边抬到 256），再对齐 multiple；
+    对齐若又顶出边界就逐格收回。未越界时保持原值，原生尺寸一个像素都不动。
+    """
+    longest, shortest = max(width, height), min(width, height)
+    if MIN_LATENT_SIDE <= shortest and longest <= MAX_LATENT_SIDE:
+        return int(round(width)), int(round(height))
+
+    k = (MAX_LATENT_SIDE / longest) if longest > MAX_LATENT_SIDE \
+        else (MIN_LATENT_SIDE / shortest)
+    out_w = _round_to(width * k, multiple)
+    out_h = _round_to(height * k, multiple)
+    while max(out_w, out_h) > MAX_LATENT_SIDE:
+        if out_w >= out_h:
+            out_w -= multiple
+        else:
+            out_h -= multiple
+    while min(out_w, out_h) < MIN_LATENT_SIDE:
+        if out_w <= out_h:
+            out_w += multiple
+        else:
+            out_h += multiple
+    return out_w, out_h
+
+
 def _set_latent_size(info: dict, width: float, height: float) -> None:
     inputs = info["node"].setdefault("inputs", {})
-    inputs["width"] = max(256, min(4096, int(round(width))))
-    inputs["height"] = max(256, min(4096, int(round(height))))
-
+    out_w, out_h = _fit_latent_size(width, height, int(info.get("multiple") or 16))
+    inputs["width"] = out_w
+    inputs["height"] = out_h
 
 def _pick_ratio_option(options: list[str], ratio: str) -> str | None:
     for option in options:

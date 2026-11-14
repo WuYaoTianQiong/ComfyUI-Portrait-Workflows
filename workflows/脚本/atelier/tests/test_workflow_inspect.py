@@ -58,6 +58,40 @@ def test_size_preview_matches_actual_injection():
             ), f"{tier} {ratio} 预览与实际注入不一致"
 
 
+def test_size_preview_honors_max_latent_side():
+    """长边超过 4096 的档位必须和注入一样等比缩小，且比例不能被压走样。"""
+    wf = _workflow()
+    wf["1"]["inputs"].update({"width": 1280, "height": 1920})
+    params = detect_workflow_params(wf)
+    entry = build_size_preview(wf, params)["2.0x"]["9:16"]
+
+    injected = copy.deepcopy(wf)
+    inject_prompt(injected, {
+        "prompt": "", "seed": 1, "aspect_ratio": "9:16",
+        "quality": "2.0x", "orientation": "portrait",
+    })
+    latent = injected["1"]["inputs"]
+    assert (latent["width"], latent["height"]) == (
+        entry["width"], entry["height"],
+    ), "预览与实际注入不一致（边长上限没同步）"
+    assert max(entry["width"], entry["height"]) == 4096
+    # 等比缩小：9:16 必须还是 9:16，不能被单边截断压成 0.574
+    assert abs(entry["width"] / entry["height"] - 9 / 16) < 0.005
+
+
+def test_size_fit_keeps_native_size_untouched():
+    """未越界的档位一律原样，原生尺寸（哪怕不是 16 的倍数）1 像素都不改。"""
+    wf = _workflow()
+    wf["1"]["inputs"].update({"width": 1128, "height": 2008})
+    injected = copy.deepcopy(wf)
+    inject_prompt(injected, {
+        "prompt": "", "seed": 1, "aspect_ratio": "9:16",
+        "quality": "1.0x", "orientation": "portrait",
+    })
+    latent = injected["1"]["inputs"]
+    assert (latent["width"], latent["height"]) == (1128, 2008)
+
+
 def test_inspect_endpoint_returns_caps_and_preview(api):
     wf = _workflow({"atelier": {"quality_tiers": ["4K"], "default_quality": "4K"}})
     resp = api.post("/api/workflows/inspect", json={

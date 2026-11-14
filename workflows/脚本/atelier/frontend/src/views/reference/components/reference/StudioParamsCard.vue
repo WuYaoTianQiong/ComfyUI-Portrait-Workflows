@@ -92,6 +92,16 @@ function onBaseSeedInput(event: Event): void {
   emit('update:baseSeed', target.value)
 }
 
+/**
+ * 档位 chip 文案：多选比例时只留倍率。
+ *
+ * 每个「比例 × 档位」各展开一组任务，单一像素标注必然和其中几组不符，
+ * 所以多比例时把 `· 6.3MP · 1648×3824` 摘掉，只保留 `2.0×`。
+ */
+function qualityChipText(label: string): string {
+  return props.ratioSelection.length > 1 ? (label.split(' · ')[0] ?? label) : label
+}
+
 /** 体态开关回传勾选态；安全模式下输入本身 disabled，这里再防御一次。 */
 function onBodyModeChange(event: Event): void {
   if (props.safeMode) return
@@ -215,10 +225,13 @@ function onPairBatchChange(event: Event): void {
           :data-quality="option.value"
           @click="emit('toggleQuality', option.value)"
         >
-          {{ option.label }}
+          {{ qualityChipText(option.label) }}
         </button>
       </div>
-      <p v-if="qualitySelection.length === 0" class="params-hint">
+      <p v-if="ratioSelection.length > 1" class="params-hint" data-testid="studio-quality-multi-ratio-hint">
+        已选 {{ ratioSelection.length }} 个比例：每个「比例 × 档位」各出一组，像素尺寸见生成清单
+      </p>
+      <p v-else-if="qualitySelection.length === 0" class="params-hint">
         未选：跟随工作流原生尺寸
       </p>
       <p class="params-hint" data-testid="studio-quality-time-hint">

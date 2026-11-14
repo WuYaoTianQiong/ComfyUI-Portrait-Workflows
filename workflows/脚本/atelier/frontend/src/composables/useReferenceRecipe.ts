@@ -532,6 +532,13 @@ export function useReferenceRecipe() {
   const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
     workflowPath,
     studioRows,
+    /**
+     * 档位文案（2.0× · 6.3MP · 1648×3824）只按第一个比例算，**只影响标注**。
+     *
+     * 合成台的比例是多选，每个「比例 × 档位」各展开一组任务；多选时页面不显示
+     * 像素（见 StudioParamsCard），所以这里给第一个比例就够，提交体仍按全部比例展开。
+     */
+    computed(() => ratioSelection.value[0] ?? ''),
   )
 
   /** 当前代表工作流（首条）：caps / 预览 / 降级判定都用它。 */

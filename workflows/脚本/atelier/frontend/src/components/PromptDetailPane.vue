@@ -3,8 +3,11 @@ import { computed, ref, watch } from 'vue'
 
 import WorkflowPicker from './WorkflowPicker.vue'
 import WorkflowParams from './WorkflowParams.vue'
+import PromptMatrixStack from './PromptMatrixStack.vue'
 import TagInput from './TagInput.vue'
-import EmptyState from './EmptyState.vue'
+import QueryState from './QueryState.vue'
+import type { PromptMatrixApi } from '../composables/usePromptMatrix'
+import type { MatrixAlign, MatrixImage } from '../composables/useWorkflowMatrix'
 import { thumbnailUrl } from '../api/client'
 import { statusLabel } from '../utils/format'
 import type { WorkflowValidation } from '../api/workflows'
@@ -21,6 +24,9 @@ import type { HistoryItem, JobSnapshot, PromptDetail, TagRow } from '../api/type
  */
 const props = defineProps<{
   draft: PromptDetail | null
+  /** 已选中但详情还没到：必须显示加载态，不能画成「未选择」。 */
+  loading: boolean
+  error: unknown
   dirty: boolean
   saving: boolean
   classifying: boolean
@@ -42,6 +48,8 @@ const props = defineProps<{
   linkedCategoryIds: number[]
   draftTagList: string[]
   shotItems: HistoryItem[]
+  /** 横评（同一提示词 × 多工作流）的完整状态与动作 */
+  matrix: PromptMatrixApi
 }>()
 
 const emit = defineEmits<{
@@ -51,6 +59,7 @@ const emit = defineEmits<{
   'update:aspect-ratio': [value: string]
   'update:draft-tag-list': [value: string[]]
   generate: [options: { count: number; seed: number | null }]
+  retry: []
   'smart-segment': []
   'replace-fragment': []
   favorite: []
@@ -58,6 +67,9 @@ const emit = defineEmits<{
   revert: []
   save: []
   'delete-prompt': []
+  'favorite-image': [item: MatrixImage]
+  'matrix-compare': [items: MatrixImage[]]
+  'matrix-open-image': [payload: { items: MatrixImage[]; index: number }]
   copy: [text: string, label: string]
   rate: [rating: number]
   'auto-classify': []
@@ -76,15 +88,65 @@ const seedInput = ref('')
 function onGenerate() {
   // input[type=number] 在部分浏览器/测试环境里会把 v-model 值转成 number。
   const rawSeed = String(seedInput.value ?? '').trim()
-  emit('generate', {
-    count: runCount.value,
-    seed: rawSeed === '' ? null : Number(rawSeed),
-  })
+  const seed = rawSeed === '' ? null : Number(rawSeed)
+  if (props.matrix.enabled) {
+    props.matrix.submit(seed)
+    return
+  }
+  emit('generate', { count: runCount.value, seed })
 }
+
+function setCount(n: number) {
+  runCount.value = n
+  props.matrix.setCount(n)
+}
+
+/** 横评态下张数与单跑共用一组按钮，切换模式时保持同一个值。 */
+watch(
+  () => props.matrix.enabled,
+  (on) => {
+    if (on) runCount.value = props.matrix.count
+  },
+)
+
+const matrixSummary = computed(() => {
+  const p = props.matrix.plan
+  if (!p.usable.length) return '勾选工作流后开始横评'
+  return `${p.usable.length} 个工作流 × ${p.count} 张 = ${p.total} 张`
+})
+
+const alignOptions: Array<{ value: MatrixAlign; label: string }> = [
+  { value: 'native', label: '各自原生档' },
+  { value: 'first', label: '对齐到首个' },
+  { value: 'ref', label: '对齐到 1024×1536' },
+]
 /** 标签为空时压成一行；展开过一次后先收起（切换条目再重置），避免边填边塌。 */
 const tagsExpanded = ref(false)
 
 const hasTags = computed(() => props.draftTagList.length > 0)
+
+/**
+ * 当前「比例 × 画质档」的真实出图尺寸。
+ *
+ * 提示词里存的 width/height 是历史记录，**不参与出图**（后端按档位与比例重算），
+ * 把它当"分辨率"展示会让人以为换比例没生效。预演拿不到时才回落到旧字段。
+ */
+const storedSizeText = computed(() =>
+  props.draft?.width && props.draft?.height
+    ? `${props.draft.width}×${props.draft.height}`
+    : '',
+)
+
+const outputSizeText = computed(() => {
+  const option = props.qualityOptions.find((o) => o.value === props.quality)
+  return option?.label || storedSizeText.value || '-'
+})
+
+const outputSizeHint = computed(() => {
+  const stored = storedSizeText.value
+  const base = `实际出图尺寸由「比例 ${props.aspectRatio || props.defaultRatio || '默认'} × 画质档 ${props.quality || '1.0×'}」决定`
+  return stored ? `${base}；提示词记录的 ${stored} 只是历史值，不参与出图` : base
+})
 
 /** 已经动过标签就保持展开：否则删掉最后一个标签时输入框会在光标下消失。 */
 function onTagsUpdate(value: string[]) {
@@ -103,17 +165,56 @@ watch(
 
 <template>
   <section class="detail-pane">
-    <EmptyState v-if="!draft" size="big" text="选择左侧任意一条提示词" />
+    <div v-if="!draft" class="detail-state">
+      <QueryState
+        :loading="loading && !error"
+        :error="error"
+        :empty="!loading && !error"
+        loading-text="正在加载提示词…"
+        empty-text="选择左侧任意一条提示词"
+        @retry="emit('retry')"
+      />
+    </div>
 
     <div v-else class="detail">
       <div class="detail-top">
-        <div class="generate-bar">
+        <div class="generate-bar" :class="{ 'matrix-on': matrix.enabled }">
           <div class="generate-settings">
+            <button
+              class="btn btn-sm matrix-toggle"
+              :class="{ on: matrix.enabled }"
+              type="button"
+              :aria-pressed="matrix.enabled"
+              title="同一提示词、同一种子，分别投喂多个工作流做横向对比"
+              @click="matrix.setEnabled(!matrix.enabled)"
+            >
+              ⇄ 横评
+            </button>
             <WorkflowPicker
               :model-value="workflowPath"
               :workflows="workflows"
+              :multiple="matrix.enabled"
+              :selected="matrix.paths"
+              :unavailable="matrix.unavailable"
               @update:model-value="emit('update:workflow-path', $event)"
+              @update:selected="matrix.setPaths($event)"
             />
+            <label v-if="matrix.enabled" class="matrix-align">
+              <span>尺寸对齐</span>
+              <select
+                :value="matrix.align"
+                title="各工作流的档位机制不同，同一档出的尺寸并不一样"
+                @change="matrix.setAlign(($event.target as HTMLSelectElement).value as MatrixAlign)"
+              >
+                <option v-for="opt in alignOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+            <label v-if="matrix.enabled" class="matrix-lock" title="锁定后各工作流同列用同一个种子，差异才归因于模型">
+              <input v-model="matrix.lockSeed" type="checkbox" />
+              同种子
+            </label>
             <WorkflowParams
               :quality="quality"
               :orientation="orientation"
@@ -162,7 +263,7 @@ watch(
                 :key="n"
                 class="btn btn-sm count-btn"
                 :class="{ on: runCount === n }"
-                @click="runCount = n"
+                @click="setCount(n)"
               >
                 {{ n }}
               </button>
@@ -192,13 +293,29 @@ watch(
             </span>
             <button
               class="btn btn-sm primary"
-              :class="{ loading: generating }"
-              :disabled="generating || !workflowPath || !caps.prompt"
+              :class="{ loading: generating || matrix.submitting }"
+              :disabled="matrix.enabled
+                ? matrix.submitting || !matrix.plan.usable.length || matrix.plan.overLimit
+                : generating || !workflowPath || !caps.prompt"
               @click="onGenerate"
             >
-              {{ generating ? '生成中…' : '🚀 出图' }}
+              {{ matrix.enabled
+                ? (matrix.submitting ? '提交中…' : `⇄ 横评出图 ${matrix.plan.total} 张`)
+                : (generating ? '生成中…' : '🚀 出图') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="matrix.enabled" class="matrix-plan">
+          <span class="matrix-plan-count">{{ matrixSummary }}</span>
+          <span
+            v-for="(warn, i) in matrix.plan.warnings"
+            :key="i"
+            class="matrix-warn"
+            :class="warn.kind"
+          >
+            {{ warn.text }}
+          </span>
         </div>
 
         <div class="action-bar">
@@ -233,6 +350,14 @@ watch(
           </button>
         </div>
       </div>
+
+      <PromptMatrixStack
+        v-if="matrix.enabled"
+        :matrix="matrix"
+        @compare="emit('matrix-compare', $event)"
+        @open-image="emit('matrix-open-image', $event)"
+        @favorite="emit('favorite-image', $event)"
+      />
 
       <div class="detail-body">
         <main class="detail-main">
@@ -350,9 +475,9 @@ watch(
                 />
               </label>
               <div class="param-item">
-                <span class="param-label">分辨率</span>
-                <span class="param-value">
-                  {{ draft.width && draft.height ? `${draft.width}×${draft.height}` : '-' }}
+                <span class="param-label">出图分辨率</span>
+                <span class="param-value" :title="outputSizeHint">
+                  {{ outputSizeText }}
                 </span>
               </div>
               <div class="param-item">
@@ -447,6 +572,118 @@ watch(
   min-width: 0;
   overflow-y: auto;
   container-type: inline-size;
+}
+
+.detail-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: var(--gap-xl);
+}
+
+.detail-state :deep(.query-state),
+.detail-state :deep(.empty-state) {
+  width: 100%;
+  max-width: 560px;
+}
+
+.matrix-toggle.on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+/* 横评态多了对齐 / 同种子 / 芯片，单行必然放不下：
+   设置区与动作区各占一行并允许换行，避免控件互相重叠。 */
+.generate-bar.matrix-on {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.generate-bar.matrix-on .generate-settings {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.generate-bar.matrix-on .generate-actions {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  margin-left: 0;
+}
+
+.generate-bar.matrix-on .wf-picker {
+  flex: 1 1 300px;
+  max-width: 460px;
+}
+
+.matrix-align {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.matrix-align select {
+  max-width: 168px;
+  padding: 3px 6px;
+  font-size: var(--fs-xs);
+}
+
+.matrix-lock {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.matrix-lock input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+}
+
+.matrix-plan {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-sm);
+  padding: var(--gap-xs) 0 0;
+}
+
+.matrix-plan-count {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.matrix-warn {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
+}
+
+.matrix-warn.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-surface, transparent);
+}
+
+.matrix-warn.ok {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.matrix-warn.info {
+  border-color: var(--border-strong);
 }
 
 .detail {

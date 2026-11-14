@@ -8,11 +8,12 @@ import PromptTrialPanel from '../components/PromptTrialPanel.vue'
 import PromptCreateModal from '../components/PromptCreateModal.vue'
 import PromptImportModal from '../components/PromptImportModal.vue'
 import Lightbox from '../components/Lightbox.vue'
+import CompareModal from '../components/CompareModal.vue'
 import { parseMarkedSegments, renderAllSegments, smartSegmentText } from '../utils/segmentation'
 import { confirmDialog } from '../utils/naive'
 import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
-import { apiDelete, apiPost } from '../api/client'
-import { listImages } from '../api/images'
+import { apiDelete, apiGet, apiPost } from '../api/client'
+import { listImages, setImageFavorite } from '../api/images'
 import {
   PROMPT_EXPORT_URL,
   batchDeletePrompts,
@@ -37,10 +38,13 @@ import { useGenerate } from '../composables/useGenerate'
 import { useImageLocation } from '../composables/useImageLocation'
 import { usePromptDraft, splitTagText } from '../composables/usePromptDraft'
 import { useToast } from '../composables/useToast'
-import { useWorkflows, useWorkflowValidation } from '../composables/useWorkflows'
+import { useWorkflows, useWorkflowValidation, customWorkflowContent } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { usePromptWorkspace } from '../composables/usePromptWorkspace'
 import { usePromptList } from '../composables/usePromptList'
+import { usePromptMatrix } from '../composables/usePromptMatrix'
+import { resolveHistoryItems } from '../composables/useImagePreview'
+import type { MatrixImage } from '../composables/useWorkflowMatrix'
 import BatchReplaceModal from '../components/BatchReplaceModal.vue'
 import PromptListFooter from '../components/PromptListFooter.vue'
 import PromptListRow from '../components/PromptListRow.vue'
@@ -50,6 +54,7 @@ import { flattenCategories } from '../utils/categories'
 import type {
   HistoryItem,
   HistoryPage,
+  JobSnapshot,
   PromptDetail,
   PromptListItem,
 } from '../api/types'
@@ -61,10 +66,13 @@ const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const {
   busy: generating,
   job: activeJob,
+  queue: jobQueue,
   error: generateError,
   run,
   runBatch,
   runBatchReplace,
+  submitAndTrack,
+  trackQueued,
 } = useGenerate('', { queue: true })
 
 const {
@@ -202,10 +210,33 @@ const flatCats = computed(() => flattenCategories(catData.value?.categories))
 
 // ---------------- 详情 ----------------
 
-const { data: detail } = useQuery<PromptDetail>({
+const {
+  data: detail,
+  error: detailError,
+  refetch: refetchDetail,
+} = useQuery<PromptDetail>({
   queryKey: computed(() => ['prompt', selectedId.value]),
   queryFn: () => getPrompt(selectedId.value as number),
   enabled: computed(() => selectedId.value !== null),
+})
+
+/**
+ * 选中了但详情还没到 = 加载中，不是「没选」。
+ *
+ * 切换条目时 vue-query 会把 data 置空，旧写法直接渲染空态，
+ * 于是右侧闪成「选择左侧任意一条提示词」；请求失败时更是永远停在那句话上。
+ */
+const detailLoading = computed(
+  () => selectedId.value !== null && !detail.value && !detailError.value,
+)
+
+/** 选中的条目已被删除（另一个标签页 / 补跑清理）：换选一条，别把用户留在死胡同。 */
+watch(detailError, (err) => {
+  if ((err as { status?: number } | null)?.status !== 404) return
+  const stale = selectedId.value
+  const next = list.value.find((it) => it.id !== stale)
+  selectedId.value = next ? next.id : null
+  queryClient.invalidateQueries({ queryKey: ['prompts'] })
 })
 
 /**
@@ -438,6 +469,83 @@ async function jumpToPrompt(id: number) {
 function onShotChanged() {
   queryClient.invalidateQueries({ queryKey: ['prompt-history', selectedId.value] })
   queryClient.invalidateQueries({ queryKey: ['prompts'] })
+}
+
+// ---------------- 横评：同一提示词 × 多工作流 ----------------
+
+/**
+ * 一格一 job：图片的工作流归属取 job 级字段，混流塞进一个 batch job
+ * 会让灯箱把模型标错。提交仍走 useGenerate 的共享底座（幂等键 / 输出目录 / SSE）。
+ */
+const matrix = usePromptMatrix({
+  scope: () => (selectedId.value === null ? '' : `p:${selectedId.value}`),
+  promptText: () => draft.value?.prompt ?? '',
+  negativeText: () => draft.value?.negative_prompt ?? '',
+  savedSeed: () => draft.value?.seed ?? null,
+  workflows: () => workflows.value,
+  currentWorkflow: () => workflowPath.value,
+  ratio: () => aspectRatio.value || defaultRatio.value,
+  tier: () => quality.value,
+  orientation: () => orientation.value,
+  submit: (req) =>
+    submitAndTrack<{ success: boolean; job_id?: number | null }>('/api/runs', {
+      id: selectedId.value,
+      workflow_path: req.path,
+      workflow_content: customWorkflowContent(req.path),
+      quality: req.tier,
+      orientation: req.orientation,
+      aspect_ratio: req.ratio,
+      seed: req.seed,
+      prompt_override: req.prompt,
+      negative_prompt_override: req.negative,
+    }),
+  track: trackQueued,
+  fetchJob: (id) => apiGet<JobSnapshot>(`/api/jobs/${id}`).catch(() => null),
+  jobs: () => jobQueue.value,
+  shots: () => shotItems.value,
+  refreshShots: () => {
+    queryClient.invalidateQueries({ queryKey: ['prompt-history', selectedId.value] })
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  },
+  useWorkflow: (path) => {
+    workflowPath.value = path
+  },
+  notify: (kind, message) => {
+    if (kind === 'error') toast.error(message)
+    else if (kind === 'success') toast.success(message)
+    else toast.info(message)
+  },
+})
+
+const favoriteImageMutation = useMutation({
+  mutationFn: (id: number) => setImageFavorite(id),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['prompt-history', selectedId.value] })
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  },
+})
+
+/** 矩阵的看图/对比：格子只带文件名，先按名取回完整记录再喂给画廊组件。 */
+const matrixCompareOpen = ref(false)
+const matrixCompareItems = ref<HistoryItem[]>([])
+const matrixShotOpen = ref(false)
+const matrixShotItems = ref<HistoryItem[]>([])
+const matrixShotIndex = ref(0)
+
+function matrixImageRef(image: { filename: string; subfolder?: string | null; img_type?: string | null }) {
+  return { filename: image.filename, subfolder: image.subfolder, type: image.img_type }
+}
+
+async function openMatrixCompare(images: MatrixImage[]) {
+  if (images.length < 2) return
+  matrixCompareItems.value = await resolveHistoryItems(images.slice(0, 4).map(matrixImageRef))
+  matrixCompareOpen.value = true
+}
+
+async function openMatrixImage(payload: { items: MatrixImage[]; index: number }) {
+  matrixShotItems.value = await resolveHistoryItems(payload.items.map(matrixImageRef))
+  matrixShotIndex.value = Math.min(payload.index, Math.max(0, matrixShotItems.value.length - 1))
+  matrixShotOpen.value = true
 }
 
 
@@ -734,9 +842,24 @@ async function onBatchReplace(payload: {
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const moreMenu = ref<HTMLDetailsElement | null>(null)
+const moreOpen = ref(false)
 
 function closeMore() {
   if (moreMenu.value) moreMenu.value.open = false
+  moreOpen.value = false
+}
+
+/** `<details>` 原生不会点外面关闭，菜单会一直盖在列表上。 */
+function onDocPointerDown(event: PointerEvent) {
+  if (!moreOpen.value) return
+  const root = moreMenu.value
+  if (root && !root.contains(event.target as Node)) closeMore()
+}
+
+function onDocKeyDown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !moreOpen.value) return
+  closeMore()
+  moreMenu.value?.querySelector('summary')?.focus()
 }
 const importMessage = ref('')
 
@@ -911,10 +1034,16 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
-onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  document.addEventListener('pointerdown', onDocPointerDown)
+  document.addEventListener('keydown', onDocKeyDown)
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  document.removeEventListener('keydown', onDocKeyDown)
   cancelScrollSave()
   saveSession()
   stopResize()
@@ -962,8 +1091,12 @@ onBeforeUnmount(() => {
             <button class="btn btn-sm" title="临时试跑：粘贴外来提示词直接出图，不写回提示词库" @click="trialOpen = true">
               🧪 试跑
             </button>
-            <details ref="moreMenu" class="more-menu">
-              <summary class="btn btn-sm" title="更多批量操作">更多 ▾</summary>
+            <details
+              ref="moreMenu"
+              class="more-menu"
+              @toggle="moreOpen = ($event.target as HTMLDetailsElement).open"
+            >
+              <summary class="btn btn-sm" title="更多批量操作" :aria-expanded="moreOpen">更多 ▾</summary>
               <div class="more-pop">
                 <button class="btn btn-sm" title="批量粘贴 AI 润色后的多条提示词，自动分段后入库" @click="closeMore(); importOpen = true">
                   智能导入
@@ -1055,6 +1188,8 @@ onBeforeUnmount(() => {
       v-model:aspect-ratio="aspectRatio"
       v-model:draft-tag-list="draftTagList"
       :draft="draft"
+      :loading="detailLoading"
+      :error="detailError"
       :dirty="dirty"
       :saving="saveMutation.isPending.value"
       :classifying="autoClassifyMutation.isPending.value"
@@ -1071,7 +1206,12 @@ onBeforeUnmount(() => {
       :tags="tagData?.tags ?? []"
       :linked-category-ids="linkedCategoryIds"
       :shot-items="shotItems"
+      :matrix="matrix"
+      @favorite-image="$event.id && favoriteImageMutation.mutate($event.id)"
+      @matrix-compare="openMatrixCompare($event)"
+      @matrix-open-image="openMatrixImage($event)"
       @generate="generate"
+      @retry="refetchDetail()"
       @smart-segment="smartSegment"
       @replace-fragment="openReplaceForCurrent"
       @favorite="favoriteMutation.mutate()"
@@ -1097,6 +1237,20 @@ onBeforeUnmount(() => {
       @close="shotOpen = false"
       @regenerate="regenerateShot"
       @jump-to-prompt="jumpToPrompt"
+      @changed="onShotChanged"
+    />
+    <CompareModal
+      :open="matrixCompareOpen"
+      :items="matrixCompareItems"
+      @close="matrixCompareOpen = false"
+    />
+    <Lightbox
+      v-if="matrixShotOpen"
+      :items="matrixShotItems"
+      :index="matrixShotIndex"
+      :workflows="workflows"
+      @update:index="matrixShotIndex = $event"
+      @close="matrixShotOpen = false"
       @changed="onShotChanged"
     />
     <PromptTrialPanel
@@ -1212,7 +1366,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
-  width: 150px;
+  /* 按最长菜单项收窄：写死 150px 时两个四字项的菜单比触发器宽一倍还多 */
+  width: max-content;
+  min-width: 100%;
+  max-width: min(240px, calc(100vw - 24px));
   padding: var(--gap-xs);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

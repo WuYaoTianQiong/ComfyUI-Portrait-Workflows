@@ -7,6 +7,8 @@ from app.services import workflow_manifest
 
 def test_manifest_id_is_stable_when_content_changes(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "library_root", tmp_path)
+    # 清单是运行数据，落在 data_dir（不再放库根）
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     folder = tmp_path / "通用工作流"
     folder.mkdir()
     workflow = folder / "a.json"

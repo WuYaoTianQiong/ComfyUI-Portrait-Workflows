@@ -611,6 +611,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/link_prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link Images To Prompt
+         * @description 把已出的图挂到一条提示词名下。
+         *
+         *     临时试跑用 `source_prompt_id=0` 出图时 `prompt_id` 为空，用户满意后
+         *     「存为提示词」需要把整批图认领过去，否则新提示词的出图历史是空的。
+         *     只改归属与分类/标签继承，不动文件，也不动 `prompt_params` 里当次的实际文本。
+         */
+        post: operations["link_images_to_prompt_api_images_link_prompt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/reveal": {
         parameters: {
             query?: never;
@@ -2988,6 +3012,18 @@ export interface components {
             updated_at: string;
             /** Workflow Path */
             workflow_path?: string | null;
+        };
+        /** LinkPromptRequest */
+        LinkPromptRequest: {
+            /** Image Ids */
+            image_ids: number[];
+            /**
+             * Inherit Taxonomy
+             * @default true
+             */
+            inherit_taxonomy: boolean;
+            /** Prompt Id */
+            prompt_id: number;
         };
         /** MaskSaveRequest */
         MaskSaveRequest: {
@@ -5460,6 +5496,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryIdsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_images_to_prompt_api_images_link_prompt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

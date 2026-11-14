@@ -1,38 +1,47 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import Modal from './Modal.vue'
-import EmptyState from './EmptyState.vue'
 import WorkflowPicker from './WorkflowPicker.vue'
 import WorkflowParams from './WorkflowParams.vue'
+import PromptMatrixStack from './PromptMatrixStack.vue'
 import PromptCreateModal from './PromptCreateModal.vue'
+import CompareModal from './CompareModal.vue'
 import Lightbox from './Lightbox.vue'
-import { thumbnailUrl } from '../api/client'
-import { statusLabel } from '../utils/format'
 import { useSettings } from '../composables/useSettings'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useGenerate } from '../composables/useGenerate'
-import { useImagePreview } from '../composables/useImagePreview'
+import { usePromptMatrix } from '../composables/usePromptMatrix'
+import { useImagePreview, resolveHistoryItems } from '../composables/useImagePreview'
 import { useToast } from '../composables/useToast'
+import { linkImagesToPrompt } from '../api/images'
+import { apiGet } from '../api/client'
+import type { HistoryItem, JobSnapshot } from '../api/types'
+import type { MatrixAlign, MatrixImage } from '../composables/useWorkflowMatrix'
+import type { MatrixBatch } from '../composables/usePromptMatrix'
 
 /**
- * 临时试跑面板。
+ * 临时试跑工作台。
  *
- * 打开就是空白的粘贴框，不依赖任何提示词（空库也能用）：粘贴一段外来文本，
- * 选工作流/张数/种子直接出图，不写回提示词库。结果就是日志 —— 每条都是真实
- * 任务行，有缩略图、种子和状态；满意了点「存为提示词」把当次实际文本预填进
- * 新建弹窗，试 → 存 的闭环在这里闭合。
+ * 与详情页横评的分工：详情页跑**库内提示词**，这里跑**外来文本**（不写回库，
+ * 空库也能用）。两者共用 `usePromptMatrix` 一套引擎，多选、逐流档位回退、
+ * 同种子、一格一 job、矩阵结果的口径完全一致，不用学两套。
  *
- * 归档关联是显式选择：默认不关联（档案标「临时提示词」），当前有选中提示词时
- * 才能显式挂到它名下；不做"文本相等才关联"的隐式魔法。
+ * 左右双栏：左边文本吃满弹窗高度（长提示词不用反复滚动），
+ * 右边参数常驻 + 结果堆叠。结果矩阵按列=工作流转置，
+ * 竖图并排吃满右栏宽度，不再是旧版 300px 窄条留白。
+ * 文本与结果同屏，改一句话就能再跑一轮对比。
+ *
+ * 闭环：跑 → 满意 → 「存为提示词」新建一条并把**整批图**认领过去，
+ * 否则新提示词的出图历史是空的。
  */
 const props = defineProps<{
   open: boolean
-  /** 当前选中的提示词：只用于"归档到"选项，不再当载体预填文本。 */
+  /** 当前选中的提示词：只用于「归档到」选项，不当载体预填文本。 */
   promptId: number | null
   promptName: string
 }>()
@@ -42,39 +51,57 @@ const emit = defineEmits<{
   (e: 'created', id: number): void
 }>()
 
-const { workflowPath, orientation } = useSettings()
+const TEXT_KEY = 'pb.trialDraft'
+const settings = useSettings()
+const toast = useToast()
+const queryClient = useQueryClient()
+
+/** 本面板自己的工作流/方向：改这里不该顺带改掉详情页的单跑默认。 */
+const workflowPath = ref(settings.workflowPath.value)
+const orientation = ref(settings.orientation.value)
 const quality = useWorkflowQuality(workflowPath)
 const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { workflows, allWorkflows } = useWorkflows()
 const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
   workflowPath, allWorkflows, aspectRatio,
 )
-const { busy, queue, error: runError, submitAndTrack } = useGenerate('prompt-trial', { queue: true })
-const toast = useToast()
-const queryClient = useQueryClient()
+const { queue, error: runError, submitAndTrack, trackQueued } = useGenerate('prompt-trial', { queue: true })
 
-/** 本次输入：打开时清空，不继承任何提示词文本。 */
-const promptText = ref('')
-const negative = ref('')
-const negativeExpanded = ref(false)
-const count = ref(1)
+function readDraft(): { prompt: string; negative: string } {
+  try {
+    const raw = localStorage.getItem(TEXT_KEY)
+    if (!raw) return { prompt: '', negative: '' }
+    const parsed = JSON.parse(raw) as { prompt?: string; negative?: string }
+    return { prompt: parsed.prompt ?? '', negative: parsed.negative ?? '' }
+  } catch {
+    return { prompt: '', negative: '' }
+  }
+}
+
+const initialDraft = readDraft()
+const promptText = ref(initialDraft.prompt)
+const negative = ref(initialDraft.negative)
+const negativeExpanded = ref(Boolean(initialDraft.negative))
 const seedInput = ref('')
 const linkArchive = ref(false)
+
+/** 文本落盘：关掉弹窗再打开还能接着改，不用重新粘一遍。 */
+watch([promptText, negative], () => {
+  try {
+    localStorage.setItem(TEXT_KEY, JSON.stringify({ prompt: promptText.value, negative: negative.value }))
+  } catch {
+    /* 隐私模式下忽略 */
+  }
+})
 
 watch(
   () => props.open,
   (open) => {
-    if (!open) return
-    promptText.value = ''
-    negative.value = ''
-    negativeExpanded.value = false
-    count.value = 1
-    seedInput.value = ''
-    linkArchive.value = false
+    if (open && !workflowPath.value) workflowPath.value = settings.workflowPath.value
   },
 )
 
-/** 选中的提示词被切走/删掉时，归档选项必须跟着失效，避免挂到看不见的条目上。 */
+/** 选中的提示词被切走/删掉时，归档选项必须跟着失效。 */
 watch(
   () => props.promptId,
   (id) => {
@@ -82,322 +109,316 @@ watch(
   },
 )
 
-const canRun = computed(() => promptText.value.trim().length > 0 && !!workflowPath.value)
-
-const qualityLabel = computed(() => {
-  if (!caps.value.quality) return '由工作流固定'
-  return qualityOptions.value.find((o) => o.value === quality.value)?.label ?? quality.value
+const matrix = usePromptMatrix({
+  scope: () => 'trial',
+  storeKey: 'pb.trialMatrix',
+  promptText: () => promptText.value,
+  negativeText: () => negative.value,
+  savedSeed: () => null,
+  workflows: () => workflows.value,
+  currentWorkflow: () => workflowPath.value,
+  ratio: () => aspectRatio.value || defaultRatio.value,
+  tier: () => quality.value,
+  orientation: () => (caps.value.orientation ? orientation.value : 'keep'),
+  submit: (req) =>
+    submitAndTrack<{ success: boolean; job_id?: number | null }>('/api/runs/text', {
+      prompt: req.prompt,
+      negative_prompt: req.negative,
+      workflow_path: req.path,
+      workflow_content: customWorkflowContent(req.path),
+      quality: req.tier,
+      orientation: req.orientation,
+      aspect_ratio: req.ratio,
+      seed: req.seed,
+      source_prompt_id: linkArchive.value && props.promptId ? props.promptId : 0,
+    }),
+  track: trackQueued,
+  fetchJob: (id) => apiGet<JobSnapshot>(`/api/jobs/${id}`).catch(() => null),
+  jobs: () => queue.value,
+  refreshShots: () => {
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  },
+  useWorkflow: (path) => {
+    workflowPath.value = path
+  },
+  notify: (kind, message) => {
+    if (kind === 'error') toast.error(message)
+    else if (kind === 'success') toast.success(message)
+    else toast.info(message)
+  },
 })
 
-/**
- * 每张图的实际运行文本。
- *
- * 任务快照的 `JobItem` 只带 40 字预览，刷新后无法据此预填「存为提示词」，
- * 所以这里另存一份精简记录（job id → 文本/负向/种子），只服务本面板的保存闭环。
- */
-interface RunRecord {
-  prompt: string
-  negative_prompt: string
-  seed: number | null
-}
+const alignOptions: Array<{ value: MatrixAlign; label: string }> = [
+  { value: 'native', label: '各自原生档' },
+  { value: 'first', label: '对齐到首个' },
+  { value: 'ref', label: '对齐到 1024×1536' },
+]
 
-const RUNS_KEY = 'pb.trialRuns'
-const RUNS_LIMIT = 20
-const LEGACY_LOG_KEY = 'pb.trialLog'
-
-function loadRuns(): Record<string, RunRecord> {
-  try {
-    const raw = localStorage.getItem(RUNS_KEY)
-    return raw ? (JSON.parse(raw) as Record<string, RunRecord>) : {}
-  } catch {
-    return {}
-  }
-}
-
-const runs = ref<Record<string, RunRecord>>(loadRuns())
-
-function rememberRun(jobId: number, record: RunRecord) {
-  const next: Record<string, RunRecord> = { [String(jobId)]: record }
-  for (const key of Object.keys(runs.value)) {
-    if (key in next) continue
-    if (Object.keys(next).length >= RUNS_LIMIT) break
-    next[key] = runs.value[key]
-  }
-  runs.value = next
-  try {
-    localStorage.setItem(RUNS_KEY, JSON.stringify(next))
-  } catch {
-    /* 隐私模式下忽略 */
-  }
-}
-
-function recordFor(jobId: number): RunRecord | null {
-  return runs.value[String(jobId)] ?? null
-}
-
-onMounted(() => {
-  // 旧版截断日志不再使用，顺手清掉这台机器上的残留
-  try {
-    localStorage.removeItem(LEGACY_LOG_KEY)
-  } catch {
-    /* 忽略 */
-  }
-})
-
-function thumbUrl(image: { filename: string; subfolder?: string | null; type?: string | null }) {
-  return thumbnailUrl(
-    { filename: image.filename, subfolder: image.subfolder, img_type: image.type },
-    240,
-  )
-}
-
-/** 任务快照按"一任务一张"展示：本面板每次提交就是一个单图任务。 */
-const rows = computed(() =>
-  queue.value.map((job) => {
-    const item = job.items?.[0] ?? null
-    return {
-      job,
-      item,
-      image: item?.images?.[0] ?? null,
-      record: recordFor(job.id),
-    }
-  }),
+const charCount = computed(() => promptText.value.length)
+const canRun = computed(
+  () => promptText.value.trim().length > 0 && matrix.plan.usable.length > 0 && !matrix.submitting,
 )
+const planSummary = computed(() => {
+  const p = matrix.plan
+  if (!p.usable.length) return '勾选工作流后开始试跑'
+  return `${p.usable.length} 个工作流 × ${p.count} 张 = ${p.total} 张`
+})
+
+function runTrial() {
+  const raw = String(seedInput.value ?? '').trim()
+  matrix.submit(raw === '' ? null : Number(raw))
+}
+
+function randomSeed() {
+  seedInput.value = String(Math.floor(Math.random() * 2 ** 31))
+}
+
+function clearText() {
+  promptText.value = ''
+  negative.value = ''
+  negativeExpanded.value = false
+}
+
+// ---------------- 看图 / 对比 ----------------
 
 const { items: previewItems, readonly: previewReadonly, open: previewOpen, preview, close: closePreview } =
   useImagePreview()
+const compareItems = ref<HistoryItem[]>([])
+const compareOpen = ref(false)
+
+function toRef(image: MatrixImage) {
+  return { filename: image.filename, subfolder: image.subfolder, type: image.img_type }
+}
+
+function openImage(payload: { items: MatrixImage[]; index: number; prompt?: string; negative?: string }) {
+  const target = payload.items[payload.index]
+  if (target) {
+    preview(toRef(target), {
+      prompt: payload.prompt ?? promptText.value,
+      negative: payload.negative ?? negative.value,
+    })
+  }
+}
+
+async function openCompare(images: MatrixImage[]) {
+  if (images.length < 2) {
+    toast.info('并排对比至少选 2 张')
+    return
+  }
+  compareItems.value = await resolveHistoryItems(images.slice(0, 4).map(toRef))
+  compareOpen.value = true
+}
+
+// ---------------- 存为提示词（按批认领整批图） ----------------
 
 const saveOpen = ref(false)
-const saveTarget = ref<RunRecord | null>(null)
+const linking = ref(false)
+const savingBatch = ref<MatrixBatch | null>(null)
 
-function saveAsPrompt(jobId: number) {
-  const record = recordFor(jobId)
-  if (!record) return
-  saveTarget.value = record
+const saveInitial = computed(() => ({
+  prompt: savingBatch.value?.prompt || promptText.value,
+  negative_prompt: savingBatch.value?.negative ?? negative.value,
+  seed: savingBatch.value?.baseSeed || matrix.baseSeed || null,
+}))
+
+function startSave(batch: MatrixBatch) {
+  if (!batch.cells.some((c) => c.status === 'done' && c.image)) {
+    toast.error('这一批还没有出好的图')
+    return
+  }
+  savingBatch.value = batch
   saveOpen.value = true
 }
 
-function onCreated(id: number) {
+async function onCreated(id: number) {
   saveOpen.value = false
-  emit('created', id)
-}
-
-async function runTrial() {
-  if (!promptText.value.trim()) {
-    toast.error('提示词是空的')
-    return
+  const refs = (savingBatch.value?.cells ?? [])
+    .filter((c) => c.status === 'done' && c.image)
+    .map((c) => c.image as MatrixImage)
+  linking.value = true
+  try {
+    // 任务快照只给文件名，认领需要图库 id：按名取回完整记录，取不到的跳过。
+    const resolved = await resolveHistoryItems(refs.map(toRef))
+    const ids = resolved.map((r) => r.id).filter((n) => n > 0)
+    if (ids.length) {
+      const result = await linkImagesToPrompt(ids, id)
+      toast.success(`已存为提示词，并认领 ${result.linked} 张图`)
+    } else {
+      toast.info('已存为提示词；图还没入库，稍后可在画廊同步后认领')
+    }
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+    queryClient.invalidateQueries({ queryKey: ['prompt-history', id] })
+  } catch (error) {
+    toast.error(`认领图片失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    linking.value = false
+    emit('created', id)
   }
-  if (!workflowPath.value) {
-    toast.error('请先选择工作流')
-    return
-  }
-  const n = Math.min(4, Math.max(1, count.value))
-  const seedText = String(seedInput.value).trim()
-  const base = seedText === '' ? null : Number(seedText)
-  const sourceId = linkArchive.value && props.promptId ? props.promptId : 0
-  const text = promptText.value
-  const neg = negative.value
-
-  // 并发提交：张数之间没有依赖，串行等只会多等几倍；种子依次 +1，图才有区别
-  const results = await Promise.allSettled(
-    Array.from({ length: n }, (_, i) => {
-      const seed = base === null ? null : base + i
-      return submitAndTrack<{ success: boolean; job_id?: number | null; seed?: number }>(
-        '/api/runs/text',
-        {
-          prompt: text,
-          negative_prompt: neg,
-          workflow_path: workflowPath.value,
-          workflow_content: customWorkflowContent(workflowPath.value),
-          orientation: caps.value.orientation ? orientation.value : 'keep',
-          quality: caps.value.quality ? quality.value : '1.0x',
-          aspect_ratio: aspectRatio.value || defaultRatio.value,
-          seed,
-          source_prompt_id: sourceId,
-        },
-      ).then((result) => {
-        if (result.job_id) {
-          rememberRun(result.job_id, {
-            prompt: text,
-            negative_prompt: neg,
-            seed: result.seed ?? seed,
-          })
-        }
-        return result
-      })
-    }),
-  )
-
-  const failed = results.filter((r) => r.status === 'rejected')
-  if (failed.length) {
-    const reason = failed[0].status === 'rejected' ? failed[0].reason : ''
-    toast.error(`跑图失败：${reason instanceof Error ? reason.message : String(reason)}`)
-    return
-  }
-  toast.success(n > 1 ? `已提交 ${n} 张` : '已提交跑图')
 }
 </script>
+
 <template>
   <Modal
     :open="open"
     title="临时试跑"
-    width="min(720px, 94vw)"
+    width="min(1760px, 96vw)"
+    height="88vh"
     @close="emit('close')"
   >
-    <div class="trial-body">
-      <p class="note">
-        粘贴想试的提示词直接出图，不写回提示词库；结果满意可在下方「存为提示词」。
-      </p>
+    <template #head>
+      <span class="head-sub">外来文本 · 多工作流横评 · 不写回提示词库</span>
+    </template>
 
-      <label class="field">
-        <span>提示词</span>
+    <template #actions>
+      <span v-if="linking" class="head-sub">正在认领图片…</span>
+      <details class="more">
+        <summary class="btn btn-sm">归档 ▾</summary>
+        <div class="more-pop">
+          <label class="radio">
+            <input v-model="linkArchive" type="radio" :value="false" />
+            不关联（档案标「临时提示词」）
+          </label>
+          <label v-if="promptId" class="radio">
+            <input v-model="linkArchive" type="radio" :value="true" />
+            关联到《{{ promptName || `#${promptId}` }}》
+          </label>
+          <p class="more-note">关联只影响图片归属，不会把文本写回那条提示词。</p>
+        </div>
+      </details>
+    </template>
+
+    <div class="trial-grid">
+      <section class="pane pane-text">
+        <div class="pane-head">
+          <span class="pane-title">提示词</span>
+          <span class="counter">{{ charCount }} 字</span>
+          <span class="grow" />
+          <button class="btn btn-sm" type="button" :disabled="!charCount" @click="clearText">清空</button>
+        </div>
         <textarea
           v-model="promptText"
-          class="prompt-input"
-          rows="6"
+          class="big-text scroll"
           spellcheck="false"
-          placeholder="粘贴想试的提示词"
+          placeholder="把从别处复制的提示词粘进来。这里不依赖任何已存提示词，空库也能跑。"
         />
-      </label>
-
-      <div class="neg">
-        <div class="neg-head">
-          <span>负面提示词</span>
-          <span v-if="negative.trim() && caps.negative_effective === false" class="warn-text">
-            负向不生效
-          </span>
-          <button class="btn btn-sm" @click="negativeExpanded = !negativeExpanded">
-            {{ negativeExpanded ? '收起' : negative ? '展开' : '＋ 添加' }}
-          </button>
-        </div>
-        <textarea
-          v-if="negativeExpanded"
-          v-model="negative"
-          class="neg-input"
-          rows="2"
-          spellcheck="false"
-          placeholder="可留空"
-        />
-        <button v-else-if="negative" class="neg-line" @click="negativeExpanded = true">
-          {{ negative }}
-        </button>
-      </div>
-
-      <div class="settings">
-        <WorkflowPicker
-          :model-value="workflowPath"
-          :workflows="workflows"
-          @update:model-value="workflowPath = $event"
-        />
-        <WorkflowParams
-          :quality="quality"
-          :orientation="orientation"
-          :aspect-ratio="aspectRatio"
-          :aspect-ratios="aspectRatios"
-          :default-ratio="defaultRatio"
-          :workflow-path="workflowPath"
-          :caps="caps"
-          :quality-options="qualityOptions"
-          @update:quality="quality = $event"
-          @update:orientation="orientation = $event"
-          @update:aspect-ratio="aspectRatio = $event"
-        />
-        <span v-if="workflowPath && !caps.prompt" class="cap-hint warn" title="该工作流不注入提示词">
-          不注入提示词
-        </span>
-      </div>
-
-      <div class="controls">
-        <div class="field">
-          <span>张数</span>
-          <span class="counts">
-            <button
-              v-for="n in [1, 2, 3, 4]"
-              :key="n"
-              class="btn btn-sm count-btn"
-              :class="{ on: count === n }"
-              @click="count = n"
-            >
-              {{ n }}
-            </button>
-          </span>
-        </div>
-        <label class="field seed-field">
-          <span>种子（空 = 随机）</span>
-          <input v-model="seedInput" type="number" min="0" step="1" placeholder="空 = 随机" />
-        </label>
-      </div>
-
-      <div class="archive">
-        <span class="archive-label">归档到：</span>
-        <label class="radio">
-          <input v-model="linkArchive" type="radio" :value="false" />
-          不关联（临时提示词）
-        </label>
-        <label v-if="promptId" class="radio">
-          <input v-model="linkArchive" type="radio" :value="true" />
-          关联到《{{ promptName || `#${promptId}` }}》
-        </label>
-      </div>
-
-      <p v-if="runError" class="note warn">{{ runError }}</p>
-
-      <div class="actions">
-        <span class="hint">
-          画质 {{ qualityLabel }} ·
-          {{ caps.orientation ? (aspectRatio || defaultRatio || '比例固定') : '方向固定' }}
-        </span>
-        <span class="spacer" />
-        <button
-          class="btn btn-sm primary"
-          :class="{ loading: busy }"
-          :disabled="busy || !canRun"
-          @click="runTrial"
-        >
-          {{ busy ? '提交中…' : '▶ 跑图' }}
-        </button>
-      </div>
-
-      <div class="results">
-        <div class="results-head">
-          <span>本次结果</span>
-          <span v-if="rows.length" class="muted">{{ rows.length }} 个任务</span>
-        </div>
-        <div class="result-list">
-          <div v-for="row in rows" :key="row.job.id" class="result-row">
-            <button
-              v-if="row.image"
-              class="shot"
-              type="button"
-              :title="`查看原图：${row.image.filename}`"
-              @click="preview(row.image)"
-            >
-              <img :src="thumbUrl(row.image)" :alt="row.image.filename" loading="lazy" />
-            </button>
-            <span v-else class="shot placeholder">…</span>
-            <div class="result-body">
-              <div class="result-line">
-                <span :class="['st', row.job.status]">{{ statusLabel(row.job.status) }}</span>
-                <span class="muted">{{ row.job.done_count ?? 0 }}/{{ row.job.total || 1 }}</span>
-                <span class="muted">种子 {{ row.item?.seed ?? '随机' }}</span>
-              </div>
-              <div class="result-preview" :title="row.record?.prompt">
-                {{ row.record?.prompt || row.item?.prompt_preview || '正在提交…' }}
-              </div>
-              <div v-if="row.item?.error" class="err">{{ row.item.error }}</div>
-            </div>
-            <button class="btn btn-sm" :disabled="!row.image" @click="row.image && preview(row.image)">
-              看图
-            </button>
-            <button class="btn btn-sm" :disabled="!row.record" @click="saveAsPrompt(row.job.id)">
-              存为提示词
+        <div class="neg">
+          <div class="neg-head">
+            <span class="pane-title">负面提示词</span>
+            <span v-if="negative.trim() && caps.negative_effective === false" class="warn-text">
+              当前工作流负向不生效
+            </span>
+            <span class="grow" />
+            <button class="btn btn-sm" type="button" @click="negativeExpanded = !negativeExpanded">
+              {{ negativeExpanded ? '收起' : negative ? '展开' : '＋ 添加' }}
             </button>
           </div>
-          <EmptyState v-if="!rows.length" compact text="还没有试跑记录" />
+          <textarea
+            v-if="negativeExpanded"
+            v-model="negative"
+            class="neg-input scroll"
+            rows="3"
+            spellcheck="false"
+            placeholder="可留空"
+          />
         </div>
+      </section>
+
+      <section class="controls">
+          <div class="control-row">
+            <WorkflowPicker
+              :model-value="workflowPath"
+              :workflows="workflows"
+              multiple
+              :selected="matrix.paths"
+              :unavailable="matrix.unavailable"
+              @update:model-value="workflowPath = $event"
+              @update:selected="matrix.setPaths($event)"
+            />
+          </div>
+          <div class="control-row">
+            <WorkflowParams
+              :quality="quality"
+              :orientation="orientation"
+              :aspect-ratio="aspectRatio"
+              :aspect-ratios="aspectRatios"
+              :default-ratio="defaultRatio"
+              :workflow-path="workflowPath"
+              :caps="caps"
+              :quality-options="qualityOptions"
+              @update:quality="quality = $event"
+              @update:orientation="orientation = $event"
+              @update:aspect-ratio="aspectRatio = $event"
+            />
+            <label class="mini-field">
+              <span>尺寸对齐</span>
+              <select
+                :value="matrix.align"
+                title="各工作流档位机制不同，同一档出的尺寸并不一样"
+                @change="matrix.setAlign(($event.target as HTMLSelectElement).value as MatrixAlign)"
+              >
+                <option v-for="opt in alignOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="control-row">
+            <div class="mini-field">
+              <span>每个工作流张数</span>
+              <span class="counts">
+                <button
+                  v-for="n in [1, 2, 3, 4]"
+                  :key="n"
+                  class="btn btn-sm count-btn"
+                  :class="{ on: matrix.count === n }"
+                  type="button"
+                  @click="matrix.setCount(n)"
+                >
+                  {{ n }}
+                </button>
+              </span>
+            </div>
+            <label class="mini-field seed">
+              <span>基准种子</span>
+              <input v-model="seedInput" type="number" min="0" step="1" placeholder="空 = 随机" />
+            </label>
+            <button class="btn btn-sm" type="button" @click="randomSeed">🎲 随机</button>
+            <label class="lock" title="锁定后各工作流同列用同一个种子，差异才归因于模型">
+              <input v-model="matrix.lockSeed" type="checkbox" />
+              同种子
+            </label>
+            <span class="grow" />
+            <button
+              class="btn btn-sm primary run"
+              type="button"
+              :class="{ loading: matrix.submitting }"
+              :disabled="!canRun"
+              @click="runTrial"
+            >
+              {{ matrix.submitting ? '提交中…' : `▶ 跑 ${matrix.plan.total} 张` }}
+            </button>
+          </div>
+          <div class="plan">
+            <span class="plan-count">{{ planSummary }}</span>
+            <span v-for="(warn, i) in matrix.plan.warnings" :key="i" class="plan-warn" :class="warn.kind">
+              {{ warn.text }}
+            </span>
+            <span v-if="runError" class="plan-warn warn">{{ runError }}</span>
+          </div>
+      </section>
+
+      <div class="results scroll">
+        <PromptMatrixStack
+          :matrix="matrix"
+          saveable
+          @compare="openCompare($event)"
+          @open-image="openImage($event)"
+          @save="startSave($event)"
+        />
       </div>
     </div>
   </Modal>
+
+  <CompareModal :open="compareOpen" :items="compareItems" @close="compareOpen = false" />
 
   <Lightbox
     v-if="previewOpen"
@@ -412,107 +433,215 @@ async function runTrial() {
 
   <PromptCreateModal
     :open="saveOpen"
-    :initial="saveTarget"
+    :initial="saveInitial"
     @close="saveOpen = false"
     @created="onCreated"
   />
 </template>
 
 <style scoped>
-.trial-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
-  padding: var(--gap-lg);
-}
-
-.note {
-  margin: 0;
-  font-size: var(--fs-xs);
+.head-sub {
   color: var(--muted);
-  line-height: 1.6;
+  font-size: var(--fs-xs);
 }
 
-.note.warn,
-.warn-text {
-  color: var(--warn);
+.btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: rgb(255 255 255);
 }
 
-.field {
+.btn.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.more {
+  position: relative;
+}
+
+.more > summary {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+
+.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-pop {
+  position: absolute;
+  top: calc(100% + var(--gap-xs));
+  right: 0;
+  z-index: var(--z-modal);
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
-
-.prompt-input,
-.neg-input {
-  font: inherit;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  width: max-content;
+  max-width: min(320px, 80vw);
   padding: var(--gap-sm);
-  resize: vertical;
-  line-height: 1.6;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
 }
 
-.prompt-input {
-  min-height: 120px;
+.more-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
 }
 
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.radio input {
+  accent-color: var(--primary);
+}
+
+/* ---------- 双栏骨架 ---------- */
+
+.trial-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 40%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "text controls"
+    "text results";
+  height: 100%;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-text {
+  grid-area: text;
+  gap: var(--gap-sm);
+  padding: var(--gap) var(--gap-lg);
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.pane-head,
 .neg-head {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  font-size: var(--fs-xs);
+  flex: none;
+}
+
+.pane-title {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.counter {
   color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 
-.neg-head .btn {
-  margin-left: auto;
+.grow {
+  flex: 1 1 auto;
 }
 
-.neg-line {
+.big-text {
+  flex: 1 1 auto;
+  min-height: 200px;
   width: 100%;
-  padding: 4px 0 4px var(--gap);
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-left: 3px solid var(--danger);
+  resize: none;
+  padding: var(--gap-sm) var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.7;
 }
 
-.settings {
+.big-text:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.neg {
+  flex: none;
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.neg-input {
+  width: 100%;
+  resize: vertical;
+  padding: 6px var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.warn-text {
+  color: var(--warn);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 右侧常驻控制区 ---------- */
+
+.controls {
+  grid-area: controls;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap) var(--gap-lg);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.control-row {
+  display: flex;
+  align-items: flex-end;
   flex-wrap: wrap;
-  align-items: center;
   gap: var(--gap-sm);
 }
 
-.cap-hint {
+.mini-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   font-size: var(--fs-xs);
   color: var(--muted);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-pill);
-  padding: 1px 7px;
 }
 
-.cap-hint.warn {
-  color: var(--warn);
-  border-color: var(--warn);
+.mini-field select,
+.mini-field input {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
 }
 
-.controls {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--gap-lg);
+.mini-field.seed input {
+  width: 130px;
 }
 
 .counts {
@@ -523,163 +652,118 @@ async function runTrial() {
 .count-btn.on {
   border-color: var(--primary);
   color: var(--primary);
+  background: var(--primary-soft);
 }
 
-.seed-field input {
-  width: 120px;
-}
-
-.archive {
+.lock {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--gap);
-  font-size: var(--fs-sm);
+  gap: 5px;
+  font-size: var(--fs-xs);
   color: var(--muted);
-}
-
-.archive-label {
-  flex: none;
-}
-
-.radio {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
   cursor: pointer;
 }
 
-.radio input {
+.lock input {
+  width: 14px;
+  height: 14px;
   accent-color: var(--primary);
 }
 
-.actions {
+.run {
+  min-width: 116px;
+}
+
+.plan {
   display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-sm);
 }
 
-.spacer {
-  flex: 1;
+.plan-count {
+  font-size: var(--fs-sm);
+  font-weight: 500;
 }
 
-.hint {
-  font-size: var(--fs-xs);
+.plan-warn {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
+}
+
+.plan-warn.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.plan-warn.ok {
+  border-color: var(--success-border);
+  color: var(--success-text);
 }
 
 .results {
-  border-top: 1px solid var(--border);
-  padding-top: var(--gap);
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-}
-
-.results-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--fs-sm);
-  color: var(--muted);
-}
-
-.result-list {
-  max-height: 260px;
+  grid-area: results;
+  min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
+  background: var(--bg);
 }
 
-.result-row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+/* ---------- 滚动条跟随面板配色 ---------- */
+
+.scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) var(--panel-2);
+}
+
+.scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll::-webkit-scrollbar-track {
   background: var(--panel-2);
 }
 
-.shot {
-  flex: none;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--panel-3);
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  border: none;
-  padding: 0;
-  cursor: zoom-in;
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 2px solid var(--panel-2);
+  border-radius: 999px;
 }
 
-.shot img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
-.result-body {
-  flex: 1;
-  min-width: 0;
-}
+@media (max-width: 900px) {
+  .head-sub {
+    display: none;
+  }
 
-.result-line {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  font-size: var(--fs-xs);
-}
+  .trial-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "text"
+      "controls"
+      "results";
+    height: auto;
+  }
 
-.result-preview {
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  .pane-text {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 
-.st.done {
-  color: var(--success);
-}
+  .big-text {
+    min-height: 180px;
+  }
 
-.st.running,
-.st.pending {
-  color: var(--primary);
-}
-
-.st.error {
-  color: var(--danger);
-}
-
-.muted {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-
-.err {
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  color: var(--danger);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.btn.primary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: rgb(255 255 255);
-}
-
-.btn.primary:disabled {
-  opacity: 0.4;
-  cursor: default;
+  .results {
+    overflow: visible;
+  }
 }
 </style>

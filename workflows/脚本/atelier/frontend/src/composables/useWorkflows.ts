@@ -152,6 +152,8 @@ export function useWorkflows(defaultTarget?: Ref<string>) {
         caps: w.caps ?? inspection?.caps,
         params: w.params ?? inspection?.params,
         size_preview: (w.size_preview ?? inspection?.size_preview) as SizePreview | undefined,
+        // 横评据此排除必须喂图的编辑 / 参考 / 超分类；丢了它这些流会混进文生图对比
+        image_slots: w.image_slots,
       })
     }
     return merged

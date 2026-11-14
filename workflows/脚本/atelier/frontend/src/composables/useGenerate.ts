@@ -445,6 +445,8 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
     runText,
     submitAndTrack,
     track: subscribe,
+    /** 队列模式：把已存在的任务 id 接回跟踪集合（横评刷新后恢复用），不清掉其它任务。 */
+    trackQueued,
     closeStream,
   }
 }

@@ -46,6 +46,14 @@ export function setImageFavorite(id: number) {
   return apiPost<{ success: boolean; is_favorite: boolean }>(`/api/images/${id}/favorite`)
 }
 
+/** 临时试跑「存为提示词」后把整批图认领到新提示词名下。 */
+export function linkImagesToPrompt(imageIds: number[], promptId: number) {
+  return apiPost<{ success: boolean; linked: number }>('/api/images/link_prompt', {
+    image_ids: imageIds,
+    prompt_id: promptId,
+  })
+}
+
 export function batchDeleteImages(ids: number[], deleteFiles: boolean) {
   return apiPost<{ success: boolean; deleted: number; files_deleted: number }>(
     '/api/images/batch_delete',

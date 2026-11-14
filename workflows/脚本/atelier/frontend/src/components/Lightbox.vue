@@ -18,6 +18,7 @@ import {
 import { confirmDialogWithCheckbox } from '../utils/naive'
 import { useSettings } from '../composables/useSettings'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
+import { useLoadTimeout } from '../composables/useLoadTimeout'
 import { useViewerTransform } from '../composables/useViewerTransform'
 import ManualCleanupModal from './ManualCleanupModal.vue'
 import Modal from './Modal.vue'
@@ -175,6 +176,8 @@ const {
 
 function initFromImage(img: HTMLImageElement) {
   imageError.value = false
+  loadTimedOut.value = false
+  loadTimeout.stop()
   setNaturalSize(img)
   // 刷新恢复：第一次拿到尺寸时套用快照；否则正常适应窗口
   if (pendingSnapshot && pendingSnapshot.id === item.value?.id) {
@@ -197,15 +200,31 @@ function onImageLoad(event: Event) {
 const imageError = ref(false)
 /** 递增后通过 key 重建 img 元素，强制重新拉取原图。 */
 const reloadNonce = ref(0)
+/** 加载超时（请求挂起）：与失败共用错误态，但文案区分。 */
+const loadTimedOut = ref(false)
+const loadTimeout = useLoadTimeout(() => {
+  loadTimedOut.value = true
+  imgLoaded.value = false
+})
+
+/** 重试时给 URL 追加 nonce，绕过可能卡死的浏览器/代理缓存条目。 */
+const imgSrc = computed(() => {
+  const url = item.value ? displayUrl(item.value) : ''
+  if (!reloadNonce.value) return url
+  return `${url}${url.includes('?') ? '&' : '?'}_r=${reloadNonce.value}`
+})
 
 function onImageError() {
   imageError.value = true
   imgLoaded.value = false
+  loadTimeout.stop()
 }
 
 function retryImage() {
   imageError.value = false
+  loadTimedOut.value = false
   reloadNonce.value++
+  loadTimeout.start()
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +259,7 @@ onMounted(() => {
   // 图片可能已经在缓存里，load 事件不会再来一次
   const img = imgEl.value
   if (img && img.complete && img.naturalWidth) initFromImage(img)
+  else loadTimeout.start()
 
   scheduleInfoFade()
 
@@ -285,6 +305,7 @@ watch(
     nextTick(() => {
       const img = imgEl.value
       if (img && img.complete && img.naturalWidth) initFromImage(img)
+      else loadTimeout.start()
     })
   },
 )
@@ -292,6 +313,8 @@ watch(
 function resetViewState() {
   resetViewer()
   imageError.value = false
+  loadTimedOut.value = false
+  loadTimeout.stop()
   restoreInfo()
   scheduleInfoFade()
   promptInfoOpen.value = false
@@ -453,6 +476,18 @@ function referenceImage(path: string): string {
 const previewRef = ref<ReferenceInput | null>(null)
 const previewError = ref(false)
 const previewReloadNonce = ref(0)
+const previewTimedOut = ref(false)
+const previewTimeout = useLoadTimeout(() => {
+  previewTimedOut.value = true
+  previewImgLoaded.value = false
+})
+
+const previewSrc = computed(() => {
+  if (!previewRef.value) return ''
+  const url = referenceImage(previewRef.value.path)
+  if (!previewReloadNonce.value) return url
+  return `${url}${url.includes('?') ? '&' : '?'}_r=${previewReloadNonce.value}`
+})
 
 const {
   stageEl: previewStageEl,
@@ -476,6 +511,8 @@ const {
 function closeReferencePreview() {
   previewRef.value = null
   previewError.value = false
+  previewTimedOut.value = false
+  previewTimeout.stop()
   previewReset()
 }
 
@@ -484,6 +521,7 @@ useEscapeLayer(() => !!previewRef.value, closeReferencePreview)
 function openReferencePreview(ref: ReferenceInput) {
   previewRef.value = ref
   previewError.value = false
+  previewTimedOut.value = false
   previewReloadNonce.value += 1
   void nextTick(() => {
     // 图片可能已在缓存里，load 事件不会再触发
@@ -491,12 +529,16 @@ function openReferencePreview(ref: ReferenceInput) {
     if (img && img.complete && img.naturalWidth) {
       previewSetNaturalSize(img)
       previewInitView()
+    } else {
+      previewTimeout.start()
     }
   })
 }
 
 function onPreviewImageLoad(event: Event) {
   previewError.value = false
+  previewTimedOut.value = false
+  previewTimeout.stop()
   previewSetNaturalSize(event.target as HTMLImageElement)
   previewInitView()
 }
@@ -504,11 +546,14 @@ function onPreviewImageLoad(event: Event) {
 function onPreviewImageError() {
   previewError.value = true
   previewImgLoaded.value = false
+  previewTimeout.stop()
 }
 
 function retryPreviewImage() {
   previewError.value = false
+  previewTimedOut.value = false
   previewReloadNonce.value += 1
+  previewTimeout.start()
 }
 
 interface ReferenceResolveResult {
@@ -554,8 +599,16 @@ async function openInReferenceLibrary() {
  * 出图时记录在参数里的提示词正文。
  * 已关联提示词库的图也保留一份快照 —— 库里后来改过，也能看到这张图当时用的版本。
  */
-const recordedPrompt = computed(() => textOf(promptParams.value.prompt).trim())
-const recordedNegative = computed(() => textOf(promptParams.value.negative_prompt).trim())
+const recordedPrompt = computed(
+  () =>
+    textOf(promptParams.value.prompt).trim() ||
+    textOf((detail.value?.prompt_params as Record<string, unknown> | null | undefined)?.prompt).trim(),
+)
+const recordedNegative = computed(
+  () =>
+    textOf(promptParams.value.negative_prompt).trim() ||
+    textOf((detail.value?.prompt_params as Record<string, unknown> | null | undefined)?.negative_prompt).trim(),
+)
 
 /**
  * 已关联提示词库、但出图记录没留正文的旧图：只读补一份库里的当前版本，
@@ -1129,7 +1182,7 @@ function onKey(event: KeyboardEvent) {
       @mousedown="onPanStart"
       @click="onStageClick"
     >
-      <div v-if="!imgLoaded && !imageError" class="stage-state loading">
+      <div v-if="!imgLoaded && !imageError && !loadTimedOut" class="stage-state loading">
         <Skeleton
           variant="block"
           width="min(360px, 56vw)"
@@ -1138,15 +1191,15 @@ function onKey(event: KeyboardEvent) {
         />
         <span>加载中…</span>
       </div>
-      <div v-else-if="imageError" class="stage-state error" @click.stop>
-        <span>图片加载失败，请检查文件是否存在</span>
+      <div v-else-if="imageError || loadTimedOut" class="stage-state error" @click.stop>
+        <span>{{ loadTimedOut ? '图片加载超时（30 秒无响应），请重试' : '图片加载失败，请检查文件是否存在' }}</span>
         <button class="btn btn-sm" @click.stop="retryImage">重试</button>
       </div>
 
       <img
         ref="imgEl"
         :key="`${item.id}-${reloadNonce}`"
-        :src="displayUrl(item)"
+        :src="imgSrc"
         :alt="item.filename"
         :class="{ loaded: imgLoaded }"
         :draggable="false"
@@ -1274,11 +1327,11 @@ function onKey(event: KeyboardEvent) {
             @mousedown="previewOnPanStart"
             @click="previewOnStageClick"
           >
-            <span v-if="!previewImgLoaded && !previewError" class="ref-preview-state">
+            <span v-if="!previewImgLoaded && !previewError && !previewTimedOut" class="ref-preview-state">
               加载中…
             </span>
-            <div v-else-if="previewError" class="ref-preview-state error" @click.stop>
-              <span>参考图加载失败，请检查文件是否存在</span>
+            <div v-else-if="previewError || previewTimedOut" class="ref-preview-state error" @click.stop>
+              <span>{{ previewTimedOut ? '参考图加载超时（30 秒无响应），请重试' : '参考图加载失败，请检查文件是否存在' }}</span>
               <button class="btn btn-sm" type="button" @click.stop="retryPreviewImage">
                 重试
               </button>
@@ -1288,7 +1341,7 @@ function onKey(event: KeyboardEvent) {
               ref="previewImgEl"
               class="ref-preview-img"
               :class="{ loaded: previewImgLoaded }"
-              :src="referenceImage(previewRef.path)"
+              :src="previewSrc"
               :alt="previewRef.label"
               :draggable="false"
               @load="onPreviewImageLoad"
@@ -1675,6 +1728,11 @@ function onKey(event: KeyboardEvent) {
 
 .stage-state.error .btn {
   pointer-events: auto;
+}
+
+/* Skeleton 根节点满宽、骨架条默认左对齐，居中容器里要显式居中 */
+.stage-state.loading :deep(.skeleton) {
+  align-items: center;
 }
 
 .stage img {

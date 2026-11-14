@@ -19,6 +19,7 @@ from app.services.workflow_manifest import (  # noqa: E402
     MANIFEST_FILENAME,
     content_sha256,
     load_manifest,
+    manifest_path,
     stable_id_for_path,
 )
 from app.services.workflow_catalog import is_valid_workflow  # noqa: E402
@@ -168,7 +169,8 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="只校验，不写文件")
     args = parser.parse_args()
 
-    target = settings.library_root / MANIFEST_FILENAME
+    target = manifest_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
     if args.check:
         if not target.is_file():
             print(f"ERROR 缺少清单: {target}")

@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 提示词页「一提示词 × 多工作流横评」（2026-11-12 已拍板方案 A）</title>
+<style>
+  :root{
+    color-scheme: light dark;
+    --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    --font-code: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  body{margin:0;padding:16px;background:light-dark(#f0f3f6,#010409);font-family:var(--font-sans)}
+  .proto-note{max-width:1180px;margin:0 auto 12px;font-size:12px;color:light-dark(#57606a,#8b949e)}
+</style>
+</head>
+<body>
+<p class="proto-note">交互原型（离线、无后端）。已拍板：A 就地多选 + 试跑面板一起收敛 + 原生档且尺寸差异可见。尺寸/能力取自 2026-11-12 的 /api/workflows 实时返回，耗时取自同日横评实测；图位是构图示意占位，不是真实出图。施工计划见 Atelier_当前状态与待办_20261112.md 的 A15。</p>
+<div id="apx-root" class="apx">
+<style>
+#apx-root{
+  --ap-bg: light-dark(#ffffff, #0d1117);
+  --ap-panel: light-dark(#f6f8fa, #161b22);
+  --ap-panel2: light-dark(#eef1f5, #1c2128);
+  --ap-panel3: light-dark(#e3e8ee, #22272e);
+  --ap-border: light-dark(#d0d7de, #30363d);
+  --ap-border-strong: light-dark(#a9b3bd, #444c56);
+  --ap-text: light-dark(#1f2328, #e6edf3);
+  --ap-muted: light-dark(#57606a, #8b949e);
+  --ap-primary: light-dark(#4f46e5, #6366f1);
+  --ap-primary-soft: light-dark(rgba(79,70,229,.12), rgba(99,102,241,.18));
+  --ap-success: light-dark(#1a7f37, #22c55e);
+  --ap-warn: light-dark(#9a6700, #f59e0b);
+  --ap-danger: light-dark(#cf222e, #ef4444);
+  --ap-info: light-dark(#0969da, #38bdf8);
+  --fam-moss:#a855f7; --fam-moody:#22d3ee; --fam-pmk:#f472b6; --fam-qwen:#f59e0b; --fam-flux:#60a5fa;
+  --ap-radius:10px;
+  font-family: var(--font-sans);
+  font-size:13px; font-weight:400; color:var(--ap-text);
+}
+#apx-root *{box-sizing:border-box}
+#apx-root .apx-shell{background:var(--ap-bg);border:1px solid var(--ap-border);border-radius:var(--ap-radius);overflow:hidden}
+#apx-root .apx-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;background:var(--ap-panel);border-bottom:1px solid var(--ap-border)}
+#apx-root .apx-crumb{display:flex;align-items:center;gap:7px;min-width:0}
+#apx-root .apx-mark{width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,var(--fam-moss),var(--ap-primary) 55%,var(--fam-flux));flex:none}
+#apx-root .apx-crumb b{font-weight:500}
+#apx-root .apx-sep{color:var(--ap-muted)}
+#apx-root .apx-grow{flex:1 1 auto}
+#apx-root .apx-tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--ap-border-strong);color:var(--ap-muted);background:var(--ap-panel2);white-space:nowrap}
+#apx-root .apx-tag-on{color:var(--ap-primary);border-color:var(--ap-primary);background:var(--ap-primary-soft)}
+#apx-root .apx-sec{padding:12px;border-bottom:1px solid var(--ap-border)}
+#apx-root .apx-sec:last-child{border-bottom:none}
+#apx-root .apx-h{font-size:12px;font-weight:500;color:var(--ap-muted);letter-spacing:.02em}
+#apx-root .apx-rowhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+#apx-root .apx-muted{color:var(--ap-muted)}
+#apx-root .apx-small{font-size:12px}
+#apx-root .apx-tiny{font-size:11px}
+#apx-root .apx-num{font-family:var(--font-code);font-variant-numeric:tabular-nums}
+#apx-root button,#apx-root input,#apx-root select,#apx-root textarea{font-family:inherit;font-size:12px;font-weight:400;color:var(--ap-text)}
+#apx-root button{background:var(--ap-panel2);border:1px solid var(--ap-border);border-radius:8px;padding:6px 10px;min-height:32px;cursor:pointer}
+#apx-root button:hover:not(:disabled){border-color:var(--ap-border-strong);background:var(--ap-panel3)}
+#apx-root button:disabled{opacity:.45;cursor:not-allowed}
+#apx-root button.apx-primary{background:var(--ap-primary);border-color:var(--ap-primary);color:#fff;font-weight:500}
+#apx-root button.apx-primary:hover:not(:disabled){background:var(--ap-primary);filter:brightness(1.1)}
+#apx-root button.apx-ghost{background:transparent}
+#apx-root input[type=text],#apx-root input[type=number],#apx-root input[type=search],#apx-root select,#apx-root textarea{background:var(--ap-panel2);border:1px solid var(--ap-border);border-radius:8px;padding:6px 8px;min-height:32px;width:100%}
+#apx-root textarea{resize:vertical;line-height:1.5}
+#apx-root .apx-field{display:flex;flex-direction:column;gap:4px;min-width:112px;flex:0 1 auto}
+#apx-root .apx-field>span{font-size:11px;color:var(--ap-muted)}
+#apx-root .apx-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+#apx-root .apx-seg{display:inline-flex;border:1px solid var(--ap-border);border-radius:8px;overflow:hidden;background:var(--ap-panel2)}
+#apx-root .apx-seg button{border:none;border-radius:0;background:transparent;min-height:32px;padding:6px 12px}
+#apx-root .apx-seg button[aria-pressed=true]{background:var(--ap-primary-soft);color:var(--ap-primary);font-weight:500}
+#apx-root .apx-step{display:flex;align-items:center;gap:0;border:1px solid var(--ap-border);border-radius:8px;overflow:hidden;background:var(--ap-panel2)}
+#apx-root .apx-step button{border:none;border-radius:0;width:32px;padding:0;font-size:14px}
+#apx-root .apx-step output{min-width:34px;text-align:center;font-size:12px;font-family:var(--font-code)}
+#apx-root .apx-check{display:inline-flex;align-items:center;gap:6px;min-height:32px;font-size:12px;cursor:pointer;white-space:nowrap}
+#apx-root .apx-check input{width:15px;height:15px;min-height:0;accent-color:var(--ap-primary);cursor:pointer}
+#apx-root .apx-picker{position:relative;flex:1 1 260px;min-width:190px}
+#apx-root .apx-trigger{display:flex;align-items:center;gap:8px;width:100%;text-align:left;min-height:34px}
+#apx-root .apx-trigger .apx-tname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#apx-root .apx-caret{color:var(--ap-muted);font-size:11px;flex:none}
+#apx-root .apx-panel{margin-top:6px;border:1px solid var(--ap-border-strong);border-radius:var(--ap-radius);background:var(--ap-panel);overflow:hidden}
+#apx-root .apx-panel-top{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px;border-bottom:1px solid var(--ap-border);background:var(--ap-panel2)}
+#apx-root .apx-preset{border-radius:999px;padding:5px 10px;font-size:11px;min-height:28px}
+#apx-root .apx-group{padding:6px 8px}
+#apx-root .apx-group-h{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ap-muted);padding:4px 2px}
+#apx-root .apx-opt{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+#apx-root .apx-opt:hover{background:var(--ap-panel2)}
+#apx-root .apx-opt[data-on=true]{background:var(--ap-primary-soft);border-color:var(--ap-primary)}
+#apx-root .apx-opt[data-off=true]{opacity:.55;cursor:not-allowed}
+#apx-root .apx-opt input{margin-top:2px;width:15px;height:15px;min-height:0;flex:none;accent-color:var(--ap-primary)}
+#apx-root .apx-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px}
+#apx-root .apx-optbody{min-width:0;flex:1 1 auto}
+#apx-root .apx-optname{font-size:12px;word-break:break-word}
+#apx-root .apx-optmeta{font-size:11px;color:var(--ap-muted);display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+#apx-root .apx-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#apx-root .apx-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 8px;border-radius:999px;border:1px solid var(--ap-border-strong);background:var(--ap-panel2);font-size:11px;cursor:grab}
+#apx-root .apx-chip[data-drag=true]{opacity:.4}
+#apx-root .apx-chip[data-over=true]{border-color:var(--ap-primary);background:var(--ap-primary-soft)}
+#apx-root .apx-chip button{min-height:20px;width:20px;padding:0;border-radius:50%;border:none;background:transparent;color:var(--ap-muted);font-size:12px;line-height:1}
+#apx-root .apx-chip button:hover{background:var(--ap-panel3);color:var(--ap-danger)}
+#apx-root .apx-plan{display:flex;flex-direction:column;gap:8px}
+#apx-root .apx-count{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#apx-root .apx-count b{font-size:15px;font-weight:500}
+#apx-root .apx-meter{height:5px;border-radius:999px;background:var(--ap-panel3);overflow:hidden}
+#apx-root .apx-meter i{display:block;height:100%;background:linear-gradient(90deg,var(--fam-flux),var(--ap-primary) 60%,var(--fam-moss));width:0}
+#apx-root .apx-notes{display:flex;flex-direction:column;gap:5px}
+#apx-root .apx-note{display:flex;gap:7px;align-items:flex-start;font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--ap-border);background:var(--ap-panel)}
+#apx-root .apx-note[data-kind=warn]{border-color:var(--ap-warn);color:var(--ap-text);background:light-dark(rgba(154,103,0,.08),rgba(245,158,11,.1))}
+#apx-root .apx-note[data-kind=info]{border-color:var(--ap-info);background:light-dark(rgba(9,105,218,.07),rgba(56,189,248,.1))}
+#apx-root .apx-note[data-kind=ok]{border-color:var(--ap-success);background:light-dark(rgba(26,127,55,.07),rgba(34,197,94,.1))}
+#apx-root .apx-note i{font-style:normal;flex:none}
+#apx-root .apx-live{min-height:20px;font-size:12px;color:var(--ap-primary);padding:2px 0}
+#apx-root .apx-matrix{display:flex;flex-direction:column;gap:8px}
+#apx-root .apx-mrow{display:grid;grid-template-columns:154px minmax(0,1fr);gap:8px;align-items:stretch}
+#apx-root .apx-mhead{display:grid;grid-template-columns:154px minmax(0,1fr);gap:8px}
+#apx-root .apx-cells{display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));gap:8px;max-width:calc(var(--cols) * 216px)}
+#apx-root .apx-colhead{font-size:11px;color:var(--ap-muted);text-align:center;padding:2px 0}
+#apx-root .apx-rlabel{border:1px solid var(--ap-border);border-left:3px solid var(--hue);border-radius:8px;background:var(--ap-panel);padding:8px;display:flex;flex-direction:column;gap:3px;min-width:0}
+#apx-root .apx-rname{font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+#apx-root .apx-rmeta{font-size:11px;color:var(--ap-muted);word-break:break-word}
+#apx-root .apx-star{color:var(--ap-warn)}
+#apx-root .apx-cell{position:relative;height:172px;border:1px solid var(--ap-border);border-radius:8px;background:var(--ap-panel2);overflow:hidden;display:flex;flex-direction:column}
+#apx-root .apx-cell[data-state=idle],#apx-root .apx-cell[data-state=queued]{height:74px}
+#apx-root .apx-cell[data-state=done]{border-color:var(--ap-border-strong)}
+#apx-root .apx-cell[data-state=error]{border-color:var(--ap-danger)}
+#apx-root .apx-cell[data-sel=true]{outline:2px solid var(--ap-primary);outline-offset:-2px}
+#apx-root .apx-art{flex:1 1 auto;min-height:0;position:relative;display:grid;place-items:center;background:radial-gradient(120% 90% at 50% 0%,var(--ap-panel3),var(--ap-panel2) 70%)}
+#apx-root .apx-frame{height:100%;max-width:100%;border:1px solid var(--ap-border-strong);border-radius:3px;overflow:hidden;box-shadow:0 2px 10px light-dark(rgba(31,35,40,.16),rgba(1,4,9,.55))}
+#apx-root .apx-art svg,#apx-root .apx-frame svg{display:block;width:100%;height:100%}
+#apx-root .apx-cellfoot{flex:none;display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--ap-panel);border-top:1px solid var(--ap-border);font-size:11px;color:var(--ap-muted)}
+#apx-root .apx-cellfoot .apx-num{color:var(--ap-text)}
+#apx-root .apx-cellbox{position:absolute;top:5px;left:5px;width:22px;height:22px;min-height:0;border-radius:5px;background:var(--ap-panel);border:1px solid var(--ap-border-strong);accent-color:var(--ap-primary);cursor:pointer}
+#apx-root .apx-cellmark{position:absolute;top:5px;right:5px;display:flex;gap:4px}
+#apx-root .apx-pill{font-size:11px;padding:1px 6px;border-radius:999px;background:var(--ap-panel);border:1px solid var(--ap-border-strong);color:var(--ap-muted)}
+#apx-root .apx-pill[data-kind=best]{color:var(--ap-warn);border-color:var(--ap-warn)}
+#apx-root .apx-pill[data-kind=fav]{color:var(--ap-danger);border-color:var(--ap-danger)}
+#apx-root .apx-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px;text-align:center;background:var(--ap-panel2)}
+#apx-root .apx-state[data-kind=run]{background:linear-gradient(160deg,var(--ap-panel3),var(--ap-panel2))}
+#apx-root .apx-state[data-kind=err]{background:light-dark(rgba(207,34,46,.07),rgba(239,68,68,.12))}
+#apx-root .apx-runbar{width:78%;height:4px;border-radius:999px;background:var(--ap-panel);overflow:hidden}
+#apx-root .apx-runbar i{display:block;height:100%;width:0;background:var(--hue)}
+#apx-root .apx-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--ap-border-strong);border-top-color:var(--hue);animation:apx-spin .9s linear infinite}
+@keyframes apx-spin{to{transform:rotate(360deg)}}
+#apx-root .apx-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;padding:7px 12px;border-radius:999px;border:1px solid var(--ap-border-strong);background:var(--ap-panel);box-shadow:0 6px 20px light-dark(rgba(31,35,40,.1),rgba(1,4,9,.5));margin:4px auto 0;max-width:100%}
+#apx-root .apx-bar button{border-radius:999px;min-height:30px;padding:5px 11px;font-size:12px}
+#apx-root .apx-cmp{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:10px}
+#apx-root .apx-cmptile{border:1px solid var(--ap-border);border-radius:8px;background:var(--ap-panel);overflow:hidden;display:flex;flex-direction:column}
+#apx-root .apx-cmpview{height:230px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,var(--ap-panel3),var(--ap-panel2) 70%);display:grid;place-items:center}
+#apx-root .apx-cmpview>div{height:100%;display:grid;place-items:center;transform-origin:center center}
+#apx-root .apx-cmpmeta{padding:7px 8px;display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--ap-muted);border-top:1px solid var(--ap-border)}
+#apx-root .apx-rate{display:flex;gap:2px;align-items:center}
+#apx-root .apx-rate button{min-height:24px;width:24px;padding:0;border-radius:6px;font-size:12px;line-height:1}
+#apx-root .apx-rate button[aria-pressed=true]{color:var(--ap-warn);border-color:var(--ap-warn)}
+#apx-root .apx-table{width:100%;border-collapse:collapse;font-size:12px}
+#apx-root .apx-table th,#apx-root .apx-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--ap-border);vertical-align:top}
+#apx-root .apx-table th{font-size:11px;color:var(--ap-muted);font-weight:500}
+#apx-root .apx-code{font-family:var(--font-code);font-size:11px;word-break:break-all;color:var(--ap-info)}
+#apx-root .apx-evi{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+#apx-root .apx-evi div{border:1px solid var(--ap-border);border-left:3px solid var(--ap-primary);border-radius:8px;padding:8px;background:var(--ap-panel);font-size:12px}
+#apx-root .apx-evi b{display:block;font-weight:500;margin-bottom:3px}
+#apx-root .apx-scroll{scrollbar-width:thin;scrollbar-color:var(--ap-border-strong) var(--ap-panel2)}
+#apx-root ::-webkit-scrollbar{width:9px;height:9px}
+#apx-root ::-webkit-scrollbar-track{background:var(--ap-panel2)}
+#apx-root ::-webkit-scrollbar-thumb{background:var(--ap-border-strong);border-radius:999px}
+#apx-root ::-webkit-scrollbar-thumb:hover{background:var(--ap-muted)}
+@media (max-width:660px){
+  #apx-root .apx-mrow,#apx-root .apx-mhead{grid-template-columns:minmax(0,1fr)}
+  #apx-root .apx-mhead{display:none}
+  #apx-root .apx-cell{height:150px}
+  #apx-root .apx-cell[data-state=idle],#apx-root .apx-cell[data-state=queued]{height:66px}
+  #apx-root .apx-cmp{grid-template-columns:minmax(0,1fr)}
+  #apx-root .apx-picker{flex:1 1 100%}
+}
+@media (prefers-reduced-motion:reduce){
+  #apx-root .apx-spin{animation:none}
+  #apx-root *{transition:none !important}
+}
+</style>
+
+<div class="apx-shell">
+  <header class="apx-top">
+    <div class="apx-crumb">
+      <span class="apx-mark" aria-hidden="true"></span>
+      <span class="apx-muted apx-small">提示词</span>
+      <span class="apx-sep" aria-hidden="true">›</span>
+      <b id="apx-title">雨后街道 · 白衬衫</b>
+      <span class="apx-tag apx-num" id="apx-idtag">id 1171</span>
+    </div>
+    <span class="apx-grow"></span>
+    <span class="apx-tag" id="apx-preftag" hidden></span>
+    <span class="apx-tag apx-tag-on">设计提案 · 未接后端</span>
+  </header>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead">
+      <span class="apx-h">一份文本</span>
+      <span class="apx-tag" id="apx-srctag">库内提示词</span>
+      <span class="apx-grow"></span>
+      <button type="button" id="apx-paste" class="apx-ghost">粘贴外来提示词</button>
+      <button type="button" id="apx-saveas" hidden>存为提示词</button>
+    </div>
+    <textarea id="apx-prompt" class="apx-scroll" rows="3" aria-label="提示词文本">A young East Asian woman standing on a rain-soaked street at dusk, white cotton shirt, damp hair, soft rim light from a convenience store sign, shallow depth of field, 85mm, natural skin texture, full upper body, cinematic documentary style</textarea>
+    <div class="apx-rowhead" style="margin:8px 0 0">
+      <span class="apx-h">负向</span>
+      <span class="apx-tag" id="apx-negtag">本批 0 / 4 生效</span>
+      <span class="apx-muted apx-tiny" id="apx-negnote"></span>
+    </div>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead">
+      <span class="apx-h">出图上下文</span>
+      <div class="apx-seg" role="group" aria-label="出图模式">
+        <button type="button" id="apx-mode-single" aria-pressed="false">单工作流</button>
+        <button type="button" id="apx-mode-multi" aria-pressed="true">多工作流横评</button>
+      </div>
+      <span class="apx-grow"></span>
+      <span class="apx-muted apx-tiny" id="apx-modehint"></span>
+    </div>
+
+    <div class="apx-controls">
+      <div class="apx-picker">
+        <button type="button" class="apx-trigger" id="apx-wftrigger" aria-expanded="false" aria-controls="apx-wfpanel">
+          <span class="apx-tname" id="apx-wfname">已选 4 个工作流</span>
+          <span class="apx-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+      <div class="apx-field">
+        <span id="apx-countlabel">每个工作流张数</span>
+        <div class="apx-step">
+          <button type="button" id="apx-count-down" aria-label="减少张数">−</button>
+          <output id="apx-count-out" class="apx-num" aria-labelledby="apx-countlabel">2</output>
+          <button type="button" id="apx-count-up" aria-label="增加张数">+</button>
+        </div>
+      </div>
+      <div class="apx-field" style="flex:0 1 150px">
+        <span>基准种子</span>
+        <input type="text" id="apx-seed" class="apx-num" value="20261112" inputmode="numeric" aria-label="基准种子">
+      </div>
+      <label class="apx-check"><input type="checkbox" id="apx-seedlock" checked>锁定同种子</label>
+      <button type="button" id="apx-seedrand" class="apx-ghost">随机种子</button>
+    </div>
+
+    <div class="apx-controls" style="margin-top:8px">
+      <div class="apx-field">
+        <span>比例</span>
+        <select id="apx-ratio" aria-label="比例">
+          <option value="2:3">2:3 竖</option>
+          <option value="9:16">9:16 窄竖</option>
+          <option value="3:4">3:4 竖</option>
+          <option value="1:1">1:1 方</option>
+          <option value="3:2">3:2 横</option>
+          <option value="16:9">16:9 宽</option>
+        </select>
+      </div>
+      <div class="apx-field">
+        <span>画质档</span>
+        <select id="apx-tier" aria-label="画质档">
+          <option value="0.5x">0.5×</option>
+          <option value="0.75x">0.75×</option>
+          <option value="1.0x" selected>1.0×</option>
+          <option value="1.25x">1.25×</option>
+          <option value="1.5x">1.5×</option>
+          <option value="2.0x">2.0×</option>
+        </select>
+      </div>
+      <div class="apx-field" style="flex:0 1 190px">
+        <span>尺寸对齐（横评公平性）</span>
+        <select id="apx-align" aria-label="尺寸对齐">
+          <option value="native">各自原生档</option>
+          <option value="first">对齐到首个（自动选最近档）</option>
+          <option value="ref">对齐到 1024×1536</option>
+        </select>
+      </div>
+      <div class="apx-field">
+        <span>提交并发</span>
+        <select id="apx-conc" aria-label="提交并发">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+        </select>
+      </div>
+      <div class="apx-field">
+        <span>行排序</span>
+        <select id="apx-sort" aria-label="行排序">
+          <option value="order">选择顺序</option>
+          <option value="fast">耗时升序</option>
+          <option value="size">像素量升序</option>
+        </select>
+      </div>
+      <label class="apx-check"><input type="checkbox" id="apx-guides">构图参考线</label>
+      <div class="apx-field">
+        <span>演示速度</span>
+        <select id="apx-speed" aria-label="演示速度">
+          <option value="1">×1 真实</option>
+          <option value="8" selected>×8</option>
+          <option value="30">×30</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="apx-wfpanel" class="apx-panel" hidden>
+      <div class="apx-panel-top">
+        <input type="search" id="apx-wfsearch" class="apx-scroll" placeholder="搜索工作流名…" aria-label="搜索工作流" style="flex:1 1 160px;width:auto">
+        <button type="button" class="apx-preset" data-preset="asian">亚洲写实脸</button>
+        <button type="button" class="apx-preset" data-preset="text">图内中文</button>
+        <button type="button" class="apx-preset" data-preset="fast">极速草稿</button>
+        <button type="button" class="apx-preset" data-preset="all">全部文生图</button>
+        <button type="button" class="apx-preset" data-preset="none">清空</button>
+      </div>
+      <div id="apx-wflist"></div>
+    </div>
+
+    <div class="apx-chips" id="apx-chips"></div>
+
+    <div class="apx-controls" style="margin-top:10px">
+      <button type="button" id="apx-run" class="apx-primary">横评出图</button>
+      <button type="button" id="apx-stop" disabled>停止演示</button>
+      <button type="button" id="apx-reset" class="apx-ghost">重置</button>
+      <button type="button" id="apx-exportbtn" class="apx-ghost">导出清单</button>
+      <span class="apx-grow"></span>
+      <span class="apx-muted apx-tiny">拖动芯片可调整行顺序</span>
+    </div>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-plan">
+      <div class="apx-count" aria-live="polite">
+        <b id="apx-plantext">4 个工作流 × 2 张 = 8 张</b>
+        <span class="apx-muted apx-small apx-num" id="apx-plantime"></span>
+        <span class="apx-grow"></span>
+        <span class="apx-muted apx-tiny apx-num" id="apx-plancap"></span>
+      </div>
+      <div class="apx-meter"><i id="apx-planbar"></i></div>
+      <div class="apx-notes" id="apx-warnings"></div>
+      <div class="apx-live" id="apx-live" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead">
+      <span class="apx-h">结果矩阵</span>
+      <span class="apx-muted apx-tiny">行 = 工作流，列 = 第 N 张（种子 +1）</span>
+      <span class="apx-grow"></span>
+      <span class="apx-tag" id="apx-matrixtag">未提交</span>
+    </div>
+    <div class="apx-matrix" id="apx-matrix"></div>
+    <div id="apx-barwrap"></div>
+    <p class="apx-muted apx-tiny" style="margin:8px 0 0">演示说明：图位是构图示意占位，不是真实出图；耗时按 2026-11-12 横评实测值随像素量估算，尺寸与能力取自 <span class="apx-code">/api/workflows</span> 实时返回。</p>
+  </section>
+
+  <section class="apx-sec" id="apx-cmpsec" hidden>
+    <div class="apx-rowhead">
+      <span class="apx-h">并排对比</span>
+      <span class="apx-muted apx-tiny">应用内复用现有 CompareModal（2~4 张、缩放联动）</span>
+      <span class="apx-grow"></span>
+      <label class="apx-check"><input type="checkbox" id="apx-zoomsync" checked>同步缩放</label>
+      <div class="apx-field" style="flex:0 1 150px">
+        <span>缩放 <output id="apx-zoomout" class="apx-num">1.0×</output></span>
+        <input type="range" id="apx-zoom" min="1" max="4" step="0.1" value="1" aria-label="缩放">
+      </div>
+      <button type="button" id="apx-cmpclose" class="apx-ghost">关闭对比</button>
+    </div>
+    <div class="apx-cmp" id="apx-cmp"></div>
+  </section>
+
+  <section class="apx-sec" id="apx-exportsec" hidden>
+    <div class="apx-rowhead">
+      <span class="apx-h">提交清单</span>
+      <span class="apx-muted apx-tiny">一个工作流一个 job，避免图片工作流归属被 job 级字段覆盖</span>
+      <span class="apx-grow"></span>
+      <button type="button" id="apx-copy" class="apx-ghost">全选便于复制</button>
+      <button type="button" id="apx-exportclose" class="apx-ghost">收起</button>
+    </div>
+    <textarea id="apx-exporttext" class="apx-scroll apx-num" rows="8" readonly aria-label="提交清单 JSON"></textarea>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead"><span class="apx-h">为什么补这个入口</span></div>
+    <div class="apx-evi">
+      <div><b>合成台已经能做</b>工作流多选 × 画质 × 比例笛卡尔组合，上限 100 组，结果板标「#组号 · 工作流短名 · 尺寸」。</div>
+      <div><b>提示词页不能做</b>工作流是全局单选，批量只有「多提示词 × 单工作流」，同一提示词换模型要手动改选择再跑。</div>
+      <div><b>现在靠脚本和手工</b>今天的 8 流横评是手工统一 1024×1536 与同种子跑出来的，结论写在 md 里，图散在 output 根目录。</div>
+    </div>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead"><span class="apx-h">落地改动（最小侵入）</span></div>
+    <table class="apx-table">
+      <thead><tr><th style="width:30%">位置</th><th>改动</th></tr></thead>
+      <tbody>
+        <tr><td><span class="apx-code">components/WorkflowPicker.vue</span></td><td>加 <span class="apx-code">multiple</span> 模式：选中项变芯片、面板变复选列表，能力徽标与置灰原因复用合成台的 <span class="apx-code">describeWorkflowUnavailableFor</span>。单选行为不变。</td></tr>
+        <tr><td><span class="apx-code">components/PromptDetailPane.vue</span></td><td>出图栏加「横评」开关与尺寸对齐选择；张数 × 工作流数显示总数；种子锁定复用现有种子输入。</td></tr>
+        <tr><td><span class="apx-code">composables/useGenerate.ts</span></td><td>新增 <span class="apx-code">runMatrix()</span>：按工作流循环调 <span class="apx-code">/api/runs/batch</span>（每流一个 job、同种子），队列模式已支持多任务跟踪，无需新底座。</td></tr>
+        <tr><td><span class="apx-code">app/routers/comfyui.py:633</span></td><td>后端已支持 item 级 <span class="apx-code">workflow_path</span>，本轮不用改；但图片归属取 job 级（<span class="apx-code">images.py:1293</span>），所以必须一流一 job，否则灯箱标错模型。</td></tr>
+        <tr><td>不在本轮范围</td><td>「取消任务真停」与「【避免】全入口生效」按 2026-11-07 拍板继续暂缓；本提案不动这两项行为。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="apx-sec">
+    <div class="apx-rowhead"><span class="apx-h">三种入口形态</span><span class="apx-muted apx-tiny">上面演示的是方案 A</span></div>
+    <table class="apx-table">
+      <thead><tr><th style="width:22%">方案</th><th style="width:39%">形态</th><th>代价</th></tr></thead>
+      <tbody>
+        <tr><td><b>A 就地多选</b> <span class="apx-tag apx-tag-on">推荐</span></td><td>现有工作流选择器升级为可多选，出图栏原地变成横评栏，结果区切换成矩阵。</td><td>不新增页面与面板，和被否的试跑面板收敛成「一份文本 + 一个跑按钮」；需要给单选器加多选态。</td></tr>
+        <tr><td>B 独立横评页</td><td>新开 <span class="apx-code">/compare</span>，直接搬合成台的组合清单 + 结果板。</td><td>组件复用最快，但提示词要跳页选，第三个出图入口会让入口更碎。</td></tr>
+        <tr><td>C 批量栏附加</td><td>勾选多条提示词后，批量栏加「同时跑这些工作流」。</td><td>改动最小，但解决的是「多提示词 × 多工作流」，单条提示词横评仍然没有入口。</td></tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+(function(){
+  var ROOT = document.getElementById('apx-root');
+  function $(id){ return ROOT.querySelector('#' + id); }
+  var SIZES = {"moss":{"0.25x":{"1:1":[320,320],"2:3":[256,384],"3:2":[384,256],"3:4":[272,368],"4:3":[368,272],"9:16":[240,416],"16:9":[416,240],"21:9":[480,208],"9:21":[208,480]},"0.5x":{"1:1":[624,624],"2:3":[512,768],"3:2":[768,512],"3:4":[544,720],"4:3":[720,544],"9:16":[464,832],"16:9":[832,464],"21:9":[960,416],"9:21":[416,960]},"0.75x":{"1:1":[944,944],"2:3":[768,1152],"3:2":[1152,768],"3:4":[816,1088],"4:3":[1088,816],"9:16":[704,1248],"16:9":[1248,704],"21:9":[1440,608],"9:21":[608,1440]},"1.0x":{"1:1":[1248,1248],"2:3":[1024,1536],"3:2":[1536,1024],"3:4":[1088,1456],"4:3":[1456,1088],"9:16":[944,1680],"16:9":[1680,944],"21:9":[1920,816],"9:21":[816,1920]},"1.25x":{"1:1":[1568,1568],"2:3":[1280,1920],"3:2":[1920,1280],"3:4":[1360,1808],"4:3":[1808,1360],"9:16":[1168,2096],"16:9":[2096,1168],"21:9":[2400,1024],"9:21":[1024,2400]},"1.5x":{"1:1":[1888,1888],"2:3":[1536,2304],"3:2":[2304,1536],"3:4":[1632,2176],"4:3":[2176,1632],"9:16":[1408,2512],"16:9":[2512,1408],"21:9":[2880,1232],"9:21":[1232,2880]},"2.0x":{"1:1":[2512,2512],"2:3":[2048,3072],"3:2":[3072,2048],"3:4":[2176,2896],"4:3":[2896,2176],"9:16":[1888,3344],"16:9":[3344,1888],"21:9":[3824,1648],"9:21":[1648,3824]}},
+  "flux3":{"0.25x":{"1:1":[320,320],"2:3":[256,384],"3:2":[384,256],"3:4":[272,368],"4:3":[368,272],"9:16":[240,416],"16:9":[416,240],"21:9":[480,208],"9:21":[208,480]},"0.5x":{"1:1":[624,624],"2:3":[512,768],"3:2":[768,512],"3:4":[544,720],"4:3":[720,544],"9:16":[464,832],"16:9":[832,464],"21:9":[960,416],"9:21":[416,960]},"0.75x":{"1:1":[944,944],"2:3":[768,1152],"3:2":[1152,768],"3:4":[816,1088],"4:3":[1088,816],"9:16":[704,1248],"16:9":[1248,704],"21:9":[1440,608],"9:21":[608,1440]},"1.0x":{"1:1":[1248,1248],"2:3":[1024,1536],"3:2":[1536,1024],"3:4":[1088,1456],"4:3":[1456,1088],"9:16":[944,1680],"16:9":[1680,944],"21:9":[1920,816],"9:21":[816,1920]},"1.25x":{"1:1":[1568,1568],"2:3":[1280,1920],"3:2":[1920,1280],"3:4":[1360,1808],"4:3":[1808,1360],"9:16":[1168,2096],"16:9":[2096,1168],"21:9":[2400,1024],"9:21":[1024,2400]},"1.5x":{"1:1":[1888,1888],"2:3":[1536,2304],"3:2":[2304,1536],"3:4":[1632,2176],"4:3":[2176,1632],"9:16":[1408,2512],"16:9":[2512,1408],"21:9":[2880,1232],"9:21":[1232,2880]},"2.0x":{"1:1":[2512,2512],"2:3":[2048,3072],"3:2":[3072,2048],"3:4":[2176,2896],"4:3":[2896,2176],"9:16":[1888,3344],"16:9":[3344,1888],"21:9":[3824,1648],"9:21":[1648,3824]}},
+  "pmk25":{"0.25x":{"1:1":[400,400],"2:3":[320,488],"3:2":[488,320],"3:4":[344,456],"4:3":[456,344],"9:16":[296,528],"16:9":[528,296],"21:9":[608,256],"9:21":[256,608]},"0.5x":{"1:1":[792,792],"2:3":[648,968],"3:2":[968,648],"3:4":[688,912],"4:3":[912,688],"9:16":[592,1056],"16:9":[1056,592],"21:9":[1208,520],"9:21":[520,1208]},"0.75x":{"1:1":[1192,1192],"2:3":[968,1456],"3:2":[1456,968],"3:4":[1032,1376],"4:3":[1376,1032],"9:16":[896,1584],"16:9":[1584,896],"21:9":[1816,776],"9:21":[776,1816]},"1.0x":{"1:1":[1584,1584],"2:3":[1296,1944],"3:2":[1944,1296],"3:4":[1376,1832],"4:3":[1832,1376],"9:16":[1192,2112],"16:9":[2112,1192],"21:9":[2424,1040],"9:21":[1040,2424]},"1.25x":{"1:1":[1984,1984],"2:3":[1616,2432],"3:2":[2432,1616],"3:4":[1720,2288],"4:3":[2288,1720],"9:16":[1488,2640],"16:9":[2640,1488],"21:9":[3032,1296],"9:21":[1296,3032]},"1.5x":{"1:1":[2376,2376],"2:3":[1944,2912],"3:2":[2912,1944],"3:4":[2064,2744],"4:3":[2744,2064],"9:16":[1784,3176],"16:9":[3176,1784],"21:9":[3632,1560],"9:21":[1560,3632]},"2.0x":{"1:1":[3176,3176],"2:3":[2592,3888],"3:2":[3888,2592],"3:4":[2744,3664],"4:3":[3664,2744],"9:16":[2376,4232],"16:9":[4232,2376],"21:9":[4848,2080],"9:21":[2080,4848]}},
+  "qwen21":{"1.25x":{"1:1":[1952,1952],"2:3":[1600,2400],"3:2":[2400,1600],"3:4":[1696,2256],"4:3":[2256,1696],"9:16":[1472,2608],"16:9":[2608,1472],"21:9":[2992,1280],"9:21":[1280,2992]},"1.5x":{"1:1":[2352,2352],"2:3":[1920,2880],"3:2":[2880,1920],"3:4":[2032,2720],"4:3":[2720,2032],"9:16":[1760,3136],"16:9":[3136,1760],"21:9":[3584,1536],"9:21":[1536,3584]},"2.0x":{"1:1":[3136,3136],"2:3":[2560,3840],"3:2":[3840,2560],"3:4":[2720,3616],"4:3":[3616,2720],"9:16":[2352,4176],"16:9":[4176,2352],"21:9":[4784,2048],"9:21":[2048,4784]}},
+  "moodyk2":{"0.25x":{"1:1":[376,376],"2:3":[304,464],"3:2":[464,304],"3:4":[328,432],"4:3":[432,328],"9:16":[280,504],"16:9":[504,280],"21:9":[576,248],"9:21":[248,576]},"0.5x":{"1:1":[752,752],"2:3":[616,920],"3:2":[920,616],"3:4":[648,872],"4:3":[872,648],"9:16":[568,1000],"16:9":[1000,568],"21:9":[1152,496],"9:21":[496,1152]},"0.75x":{"1:1":[1128,1128],"2:3":[920,1384],"3:2":[1384,920],"3:4":[976,1304],"4:3":[1304,976],"9:16":[848,1504],"16:9":[1504,848],"21:9":[1728,736],"9:21":[736,1728]},"1.0x":{"1:1":[1504,1504],"2:3":[1232,1840],"3:2":[1840,1232],"3:4":[1304,1736],"4:3":[1736,1304],"9:16":[1128,2008],"16:9":[2008,1128],"21:9":[2296,984],"9:21":[984,2296]},"1.25x":{"1:1":[1880,1880],"2:3":[1536,2304],"3:2":[2304,1536],"3:4":[1632,2176],"4:3":[2176,1632],"9:16":[1408,2512],"16:9":[2512,1408],"21:9":[2872,1232],"9:21":[1232,2872]},"1.5x":{"1:1":[2256,2256],"2:3":[1840,2768],"3:2":[2768,1840],"3:4":[1952,2608],"4:3":[2608,1952],"9:16":[1696,3008],"16:9":[3008,1696],"21:9":[3448,1480],"9:21":[1480,3448]},"2.0x":{"1:1":[3008,3008],"2:3":[2456,3688],"3:2":[3688,2456],"3:4":[2608,3472],"4:3":[3472,2608],"9:16":[2256,4016],"16:9":[4016,2256],"21:9":[4600,1968],"9:21":[1968,4600]}}};
+
+  var WF = [
+    {id:'moss',short:'MOSS MossMix V4.1',file:'MOSS_MossMixV41_文生图_25步CFG3_1024x1536.json',fam:'MOSS',hue:'var(--fam-moss)',kind:'t2i',steps:25,cfg:3,mech:'倍率',defRatio:'2:3',tiers:[],defTier:'1.0x',neg:false,negEff:false,secs:51.8,verdict:'脸与皮肤质感最好，衬衫褶皱最佳',frame:0.62},
+    {id:'moodyk2',short:'Moody Krea2 V8 SE',file:'MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json',fam:'Krea2',hue:'var(--fam-moody)',kind:'t2i',steps:8,cfg:1,mech:'目标MP',defRatio:'9:16',tiers:[],defTier:'1.0x',neg:false,negEff:false,secs:22.9,verdict:'速度最优（MOSS 的 2.3 倍），韩系精致',frame:0.66},
+    {id:'pmk25',short:'PornMaster Krea2 V25',file:'PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json',fam:'Krea2',hue:'var(--fam-pmk)',kind:'t2i',steps:8,cfg:1,mech:'目标MP',defRatio:'9:16',tiers:[],defTier:'1.0x',neg:false,negEff:false,secs:28.7,verdict:'最真实（骨骼/眼神/故事感），人物占幅偏大',frame:0.78},
+    {id:'qwen21',short:'Qwen21 2K 优化 32步',file:'Qwen21_文生图_长中文提示词_2K优化_32步_12G.json',fam:'Qwen',hue:'var(--fam-qwen)',kind:'t2i',steps:32,cfg:1,mech:'倍率',defRatio:'2:3',tiers:['1.25x','1.5x','2.0x'],defTier:'1.25x',neg:true,negEff:false,secs:30.7,verdict:'图内中文最稳；长中文提示词人体结构易崩',frame:0.64},
+    {id:'flux3',short:'FLUX3 Klein 16步',file:'FLUX3Klein_文生图_16步_1024x1536.json',fam:'FLUX',hue:'var(--fam-flux)',kind:'t2i',steps:16,cfg:1,mech:'倍率',defRatio:'2:3',tiers:[],defTier:'1.0x',neg:false,negEff:false,secs:11.1,verdict:'最快 11 s；裸版脸偏欧美化，需挂 Asian Mix',frame:0.60},
+    {id:'f2k1',short:'F2K 单图编辑（可选遮罩）',kind:'edit',slots:1,reason:'需要 1 张输入图，属编辑线'},
+    {id:'f2k2',short:'F2K 双图参考换衣',kind:'edit',slots:2,reason:'需要 2 张参考图，属编辑线'},
+    {id:'f2k3',short:'F2K 三图参考编辑',kind:'edit',slots:3,reason:'需要 3 张参考图，属合成台'},
+    {id:'flux3e',short:'FLUX3 单图指令编辑',kind:'edit',slots:1,reason:'需要 1 张输入图，属编辑线'},
+    {id:'mosse',short:'MOSS 图生图指令编辑',kind:'edit',slots:1,reason:'需要 1 张输入图，属编辑线'},
+    {id:'seedvr',short:'SeedVR2 超分 7B',kind:'post',slots:1,reason:'超分需要源图，不产生新构图'},
+    {id:'qwen3vl',short:'Qwen3VL 图生中文提示词',kind:'util',slots:1,reason:'反推提示词，不出图'},
+    {id:'h3t',short:'MiniMax H3 文生视频',kind:'video',slots:0,reason:'视频产物，不进图片矩阵'},
+    {id:'h3i',short:'MiniMax H3 图生视频',kind:'video',slots:1,reason:'视频产物，不进图片矩阵'}
+  ];
+  var BY = {}; WF.forEach(function(w){ BY[w.id] = w; });
+  var T2I = WF.filter(function(w){ return w.kind === 't2i'; });
+  var PRESETS = {asian:['moss','moodyk2','pmk25'],text:['qwen21','moss'],fast:['flux3','moodyk2'],all:T2I.map(function(w){return w.id;}),none:[]};
+  var TIERS = ['0.25x','0.5x','0.75x','1.0x','1.25x','1.5x','2.0x'];
+  var CAP = 100;
+  var ORIGINAL_PROMPT = $('apx-prompt').value;
+  var PASTED_PROMPT = '雨后傍晚的便利店门口，一位东亚年轻女性穿白色棉质衬衫，湿发，霓虹招牌的轮廓光，浅景深，85mm，自然皮肤质感，半身构图，纪实电影感';
+
+  var S = null;
+  function defaults(){
+    return {
+      mode:'multi', picked:['moss','moodyk2','pmk25','qwen21'], count:2, seed:20261112, lock:true,
+      ratio:'2:3', tier:'1.0x', align:'native', conc:2, sort:'order', guides:false, speed:8,
+      query:'', panel:false, cells:[], best:null, fav:{}, rate:{}, sel:[], cmp:false, zoom:1, sync:true,
+      running:false, pasted:false, saved:false, drag:null, seeded:false
+    };
+  }
+
+  function tierFor(w, tier){
+    if(!w.tiers.length || w.tiers.indexOf(tier) >= 0) return {tier:tier, fallback:false};
+    return {tier:w.defTier, fallback:true};
+  }
+  function nativeSize(w, tier, ratio){
+    var t = SIZES[w.id] && SIZES[w.id][tier];
+    return (t && t[ratio]) ? t[ratio] : null;
+  }
+  function nearestTier(w, ratio, target){
+    var tp = target[0] * target[1], best = null;
+    var list = w.tiers.length ? w.tiers : TIERS;
+    list.forEach(function(t){
+      var s = nativeSize(w, t, ratio);
+      if(!s) return;
+      var d = Math.abs(Math.log((s[0]*s[1]) / tp));
+      if(!best || d < best.d) best = {tier:t, size:s, d:d};
+    });
+    return best;
+  }
+  function rows(){
+    var list = S.picked.map(function(id){ return BY[id]; }).filter(Boolean);
+    if(S.mode === 'single') list = list.slice(0,1);
+    if(S.sort === 'fast') list = list.slice().sort(function(a,b){ return a.secs - b.secs; });
+    return list;
+  }
+  function targetSize(){
+    if(S.align === 'ref') return [1024,1536];
+    if(S.align === 'first'){
+      var r = rows()[0];
+      if(!r) return null;
+      return nativeSize(r, tierFor(r, S.tier).tier, S.ratio);
+    }
+    return null;
+  }
+  function plan(){
+    var target = targetSize(), out = [];
+    rows().forEach(function(w){
+      var tf = tierFor(w, S.tier), tier = tf.tier, fallback = tf.fallback, aligned = false;
+      var size = nativeSize(w, tier, S.ratio);
+      if(target){
+        var n = nearestTier(w, S.ratio, target);
+        if(n){ tier = n.tier; size = n.size; aligned = true; fallback = tier !== S.tier; }
+      }
+      if(!size) return;
+      var px = size[0]*size[1];
+      var dev = target ? (px / (target[0]*target[1]) - 1) : 0;
+      out.push({wf:w, tier:tier, size:size, px:px, fallback:fallback, aligned:aligned, dev:dev,
+        secs: Math.max(1, w.secs * px / (1024*1536))});
+    });
+    if(S.sort === 'size') out.sort(function(a,b){ return a.px - b.px; });
+    return out;
+  }
+  function seedAt(col){
+    if(S.lock) return S.seed + col;
+    var x = (S.seed + col * 2654435761) % 2147483647;
+    return Math.abs(x % 100000000);
+  }
+  function totalSeconds(p){
+    var lanes = [], n = Math.max(1, S.conc);
+    for(var i=0;i<n;i++) lanes.push(0);
+    p.forEach(function(r){
+      for(var c=0;c<S.count;c++){
+        var m = 0;
+        for(var k=1;k<lanes.length;k++) if(lanes[k] < lanes[m]) m = k;
+        lanes[m] += r.secs;
+      }
+    });
+    return Math.max.apply(null, lanes);
+  }
+  function fmtSecs(s){
+    if(s < 60) return s.toFixed(1) + ' s';
+    var m = Math.floor(s/60), r = Math.round(s%60);
+    return m + ' 分 ' + (r<10?'0':'') + r + ' 秒';
+  }
+  function say(msg){ $('apx-live').textContent = msg || ''; }
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function art(w, seed, ratio, guides, ns){
+    var parts = String(ratio).split(':');
+    var rw = Number(parts[0]) || 2, rh = Number(parts[1]) || 3;
+    var W = 100, H = Math.round(100 * rh / rw);
+    var jitter = ((seed % 17) - 8) / 100;
+    var frame = Math.min(0.92, Math.max(0.4, w.frame + jitter));
+    var headR = W * 0.13 * (frame / 0.64);
+    var cx = W / 2 + ((seed % 7) - 3) * 0.9;
+    var headY = H * (0.30 - (frame - 0.64) * 0.22);
+    var shoulderY = headY + headR * 1.75;
+    var gid = 'g-' + (ns || 'm') + '-' + w.id + '-' + seed;
+    var lines = '';
+    if(guides){
+      lines = '<g stroke="var(--ap-border-strong)" stroke-width="0.5" stroke-dasharray="2 2" opacity="0.85">'
+        + '<line x1="'+(W/3)+'" y1="0" x2="'+(W/3)+'" y2="'+H+'"/>'
+        + '<line x1="'+(2*W/3)+'" y1="0" x2="'+(2*W/3)+'" y2="'+H+'"/>'
+        + '<line x1="0" y1="'+(H/3)+'" x2="'+W+'" y2="'+(H/3)+'"/>'
+        + '<line x1="0" y1="'+(2*H/3)+'" x2="'+W+'" y2="'+(2*H/3)+'"/></g>';
+    }
+    var horizon = H * 0.72, rain = '';
+    for(var i=0;i<8;i++){
+      var rx = ((seed * (i+3)) % 94) + 3;
+      var ry = H * (0.04 + (i%4) * 0.07);
+      rain += '<line x1="'+rx.toFixed(1)+'" y1="'+ry.toFixed(1)+'" x2="'+(rx-2.5).toFixed(1)+'" y2="'+(ry+H*0.13).toFixed(1)+'"/>';
+    }
+    return '<div class="apx-frame" style="aspect-ratio:'+rw+' / '+rh+'">'
+      + '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" role="img" aria-label="'+esc(w.short)+' 构图示意占位">'
+      + '<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0.4" y2="1">'
+      + '<stop offset="0" stop-color="'+w.hue+'" stop-opacity="0.38"/>'
+      + '<stop offset="1" stop-color="'+w.hue+'" stop-opacity="0.10"/></linearGradient></defs>'
+      + '<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="url(#'+gid+')"/>'
+      + '<rect x="0" y="'+horizon.toFixed(1)+'" width="'+W+'" height="'+(H-horizon).toFixed(1)+'" fill="'+w.hue+'" opacity="0.16"/>'
+      + '<line x1="0" y1="'+horizon.toFixed(1)+'" x2="'+W+'" y2="'+horizon.toFixed(1)+'" stroke="'+w.hue+'" stroke-width="0.6" opacity="0.45"/>'
+      + '<rect x="6" y="'+(H*0.09).toFixed(1)+'" width="24" height="'+(H*0.07).toFixed(1)+'" rx="1.5" fill="'+w.hue+'" opacity="0.32"/>'
+      + '<g stroke="'+w.hue+'" stroke-width="0.5" opacity="0.24">'+rain+'</g>'
+      + '<g fill="'+w.hue+'" opacity="0.6">'
+      + '<circle cx="'+cx.toFixed(1)+'" cy="'+headY.toFixed(1)+'" r="'+headR.toFixed(1)+'"/>'
+      + '<path d="M '+(cx-headR*2.3).toFixed(1)+' '+H+' Q '+(cx-headR*2.1).toFixed(1)+' '+shoulderY.toFixed(1)+' '+cx.toFixed(1)+' '+shoulderY.toFixed(1)
+      + ' Q '+(cx+headR*2.1).toFixed(1)+' '+shoulderY.toFixed(1)+' '+(cx+headR*2.3).toFixed(1)+' '+H+' Z"/></g>'
+      + lines
+      + '<text x="3" y="'+(H-3)+'" font-size="5" fill="var(--ap-muted)">示意占位</text>'
+      + '</svg></div>';
+  }
+
+  function renderPicker(){
+    var q = S.query.trim().toLowerCase();
+    var groups = [
+      {key:'t2i', label:'文生图 · 可横评', items:T2I},
+      {key:'other', label:'编辑 / 参考 / 工具 · 本入口不可用', items:WF.filter(function(w){return w.kind!=='t2i';})}
+    ];
+    var html = '';
+    groups.forEach(function(g){
+      var items = g.items.filter(function(w){ return !q || (w.short + ' ' + (w.file||'')).toLowerCase().indexOf(q) >= 0; });
+      if(!items.length) return;
+      html += '<div class="apx-group"><div class="apx-group-h"><span>'+esc(g.label)+'</span><span class="apx-num">'+items.length+'</span></div>';
+      items.forEach(function(w){
+        var on = S.picked.indexOf(w.id) >= 0;
+        var off = w.kind !== 't2i';
+        var meta = '';
+        if(w.kind === 't2i'){
+          var tf = tierFor(w, S.tier), sz = nativeSize(w, tf.tier, S.ratio);
+          meta = '<span class="apx-num">'+w.steps+' 步</span><span>CFG '+w.cfg+'</span><span>'+esc(w.mech)+'</span>'
+            + '<span class="apx-num">'+(sz ? sz[0]+'×'+sz[1] : '档位不可用')+'</span>'
+            + '<span class="apx-num">实测 '+w.secs+' s</span>'
+            + (tf.fallback ? '<span style="color:var(--ap-warn)">仅 '+w.tiers.join('/')+'</span>' : '');
+        } else {
+          meta = '<span>'+esc(w.reason)+'</span>';
+        }
+        html += '<label class="apx-opt" data-on="'+(on&&!off)+'" data-off="'+off+'">'
+          + '<input type="checkbox" data-wf="'+w.id+'"'+(on?' checked':'')+(off?' disabled':'')+'>'
+          + '<span class="apx-dot" style="background:'+(w.hue||'var(--ap-muted)')+'"></span>'
+          + '<span class="apx-optbody"><span class="apx-optname">'+esc(w.short)+'</span>'
+          + '<span class="apx-optmeta">'+meta+'</span></span></label>';
+      });
+      html += '</div>';
+    });
+    if(!html) html = '<div class="apx-group"><div class="apx-group-h">没有匹配的工作流，换个关键词</div></div>';
+    $('apx-wflist').innerHTML = html;
+    $('apx-wfpanel').hidden = !S.panel;
+    $('apx-wftrigger').setAttribute('aria-expanded', String(S.panel));
+    var r = rows();
+    $('apx-wfname').textContent = S.mode === 'single'
+      ? (r[0] ? r[0].short : '选择工作流…')
+      : (S.picked.length ? '已选 '+S.picked.length+' 个工作流'+(r[0] ? '（首个：'+r[0].short+'）' : '') : '选择工作流…');
+  }
+
+  function renderChips(){
+    var html = '';
+    S.picked.forEach(function(id){
+      var w = BY[id]; if(!w) return;
+      var dim = S.mode === 'single' && S.picked[0] !== id;
+      html += '<span class="apx-chip" draggable="true" data-chip="'+id+'" style="border-left:3px solid '+w.hue+(dim?';opacity:.45':'')+'">'
+        + '<span class="apx-dot" style="background:'+w.hue+';margin-top:0"></span>'
+        + '<span>'+esc(w.short)+'</span>'
+        + '<button type="button" data-drop="'+id+'" aria-label="移除 '+esc(w.short)+'">×</button></span>';
+    });
+    $('apx-chips').innerHTML = html || '<span class="apx-muted apx-tiny">还没有选择工作流</span>';
+  }
+
+  function renderPlan(){
+    var p = plan(), n = p.length * S.count, secs = totalSeconds(p);
+    $('apx-plantext').textContent = p.length
+      ? (S.mode === 'single' ? '1 个工作流 × '+S.count+' 张 = '+n+' 张' : p.length+' 个工作流 × '+S.count+' 张 = '+n+' 张')
+      : '请先选择至少一个文生图工作流';
+    $('apx-plantime').textContent = p.length ? '预计 '+fmtSecs(secs)+'（并发 '+S.conc+'）' : '';
+    $('apx-plancap').textContent = n + ' / 上限 ' + CAP;
+    $('apx-planbar').style.width = Math.min(100, n / CAP * 100) + '%';
+    $('apx-run').disabled = !p.length || n > CAP || S.running;
+    $('apx-run').textContent = S.running ? '提交中…' : (S.mode === 'single' ? '出图 '+n+' 张' : '横评出图 '+n+' 张');
+    $('apx-stop').disabled = !S.running;
+    $('apx-mode-single').setAttribute('aria-pressed', String(S.mode === 'single'));
+    $('apx-mode-multi').setAttribute('aria-pressed', String(S.mode === 'multi'));
+    $('apx-modehint').textContent = S.mode === 'single'
+      ? '单选态沿用现有出图链路，全局默认工作流不变'
+      : '横评态选中集合单独保存，不覆盖全局默认工作流';
+    $('apx-count-out').textContent = String(S.count);
+
+    var notes = [];
+    var fb = p.filter(function(r){ return r.fallback; });
+    if(fb.length){
+      notes.push({kind:'warn', icon:'⚠', text:fb.map(function(r){ return r.wf.short+' 不支持 '+S.tier+'，改用 '+r.tier+'（'+r.size[0]+'×'+r.size[1]+'）'; }).join('；')+'。横评条件已被改写，需要知情。'});
+    }
+    if(S.align === 'native' && p.length > 1){
+      var sizes = {}; p.forEach(function(r){ sizes[r.size.join('×')] = 1; });
+      var keys = Object.keys(sizes);
+      if(keys.length > 1) notes.push({kind:'warn', icon:'≠', text:'同一「'+S.ratio+' × '+S.tier+'」下各流原生尺寸不同：'+keys.join(' / ')+'。要严格同条件，请把尺寸对齐切到「对齐到 1024×1536」。'});
+    }
+    if(S.align !== 'native'){
+      var bad = p.filter(function(r){ return Math.abs(r.dev) > 0.02; });
+      notes.push(bad.length
+        ? {kind:'warn', icon:'≈', text:'已按各流机制选最接近档，仍有偏差：'+bad.map(function(r){ return r.wf.short+' '+(r.dev>0?'+':'')+(r.dev*100).toFixed(0)+'%'; }).join('、')+'。倍率档与目标 MP 档无法精确对齐。'}
+        : {kind:'ok', icon:'✓', text:'各流已对齐到同一目标像素量，横评条件一致。'});
+    }
+    var negOn = p.filter(function(r){ return r.wf.negEff; }).length;
+    $('apx-negtag').textContent = '本批 ' + negOn + ' / ' + p.length + ' 生效';
+    $('apx-negnote').textContent = negOn ? '' : '这批工作流都没有真实生效的负向路径（结构有输入但 CFG=1 也算不生效），负向文本不参与本次横评。';
+    if(!negOn && p.length) notes.push({kind:'info', icon:'ⓘ', text:'负向提示词 0 / '+p.length+' 生效：不要用它解释这批图的差异。'});
+    if(p.some(function(r){ return r.wf.id === 'qwen21' && r.tier === '2.0x'; })){
+      notes.push({kind:'warn', icon:'⚠', text:'Qwen21 在 2.0× 档需要 2560×3840，12G 显存会 OOM；演示里这一格会失败，建议降到 1.5×。'});
+    }
+    if(n > 12) notes.push({kind:'info', icon:'ⓘ', text:'超过 12 张：连续压测会把 GGUF 反量化的 ComfyUI 压崩，建议分批提交（实测矩阵脚本就是每批 ≤5 组）。'});
+    $('apx-warnings').innerHTML = notes.map(function(x){
+      return '<div class="apx-note" data-kind="'+x.kind+'"><i>'+x.icon+'</i><span>'+esc(x.text)+'</span></div>';
+    }).join('');
+    $('apx-preftag').hidden = !S.best;
+    if(S.best) $('apx-preftag').textContent = '模型偏好：' + BY[S.best].short;
+  }
+
+  function cellKey(id, col){ return id + '#' + col; }
+  function buildCells(){
+    var p = plan(), list = [];
+    p.forEach(function(r){
+      for(var c=0;c<S.count;c++){
+        list.push({key:cellKey(r.wf.id,c), wf:r.wf, col:c, tier:r.tier, size:r.size, secs:r.secs,
+          seed:seedAt(c), state:'idle', progress:0, elapsed:0, error:''});
+      }
+    });
+    S.cells = list; S.sel = []; S.cmp = false;
+  }
+  function findCell(key){ for(var i=0;i<S.cells.length;i++) if(S.cells[i].key === key) return S.cells[i]; return null; }
+  function seedResults(){
+    buildCells();
+    S.cells.forEach(function(c){ c.state = 'done'; c.progress = 1; c.elapsed = c.secs; });
+    S.seeded = true;
+  }
+
+  function renderMatrix(){
+    var p = plan();
+    if(!p.length){
+      S.cells = [];
+      $('apx-matrix').innerHTML = '<div class="apx-note" data-kind="info"><i>ⓘ</i><span>还没有选择文生图工作流。打开上方选择器，或直接套用「亚洲写实脸」预设。</span></div>';
+      $('apx-matrixtag').textContent = '未提交';
+      renderBar();
+      return;
+    }
+    if(!S.cells.length) buildCells();
+    var head = '<div class="apx-mhead"><div></div><div class="apx-cells" style="--cols:'+S.count+'">';
+    for(var c=0;c<S.count;c++) head += '<div class="apx-colhead">第 '+(c+1)+' 张 · <span class="apx-num">种子 '+seedAt(c)+'</span></div>';
+    head += '</div></div>';
+    var body = '';
+    p.forEach(function(r){
+      var w = r.wf;
+      var rated = S.rate[w.id];
+      body += '<div class="apx-mrow" style="--hue:'+w.hue+'">'
+        + '<div class="apx-rlabel"><span class="apx-rname">'+esc(w.short)
+        + (S.best === w.id ? ' <span class="apx-star">★ 最佳</span>' : '') + '</span>'
+        + '<span class="apx-rmeta apx-num">'+r.size[0]+'×'+r.size[1]+' · '+r.tier+(r.fallback?' ⚠':'')+'</span>'
+        + '<span class="apx-rmeta apx-num">'+w.steps+'步 · CFG'+w.cfg+' · ≈'+r.secs.toFixed(1)+'s</span>'
+        + '<span class="apx-rmeta">'+esc(w.verdict)+'</span>'
+        + (rated ? '<span class="apx-rmeta apx-star">评分 '+rated+' / 5</span>' : '')
+        + '</span></div><div class="apx-cells" style="--cols:'+S.count+'">';
+      for(var c=0;c<S.count;c++){
+        var cell = findCell(cellKey(w.id,c));
+        if(!cell) continue;
+        var sel = S.sel.indexOf(cell.key) >= 0;
+        var marks = '';
+        if(S.best === w.id && c === 0) marks += '<span class="apx-pill" data-kind="best">★</span>';
+        if(S.fav[cell.key]) marks += '<span class="apx-pill" data-kind="fav">♥</span>';
+        var inner = '';
+        if(cell.state === 'done'){
+          inner = '<div class="apx-art">'+art(w, cell.seed, S.ratio, S.guides)+'</div>'
+            + '<input type="checkbox" class="apx-cellbox" data-sel="'+cell.key+'"'+(sel?' checked':'')+' aria-label="选择 '+esc(w.short)+' 第 '+(c+1)+' 张用于对比">'
+            + '<div class="apx-cellmark">'+marks+'</div>'
+            + '<div class="apx-cellfoot"><span class="apx-num">'+cell.size[0]+'×'+cell.size[1]+'</span><span class="apx-grow"></span><span class="apx-num">'+cell.secs.toFixed(1)+' s</span></div>';
+        } else if(cell.state === 'run'){
+          inner = '<div class="apx-state" data-kind="run"><span class="apx-spin"></span>'
+            + '<span class="apx-small">生成中 <span class="apx-num" data-prog="'+cell.key+'">'+Math.round(cell.progress*100)+'%</span></span>'
+            + '<span class="apx-runbar"><i data-bar="'+cell.key+'" style="width:'+(cell.progress*100)+'%"></i></span>'
+            + '<span class="apx-tiny apx-muted apx-num" data-elapsed="'+cell.key+'">'+cell.elapsed.toFixed(1)+' s / '+cell.secs.toFixed(1)+' s</span></div>';
+        } else if(cell.state === 'error'){
+          inner = '<div class="apx-state" data-kind="err"><span class="apx-small" style="color:var(--ap-danger)">失败</span>'
+            + '<span class="apx-tiny">'+esc(cell.error)+'</span>'
+            + '<button type="button" data-retry="'+cell.key+'">重试这一格</button></div>';
+        } else if(cell.state === 'queued'){
+          inner = '<div class="apx-state"><span class="apx-small apx-muted">排队中</span><span class="apx-tiny apx-muted apx-num">种子 '+cell.seed+'</span></div>';
+        } else {
+          inner = '<div class="apx-state"><span class="apx-small apx-muted">待提交</span>'
+            + '<span class="apx-tiny apx-muted apx-num">'+cell.size[0]+'×'+cell.size[1]+' · 种子 '+cell.seed+'</span></div>';
+        }
+        body += '<div class="apx-cell" data-state="'+cell.state+'" data-sel="'+sel+'" style="--hue:'+w.hue+'">'+inner+'</div>';
+      }
+      body += '</div></div>';
+    });
+    $('apx-matrix').innerHTML = head + body;
+    var done = S.cells.filter(function(x){return x.state==='done';}).length;
+    var err = S.cells.filter(function(x){return x.state==='error';}).length;
+    var act = S.cells.filter(function(x){return x.state==='run'||x.state==='queued';}).length;
+    $('apx-matrixtag').textContent = S.running ? ('进行中 · 完成 '+done+' / '+S.cells.length)
+      : (S.seeded && done === S.cells.length ? '示例结果 · '+done+' / '+S.cells.length
+      : (done || err ? '完成 '+done+(err?' · 失败 '+err:'')+' / '+S.cells.length : '未提交'));
+    renderBar();
+  }
+
+  function renderBar(){
+    var n = S.sel.length;
+    if(!n){ $('apx-barwrap').innerHTML = ''; return; }
+    $('apx-barwrap').innerHTML = '<div class="apx-bar" role="group" aria-label="选中图片批量操作">'
+      + '<span class="apx-small apx-num">已选 '+n+' 张</span>'
+      + '<button type="button" id="apx-docmp"'+(n<2?' disabled':'')+'>并排对比</button>'
+      + '<button type="button" id="apx-dobest">选为最佳</button>'
+      + '<button type="button" id="apx-dofav">加入精选</button>'
+      + '<button type="button" id="apx-doreveal">在资源管理器定位</button>'
+      + '<button type="button" id="apx-dorerun">重跑选中</button>'
+      + '<button type="button" id="apx-doclear" class="apx-ghost">清除选择</button></div>';
+  }
+
+  function renderCompare(){
+    $('apx-cmpsec').hidden = !S.cmp || S.sel.length < 2;
+    if($('apx-cmpsec').hidden) return;
+    var items = S.sel.map(findCell).filter(Boolean);
+    $('apx-cmp').style.setProperty('--n', String(items.length));
+    $('apx-cmp').innerHTML = items.map(function(cell){
+      var w = cell.wf, r = S.rate[w.id] || 0;
+      var stars = '';
+      for(var i=1;i<=5;i++) stars += '<button type="button" data-rate="'+w.id+'" data-val="'+i+'" aria-pressed="'+(r===i)+'" aria-label="'+esc(w.short)+' 评 '+i+' 分">'+(r>=i?'★':'☆')+'</button>';
+      var z = S.sync ? S.zoom : (cell.zoom || S.zoom);
+      return '<div class="apx-cmptile"><div class="apx-cmpview"><div data-zoom="'+cell.key+'" style="transform:scale('+z+')">'
+        + art(w, cell.seed, S.ratio, S.guides, 'c') + '</div></div>'
+        + '<div class="apx-cmpmeta"><span style="color:var(--ap-text);font-size:12px">'+esc(w.short)+'</span>'
+        + '<span class="apx-num">'+cell.size[0]+'×'+cell.size[1]+' · '+cell.tier+' · '+w.steps+' 步 · CFG '+w.cfg+'</span>'
+        + '<span class="apx-num">种子 '+cell.seed+' · '+cell.secs.toFixed(1)+' s</span>'
+        + '<span class="apx-rate">'+stars+'</span>'
+        + '<span><button type="button" data-best="'+w.id+'">'+(S.best===w.id?'★ 已是最佳':'选为最佳')+'</button></span>'
+        + '</div></div>';
+    }).join('');
+    $('apx-zoomout').textContent = S.zoom.toFixed(1) + '×';
+  }
+
+  function renderExport(){
+    if($('apx-exportsec').hidden) return;
+    var p = plan();
+    var payload = {
+      source_prompt_id: S.pasted ? null : 1171,
+      prompt: $('apx-prompt').value,
+      base_seed: S.seed, lock_seed: S.lock, aspect_ratio: S.ratio, quality: S.tier,
+      size_alignment: S.align, concurrency: S.conc,
+      jobs: p.map(function(r){
+        return {endpoint:'/api/runs/batch', workflow_path:'通用工作流/' + r.wf.file, quality:r.tier,
+          aspect_ratio:S.ratio, size:r.size[0]+'x'+r.size[1], estimated_seconds:Number(r.secs.toFixed(1)),
+          items:Array.from({length:S.count}, function(_, c){ return {prompt_id:S.pasted?0:1171, seed:seedAt(c)}; })};
+      })
+    };
+    $('apx-exporttext').value = JSON.stringify(payload, null, 2);
+  }
+
+  function renderAll(){ renderPicker(); renderChips(); renderPlan(); renderMatrix(); renderCompare(); renderExport(); }
+
+  var timer = null;
+  function stopTimer(){ if(timer){ clearInterval(timer); timer = null; } }
+  function tick(){
+    var lanes = S.cells.filter(function(c){ return c.state === 'run'; });
+    while(lanes.length < S.conc){
+      var next = null;
+      for(var i=0;i<S.cells.length;i++) if(S.cells[i].state === 'queued'){ next = S.cells[i]; break; }
+      if(!next) break;
+      next.state = 'run'; next.startedAt = Date.now(); lanes.push(next);
+      renderMatrix();
+    }
+    var active = false;
+    S.cells.forEach(function(c){
+      if(c.state !== 'run') return;
+      active = true;
+      var real = (Date.now() - c.startedAt) / 1000 * S.speed;
+      c.elapsed = Math.min(c.secs, real);
+      c.progress = Math.min(1, real / c.secs);
+      var pe = ROOT.querySelector('[data-prog="'+c.key+'"]');
+      var be = ROOT.querySelector('[data-bar="'+c.key+'"]');
+      var ee = ROOT.querySelector('[data-elapsed="'+c.key+'"]');
+      if(pe) pe.textContent = Math.round(c.progress*100) + '%';
+      if(be) be.style.width = (c.progress*100) + '%';
+      if(ee) ee.textContent = c.elapsed.toFixed(1) + ' s / ' + c.secs.toFixed(1) + ' s';
+      if(c.progress >= 1){
+        if(c.wf.id === 'qwen21' && c.tier === '2.0x'){
+          c.state = 'error'; c.error = 'CUDA out of memory（12G 显存，2560×3840）';
+        } else {
+          c.state = 'done';
+        }
+        renderMatrix();
+      }
+    });
+    var pending = S.cells.some(function(c){ return c.state === 'queued' || c.state === 'run'; });
+    if(!pending){
+      stopTimer(); S.running = false;
+      renderPlan(); renderMatrix();
+      var ok = S.cells.filter(function(c){return c.state==='done';}).length;
+      var bad = S.cells.filter(function(c){return c.state==='error';}).length;
+      say('演示完成：' + ok + ' 张出图' + (bad ? '，' + bad + ' 格失败（可单独重试）' : '') + '。勾选 2~4 张即可并排对比。');
+    } else if(!active){
+      stopTimer();
+    }
+  }
+  function start(){
+    buildCells();
+    S.cells.forEach(function(c){ c.state = 'queued'; });
+    S.running = true; S.best = null; S.seeded = false;
+    say('已按「一个工作流一个 job」提交 ' + plan().length + ' 个任务，并发 ' + S.conc + '。');
+    renderAll();
+    stopTimer(); timer = setInterval(tick, 90); tick();
+  }
+
+  ROOT.addEventListener('click', function(ev){
+    var t = ev.target;
+    function hit(attr){ var el = t.closest ? t.closest('['+attr+']') : null; return el && ROOT.contains(el) ? el : null; }
+    var el;
+    if((el = hit('data-preset'))){
+      var key = el.getAttribute('data-preset');
+      S.picked = PRESETS[key].slice();
+      if(S.mode === 'single') S.picked = S.picked.slice(0,1);
+      S.cells = []; S.sel = []; S.cmp = false;
+      say(key === 'none' ? '已清空选择' : '已套用预设：' + el.textContent);
+      renderAll(); return;
+    }
+    if((el = hit('data-drop'))){
+      var id = el.getAttribute('data-drop');
+      S.picked = S.picked.filter(function(x){ return x !== id; });
+      S.cells = []; S.sel = []; S.cmp = false;
+      renderAll(); return;
+    }
+    if((el = hit('data-retry'))){
+      var cell = findCell(el.getAttribute('data-retry'));
+      if(cell){ cell.state = 'queued'; cell.progress = 0; cell.elapsed = 0; cell.error = '';
+        S.running = true; renderAll(); stopTimer(); timer = setInterval(tick, 90); tick(); }
+      return;
+    }
+    if((el = hit('data-rate'))){
+      S.rate[el.getAttribute('data-rate')] = Number(el.getAttribute('data-val'));
+      renderMatrix(); renderCompare(); return;
+    }
+    if((el = hit('data-best'))){
+      S.best = el.getAttribute('data-best');
+      say('已把 ' + BY[S.best].short + ' 记为这条提示词的模型偏好（演示：写入提示词记录）。');
+      renderPlan(); renderMatrix(); renderCompare(); return;
+    }
+    var btn = t.closest ? t.closest('button') : null;
+    switch(btn ? btn.id : t.id){
+      case 'apx-wftrigger': S.panel = !S.panel; renderPicker(); if(S.panel) $('apx-wfsearch').focus(); return;
+      case 'apx-mode-single': S.mode = 'single'; S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-mode-multi': S.mode = 'multi'; S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-count-up': S.count = Math.min(6, S.count+1); S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-count-down': S.count = Math.max(1, S.count-1); S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-seedrand': S.seed = Math.floor(Math.random()*99999999); $('apx-seed').value = String(S.seed); S.cells = []; renderAll(); say('已随机基准种子 ' + S.seed); return;
+      case 'apx-run': start(); return;
+      case 'apx-stop':
+        stopTimer(); S.running = false;
+        S.cells.forEach(function(c){ if(c.state==='queued'||c.state==='run'){ c.state='idle'; c.progress=0; c.elapsed=0; } });
+        say('演示已停止。应用内「取消任务真停」按 2026-11-07 拍板仍在暂缓，这里只停演示。');
+        renderAll(); return;
+      case 'apx-reset':
+        stopTimer(); S = defaults();
+        $('apx-prompt').value = ORIGINAL_PROMPT; $('apx-seed').value = String(S.seed);
+        $('apx-ratio').value = S.ratio; $('apx-tier').value = S.tier; $('apx-align').value = S.align;
+        $('apx-conc').value = String(S.conc); $('apx-sort').value = S.sort; $('apx-speed').value = String(S.speed);
+        $('apx-seedlock').checked = true; $('apx-guides').checked = false; $('apx-wfsearch').value = '';
+        $('apx-srctag').textContent = '库内提示词'; $('apx-saveas').hidden = true; $('apx-title').textContent = '雨后街道 · 白衬衫';
+        $('apx-idtag').textContent = 'id 1171'; $('apx-exportsec').hidden = true; $('apx-zoom').value = '1';
+        say('已回到默认横评配置'); seedResults(); renderAll(); return;
+      case 'apx-paste':
+        S.pasted = true; S.saved = false;
+        $('apx-prompt').value = PASTED_PROMPT;
+        $('apx-srctag').textContent = '临时提示词 · 不挂载体';
+        $('apx-title').textContent = '外来提示词试跑';
+        $('apx-idtag').textContent = '未入库';
+        $('apx-saveas').hidden = false;
+        say('外来文本不依赖任何已选提示词；出图后满意再存为提示词。');
+        renderExport(); return;
+      case 'apx-saveas':
+        S.saved = true; S.pasted = false;
+        $('apx-srctag').textContent = '已入库'; $('apx-idtag').textContent = 'id 1172';
+        $('apx-title').textContent = '雨后街道 · 便利店霓虹'; $('apx-saveas').hidden = true;
+        say('演示：已存为提示词 id 1172，本批图片改挂这条记录。');
+        renderExport(); return;
+      case 'apx-exportbtn': $('apx-exportsec').hidden = !$('apx-exportsec').hidden; renderExport(); return;
+      case 'apx-exportclose': $('apx-exportsec').hidden = true; return;
+      case 'apx-copy': $('apx-exporttext').focus(); $('apx-exporttext').select(); say('已全选清单，按 Ctrl+C 复制'); return;
+      case 'apx-cmpclose': S.cmp = false; renderCompare(); return;
+      case 'apx-docmp': S.cmp = true; S.zoom = 1; $('apx-zoom').value = '1'; renderCompare(); say('并排对比已展开：滚轮/滑杆缩放，可勾选同步'); return;
+      case 'apx-dobest':
+        var first = findCell(S.sel[0]);
+        if(first){ S.best = first.wf.id; say('已把 ' + first.wf.short + ' 记为模型偏好'); renderPlan(); renderMatrix(); renderCompare(); }
+        return;
+      case 'apx-dofav':
+        S.sel.forEach(function(k){ S.fav[k] = true; });
+        say('已加入精选 ' + S.sel.length + ' 张（演示）'); renderMatrix(); return;
+      case 'apx-doreveal':
+        var c0 = findCell(S.sel[0]);
+        if(c0) say('演示：定位 output/横评_' + S.seed + '/' + c0.wf.id + '_' + c0.seed + '.png（应用内走现有 revealImage）');
+        return;
+      case 'apx-dorerun':
+        S.sel.forEach(function(k){ var c = findCell(k); if(c){ c.state='queued'; c.progress=0; c.elapsed=0; c.error=''; } });
+        S.running = true; renderAll(); stopTimer(); timer = setInterval(tick, 90); tick(); return;
+      case 'apx-doclear': S.sel = []; S.cmp = false; renderMatrix(); renderCompare(); return;
+    }
+  });
+
+  ROOT.addEventListener('change', function(ev){
+    var t = ev.target;
+    if(t.hasAttribute && t.hasAttribute('data-wf')){
+      var id = t.getAttribute('data-wf');
+      if(t.checked){ if(S.picked.indexOf(id) < 0) S.picked.push(id); }
+      else S.picked = S.picked.filter(function(x){ return x !== id; });
+      if(S.mode === 'single' && t.checked) S.picked = [id];
+      S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+    }
+    if(t.hasAttribute && t.hasAttribute('data-sel')){
+      var k = t.getAttribute('data-sel');
+      if(t.checked){
+        if(S.sel.length >= 4){ t.checked = false; say('对比最多 4 张，与现有 CompareModal 一致'); return; }
+        S.sel.push(k);
+      } else S.sel = S.sel.filter(function(x){ return x !== k; });
+      if(S.sel.length < 2) S.cmp = false;
+      var box = t.closest('.apx-cell');
+      if(box) box.setAttribute('data-sel', String(t.checked));
+      renderBar(); renderCompare();
+      return;
+    }
+    switch(t.id){
+      case 'apx-seedlock': S.lock = t.checked; S.cells = []; renderAll(); say(S.lock?'已锁定同种子：各工作流用同一种子，横评可比':'已解锁：每格独立随机种子，只能看风格不能比细节'); return;
+      case 'apx-guides': S.guides = t.checked; renderMatrix(); renderCompare(); return;
+      case 'apx-ratio': S.ratio = t.value; S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-tier': S.tier = t.value; S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-align': S.align = t.value; S.cells = []; S.sel = []; S.cmp = false; renderAll(); say(S.align==='native'?'按各流原生档：尺寸可能不同，矩阵会标出':'按目标像素量自动选最接近档，偏差会在提示里列出'); return;
+      case 'apx-conc': S.conc = Number(t.value); renderPlan(); return;
+      case 'apx-sort': S.sort = t.value; S.cells = []; S.sel = []; S.cmp = false; renderAll(); return;
+      case 'apx-speed': S.speed = Number(t.value); renderPlan(); return;
+      case 'apx-zoomsync': S.sync = t.checked; renderCompare(); return;
+    }
+  });
+
+  ROOT.addEventListener('input', function(ev){
+    var t = ev.target;
+    if(t.id === 'apx-wfsearch'){ S.query = t.value; renderPicker(); return; }
+    if(t.id === 'apx-seed'){
+      var v = t.value.replace(/[^0-9]/g,'');
+      if(v !== t.value) t.value = v;
+      S.seed = v ? Number(v) : 0; S.cells = []; renderAll(); return;
+    }
+    if(t.id === 'apx-zoom'){ S.zoom = Number(t.value); renderCompare(); return; }
+    if(t.id === 'apx-prompt'){
+      var changed = t.value !== ORIGINAL_PROMPT;
+      if(changed && !S.pasted){
+        S.pasted = true; $('apx-srctag').textContent = '临时提示词 · 不挂载体';
+        $('apx-idtag').textContent = '未入库'; $('apx-saveas').hidden = false;
+        $('apx-title').textContent = '草稿文本试跑';
+      }
+      renderExport();
+    }
+  });
+
+  ROOT.addEventListener('keydown', function(ev){
+    if(ev.key === 'Escape' && S.panel){ S.panel = false; renderPicker(); $('apx-wftrigger').focus(); }
+  });
+
+  ROOT.addEventListener('dragstart', function(ev){
+    var el = ev.target.closest ? ev.target.closest('[data-chip]') : null;
+    if(!el) return;
+    S.drag = el.getAttribute('data-chip');
+    el.setAttribute('data-drag','true');
+    if(ev.dataTransfer){ ev.dataTransfer.effectAllowed = 'move'; try{ ev.dataTransfer.setData('text/plain', S.drag); }catch(e){} }
+  });
+  ROOT.addEventListener('dragover', function(ev){
+    var el = ev.target.closest ? ev.target.closest('[data-chip]') : null;
+    if(!el || !S.drag) return;
+    ev.preventDefault();
+    el.setAttribute('data-over','true');
+  });
+  ROOT.addEventListener('dragleave', function(ev){
+    var el = ev.target.closest ? ev.target.closest('[data-chip]') : null;
+    if(el) el.removeAttribute('data-over');
+  });
+  ROOT.addEventListener('drop', function(ev){
+    var el = ev.target.closest ? ev.target.closest('[data-chip]') : null;
+    if(!el || !S.drag) return;
+    ev.preventDefault();
+    var to = el.getAttribute('data-chip'), from = S.drag;
+    if(to !== from){
+      var list = S.picked.slice(), a = list.indexOf(from), b = list.indexOf(to);
+      if(a >= 0 && b >= 0){ list.splice(a,1); list.splice(b,0,from); S.picked = list; S.cells = []; S.sel = []; S.cmp = false; say('已调整行顺序'); }
+    }
+    S.drag = null; renderAll();
+  });
+  ROOT.addEventListener('dragend', function(){ S.drag = null; renderChips(); });
+
+  ROOT.addEventListener('wheel', function(ev){
+    if(!S.cmp) return;
+    var el = ev.target.closest ? ev.target.closest('.apx-cmpview') : null;
+    if(!el) return;
+    ev.preventDefault();
+    var next = Math.min(4, Math.max(1, S.zoom + (ev.deltaY < 0 ? 0.2 : -0.2)));
+    S.zoom = Math.round(next*10)/10;
+    $('apx-zoom').value = String(S.zoom);
+    renderCompare();
+  }, {passive:false});
+
+  S = defaults();
+  seedResults();
+  renderAll();
+  say('打开即带一批示例结果：勾选 2~4 张可并排对比；改任意参数后点「横评出图」看实时进度。');
+})();
+</script>
+</div>
+
+</body>
+</html>

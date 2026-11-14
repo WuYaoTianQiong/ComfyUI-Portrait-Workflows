@@ -1175,6 +1175,37 @@ def batch_delete_history(body: BatchDeleteRequest):
 # 收藏切换
 # ---------------------------------------------------------------------------
 
+class LinkPromptRequest(BaseModel):
+    image_ids: list[int]
+    prompt_id: int
+    inherit_taxonomy: bool = True
+
+
+@router.post("/images/link_prompt")
+def link_images_to_prompt(body: LinkPromptRequest):
+    """把已出的图挂到一条提示词名下。
+
+    临时试跑用 `source_prompt_id=0` 出图时 `prompt_id` 为空，用户满意后
+    「存为提示词」需要把整批图认领过去，否则新提示词的出图历史是空的。
+    只改归属与分类/标签继承，不动文件，也不动 `prompt_params` 里当次的实际文本。
+    """
+    if not body.image_ids:
+        return {"success": True, "linked": 0}
+    if Prompt.get_or_none(Prompt.id == body.prompt_id) is None:
+        raise HTTPException(404, "提示词不存在")
+    rows = list(
+        Image.select().where((Image.id.in_(body.image_ids)) & (Image.is_deleted == False))
+    )
+    if not rows:
+        return {"success": True, "linked": 0}
+    ids = [r.id for r in rows]
+    linked = Image.update(prompt_id=body.prompt_id).where(Image.id.in_(ids)).execute()
+    if body.inherit_taxonomy:
+        for image_id in ids:
+            inherit_prompt_taxonomy(image_id)
+    return {"success": True, "linked": linked}
+
+
 @router.post("/images/{item_id}/favorite")
 def toggle_favorite(item_id: int):
     r = Image.get_or_none(Image.id == item_id)

@@ -15,6 +15,8 @@ export interface WorkflowRow {
   params?: WorkflowParams
   /** 档位 × 比例的预演尺寸；后端是唯一计算方 */
   size_preview?: SizePreview
+  /** LoadImage 输入槽数量：>0 表示必须喂图（编辑 / 参考 / 超分），不能纯文本出图 */
+  image_slots?: number
   /** 自定义上传的工作流（内容存在本地，不在后端磁盘上） */
   custom?: boolean
 }
