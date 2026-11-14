@@ -17,8 +17,9 @@
 
   --text: #e6edf3;
   --muted: #8b949e;
-  --primary: #6366f1;
-  --primary-soft: rgba(99, 102, 241, 0.16);
+  /* 实底主色：白字 5.37:1（旧 #6366f1 仅 4.47）。作文字/链接时用 --accent-link（暗底 6.34:1）。 */
+  --primary: #5b5bd6;
+  --primary-soft: rgba(91, 91, 214, 0.16);
   --danger: #ef4444;
   --danger-soft: rgba(127, 29, 29, 0.88);
   --success: #22c55e;
@@ -85,7 +86,7 @@
   --text-body: #e5e5e5;
   --text-body-soft: #d4d4d4;
   --text-muted: #a1a1a1;
-  --text-faint: #737373;
+  --text-faint: #8a8a8a;
   --text-disabled: #6b6b6b;
 
   /* 反色按钮：深色主题下是浅底深字，浅色主题下反过来。 */
@@ -431,7 +432,7 @@ select:focus {
 .btn.active {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 /* 提交/生成中的按钮：加一个小转圈，避免"点了没反应" */

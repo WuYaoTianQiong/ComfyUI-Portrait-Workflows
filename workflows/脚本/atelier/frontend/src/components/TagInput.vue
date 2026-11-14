@@ -123,7 +123,7 @@ function remove(name: string) {
   border-radius: var(--radius-pill);
   background: var(--primary-soft);
   border: 1px solid var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .picked-tag button {

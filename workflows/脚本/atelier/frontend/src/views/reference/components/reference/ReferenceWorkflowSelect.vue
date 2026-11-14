@@ -572,7 +572,7 @@ onBeforeUnmount(() => {
 }
 
 .wf-option.is-active {
-  background: var(--primary-soft, rgba(99, 102, 241, 0.16));
+  background: var(--primary-soft, rgba(91, 91, 214, 0.16));
   color: var(--text-strong);
 }
 

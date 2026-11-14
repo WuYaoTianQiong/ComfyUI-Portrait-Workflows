@@ -254,7 +254,7 @@ function isBatchReplace(item: HistoryItem): boolean {
   padding: 1px var(--gap-sm);
   border-radius: var(--radius-pill);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -277,7 +277,7 @@ function isBatchReplace(item: HistoryItem): boolean {
 }
 
 .filename:hover {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .dim {

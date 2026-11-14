@@ -518,7 +518,7 @@ function openInGallery(filename: string) {
 
 .badge {
   font-size: var(--fs-xs);
-  color: var(--primary);
+  color: var(--accent-link);
   border: 1px solid var(--primary);
   border-radius: var(--radius-pill);
   padding: 1px 8px;
@@ -688,7 +688,7 @@ function openInGallery(filename: string) {
 
 .status.running,
 .status.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .status.done {
@@ -807,7 +807,7 @@ function openInGallery(filename: string) {
 
 .item-status.running,
 .item-status.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .err {

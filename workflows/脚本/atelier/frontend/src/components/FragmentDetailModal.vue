@@ -90,7 +90,7 @@ const emit = defineEmits<{
 }
 
 .src {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .name {

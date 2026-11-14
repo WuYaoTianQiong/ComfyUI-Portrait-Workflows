@@ -369,7 +369,7 @@ onBeforeUnmount(() => {
 
 .tool.active {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .close:hover {
@@ -492,7 +492,7 @@ onBeforeUnmount(() => {
 
 .cell figcaption .locate:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .empty {

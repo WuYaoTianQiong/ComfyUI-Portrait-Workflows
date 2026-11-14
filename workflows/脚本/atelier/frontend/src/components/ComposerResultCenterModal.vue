@@ -328,7 +328,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 .res-chip.on {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .res-grid {
@@ -520,7 +520,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
 .locate:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .job-body {
@@ -551,7 +551,7 @@ function thumbUrl(image: { filename: string; subfolder?: string | null; type?: s
 
 .st.running,
 .st.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .st.done {

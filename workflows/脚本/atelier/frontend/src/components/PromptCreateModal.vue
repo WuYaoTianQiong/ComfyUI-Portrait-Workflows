@@ -196,7 +196,7 @@ async function submit() {
 .mode-switch .btn.active {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .field {

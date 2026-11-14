@@ -253,7 +253,7 @@ function facetValue(key: FacetKey): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: var(--fs-xs);
 }
 
@@ -312,7 +312,7 @@ function facetValue(key: FacetKey): string {
 .chip.active {
   background: var(--primary-soft);
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .chip i {

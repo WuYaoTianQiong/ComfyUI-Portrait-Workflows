@@ -520,7 +520,7 @@ function previewContent(content: string): string {
 
 .person-b__tab.is-active {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
   font-weight: 600;
 }
 

@@ -480,7 +480,7 @@ onBeforeUnmount(() => {
 }
 
 .wf-option.active {
-  color: var(--primary);
+  color: var(--accent-link);
   background: var(--primary-soft);
 }
 

@@ -1113,7 +1113,7 @@ function clearFilters() {
 }
 
 .toolbar .on {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .search {
@@ -1131,7 +1131,7 @@ function clearFilters() {
 
 .fetching {
   margin-left: var(--gap-sm);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .spacer {
@@ -1162,7 +1162,7 @@ function clearFilters() {
 }
 
 .bulk-count b {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .btn.danger {

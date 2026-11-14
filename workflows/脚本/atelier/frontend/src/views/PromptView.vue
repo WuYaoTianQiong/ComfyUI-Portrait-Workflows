@@ -1396,7 +1396,7 @@ onBeforeUnmount(() => {
   padding: var(--gap-xs) var(--gap);
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-xs);
-  color: var(--primary);
+  color: var(--accent-link);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

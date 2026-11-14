@@ -259,7 +259,7 @@ async function createFolder() {
 }
 
 .icon {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .new-row {

@@ -462,7 +462,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 .skipped-chip {
   border: 1px solid var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
   border-radius: var(--radius-pill);
   padding: 1px var(--gap-sm);
   font-size: var(--fs-xs);
@@ -604,7 +604,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 
 .wf-badge.custom {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .wf-row .row-name {
@@ -625,7 +625,7 @@ async function removeItem(kind: Panel, id: number, name: string) {
 }
 
 .wf-row .icon:hover {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .wf-row .icon.danger:hover {

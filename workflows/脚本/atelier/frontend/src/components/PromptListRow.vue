@@ -170,6 +170,6 @@ defineEmits<{
   padding: 1px 6px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 </style>

@@ -863,7 +863,7 @@ async function submit() {
 
 .presets .btn.on {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .mask-list {
@@ -930,7 +930,7 @@ async function submit() {
 
 .node-id {
   font-family: ui-monospace, monospace;
-  color: var(--primary);
+  color: var(--accent-link);
   margin-right: var(--gap-sm);
 }
 
@@ -989,7 +989,7 @@ textarea {
 
 .summary b {
   font-size: var(--fs-xl);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .actions {
@@ -1009,7 +1009,7 @@ textarea {
 
 .job-state.running,
 .job-state.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .job-state.done {

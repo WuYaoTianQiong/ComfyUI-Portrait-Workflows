@@ -1110,7 +1110,7 @@ function submit() {
 
 .job-status.running,
 .job-status.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .job-status.done {
@@ -1239,7 +1239,7 @@ function submit() {
 
 .res-status.running,
 .res-status.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .res-error {
@@ -1306,7 +1306,7 @@ function submit() {
   height: 18px;
   border-radius: 50%;
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: var(--fs-xs);
   font-weight: 600;
   flex: none;
@@ -1354,7 +1354,7 @@ function submit() {
 .chip.active {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .chip.empty .chip-type {
@@ -1365,7 +1365,7 @@ function submit() {
   padding: 0 4px;
   border-radius: var(--radius-pill);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: var(--fs-xs);
 }
 
@@ -1402,7 +1402,7 @@ function submit() {
 .seg .btn.on {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .main {
@@ -1646,7 +1646,7 @@ function submit() {
 
 .append-tag {
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .replace-tag {
@@ -1686,7 +1686,7 @@ function submit() {
 }
 
 .new-block .diff-label {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .old,

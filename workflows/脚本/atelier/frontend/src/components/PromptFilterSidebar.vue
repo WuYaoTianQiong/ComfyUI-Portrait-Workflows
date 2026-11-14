@@ -295,7 +295,7 @@ function onFragmentTypeChange(event: Event) {
 
 .tag-toggle.active {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .tag-panel {
@@ -345,7 +345,7 @@ function onFragmentTypeChange(event: Event) {
 .frag-filter-row .btn.active {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .badge {
@@ -374,7 +374,7 @@ function onFragmentTypeChange(event: Event) {
 .filter-chip {
   border: 1px solid var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
   border-radius: var(--radius-pill);
   padding: 1px var(--gap-sm);
   font-size: var(--fs-xs);

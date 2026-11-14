@@ -112,7 +112,7 @@ defineEmits<{
 }
 
 .bulk-count b {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .pager-row {

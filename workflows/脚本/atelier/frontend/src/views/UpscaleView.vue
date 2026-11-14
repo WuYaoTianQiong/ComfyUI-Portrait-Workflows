@@ -347,7 +347,7 @@ async function submit() {
 }
 
 .summary b {
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: var(--fs-lg);
 }
 
@@ -372,6 +372,6 @@ async function submit() {
 }
 
 .job-state.done {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 </style>

@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
   padding: 1px 5px;
   border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
-  color: var(--primary);
+  color: var(--accent-link);
   font-size: 10px;
   font-family: ui-monospace, monospace;
 }
@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
 
 .dz-btn:hover:not(:disabled) {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .dz-btn:disabled {

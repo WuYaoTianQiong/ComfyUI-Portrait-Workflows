@@ -593,7 +593,7 @@ watch(
 .matrix-toggle.on {
   border-color: var(--primary);
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 /* 横评态多了对齐 / 同种子 / 芯片，单行必然放不下：
@@ -744,7 +744,7 @@ watch(
 
 .run-counts .count-btn.on {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .seed-input {
@@ -843,7 +843,7 @@ watch(
 
 .job-state.running,
 .job-state.pending {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .job-state.done {

@@ -652,7 +652,7 @@ async function onCreated(id: number) {
 
 .count-btn.on {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
   background: var(--primary-soft);
 }
 

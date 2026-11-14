@@ -346,7 +346,7 @@ function fallbackReason(row: MatrixPlan['usable'][number]): string {
 
 .matrix-stat.running {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
   background: var(--primary-soft);
 }
 

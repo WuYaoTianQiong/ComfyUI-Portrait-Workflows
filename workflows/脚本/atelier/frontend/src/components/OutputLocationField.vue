@@ -154,7 +154,7 @@ async function openOutputDir() {
 
 .trigger.on {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .popover {

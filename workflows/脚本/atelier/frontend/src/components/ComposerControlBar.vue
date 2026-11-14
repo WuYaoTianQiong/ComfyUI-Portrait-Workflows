@@ -181,7 +181,7 @@ function onSearchInput(event: Event) {
 }
 
 .composer-bar .on {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .count {
@@ -236,7 +236,7 @@ function onSearchInput(event: Event) {
   border: 1px solid var(--primary);
   border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--primary);
+  color: var(--accent-link);
   padding: 1px 8px;
   cursor: pointer;
   transition:

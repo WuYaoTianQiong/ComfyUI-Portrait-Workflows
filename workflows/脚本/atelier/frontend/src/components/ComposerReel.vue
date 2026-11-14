@@ -237,7 +237,7 @@ function textParts(text: string): Array<{ text: string; hit: boolean }> {
 }
 
 .locate-ico:hover {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 /* 列头下方：当前选中的碎片，替代旧版底部 8/8 的信息 */
@@ -254,7 +254,7 @@ function textParts(text: string): Array<{ text: string; hit: boolean }> {
 
 .picked-label {
   flex: none;
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .picked-text {
@@ -352,7 +352,7 @@ function textParts(text: string): Array<{ text: string; hit: boolean }> {
 }
 
 .tag-self {
-  color: var(--primary);
+  color: var(--accent-link);
   border: 1px solid currentColor;
   border-radius: var(--radius-sm);
   padding: 0 2px;
@@ -374,7 +374,7 @@ function textParts(text: string): Array<{ text: string; hit: boolean }> {
 
 .more:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .card.add {

@@ -1652,7 +1652,7 @@ function onKey(event: KeyboardEvent) {
 
 .tool.active {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .tool.primary {
@@ -1772,7 +1772,7 @@ function onKey(event: KeyboardEvent) {
 
 .nav:hover:not(:disabled) {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .nav:disabled {
@@ -1857,7 +1857,7 @@ function onKey(event: KeyboardEvent) {
 }
 
 .filename.copyable:hover {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .facts {
@@ -1899,7 +1899,7 @@ function onKey(event: KeyboardEvent) {
 
 .prompt-link:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .tags {
@@ -2220,7 +2220,7 @@ function onKey(event: KeyboardEvent) {
 
 .linkable {
   cursor: pointer;
-  color: var(--primary);
+  color: var(--accent-link);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
@@ -2248,7 +2248,7 @@ function onKey(event: KeyboardEvent) {
 }
 
 .side-filename.copyable:hover {
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 /* 短字段两列，长字段（路径 / 模型 / 文件名）由 .wide 独占整行 */

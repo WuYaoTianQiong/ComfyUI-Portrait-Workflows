@@ -416,7 +416,7 @@ function confirmSelection(): void {
 
 .fragment-entry.is-selected .fragment-entry__mark {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .fragment-entry__body {
@@ -467,6 +467,6 @@ function confirmSelection(): void {
 
 .fragment-picker__confirm {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 </style>

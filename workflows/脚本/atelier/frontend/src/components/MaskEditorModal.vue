@@ -711,7 +711,7 @@ onBeforeUnmount(() => {
 
 .toolbar .btn.active {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--accent-link);
 }
 
 .seg-wand {
