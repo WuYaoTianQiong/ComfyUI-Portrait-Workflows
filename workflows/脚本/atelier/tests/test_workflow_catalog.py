@@ -242,9 +242,9 @@ STUDIO_ROLE_WORKFLOWS = {
 
 #: UI 格式 .json：能解析出 LoadImage，但标题一个业务角色都认不出 → 合成台永远失败。
 UNROLEABLE_UI_WORKFLOWS = {
-    "PornMaster_Flux2Klein9B_三图参考编辑_自动尺寸.json",
-    "PornMaster_Flux2Klein9B_单图编辑_可选遮罩.json",
-    "PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json",
+    "PornMaster_Flux2Klein9B_Ref3_FP8_1Pass.json",
+    "PornMaster_Flux2Klein9B_Edit_FP8_1Pass.json",
+    "PornMaster_Flux2Klein9B_Ref2_FP8_1Pass.json",
 }
 
 

@@ -878,7 +878,7 @@ Krea2 的 depth 控制 LoRA（`Patil/Krea-2-depth-controlnet` + `comfyui-krea2-c
 **实测 B：底部扩图补脚（1/1 成功）**
 
 1. 扩画布：1128×2008 → **1200×2128**（下 +120px = 5.6%，左右各 +36px，比例仍≈9:16）；新增边框 `alpha=0`，ComfyUI `LoadImage` 自动转成 `mask=1`。
-2. 遮罩内补：`PornMaster_Flux2Klein9B_单图编辑_可选遮罩`（`VAEEncodeForInpaint`，`grow_mask_by=8`，4 步 / cfg 1 / euler / seed 20261027），**59.7s**；指令只写四件事——补全被底边裁掉的脚趾、延续浅色木地板、补左右门板与墙、人物与光照不变。
+2. 遮罩内补：`PornMaster_Flux2Klein9B_Edit_FP8_1Pass`（`VAEEncodeForInpaint`，`grow_mask_by=8`，4 步 / cfg 1 / euler / seed 20261027），**59.7s**；指令只写四件事——补全被底边裁掉的脚趾、延续浅色木地板、补左右门板与墙、人物与光照不变。
 3. 像素贴回：工作流内置 `ImageCompositeMasked`，人物区 **diff max=0、不同像素 0.000%**。
 4. 消接缝：模型自绘的左右边框比原图暗 **34 级** → 改用**原图边缘列镜像**（差 0）；底部接缝做逐行色调斜坡（R/G/B 补偿 0.4 / 5.1 / 8.8，120px 线性衰减），残留 1–2px 纹理线，原尺寸不可见。
 
@@ -1183,7 +1183,7 @@ Qwen3 系理论可吃数万 token，但 **ComfyUI 节点 tokenizer 通常截断�
 
 > 本节只记录文字与测量结论，**不嵌图**。测试图在 `output\ladder`、`output\stability`、`output\db_enhanced`，按需本地查看。
 >
-> 测试条件：`MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json`，单程 8 步、CFG=1、euler_ancestral / beta、1MP、固定 seed 20261030；侧视 90°、双臂背在身后、贴身针织上衣（避免手臂遮挡胸部投影）。人物均为二十岁出头的成年东亚女性。
+> 测试条件：`MoodyKrea2_V8SE_T2I_FP8_1Pass.json`，单程 8 步、CFG=1、euler_ancestral / beta、1MP、固定 seed 20261030；侧视 90°、双臂背在身后、贴身针织上衣（避免手臂遮挡胸部投影）。人物均为二十岁出头的成年东亚女性。
 
 ### 1. 中文分级：C→F 可控，G/H 平台化
 

@@ -264,8 +264,8 @@
 
 | 文件 | 定位 | 输出 | 耗时 |
 |---|---|---|---|
-| `MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json` | V8SE 最高画质直出 | 1128x2008（9:16, 2.26MP） | 17.9 s |
-| `PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json` | V25 最高画质直出 | 1192x2112（9:16, 2.52MP） | 36.2 s |
+| `MoodyKrea2_V8SE_T2I_FP8_1Pass.json` | V8SE 最高画质直出 | 1128x2008（9:16, 2.26MP） | 17.9 s |
+| `PornMaster_Krea2V25_T2I_FP8_1Pass.json` | V25 最高画质直出 | 1192x2112（9:16, 2.52MP） | 36.2 s |
 | `图片超分_SeedVR2_7B_源图命名_最高4K实测.json` | 手动超分，下拉切档 | 2K / 4K / 6K… | 12.6~42 s |
 
 ### 已归档到 `历史工作流/`
@@ -279,7 +279,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| `PornMaster_Flux2Klein9B_双图参考换衣_可选遮罩.json` | 无安全加速空间，保持原样 |
+| `PornMaster_Flux2Klein9B_Ref2_FP8_1Pass.json` | 无安全加速空间，保持原样 |
 | `MoodyZIT_V13_Visual_文生图_双程采样_快速预览_文字渲染.json` | 结构合理，未做改动 |
 
 ---

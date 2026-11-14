@@ -34,8 +34,8 @@ WORKFLOW_DIRS = (
 )
 
 WORKFLOWS = {
-    "porn": "PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json",
-    "moody": "MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json",
+    "porn": "PornMaster_Krea2V25_T2I_FP8_1Pass.json",
+    "moody": "MoodyKrea2_V8SE_T2I_FP8_1Pass.json",
 }
 
 

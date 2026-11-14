@@ -126,11 +126,11 @@ def test_missing_required_defaults_are_filled(monkeypatch):
     "filename, bypassed, vae_id, first_sampler",
     [
         (
-            "MoodyKrea2_V8SE_文生图_单程8步_1128x2008_画质优先.json",
+            "MoodyKrea2_V8SE_T2I_FP8_1Pass.json",
             ("10", "11"), "12", "9",
         ),
         (
-            "PornMaster_Krea2V25_文生图_单程8步_1192x2112_fp8_画质优先.json",
+            "PornMaster_Krea2V25_T2I_FP8_1Pass.json",
             ("175", "176"), "30", "63",
         ),
     ],
