@@ -34,12 +34,12 @@
       ],
       "properties": {},
       "widgets_values": [
-        "video/MiniMax_H3",
+        "video/MinimaxH3",
         "auto",
         "auto"
       ],
       "widgets_values_named": {
-        "filename_prefix": "video/MiniMax_H3",
+        "filename_prefix": "video/MinimaxH3",
         "format": "auto",
         "codec": "auto"
       }
