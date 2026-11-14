@@ -2066,6 +2066,11 @@
             "title": "Idempotency Key",
             "type": "string"
           },
+          "negative_prompt": {
+            "default": "",
+            "title": "Negative Prompt",
+            "type": "string"
+          },
           "orientation": {
             "default": "portrait",
             "title": "Orientation",
@@ -2074,6 +2079,11 @@
           "output_subfolder": {
             "default": "",
             "title": "Output Subfolder",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
             "type": "string"
           },
           "quality": {

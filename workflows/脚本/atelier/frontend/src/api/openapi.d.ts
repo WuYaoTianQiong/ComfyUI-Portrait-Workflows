@@ -3080,6 +3080,11 @@ export interface components {
              */
             idempotency_key: string;
             /**
+             * Negative Prompt
+             * @default
+             */
+            negative_prompt: string;
+            /**
              * Orientation
              * @default portrait
              */
@@ -3089,6 +3094,11 @@ export interface components {
              * @default
              */
             output_subfolder: string;
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
             /**
              * Quality
              * @default 1.0x

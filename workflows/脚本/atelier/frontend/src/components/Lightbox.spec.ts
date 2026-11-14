@@ -196,7 +196,7 @@ describe('Lightbox', () => {
     const tips = wrapper.findAll('.bar .tool').map((button) => button.attributes('data-tip') ?? '')
 
     // 写操作：投喂 / 重出图 / 提示词 / 收藏 / 删除（图标化后按 data-tip 断言）
-    expect(tips.some((t) => t.startsWith('投喂给工作流处理'))).toBe(false)
+    expect(tips.some((t) => t.startsWith('把这张图作为输入运行工作流'))).toBe(false)
     expect(tips.some((t) => t.startsWith('用这张图的记录重新出图'))).toBe(false)
     expect(tools).not.toContain('↗')
     expect(tools).not.toContain('☆')
@@ -241,6 +241,40 @@ describe('Lightbox', () => {
     expect(tips.every((tip) => tip.trim().length > 0)).toBe(true)
     expect(tools).toContain('目录')
     expect(wrapper.find('.prompt-link').exists()).toBe(true)
+  })
+
+  it('投喂只列单图工作流，并把提示词/档位传给后端', async () => {
+    const wfs = [
+      { path: '/wf/t2i.json', name: '文生图', image_slots: 0 },
+      {
+        path: '/wf/up.json',
+        name: '超分工作流',
+        image_slots: 1,
+        caps: { prompt: true, negative: true, quality: true, orientation: false },
+        params: { quality_mode: 'scale', quality_tiers: ['1.0x'] },
+        size_preview: {},
+      },
+    ]
+    const wrapper = mount(Lightbox, {
+      props: { items: [item(1, 'a.png')], index: 0, workflows: wfs as any },
+    })
+    await wrapper.find('.bar .tool[data-tip*="运行工作流"]').trigger('click')
+    expect(wrapper.find('.wf-picker').exists()).toBe(true)
+    expect(wrapper.find('.wf-picker').text()).toContain('超分工作流')
+    expect(wrapper.find('.wf-picker').text()).not.toContain('文生图')
+
+    await wrapper.find('.wf-picker input').setValue('一只猫')
+    await wrapper.find('.wf-actions .primary').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith(
+      '/api/images/1/process',
+      expect.objectContaining({
+        workflow_path: '/wf/up.json',
+        prompt: '一只猫',
+        quality: '1.0x',
+      }),
+    )
   })
 
   it('缺失的图给出明确提示', () => {

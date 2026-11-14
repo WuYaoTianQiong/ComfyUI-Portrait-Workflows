@@ -1436,6 +1436,8 @@ def backfill_taxonomy():
 class ProcessImageRequest(BaseModel):
     workflow_path: str
     workflow_content: str | None = None
+    prompt: str = ""
+    negative_prompt: str = ""
     orientation: str = "portrait"
     quality: str = "1.0x"
     aspect_ratio: str = ""
@@ -1519,7 +1521,7 @@ def process_history_image(
 
     # 4. 注入基础参数
     prompt_data = {
-        "prompt": "", "negative_prompt": "",
+        "prompt": data.prompt, "negative_prompt": data.negative_prompt,
         "seed": resolve_seed(None),
         "orientation": data.orientation, "quality": data.quality,
         "aspect_ratio": data.aspect_ratio,
@@ -1536,6 +1538,9 @@ def process_history_image(
             "history_id": item_id,
             "input_image": img_name,
             "original_filename": r.filename,
+            "prompt": data.prompt,
+            "negative_prompt": data.negative_prompt,
+            "quality": data.quality,
             "seed": seed_effective,
         }, ensure_ascii=False),
     }]

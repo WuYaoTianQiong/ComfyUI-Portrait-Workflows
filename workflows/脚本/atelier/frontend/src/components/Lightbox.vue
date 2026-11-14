@@ -21,6 +21,10 @@ import { useSettings } from '../composables/useSettings'
 import { useEscapeLayer } from '../composables/useEscapeLayer'
 import { useLoadTimeout } from '../composables/useLoadTimeout'
 import { useViewerTransform } from '../composables/useViewerTransform'
+import { useWorkflowCaps } from '../composables/useWorkflowCaps'
+import { useWorkflowQuality } from '../composables/useWorkflowQuality'
+import { customWorkflowContent } from '../composables/useWorkflows'
+import type { WorkflowRow } from '../composables/useWorkflows'
 import ManualCleanupModal from './ManualCleanupModal.vue'
 import Modal from './Modal.vue'
 import Skeleton from './Skeleton.vue'
@@ -387,6 +391,28 @@ async function copyFilename() {
 
 const processWf = ref('')
 const processOpen = ref(false)
+const processPrompt = ref('')
+const processNegative = ref('')
+const processQuality = useWorkflowQuality(processWf)
+const processWorkflowRows = computed(() => (props.workflows ?? []) as WorkflowRow[])
+/** `/process` 只注入第一个 LoadImage：只列单图工作流，避免选到文生图/多图流直接失败。 */
+const processWorkflows = computed(() =>
+  processWorkflowRows.value.filter((wf) => (wf.image_slots ?? 0) === 1),
+)
+const { caps: processCaps, qualityOptions: processQualityOptions } =
+  useWorkflowCaps(processWf, processWorkflowRows)
+
+/** 打开面板时默认选第一个可用单图工作流；列表后到也要纠正失效选择。 */
+watch(
+  [processOpen, processWorkflows],
+  ([open, list]) => {
+    if (!open) return
+    if (!list.some((wf) => wf.path === processWf.value)) {
+      processWf.value = list[0]?.path ?? ''
+    }
+  },
+  { immediate: true },
+)
 
 async function feedToWorkflow() {
   if (!item.value) return
@@ -398,6 +424,10 @@ async function feedToWorkflow() {
   try {
     await apiPost(`/api/images/${item.value.id}/process`, {
       workflow_path: processWf.value,
+      workflow_content: customWorkflowContent(processWf.value),
+      prompt: processPrompt.value,
+      negative_prompt: processNegative.value,
+      quality: processCaps.value.quality ? processQuality.value : '1.0x',
       output_subfolder: outputSubfolder.value,
     })
     toast.success('已提交处理任务，可在「任务」页看进度')
@@ -1148,20 +1178,50 @@ function onKey(event: KeyboardEvent) {
       <span class="pos">{{ index + 1 }} / {{ items.length }}</span>
       <span class="spacer" />
 
-      <div v-if="processOpen && !readonly" class="wf-picker">
-        <select v-model="processWf" class="wf-select">
-          <option value="">选择工作流…</option>
-          <option v-for="wf in workflows ?? []" :key="wf.path" :value="wf.path">{{ wf.name }}</option>
-        </select>
-        <button class="tool primary" :disabled="busy" @click="feedToWorkflow">投喂</button>
-        <button class="tool" @click="processOpen = false">取消</button>
+      <div v-if="processOpen && !readonly" class="wf-picker" @click.stop>
+        <div class="wf-picker-head">
+          <strong>用这张图运行工作流</strong>
+          <span class="wf-hint">仅单图输入</span>
+        </div>
+        <label class="wf-field">
+          <span>工作流</span>
+          <select v-model="processWf">
+            <option v-if="!processWorkflows.length" value="">没有可用的单图工作流</option>
+            <option v-for="wf in processWorkflows" :key="wf.path" :value="wf.path">
+              {{ wf.name }}
+            </option>
+          </select>
+        </label>
+        <label v-if="processCaps.prompt" class="wf-field">
+          <span>提示词（可选）</span>
+          <input v-model="processPrompt" type="text" placeholder="留空则按工作流自身设置运行" />
+        </label>
+        <label v-if="processCaps.negative" class="wf-field">
+          <span>负向（可选）</span>
+          <input v-model="processNegative" type="text" placeholder="工作流支持负向时生效" />
+        </label>
+        <label v-if="processQualityOptions.length" class="wf-field">
+          <span>输出档位</span>
+          <select v-model="processQuality">
+            <option v-for="opt in processQualityOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </label>
+        <p class="wf-hint">整图处理；局部重绘请用「框选清理」。</p>
+        <div class="wf-actions">
+          <button class="tool" @click="processOpen = false">取消</button>
+          <button class="tool primary" :disabled="busy || !processWf" @click="feedToWorkflow">
+            {{ busy ? '提交中…' : '运行' }}
+          </button>
+        </div>
       </div>
 
       <button
         v-if="!readonly"
         class="tool"
-        :data-tip="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
-        :aria-label="processOpen ? '收起工作流选择' : '投喂给工作流处理（超分/重绘等）'"
+        :data-tip="processOpen ? undefined : '把这张图作为输入运行工作流（仅单图）'"
+        :aria-label="processOpen ? '收起工作流选择' : '把这张图作为输入运行工作流（仅单图）'"
         @click="processOpen = !processOpen"
       >
         <Icon name="zap" />
@@ -1856,14 +1916,54 @@ function onKey(event: KeyboardEvent) {
 }
 
 .wf-picker {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: var(--gap);
+  z-index: 4;
+  width: 360px;
+  padding: var(--gap);
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: var(--gap-sm);
+  flex-direction: column;
+  gap: var(--gap-sm);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
 }
 
-.wf-select {
-  width: 220px;
+.wf-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+}
+
+.wf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-field > span {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.wf-field select,
+.wf-field input {
+  width: 100%;
+}
+
+.wf-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.wf-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
 }
 
 .stage {
