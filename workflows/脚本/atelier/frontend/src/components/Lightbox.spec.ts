@@ -420,6 +420,74 @@ describe('Lightbox', () => {
     expect(writeText).toHaveBeenCalledWith('a.png')
   })
 
+  it('顶部复制一次带出当前页签的正负提示词', async () => {
+    const withPrompts = {
+      ...item(1, 'a.png'),
+      prompt_params: {
+        prompt: '正向正文',
+        negative_prompt: '负向正文',
+        compiled: {
+          positive: '编译正向',
+          negative: '编译负向',
+          negative_effective: true,
+        },
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withPrompts], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+    const tabButton = (label: string) =>
+      [...document.body.querySelectorAll<HTMLElement>('.pane-tabs .btn')].find(
+        (el) => el.textContent?.trim() === label,
+      )!
+
+    tabButton('复制').click()
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('正向正文\n\nNegative prompt: 负向正文')
+
+    tabButton('实际提交').click()
+    await flushPromises()
+    tabButton('复制').click()
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('编译正向\n\nNegative prompt: 编译负向')
+  })
+
+  it('实际提交负向不生效时顶部复制只带正向', async () => {
+    const withPrompts = {
+      ...item(1, 'a.png'),
+      prompt_params: {
+        prompt: '正向正文',
+        negative_prompt: '负向正文',
+        compiled: {
+          positive: '编译正向',
+          negative: '编译负向',
+          negative_effective: false,
+        },
+      },
+    }
+    const wrapper = mount(Lightbox, { props: { items: [withPrompts], index: 0 } })
+    await wrapper.find('.prompt-link').trigger('click')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+    const tabButton = (label: string) =>
+      [...document.body.querySelectorAll<HTMLElement>('.pane-tabs .btn')].find(
+        (el) => el.textContent?.trim() === label,
+      )!
+
+    tabButton('实际提交').click()
+    await flushPromises()
+    tabButton('复制').click()
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('编译正向')
+  })
+
   it('存储位置点击后在资源管理器中定位', async () => {
     const wrapper = mount(Lightbox, { props: { items: ITEMS, index: 0 } })
     await wrapper.find('.prompt-link').trigger('click')

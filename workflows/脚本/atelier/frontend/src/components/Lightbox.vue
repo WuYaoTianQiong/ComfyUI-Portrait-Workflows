@@ -702,15 +702,28 @@ const submittedNegativeText = computed(() =>
   compiledEffective.value ? compiledNegative.value : '（工作流负向不生效，实际提交为空）',
 )
 
-const activeCopyText = computed(() =>
+const activePositive = computed(() =>
   promptTab.value === 'submitted' ? compiledPositive.value : shownPrompt.value,
 )
+/** 实际提交页签下负向不生效时，合并复制也不带负向。 */
+const activeNegative = computed(() => {
+  if (promptTab.value === 'submitted') {
+    return compiledEffective.value ? compiledNegative.value : ''
+  }
+  return shownNegative.value
+})
+
+/** 顶部复制：当前页签正负合并，分隔格式兼容 A1111（Negative prompt:）。 */
+const activeCopyText = computed(() => {
+  const positive = activePositive.value
+  const negative = activeNegative.value.trim()
+  if (!negative) return positive
+  return positive ? `${positive}\n\nNegative prompt: ${negative}` : `Negative prompt: ${negative}`
+})
 
 function copyActivePrompt() {
-  void copyText(
-    activeCopyText.value,
-    promptTab.value === 'submitted' ? '编译后正向' : '正向提示词',
-  )
+  const base = activeNegative.value ? '正向与负向提示词' : '正向提示词'
+  void copyText(activeCopyText.value, promptTab.value === 'submitted' ? `编译后${base}` : base)
 }
 
 const PARAM_SOURCE_LABEL: Record<string, string> = {
