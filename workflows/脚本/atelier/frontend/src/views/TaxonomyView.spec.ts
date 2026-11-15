@@ -72,6 +72,9 @@ describe('TaxonomyView 分类与标签', () => {
     vi.mocked(apiPost).mockClear()
     // 组件里用了 confirm 二次确认，测试环境默认没有
     vi.stubGlobal('confirm', () => true)
+    // 页签选择会写进会话存储，跨用例残留：上一个用例切到「标签」后，
+    // 下一个用例挂载就会停在标签页，「一键自动分类」这类只在分类页出现的按钮会找不到。
+    localStorage.removeItem('pb.session.manage')
   })
 
   it('默认展示分类列表', async () => {
