@@ -24,6 +24,8 @@ const props = defineProps<{
   order: 'asc' | 'desc'
   fragmentType: string
   fragmentMatch: 'has' | 'only'
+  /** 内容分级（nsfw / pending / safe；空 = 全部） */
+  contentRating: string
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   'toggle-tag': [id: number]
   'set-fragment-type': [value: string]
   'set-fragment-match': [value: 'has' | 'only']
+  'set-content-rating': [value: string]
   'clear-tags': []
   'clear-fragment': []
   'clear-filters': []
@@ -53,6 +56,10 @@ function onSearchInput(event: Event) {
 
 function onSortChange(event: Event) {
   emit('update:sort', (event.target as HTMLSelectElement).value)
+}
+
+function onContentRatingChange(event: Event) {
+  emit('set-content-rating', (event.target as HTMLSelectElement).value)
 }
 
 function onFragmentTypeChange(event: Event) {
@@ -102,6 +109,17 @@ function onFragmentTypeChange(event: Event) {
       <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
         {{ opt.label }}
       </option>
+    </select>
+    <select
+      :value="contentRating"
+      class="rating-select"
+      title="内容分级：待确认 = 命中敏感关键词但还没人工确认"
+      @change="onContentRatingChange"
+    >
+      <option value="">全部分级</option>
+      <option value="safe">安全</option>
+      <option value="pending">待确认</option>
+      <option value="nsfw">18+</option>
     </select>
     <button
       v-if="sort !== 'default'"

@@ -18,6 +18,7 @@ defineEmits<{
   batchReplace: []
   batchGenerate: []
   batchDelete: []
+  'batch-rating': [rating: 'nsfw' | 'safe']
   'update:page': [page: number]
   'page-size-change': [size: number]
   locate: []
@@ -45,6 +46,20 @@ defineEmits<{
       @click="$emit('batchGenerate')"
     >
       批量出图
+    </button>
+    <button
+      class="btn btn-sm"
+      title="把选中的提示词标为安全（待确认项确认放行）"
+      @click="$emit('batch-rating', 'safe')"
+    >
+      标为安全
+    </button>
+    <button
+      class="btn btn-sm"
+      title="把选中的提示词标为 18+（安全模式下隐藏）"
+      @click="$emit('batch-rating', 'nsfw')"
+    >
+      标为 18+
     </button>
     <button class="btn btn-sm danger" @click="$emit('batchDelete')">删除</button>
   </div>

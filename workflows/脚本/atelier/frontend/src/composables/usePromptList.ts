@@ -15,6 +15,8 @@ export interface PromptListFilters {
   fragmentMatch: Ref<'has' | 'only'>
   sort: Ref<string>
   order: Ref<'asc' | 'desc'>
+  /** 内容分级（nsfw / pending / safe；空 = 全部） */
+  contentRating: Ref<string>
 }
 
 /**
@@ -43,6 +45,7 @@ export function usePromptList(filters: PromptListFilters) {
     filters.fragmentMatch.value,
     filters.sort.value,
     filters.order.value,
+    filters.contentRating.value,
   ])
 
   const { data, isFetching, isError, error, refetch } = useQuery({
@@ -58,6 +61,7 @@ export function usePromptList(filters: PromptListFilters) {
         ...fragmentParams(),
         sort: filters.sort.value,
         order: filters.order.value,
+        content_rating: filters.contentRating.value,
       }),
     placeholderData: (prev) => prev,
   })

@@ -10,6 +10,7 @@ import Modal from '../components/Modal.vue'
 import GalleryFilterSidebar from '../components/GalleryFilterSidebar.vue'
 import GalleryGrid from '../components/GalleryGrid.vue'
 import { apiPost } from '../api/client'
+import { batchSetAssetOverrides } from '../api/assets'
 import {
   backfillImageTaxonomy,
   batchDeleteImages,
@@ -56,6 +57,8 @@ interface GallerySession {
   dateFacet: string
   model: string
   orientation: string
+  /** 内容分级筛选（nsfw / pending / safe；空 = 全部） */
+  contentRating: string
   scrollTop: number
   /** 卡片密度：紧凑 / 标准（纯展示偏好，不影响筛选与分页）。 */
   density: 'standard' | 'compact'
@@ -77,6 +80,7 @@ const savedSession = readSession<GallerySession>(SESSION_KEY, {
   dateFacet: '',
   model: '',
   orientation: '',
+  contentRating: '',
   scrollTop: 0,
   density: 'standard',
   viewerId: null,
@@ -96,6 +100,8 @@ const source = ref(savedSession.source)
 const dateFacet = ref(savedSession.dateFacet)
 const model = ref(savedSession.model)
 const orientation = ref(savedSession.orientation)
+// 内容分级：图片分级是派生的（图片覆盖 > 来源提示词 > 安全），只做筛选不改数据
+const contentRating = ref(savedSession.contentRating)
 
 /** 卡片密度：默认标准，紧凑档缩小列宽与间距。 */
 const density = ref<'standard' | 'compact'>(savedSession.density ?? 'standard')
@@ -142,6 +148,7 @@ const filterBadge = computed(
     (dateFacet.value ? 1 : 0) +
     (model.value ? 1 : 0) +
     (orientation.value ? 1 : 0) +
+    (contentRating.value ? 1 : 0) +
     (onlyMissing.value ? 1 : 0) +
     (search.value.trim() ? 1 : 0),
 )
@@ -169,6 +176,7 @@ const historyKey = computed(() => [
   dateFacet.value,
   model.value,
   orientation.value,
+  contentRating.value,
 ])
 
 /** 排序变了要回到第 1 页：停在第 3 页看新顺序没有意义。 */
@@ -191,6 +199,7 @@ function historyFilterParams() {
     date: dateFacet.value,
     model: model.value,
     orientation: orientation.value,
+    content_rating: contentRating.value,
   }
 }
 /** 列表与分面共用的筛选参数（不含分面维度自身 —— 后端就是按这个口径算的）。 */
@@ -200,6 +209,7 @@ const facetScope = computed(() => ({
   tag_ids: selectedTags.value.join(','),
   tag_match: tagMatch.value,
   missing: onlyMissing.value ? 1 : undefined,
+  content_rating: contentRating.value,
 }))
 
 const {
@@ -269,6 +279,7 @@ function saveSession() {
     dateFacet: dateFacet.value,
     model: model.value,
     orientation: orientation.value,
+    contentRating: contentRating.value,
     density: density.value,
     scrollTop: gridEl.value?.scrollTop ?? savedSession.scrollTop,
     viewerId:
@@ -291,6 +302,7 @@ watch(
       dateFacet.value,
       model.value,
       orientation.value,
+      contentRating.value,
       density.value,
     ].join('|'),
   saveSession,
@@ -530,6 +542,7 @@ const emit = defineEmits<{
 const bulkOpen = ref(false)
 const bulkTagId = ref<number | null>(null)
 const bulkCatId = ref<number | null>(null)
+const bulkRating = ref<'nsfw' | 'safe' | ''>('')
 const bulkBusy = ref(false)
 
 const { data: bulkTags } = useQuery({
@@ -604,6 +617,25 @@ async function applyBulkTag() {
 async function applyBulkCat() {
   if (!bulkCatId.value) return
   await applyBulk(`/api/images/{id}/categories/${bulkCatId.value}`, '分类')
+}
+
+/** 批量标分级：一次请求写完全部选中项（逐张 PUT 会把对话框卡住）。 */
+async function applyBulkRating() {
+  const rating = bulkRating.value
+  const ids = Array.from(selected.value)
+  if (!rating || !ids.length) return
+  bulkBusy.value = true
+  try {
+    const res = await batchSetAssetOverrides('image', ids.map(String), { rating })
+    toast.success(`已把 ${res.updated} 张图片标为${rating === 'nsfw' ? '18+' : '安全'}`)
+    bulkOpen.value = false
+    bulkRating.value = ''
+    queryClient.invalidateQueries({ queryKey: ['history'] })
+  } catch (e) {
+    toast.error(`标记失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    bulkBusy.value = false
+  }
 }
 
 async function applyBulk(pathTemplate: string, label: string, body?: Record<string, unknown>) {
@@ -832,6 +864,7 @@ function clearFilters() {
   tagMatch.value = 'all'
   onlyMissing.value = false
   search.value = ''
+  contentRating.value = ''
   page.value = 1
 }
 </script>
@@ -911,6 +944,17 @@ function clearFilters() {
         >
           {{ syncing ? '刷新中…' : '刷新' }}
         </button>
+        <select
+          v-model="contentRating"
+          class="mini-select"
+          title="内容分级：继承来源提示词，可在批量面板里单张/批量改"
+          @change="page = 1"
+        >
+          <option value="">全部分级</option>
+          <option value="safe">安全</option>
+          <option value="pending">待确认</option>
+          <option value="nsfw">18+</option>
+        </select>
         <select v-model="sortBy" class="mini-select" title="排序">
           <option value="newest">最新优先</option>
           <option value="oldest">最旧优先</option>
@@ -1004,8 +1048,23 @@ function clearFilters() {
       @close="compareOpen = false"
     />
 
-    <Modal :open="bulkOpen" title="批量打标签 / 分类" @close="bulkOpen = false">
+    <Modal :open="bulkOpen" title="批量处理" @close="bulkOpen = false">
       <div class="bulk-body">
+        <div class="bulk-row">
+          <span class="bulk-label">分级</span>
+          <select v-model="bulkRating" class="bulk-select">
+            <option value="">选择分级…</option>
+            <option value="nsfw">18+（安全模式隐藏）</option>
+            <option value="safe">安全</option>
+          </select>
+          <button
+            class="btn btn-sm"
+            :disabled="bulkBusy || !bulkRating"
+            @click="applyBulkRating"
+          >
+            应用到选中的 {{ selectedCount }} 张
+          </button>
+        </div>
         <div class="bulk-row">
           <span class="bulk-label">标签</span>
           <select v-model="bulkTagId" class="bulk-select">

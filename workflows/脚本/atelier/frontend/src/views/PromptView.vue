@@ -14,6 +14,7 @@ import { parseMarkedSegments, renderAllSegments, smartSegmentText } from '../uti
 import { confirmDialog } from '../utils/naive'
 import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
 import { apiDelete, apiGet, apiPost } from '../api/client'
+import { batchSetAssetOverrides } from '../api/assets'
 import { listImages, setImageFavorite } from '../api/images'
 import {
   PROMPT_EXPORT_URL,
@@ -90,6 +91,7 @@ const {
   tagMatch,
   fragmentType,
   fragmentMatch,
+  contentRating,
   selectedId,
   selectedIds,
   listEl,
@@ -130,6 +132,7 @@ const {
   fragmentMatch,
   sort,
   order,
+  contentRating,
 })
 
 /** 列表数据到位后再恢复滚动位置，否则容器还没高度，scrollTop 会被清 0。 */
@@ -755,6 +758,24 @@ function batchFavorite() {
   batchFavoriteMutation.mutate(Array.from(selectedIds.value))
 }
 
+/**
+ * 批量标分级：待确认项确认放行 / 标 18+。
+ *
+ * 一次请求写完整批（几百条逐张 PUT 太慢），写完让列表与合成台碎片一起失效。
+ */
+async function batchRating(rating: 'nsfw' | 'safe') {
+  const ids = Array.from(selectedIds.value)
+  if (!ids.length) return
+  try {
+    const res = await batchSetAssetOverrides('prompt', ids.map(String), { rating })
+    toast.success(`已把 ${res.updated} 条提示词标为${rating === 'nsfw' ? '18+' : '安全'}`)
+    queryClient.invalidateQueries({ queryKey: ['prompts'] })
+    queryClient.invalidateQueries({ queryKey: ['composer'] })
+  } catch (cause) {
+    toast.error(cause instanceof Error ? cause.message : '标记失败')
+  }
+}
+
 async function batchDelete() {
   const ids = Array.from(selectedIds.value)
   if (!ids.length) return
@@ -952,6 +973,12 @@ function onFragmentMatchChange(value: 'has' | 'only') {
   page.value = 1
 }
 
+/** 内容分级筛选：切了就回第 1 页（筛选变了页码没有意义）。 */
+function onContentRatingChange(value: string) {
+  contentRating.value = value
+  page.value = 1
+}
+
 function onClearTags() {
   tagIds.value = []
   page.value = 1
@@ -978,6 +1005,7 @@ function clearFilters() {
   tagMatch.value = 'all'
   fragmentType.value = ''
   fragmentMatch.value = 'has'
+  contentRating.value = ''
   page.value = 1
 }
 
@@ -1070,6 +1098,7 @@ onBeforeUnmount(() => {
         :order="order"
         :fragment-type="fragmentType"
         :fragment-match="fragmentMatch"
+        :content-rating="contentRating"
         @collapse="sidebarCollapsed = true"
         @update:search="onSearchInput"
         @select-category="selectCategory"
@@ -1079,6 +1108,7 @@ onBeforeUnmount(() => {
         @toggle-tag="toggleTag"
         @set-fragment-type="onFragmentTypeChange"
         @set-fragment-match="onFragmentMatchChange"
+        @set-content-rating="onContentRatingChange"
         @clear-tags="onClearTags"
         @clear-fragment="onClearFragment"
         @clear-filters="clearFilters"
@@ -1172,6 +1202,7 @@ onBeforeUnmount(() => {
         @batch-replace="openReplaceForSelection"
         @batch-generate="batchGenerate"
         @batch-delete="batchDelete"
+        @batch-rating="batchRating"
         @update:page="page = $event"
         @page-size-change="onPageSizeChange"
         @locate="locateSelected"

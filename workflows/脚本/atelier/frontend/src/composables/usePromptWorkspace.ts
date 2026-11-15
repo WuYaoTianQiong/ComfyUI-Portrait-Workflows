@@ -28,6 +28,8 @@ export interface PromptSession {
   tagMatch: 'all' | 'any'
   fragmentType: string
   fragmentMatch: 'has' | 'only'
+  /** 内容分级（nsfw / pending / safe；空 = 全部） */
+  contentRating: string
   selectedId: number | null
   selectedIds: number[]
   scrollTop: number
@@ -87,6 +89,7 @@ export function usePromptWorkspace() {
     tagMatch: 'all',
     fragmentType: '',
     fragmentMatch: 'has',
+    contentRating: '',
     selectedId: null,
     selectedIds: [],
     scrollTop: 0,
@@ -99,6 +102,7 @@ export function usePromptWorkspace() {
   const tagMatch = ref<'all' | 'any'>(savedSession.tagMatch)
   const fragmentType = ref<string>(savedSession.fragmentType)
   const fragmentMatch = ref<'has' | 'only'>(savedSession.fragmentMatch)
+  const contentRating = ref<string>(savedSession.contentRating)
   const selectedId = ref<number | null>(savedSession.selectedId)
   const selectedIds = ref<Set<number>>(new Set(savedSession.selectedIds))
 
@@ -114,6 +118,7 @@ export function usePromptWorkspace() {
       tagMatch: tagMatch.value,
       fragmentType: fragmentType.value,
       fragmentMatch: fragmentMatch.value,
+      contentRating: contentRating.value,
       selectedId: selectedId.value,
       selectedIds: Array.from(selectedIds.value),
       scrollTop: listEl.value?.scrollTop ?? savedSession.scrollTop,
@@ -130,6 +135,7 @@ export function usePromptWorkspace() {
         tagMatch.value,
         fragmentType.value,
         fragmentMatch.value,
+        contentRating.value,
         selectedId.value,
         Array.from(selectedIds.value).sort((a, b) => a - b).join(','),
       ].join('|'),
@@ -165,6 +171,7 @@ export function usePromptWorkspace() {
     tagMatch,
     fragmentType,
     fragmentMatch,
+    contentRating,
     selectedId,
     selectedIds,
     listEl,

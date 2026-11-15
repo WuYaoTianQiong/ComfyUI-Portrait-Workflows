@@ -58,6 +58,7 @@ function placeholderItem(image: ImageRef, fallback?: PreviewFallback): HistoryIt
     prompt_id: null,
     job_id: null,
     prompt_name: '',
+    content_rating: 'safe',
     prompt_params:
       fallback && (fallback.prompt || fallback.negative)
         ? {

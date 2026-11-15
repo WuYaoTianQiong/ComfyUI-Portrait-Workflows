@@ -276,6 +276,48 @@ describe('GalleryView 清理失效', () => {
     expect(paths).toContain('/api/images/2/inherit')
   })
 
+  it('内容分级筛选写入 content_rating 并回到第 1 页', async () => {
+    const wrapper = await mountView()
+    const select = wrapper.find('select[title^="内容分级"]')
+    expect(select.exists()).toBe(true)
+
+    await select.setValue('nsfw')
+    await flushPromises()
+
+    const calls = vi.mocked(apiGet).mock.calls.filter(
+      ([path]) =>
+        String(path).includes('/api/images') &&
+        !String(path).includes('/facets') &&
+        !String(path).includes('/ids'),
+    )
+    const last = calls[calls.length - 1]
+    expect(last?.[1]).toMatchObject({ content_rating: 'nsfw', page: 1 })
+  })
+
+  it('批量标分级只发一次批量接口，不逐张 PUT', async () => {
+    const wrapper = await mountView()
+    const picks = wrapper.findAll('.card .pick')
+    await picks[0].trigger('click')
+    await picks[1].trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('.btn').find((b) => b.text().includes('打标签'))!.trigger('click')
+    await flushPromises()
+    await wrapper.find('select.bulk-select').setValue('nsfw')
+    await wrapper.findAll('.btn').find((b) => b.text().includes('应用到选中的'))!.trigger('click')
+    await flushPromises()
+
+    const batchCalls = vi
+      .mocked(apiPost)
+      .mock.calls.filter((c) => String(c[0]) === '/api/assets/overrides/batch')
+    expect(batchCalls).toHaveLength(1)
+    expect(batchCalls[0][1]).toMatchObject({
+      asset_type: 'image',
+      keys: ['1', '2'],
+      rating: 'nsfw',
+    })
+  })
+
   it('批量删除的「同时删磁盘文件」勾选态会被记住并随请求发送', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const settings = useSettings()

@@ -71,6 +71,16 @@ function isBatchReplace(item: HistoryItem): boolean {
         <span v-else-if="isBatchReplace(item)" class="badge-replace" title="由替换碎片出图生成，提示词以临时记录保存">
           替换
         </span>
+        <span
+          v-if="item.content_rating === 'nsfw'"
+          class="badge-rating is-nsfw"
+          title="内容分级 18+：可在批量处理面板里改成安全"
+        >18+</span>
+        <span
+          v-else-if="item.content_rating === 'pending'"
+          class="badge-rating is-pending"
+          title="来源提示词命中敏感关键词但未确认：安全模式同样隐藏，确认后可放行"
+        >待确认</span>
         <span v-if="selected.has(item.id)" class="check-mark" aria-hidden="true">✓</span>
       </div>
 
@@ -260,10 +270,31 @@ function isBatchReplace(item: HistoryItem): boolean {
   white-space: nowrap;
 }
 
+/* 内容分级角标：贴左上，和居中的「文件缺失 / 替换」错开，不互相盖住 */
+.badge-rating {
+  position: absolute;
+  top: var(--gap-sm);
+  left: var(--gap-sm);
+  padding: 1px var(--gap-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-rating.is-nsfw {
+  background: var(--accent-red-soft);
+  color: var(--accent-red-text);
+}
+
+.badge-rating.is-pending {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
 .caption {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: column;  gap: 1px;
   padding: var(--gap-sm) var(--gap-sm) 0;
 }
 

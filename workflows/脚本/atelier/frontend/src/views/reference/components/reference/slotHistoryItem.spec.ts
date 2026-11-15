@@ -46,6 +46,7 @@ describe('slotSelectedItemToHistoryItem', () => {
       prompt_id: null,
       job_id: null,
       prompt_name: '',
+      content_rating: 'safe',
       prompt_params: null,
       comfyui_prompt_id: null,
       is_favorite: false,

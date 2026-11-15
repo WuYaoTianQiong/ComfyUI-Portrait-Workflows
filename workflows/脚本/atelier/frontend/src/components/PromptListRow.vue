@@ -36,6 +36,16 @@ defineEmits<{
         <span v-if="item.is_favorite" class="star" title="收藏">★</span>
         <span class="name">{{ item.name || `#${item.id}` }}</span>
         <span v-if="item.rating" class="rating">{{ '★'.repeat(item.rating) }}</span>
+        <span
+          v-if="item.content_rating === 'nsfw'"
+          class="content-badge is-nsfw"
+          title="内容分级 18+：安全模式下隐藏"
+        >18+</span>
+        <span
+          v-else-if="item.content_rating === 'pending'"
+          class="content-badge is-pending"
+          title="待确认：命中敏感关键词但还没人工确认，安全模式同样隐藏"
+        >待确认</span>
       </div>
       <div class="row-preview">{{ item.prompt_preview }}</div>
       <div class="row-meta">
@@ -48,6 +58,27 @@ defineEmits<{
 </template>
 
 <style scoped>
+/* 内容分级徽标：紧跟在名称后面，比标签更靠前，一眼能看到待确认 */
+.content-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.content-badge.is-nsfw {
+  background: var(--accent-red-soft);
+  color: var(--accent-red-text);
+}
+
+.content-badge.is-pending {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
 .row {
   display: flex;
   align-items: flex-start;

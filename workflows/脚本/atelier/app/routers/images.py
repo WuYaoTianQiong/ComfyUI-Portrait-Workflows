@@ -47,6 +47,7 @@ from app.services.tombstones import (
     tombstone_key,
     tombstoned_keys,
 )
+from app.services import asset_meta
 
 router = APIRouter(tags=["图片"])
 
@@ -94,7 +95,7 @@ def _captured_at_expr():
     return fn.COALESCE(Image.captured_at, Image.created_at)
 
 
-def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) -> dict:
+def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None, rating="") -> dict:
     if meta is None:
         meta = get_image_metadata(r.filename, r.subfolder or "", r.img_type or "output")
     prompt_params = json.loads(r.prompt_params) if r.prompt_params else None
@@ -136,6 +137,8 @@ def _enrich_item(r, prompt_cache=None, meta=None, categories=None, tags=None) ->
         "captured_at": str(r.captured_at) if r.captured_at else "",
         "source": r.source,
         "prompt_name": "",  # 默认空字符串
+        # 内容分级（nsfw / safe / pending）：派生值，口径见 services/asset_meta
+        "content_rating": rating or asset_meta.RATING_SAFE,
         # 文件缺失：以巡检写的派生列为准，同时兼容"刚被删、巡检还没跑到"的情况
         # （meta 为空 = 路径 stat 失败 = 取不到图）。只用于展示与筛选，不参与删除。
         "missing": bool(r.missing_since) or not meta,
@@ -713,11 +716,14 @@ def list_history(
     missing: bool = Query(None),
     tag_match: str = Query("all", description="多标签语义：all=交集, any=并集"),
     ids: str = Query("", description="逗号分隔的历史 id，只取这些记录"),
+    content_rating: str = Query("", description="nsfw / safe / pending；空 = 全部"),
 ):
     # 筛选构造统一走 _filtered_history_query + _apply_facet_filters：
     # 这两个函数是 /images、/images/ids、/images/facets、/images/cleanup_missing
     # 的唯一来源，避免"列表筛了、全选却选到范围外"这类错位。
-    q = _filtered_history_query(favorite, search, category_id, tag_ids, missing, tag_match)
+    q = _filtered_history_query(
+        favorite, search, category_id, tag_ids, missing, tag_match, content_rating
+    )
     q = _apply_facet_filters(q, source, date, model, orientation)
 
     # 按 id 精确取图：图像编辑页要用它把已选目标图的文件名/缩略图取回来配遮罩
@@ -783,8 +789,12 @@ def list_history(
 
     alive = rows
     cache = _build_prompt_cache(alive)
+    rating_map = asset_meta.image_ratings_for(alive)
     result = [
-        _enrich_item(r, cache, meta_cache.get(r.id, {}), cats_map.get(r.id), tags_map.get(r.id))
+        _enrich_item(
+            r, cache, meta_cache.get(r.id, {}), cats_map.get(r.id), tags_map.get(r.id),
+            rating_map.get(r.id, ""),
+        )
         for r in alive
     ]
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -797,15 +807,21 @@ def _filtered_history_query(
     tag_ids: str = "",
     missing: bool | None = None,
     tag_match: str = "all",
+    content_rating: str = "",
 ):
-    """历史画廊的统一筛选构造器（favorite/search/分类/标签/缺失）。
+    """历史画廊的统一筛选构造器（favorite/search/分类/标签/缺失/内容分级）。
 
     `/images`、`/images/ids`、`/images/facets` 必须共用这一份，
     否则会出现"列表按分类筛了、全选却选到类外"的错位。
 
     `tag_match` 决定多标签的语义：`all` = 交集（同时满足），`any` = 并集（任一满足）。
+
+    内容分级是**派生态**（图片覆盖 > 来源提示词 > 安全），数据库里没有这一列，
+    所以先算出 id 集合再下推 `IN`；口径唯一来源是 `asset_meta.image_ids_by_rating`。
     """
     q = Image.select().where(Image.is_deleted == False)
+    if content_rating:
+        q = q.where(Image.id.in_(asset_meta.image_ids_by_rating(content_rating)))
     if favorite is not None:
         q = q.where(Image.is_favorite == favorite)
     if missing is not None:
@@ -886,11 +902,12 @@ def history_facets(
     tag_ids: str = Query(""),
     missing: bool = Query(None),
     tag_match: str = Query("all"),
+    content_rating: str = Query("", description="nsfw / safe / pending；空 = 全部"),
 ):
-    """分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），
+    """分面计数：基于 favorite/search/category/tag/missing/内容分级当前筛选（不含分面维度自身），
     返回 source / date(年-月) / model 各取值的数量。"""
     sub = _filtered_history_query(
-        favorite, search, category_id, tag_ids, missing, tag_match
+        favorite, search, category_id, tag_ids, missing, tag_match, content_rating
     ).select(Image.id).distinct()
     q0 = Image.select().where(Image.id.in_(sub))
     src_rows = q0.select(Image.source, fn.COUNT(Image.id).alias("c")).group_by(Image.source)
@@ -932,6 +949,7 @@ def history_ids(
     orientation: str = Query(""),
     missing: str = Query(""),
     tag_match: str = Query("all"),
+    content_rating: str = Query("", description="nsfw / safe / pending；空 = 全部"),
 ):
     """返回当前筛选条件下所有（未删除）历史记录的 id 列表，供\"全选全部\"批量操作使用（不分页）。"""
     q = _filtered_history_query(
@@ -941,6 +959,7 @@ def history_ids(
         tag_ids=tag_ids,
         missing=True if missing == "1" else None,
         tag_match=tag_match,
+        content_rating=content_rating,
     )
     q = _apply_facet_filters(q, source, date, model, orientation)
     ids = [r.id for r in q.select(Image.id).distinct()]
@@ -964,7 +983,7 @@ def sync_history(page_size: int = Query(500)):
     data = list_history(
         page=1, page_size=page_size, favorite=None, sort="newest", search="",
         category_id=None, tag_ids="", source="", date="", model="", orientation="",
-        missing=None, tag_match="all",
+        missing=None, tag_match="all", content_rating="",
     )
     return {"added": added, "items": data["items"], "total": data["total"]}
 
@@ -1303,7 +1322,7 @@ def image_detail(item_id: int):
     if r is None:
         raise HTTPException(404, "历史记录不存在")
 
-    item = _enrich_item(r)
+    item = _enrich_item(r, rating=asset_meta.image_ratings_for([r]).get(r.id, ""))
     params = dict(item.get("prompt_params") or {})
     job = GenJob.get_or_none(GenJob.id == r.job_id) if r.job_id else None
     extra = _job_extra(job)

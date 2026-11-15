@@ -64,6 +64,7 @@ function item(id: number, filename: string): HistoryItem {
     captured_at: '2026-10-30 10:00:00',
     source: 'local',
     prompt_name: 'p',
+    content_rating: 'safe',
     prompt_params: null,
     categories: [],
     tags: [],
