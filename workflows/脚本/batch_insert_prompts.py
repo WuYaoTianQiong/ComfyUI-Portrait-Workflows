@@ -69,14 +69,16 @@
 
 【入库操作规范】
   - 本脚本已内置 prompt 文本去重，同一条不会重复插入
-  - 但绝不能把整个文件重新全量跑一遍来"更新"已有条目
-  - 新增条目时只追加到源文件末尾，然后运行脚本
-  - 如需修改已有条目，直接改源文件的对应内容，脚本入库时会自动插入
-    新版本（prompt 文本不同），然后手动清理旧版本
-  - ⚠️ 禁止直接用 Python 命令字符串追加内容到源文件（如
-    `python -c "with open(...) as f: f.write(...)"`）
-    这种方式极易导致格式错误（如缺失标点、碎片化词汇）
-  - ✅ 正确做法：手动编辑源文件，或用脚本生成内容后手动复制到文件末尾
+  - 绝不能为了"更新"已有条目把整份输入全量重跑
+  - 输入文件用 --file 指定任意路径；累积源文件 organized_prompts.txt
+    已废弃（2026-11 删除），不存在也不需要维护
+  - 新增条目：把本次新内容写进一个只含新块的临时 txt，跑完即删
+  - 修改已有条目：把改写后的内容单独放进临时 txt 跑一遍（prompt 文本
+    不同会插入新版本），然后手动清理旧版本
+  - ⚠️ 禁止用 Python 命令字符串写入临时文件（如
+    `python -c "with open(...) as f: f.write(...)"`），这种方式极易导致
+    格式错误（如缺失标点、碎片化词汇）
+  - ✅ 正确做法：用编辑器 / 写入工具生成临时 txt，入库前先 --dry-run 复核
 
 【前端与出图联动】
   - prompt 字段存带【】标题的展示格式（空行分隔碎片）
@@ -132,8 +134,8 @@
   - 实测依据：同一 seed 下 1178（日常白裙）与 1192（泳池比基尼）出真人照片；
     1191（狐族女帝）即使去掉【】标题、改写画风段，仍是 CG 质感。
 
-【不要写在 organized_prompts.txt 顶部】
-  该文件按三个以上空行切块，任何说明文字都会被解析成提示词块并入库。
+【输入文件里不要写说明文字】
+  输入文件按三个以上空行切块，任何说明文字都会被解析成提示词块并入库。
   录入约定统一放在本 docstring 中；脚本没有注释语法。
 
 ============================= 以上于 2026-10-30 记录 =============================
@@ -164,8 +166,9 @@
   - 必须用 LLM 精修或手动审核所有新标题，确保无截断
   - 早期版本（2026-07-05之前）入库的提示词没有插入 template_fragments 表，
     需要手动补全碎片记录才能使用 LLM 命名功能
-  - 元数据行 parse_metadata 要求全字段（Steps/CFG/Sampler/Seed/Model/width/height）
-    同时存在才能匹配，无法单独设置 width/height。如需仅传宽高，需修改脚本。
+  - 元数据行 parse_metadata 主正则要求全字段（Steps/CFG/Sampler/Seed/Model/width/height）
+    同时存在才能匹配；2026-11-15 起补了一条兜底：只写 `width: 896, height: 1120`
+    也能识别，其余字段留空。这样符合比例规范（比例只进 DB 字段、不进碎片正文）。
   - 如果块中包含元数据行但碎片数为 0，检查 metadata 行后的 body 是否正常
     被 parse_fragments 解析（2026-07-10 发现过因元数据行干扰导致的 0 碎片问题）。
 
@@ -315,7 +318,19 @@ def parse_metadata(block):
          r'Seed:\s*(\d+),\s*Model:\s*([^,]+?),\s*width:\s*(\d+),\s*height:\s*(\d+)')
     m = re.search(p, block, re.IGNORECASE)
     if not m:
-        return (None, block)
+        # 兜底：只给画幅比例（width/height），其余参数留空。
+        # 比例必须进 DB 字段、不能写进碎片正文，所以这条路径是常态而非例外。
+        m2 = re.search(r'width:\s*(\d+)\s*[，,]\s*height:\s*(\d+)', block, re.IGNORECASE)
+        if not m2:
+            return (None, block)
+        meta = {
+            'steps': None, 'cfg_scale': None, 'sampler': None,
+            'seed': None, 'model': None,
+            'width': int(m2.group(1)), 'height': int(m2.group(2)),
+            'scheduler': None, 'steps_2': None, 'cfg_scale_2': None,
+            'sampler_2': None, 'scheduler_2': None, 'lora_name': None, 'lora_weight': None,
+        }
+        return (meta, block[:m2.start()].strip())
     meta = {
         'steps': int(m.group(1)), 'cfg_scale': float(m.group(2)), 'sampler': m.group(3).strip(),
         'seed': int(m.group(4)), 'model': m.group(5).strip(), 'width': int(m.group(6)), 'height': int(m.group(7)),
