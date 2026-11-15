@@ -4,12 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { isNsfwPoseItem } from '../../api/reference'
 import type { PoseGroup, PoseItem } from '../../api/reference'
+import { setAssetOverride } from '../../api/assets'
 import { useReferencePoses } from '../../composables/useReferenceLibrary'
 import { useReferenceRecipeDraft } from '../../composables/useReferenceRecipeDraft'
 import { useReferenceSafeMode } from '../../composables/useReferenceSafeMode'
 import { useToast } from '../../composables/useToast'
 import { readReferenceSearch, readReferenceSelection, withReferenceTab } from './referenceDeepLink'
 
+import PoseManageBar from './components/reference/PoseManageBar.vue'
 import ReferenceAgeGate from './components/ReferenceAgeGate.vue'
 import ReferenceCard from './components/ReferenceCard.vue'
 import ReferenceGrid from './components/ReferenceGrid.vue'
@@ -60,15 +62,24 @@ const {
   error,
   load,
   retry,
+  replaceItem,
 } = useReferencePoses()
 
-/** 卡片右下角逐行信息：类型 · 风格 · 不可用标记（v1.5 D046 降权）。 */
+/** 双人姿势人数风险徽标文案；单人 / 未录入为空串。 */
+const RISK_LABELS: Record<string, string> = {
+  multi: '人数风险',
+  missing: '易丢人',
+  unstable: '人数不稳',
+}
+
+/** 卡片右下角逐行信息：类型 · 风格 · 不可用 / 人数风险标记。 */
 function poseMetaOf(item: PoseItem | null | undefined): string {
   if (!item) return ''
   return [
     poseTypeOf(item),
     poseStyleOf(item),
     item.usable === false ? '不可用' : '',
+    RISK_LABELS[item.risk || ''] || '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -95,6 +106,38 @@ const {
 } = useReferenceRecipeDraft()
 
 const toast = useToast()
+
+/** 管理态：直接在卡片上改 18+ 分级与可用性（写入 asset_overrides）。 */
+const manageMode = ref(false)
+const savingKey = ref('')
+
+async function applyPoseOverride(
+  item: PoseItem,
+  patch: { rating?: 'nsfw' | 'safe'; usable?: boolean },
+): Promise<void> {
+  savingKey.value = item.id
+  try {
+    const row = await setAssetOverride('pose', item.id, patch)
+    // 库里是 shallowRef：必须换一个新对象 + 换数组引用，就地改字段不会重渲染。
+    const next: PoseItem = { ...item }
+    if (patch.rating !== undefined) {
+      const rating = row.rating || ''
+      next.rating = rating
+      next.nsfw = rating === 'nsfw'
+    }
+    if (patch.usable !== undefined) {
+      next.usable = row.usable !== false
+      next.usableNote = row.usable_note || ''
+    }
+    replaceItem(next)
+    toast.success('已保存')
+  } catch (cause) {
+    toast.error(cause instanceof Error ? cause.message : '保存失败')
+  } finally {
+    savingKey.value = ''
+  }
+}
+
 const route = useRoute()
 const router = useRouter()
 
@@ -714,6 +757,7 @@ onMounted(() => {
           <option value="">全部来源</option>
           <option value="upstream">原图库</option>
           <option value="pose-studio-lite">pose-studio-lite</option>
+          <option value="vnccs">VNCCS 姿势库</option>
         </select>
 
         <select
@@ -750,6 +794,18 @@ onMounted(() => {
           <option value="all">全部风格</option>
           <option v-for="item in styles" :key="item" :value="item">{{ item }}</option>
         </select>
+
+        <button
+          type="button"
+          class="pose-manage-toggle"
+          :class="{ 'is-on': manageMode }"
+          data-testid="pose-manage-toggle"
+          :aria-pressed="manageMode"
+          :title="manageMode ? '退出管理，恢复卡片操作' : '直接在卡片上标记 18+ 与可用性'"
+          @click="manageMode = !manageMode"
+        >
+          {{ manageMode ? '退出管理' : '管理' }}
+        </button>
         </div>
         </div>
 
@@ -840,6 +896,12 @@ onMounted(() => {
               <span v-else class="angle-cell is-empty" aria-hidden="true" />
             </template>
           </div>
+          <PoseManageBar
+            v-if="manageMode"
+            :item="card.item"
+            :saving="Boolean(card.item) && savingKey === card.item?.id"
+            @patch="card.item && applyPoseOverride(card.item, $event)"
+          />
         </ReferenceCard>
       </template>
 
@@ -861,7 +923,15 @@ onMounted(() => {
           :selected="card.selected"
           @open="openSingle(card.item)"
           @toggle-select="onTogglePose(card.item)"
-        />
+        >
+          <template v-if="manageMode" #default>
+            <PoseManageBar
+              :item="card.item"
+              :saving="savingKey === card.item.id"
+              @patch="applyPoseOverride(card.item, $event)"
+            />
+          </template>
+        </ReferenceCard>
       </template>
     </ReferenceGrid>
 
@@ -1294,6 +1364,37 @@ onMounted(() => {
 
 .pose-reset:hover {
   background: var(--fill-subtle);
+  color: var(--text-strong);
+}
+
+/* 管理态开关：与重置同高，开启时走主色描边，避免误以为还是普通筛选 */
+.pose-manage-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.pose-manage-toggle:hover {
+  background: var(--fill-subtle);
+  color: var(--text-strong);
+}
+
+.pose-manage-toggle.is-on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
   color: var(--text-strong);
 }
 

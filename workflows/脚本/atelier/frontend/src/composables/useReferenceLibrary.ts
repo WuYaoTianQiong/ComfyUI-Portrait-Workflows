@@ -48,6 +48,13 @@ export interface LibraryState<T> {
   load: () => Promise<void>
   /** 失败后重试；与 load 同一实现，单独命名便于模板绑定 */
   retry: () => Promise<void>
+  /**
+   * 用同 id 的新对象替换单条（管理态改 18+ / 可用性后用）。
+   *
+   * `items` 是 shallowRef，就地改字段不会触发渲染，必须整批换引用；
+   * 找不到 id 时静默忽略（条目可能已被筛选或重新加载掉）。
+   */
+  replaceItem: (item: T & { id?: unknown }) => void
 }
 
 /** 姿势分组结果。`lines` 是排好序的体系列表，供药丸筛选使用。 */
@@ -165,7 +172,18 @@ function createLibraryState<T>(loadItems: () => Promise<T[]>): LibraryState<T> {
     return load()
   }
 
-  return { items, loading, error, load, retry }
+  /** 单条替换：换数组引用触发 shallowRef 更新。 */
+  function replaceItem(next: T & { id?: unknown }): void {
+    const index = items.value.findIndex(
+      (entry) => (entry as { id?: unknown }).id === next.id,
+    )
+    if (index < 0) return
+    const copy = items.value.slice()
+    copy[index] = next as T
+    items.value = copy
+  }
+
+  return { items, loading, error, load, retry, replaceItem }
 }
 
 /** 四页签共享的模块级库状态；key 固定为库名。 */

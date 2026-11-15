@@ -148,33 +148,49 @@ describe('costumeSlotItems', () => {
 
 describe('双人姿势人数风险', () => {
   it('已实测的 3 人姿势返回 multi，按精确姿势 id 匹配', () => {
-    expect(pairPoseRiskOf(pose({ id: 'psl-D003', composition: 'pair' }))).toBe('multi')
-    expect(pairPoseRiskOf(pose({ id: 'pair60_P020_front', composition: 'pair' }))).toBe('multi')
+    expect(pairPoseRiskOf(pose({ id: 'psl-D003', composition: 'pair', risk: 'multi' }))).toBe(
+      'multi',
+    )
+    expect(
+      pairPoseRiskOf(pose({ id: 'pair60_P020_front', composition: 'pair', risk: 'multi' })),
+    ).toBe('multi')
     const text = describePairPoseRisk(
-      pose({ id: 'psl-D003', composition: 'pair', 姿势名称: '握脚踝双腿V字打开' }),
+      pose({
+        id: 'psl-D003',
+        composition: 'pair',
+        risk: 'multi',
+        姿势名称: '握脚踝双腿V字打开',
+      }),
     )
     expect(text).toContain('可能多画人物')
     expect(text).toContain('握脚踝双腿V字打开')
   })
 
   it('稳定丢人姿势返回 missing，不稳定返回 unstable', () => {
-    expect(pairPoseRiskOf(pose({ id: 'pair60_P049_front', composition: 'pair' }))).toBe(
-      'missing',
-    )
-    expect(pairPoseRiskOf(pose({ id: 'psl-D049', composition: 'pair' }))).toBe('unstable')
-    expect(pairPoseRiskOf(pose({ id: 'psl-D037', composition: 'pair' }))).toBe('unstable')
-    expect(pairPoseRiskOf(pose({ id: 'pair60_P002_diag', composition: 'pair' }))).toBe(
+    expect(
+      pairPoseRiskOf(pose({ id: 'pair60_P049_front', composition: 'pair', risk: 'missing' })),
+    ).toBe('missing')
+    expect(pairPoseRiskOf(pose({ id: 'psl-D049', composition: 'pair', risk: 'unstable' }))).toBe(
       'unstable',
     )
-    expect(describePairPoseRisk(pose({ id: 'psl-D008', composition: 'pair' }))).toContain(
-      '人数不稳定',
+    expect(pairPoseRiskOf(pose({ id: 'psl-D037', composition: 'pair', risk: 'unstable' }))).toBe(
+      'unstable',
     )
+    expect(
+      pairPoseRiskOf(pose({ id: 'pair60_P002_diag', composition: 'pair', risk: 'unstable' })),
+    ).toBe('unstable')
+    expect(
+      describePairPoseRisk(pose({ id: 'psl-D008', composition: 'pair', risk: 'unstable' })),
+    ).toContain('人数不稳定')
   })
 
-  it('未录入的双人姿势与单人姿势返回空', () => {
+  it('未录入的双人姿势、单人姿势与未知风险值返回空', () => {
     expect(pairPoseRiskOf(pose({ id: 'psl-D026', composition: 'pair' }))).toBe('')
     expect(pairPoseRiskOf(pose({ id: 'pair60_P020_diag', composition: 'pair' }))).toBe('')
-    expect(pairPoseRiskOf(pose({ id: 'P001_front', composition: 'single' }))).toBe('')
+    expect(pairPoseRiskOf(pose({ id: 'P001_front', composition: 'single', risk: 'multi' }))).toBe(
+      '',
+    )
+    expect(pairPoseRiskOf(pose({ id: 'psl-D026', composition: 'pair', risk: 'unknown' }))).toBe('')
     expect(describePairPoseRisk(pose({ id: 'psl-D026', composition: 'pair' }))).toBe('')
   })
 })

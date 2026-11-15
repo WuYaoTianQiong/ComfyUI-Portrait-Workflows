@@ -36,6 +36,10 @@ export interface ReferenceItemDto {
   hot: boolean
   featured: boolean
   nsfw: boolean
+  /** 统一内容分级（nsfw / safe）；由后端覆盖层决定 */
+  rating?: string
+  /** 仅 pose：双人姿势人数风险（multi / missing / unstable） */
+  risk?: string
   /** 该条目是否有深度变体；旧响应缺字段按 true 兼容 */
   has_depth?: boolean
   /** 仅 pose：可用性标记；`false` = 实测姿势不跟随（仍可手动选） */
@@ -99,6 +103,10 @@ export interface PoseItem {
   remote?: boolean
   /** 敏感标记；唯一来源为后端 DTO 的 nsfw 字段 */
   nsfw?: boolean
+  /** 统一内容分级（nsfw / safe）；由后端覆盖层决定 */
+  rating?: string
+  /** 双人姿势人数风险（multi / missing / unstable）；单人 / 未录入为空串 */
+  risk?: string
   /** 后端深度图端点；无深度图时为 null */
   depthUrl?: string | null
   /** 后端深度缩略图端点；无派生缩略图时为 null */
@@ -375,6 +383,8 @@ export function toPoseItem(dto: ReferenceItemDto): PoseItem {
     poseType: text(dto.pose_type) || '未分类',
     style: text(dto.style) || '未分类',
     nsfw: Boolean(dto.nsfw),
+    rating: text(dto.rating) || (dto.nsfw ? 'nsfw' : 'safe'),
+    risk: text(dto.risk),
     // 深度图端点保留 null；能力位缺省 true（兼容旧响应/旧持久化数据）
     hasDepth: dto.has_depth !== false,
     depthUrl: text(dto.depth_url) || null,

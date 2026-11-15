@@ -107,57 +107,6 @@ export function poseSlotName(item: PoseItem | null): string {
 /** 双人姿势人数风险类型（2026-11-08 0.5x 多 seed 实测结果）。 */
 export type PairPoseRiskKind = 'multi' | 'missing' | 'unstable' | ''
 
-/**
- * 已实测的双人姿势风险表（按**精确姿势 id**，不按基 id 归并）。
- *
- * 同一姿势不同角度的实测结果不同（例如 `pair60_P020_diag` 稳定 2 人、
- * `pair60_P020_front` 稳定 3 人），按基 id 归并会误伤正常角度，所以这里
- * 只标记真正跑过的那个条目。数据来自 117 个唯一双人姿势条目的 0.5x
- * 全量抽样，非 2 人条目再做多 seed 复验；结果见
- * `_tmp_ui_audit/pair_pose_counts.jsonl`。
- */
-const PAIR_POSE_RISK: Readonly<Record<string, PairPoseRiskKind>> = {
-  // 多次 seed 都稳定 3 人
-  'psl-D003': 'multi', // [3,3,3,3,3,3,3]
-  'pair60_P063_front': 'multi', // [3,3]
-  'psl-D005': 'multi', // [3,3]
-  'pair60_P020_front': 'multi', // [3,3]
-  'pair60_P030_front': 'multi', // [3,3]
-  'pair60_P044_front': 'multi', // [3,3]
-  'pair60_P005_front': 'multi', // [3,3]
-  'psl-D040': 'multi', // [3,3]
-  // 多次 seed 都稳定 1 人（丢失其中一人）
-  'pair60_P049_diag': 'missing', // [1,1,1,1,1]
-  'psl-D011': 'missing', // [1,1]
-  'psl-D028': 'missing', // [1,1]
-  'pair60_P032_front': 'missing', // [1,1]
-  'pair60_P042_front': 'missing', // [1,1]
-  'pair60_P049_front': 'missing', // [1,1]
-  'pair60_P004_front': 'missing', // [1,1]
-  'pair60_P006_front': 'missing', // [1,1]
-  // 多 seed 间在 1/2/3 之间波动
-  'psl-D037': 'unstable', // [2,3]
-  'pair60_P002_diag': 'unstable', // [2,3,4]
-  'pair60_P042_diag': 'unstable', // [1,2]
-  'pair60_P055_diag': 'unstable', // [1,2]
-  'pair60_P057_diag': 'unstable', // [1,2]
-  'psl-D008': 'unstable', // [1,2]
-  'psl-D017': 'unstable', // [2,3]
-  'psl-D034': 'unstable', // [1,2]
-  'psl-D049': 'unstable', // [1,2]
-  'psl-D035': 'unstable', // [2,3]
-  'psl-D023': 'unstable', // [1,3]
-  'psl-D025': 'unstable', // [1,2]
-  'psl-D031': 'unstable', // [2,3]
-  'pair60_P062_front': 'unstable', // [1,2]
-  'psl-D006': 'unstable', // [2,3]
-  'pair60_P041_front': 'unstable', // [1,3]
-  'pair60_P053_front': 'unstable', // [2,3]
-  'pair60_P013_front': 'unstable', // [2,3]
-  'pair60_P015_front': 'unstable', // [2,3]
-  'pair60_P018_front': 'unstable', // [1,2]
-}
-
 /** 是否双人构图；与后端 `is_pair` 判定口径一致。 */
 export function isPairPose(
   item: Pick<PoseItem, 'id' | 'composition'> | null | undefined,
@@ -166,17 +115,22 @@ export function isPairPose(
   return item.composition === 'pair' || item.id.startsWith('pair')
 }
 
-/** 双人姿势人数风险；非双人或未录入返回空串。 */
+/**
+ * 双人姿势人数风险；数据来自后端覆盖层 `risk` 字段（迁移 v10 起）。
+ *
+ * 只认精确姿势 id 的风险值，单人姿势一律返回空串；未知值按未录入处理。
+ */
 export function pairPoseRiskOf(
-  item: Pick<PoseItem, 'id' | 'composition'> | null | undefined,
+  item: Pick<PoseItem, 'id' | 'composition' | 'risk'> | null | undefined,
 ): PairPoseRiskKind {
   if (!isPairPose(item)) return ''
-  return PAIR_POSE_RISK[item!.id] ?? ''
+  const risk = item?.risk
+  return risk === 'multi' || risk === 'missing' || risk === 'unstable' ? risk : ''
 }
 
 /** 风险提示文案；无风险返回空串。 */
 export function describePairPoseRisk(
-  item: Pick<PoseItem, 'id' | 'composition' | '姿势名称'> | null | undefined,
+  item: Pick<PoseItem, 'id' | 'composition' | '姿势名称' | 'risk'> | null | undefined,
 ): string {
   const kind = pairPoseRiskOf(item)
   if (!kind) return ''

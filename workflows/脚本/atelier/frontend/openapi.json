@@ -169,6 +169,70 @@
         "title": "BatchItem",
         "type": "object"
       },
+      "BatchOverrideRequest": {
+        "properties": {
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk"
+          },
+          "usable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable"
+          },
+          "usable_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable Note"
+          }
+        },
+        "required": [
+          "asset_type"
+        ],
+        "title": "BatchOverrideRequest",
+        "type": "object"
+      },
       "BatchRandomRunRequest": {
         "properties": {
           "aspect_ratio": {
@@ -377,7 +441,7 @@
       "Body_upload_reference_api_reference_uploads_post": {
         "properties": {
           "file": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "File",
             "type": "string"
           }
@@ -1144,6 +1208,11 @@
             ],
             "title": "Comfyui Prompt Id"
           },
+          "content_rating": {
+            "default": "safe",
+            "title": "Content Rating",
+            "type": "string"
+          },
           "created_at": {
             "default": "",
             "title": "Created At",
@@ -1349,6 +1418,11 @@
               }
             ],
             "title": "Comfyui Prompt Id"
+          },
+          "content_rating": {
+            "default": "safe",
+            "title": "Content Rating",
+            "type": "string"
           },
           "created_at": {
             "default": "",
@@ -2011,6 +2085,112 @@
         "title": "OpenFolderRequest",
         "type": "object"
       },
+      "OverridePatch": {
+        "description": "单条覆盖；未传的字段保持原值，`rating=\"\"` 表示清空为继承默认。",
+        "properties": {
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk"
+          },
+          "usable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable"
+          },
+          "usable_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable Note"
+          }
+        },
+        "title": "OverridePatch",
+        "type": "object"
+      },
+      "OverrideRow": {
+        "properties": {
+          "asset_key": {
+            "title": "Asset Key",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "risk": {
+            "default": "",
+            "title": "Risk",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "usable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable"
+          },
+          "usable_note": {
+            "default": "",
+            "title": "Usable Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_type",
+          "asset_key"
+        ],
+        "title": "OverrideRow",
+        "type": "object"
+      },
       "ParseRequest": {
         "properties": {
           "text": {
@@ -2409,6 +2589,11 @@
       },
       "PromptListItem": {
         "properties": {
+          "content_rating": {
+            "default": "",
+            "title": "Content Rating",
+            "type": "string"
+          },
           "created_at": {
             "default": "",
             "title": "Created At",
@@ -3176,10 +3361,20 @@
             "title": "Pose Type",
             "type": "string"
           },
+          "rating": {
+            "default": "",
+            "title": "Rating",
+            "type": "string"
+          },
           "remote": {
             "default": false,
             "title": "Remote",
             "type": "boolean"
+          },
+          "risk": {
+            "default": "",
+            "title": "Risk",
+            "type": "string"
           },
           "search_text": {
             "default": "",
@@ -4151,13 +4346,6 @@
       },
       "ValidationError": {
         "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
           "loc": {
             "items": {
               "anyOf": [
@@ -4499,6 +4687,207 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/assets/overrides": {
+      "get": {
+        "operationId": "list_asset_overrides_api_assets_overrides_get",
+        "parameters": [
+          {
+            "description": "pose / prompt / image / workflow；空 = 全部",
+            "in": "query",
+            "name": "asset_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "pose / prompt / image / workflow；空 = 全部",
+              "title": "Asset Type",
+              "type": "string"
+            }
+          },
+          {
+            "description": "nsfw / safe；空 = 全部",
+            "in": "query",
+            "name": "rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "nsfw / safe；空 = 全部",
+              "title": "Rating",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OverrideRow"
+                  },
+                  "title": "Response List Asset Overrides Api Assets Overrides Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Asset Overrides",
+        "tags": [
+          "资产元数据"
+        ]
+      }
+    },
+    "/api/assets/overrides/batch": {
+      "post": {
+        "operationId": "batch_asset_overrides_api_assets_overrides_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Asset Overrides",
+        "tags": [
+          "资产元数据"
+        ]
+      }
+    },
+    "/api/assets/overrides/{asset_type}/{asset_key}": {
+      "put": {
+        "operationId": "put_asset_override_api_assets_overrides__asset_type___asset_key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_type",
+            "required": true,
+            "schema": {
+              "title": "Asset Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_key",
+            "required": true,
+            "schema": {
+              "title": "Asset Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverridePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Asset Override",
+        "tags": [
+          "资产元数据"
+        ]
+      }
+    },
+    "/api/assets/stats": {
+      "get": {
+        "description": "各类型分级计数：提示词与图片含 pending（待确认），姿势/工作流只统计显式覆盖。",
+        "operationId": "asset_stats_api_assets_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Asset Stats",
+        "tags": [
+          "资产元数据"
+        ]
+      }
+    },
     "/api/browser/image": {
       "get": {
         "description": "任意图片文件的原图（只接受图片扩展名，避免变成任意文件读取）。\n\nHEIC/HEIF（包括改名成 .jpg 的）浏览器无法直接渲染，这里返回转换后的 WebP。",
@@ -5865,6 +6254,18 @@
               "title": "Ids",
               "type": "string"
             }
+          },
+          {
+            "description": "nsfw / safe / pending；空 = 全部",
+            "in": "query",
+            "name": "content_rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "nsfw / safe / pending；空 = 全部",
+              "title": "Content Rating",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6132,7 +6533,7 @@
     },
     "/api/images/facets": {
       "get": {
-        "description": "分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），\n返回 source / date(年-月) / model 各取值的数量。",
+        "description": "分面计数：基于 favorite/search/category/tag/missing/内容分级当前筛选（不含分面维度自身），\n返回 source / date(年-月) / model 各取值的数量。",
         "operationId": "history_facets_api_images_facets_get",
         "parameters": [
           {
@@ -6189,6 +6590,18 @@
             "schema": {
               "default": "all",
               "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "nsfw / safe / pending；空 = 全部",
+            "in": "query",
+            "name": "content_rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "nsfw / safe / pending；空 = 全部",
+              "title": "Content Rating",
               "type": "string"
             }
           }
@@ -6332,6 +6745,18 @@
             "schema": {
               "default": "all",
               "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "nsfw / safe / pending；空 = 全部",
+            "in": "query",
+            "name": "content_rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "nsfw / safe / pending；空 = 全部",
+              "title": "Content Rating",
               "type": "string"
             }
           }
@@ -7766,6 +8191,18 @@
               "default": "",
               "description": "关键词需命中碎片正文",
               "title": "Fragment Kw",
+              "type": "string"
+            }
+          },
+          {
+            "description": "内容分级：nsfw / safe / pending（待确认）；空 = 全部",
+            "in": "query",
+            "name": "content_rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "内容分级：nsfw / safe / pending（待确认）；空 = 全部",
+              "title": "Content Rating",
               "type": "string"
             }
           }

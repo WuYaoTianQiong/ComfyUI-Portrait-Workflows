@@ -4,6 +4,77 @@
  */
 
 export interface paths {
+    "/api/assets/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Asset Overrides */
+        get: operations["list_asset_overrides_api_assets_overrides_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assets/overrides/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch Asset Overrides */
+        post: operations["batch_asset_overrides_api_assets_overrides_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assets/overrides/{asset_type}/{asset_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Asset Override */
+        put: operations["put_asset_override_api_assets_overrides__asset_type___asset_key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assets/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Stats
+         * @description 各类型分级计数：提示词与图片含 pending（待确认），姿势/工作流只统计显式覆盖。
+         */
+        get: operations["asset_stats_api_assets_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/browser/image": {
         parameters: {
             query?: never;
@@ -579,7 +650,7 @@ export interface paths {
         };
         /**
          * History Facets
-         * @description 分面计数：基于 favorite/search/category/tag/missing 当前筛选（不含分面维度自身），
+         * @description 分面计数：基于 favorite/search/category/tag/missing/内容分级当前筛选（不含分面维度自身），
          *     返回 source / date(年-月) / model 各取值的数量。
          */
         get: operations["history_facets_api_images_facets_get"];
@@ -2145,6 +2216,21 @@ export interface components {
              */
             workflow_path: string;
         };
+        /** BatchOverrideRequest */
+        BatchOverrideRequest: {
+            /** Asset Type */
+            asset_type: string;
+            /** Keys */
+            keys?: string[];
+            /** Rating */
+            rating?: string | null;
+            /** Risk */
+            risk?: string | null;
+            /** Usable */
+            usable?: boolean | null;
+            /** Usable Note */
+            usable_note?: string | null;
+        };
         /** BatchRandomRunRequest */
         BatchRandomRunRequest: {
             /**
@@ -2261,7 +2347,10 @@ export interface components {
         };
         /** Body_upload_reference_api_reference_uploads_post */
         Body_upload_reference_api_reference_uploads_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** CategoryCreate */
@@ -2670,6 +2759,11 @@ export interface components {
             /** Comfyui Prompt Id */
             comfyui_prompt_id?: string | null;
             /**
+             * Content Rating
+             * @default safe
+             */
+            content_rating: string;
+            /**
              * Created At
              * @default
              */
@@ -2757,6 +2851,11 @@ export interface components {
             categories?: components["schemas"]["CategoryRef"][];
             /** Comfyui Prompt Id */
             comfyui_prompt_id?: string | null;
+            /**
+             * Content Rating
+             * @default safe
+             */
+            content_rating: string;
             /**
              * Created At
              * @default
@@ -3042,6 +3141,46 @@ export interface components {
             /** Path */
             path: string;
         };
+        /**
+         * OverridePatch
+         * @description 单条覆盖；未传的字段保持原值，`rating=""` 表示清空为继承默认。
+         */
+        OverridePatch: {
+            /** Rating */
+            rating?: string | null;
+            /** Risk */
+            risk?: string | null;
+            /** Usable */
+            usable?: boolean | null;
+            /** Usable Note */
+            usable_note?: string | null;
+        };
+        /** OverrideRow */
+        OverrideRow: {
+            /** Asset Key */
+            asset_key: string;
+            /** Asset Type */
+            asset_type: string;
+            /** Rating */
+            rating?: string | null;
+            /**
+             * Risk
+             * @default
+             */
+            risk: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /** Usable */
+            usable?: boolean | null;
+            /**
+             * Usable Note
+             * @default
+             */
+            usable_note: string;
+        };
         /** ParseRequest */
         ParseRequest: {
             /**
@@ -3261,6 +3400,11 @@ export interface components {
         };
         /** PromptListItem */
         PromptListItem: {
+            /**
+             * Content Rating
+             * @default
+             */
+            content_rating: string;
             /**
              * Created At
              * @default
@@ -3733,10 +3877,20 @@ export interface components {
              */
             pose_type: string;
             /**
+             * Rating
+             * @default
+             */
+            rating: string;
+            /**
              * Remote
              * @default false
              */
             remote: boolean;
+            /**
+             * Risk
+             * @default
+             */
+            risk: string;
             /**
              * Search Text
              * @default
@@ -4247,10 +4401,6 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -4464,6 +4614,131 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_asset_overrides_api_assets_overrides_get: {
+        parameters: {
+            query?: {
+                /** @description pose / prompt / image / workflow；空 = 全部 */
+                asset_type?: string;
+                /** @description nsfw / safe；空 = 全部 */
+                rating?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_asset_overrides_api_assets_overrides_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_asset_override_api_assets_overrides__asset_type___asset_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_type: string;
+                asset_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverridePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideRow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asset_stats_api_assets_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     browser_image_api_browser_image_get: {
         parameters: {
             query: {
@@ -5272,6 +5547,8 @@ export interface operations {
                 tag_match?: string;
                 /** @description 逗号分隔的历史 id，只取这些记录 */
                 ids?: string;
+                /** @description nsfw / safe / pending；空 = 全部 */
+                content_rating?: string;
             };
             header?: never;
             path?: never;
@@ -5457,6 +5734,8 @@ export interface operations {
                 tag_ids?: string;
                 missing?: boolean;
                 tag_match?: string;
+                /** @description nsfw / safe / pending；空 = 全部 */
+                content_rating?: string;
             };
             header?: never;
             path?: never;
@@ -5498,6 +5777,8 @@ export interface operations {
                 orientation?: string;
                 missing?: string;
                 tag_match?: string;
+                /** @description nsfw / safe / pending；空 = 全部 */
+                content_rating?: string;
             };
             header?: never;
             path?: never;
@@ -6391,6 +6672,8 @@ export interface operations {
                 fragment_match?: string;
                 /** @description 关键词需命中碎片正文 */
                 fragment_kw?: string;
+                /** @description 内容分级：nsfw / safe / pending（待确认）；空 = 全部 */
+                content_rating?: string;
             };
             header?: never;
             path?: never;
