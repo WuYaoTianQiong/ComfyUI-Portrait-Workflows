@@ -211,3 +211,10 @@ workflows/脚本/_abtest/
 # 一次性工作流节点 dump（可从对应 JSON 重新生成）
 workflows/_tmp_wf.txt
 
+# 实测对比图与 agent 会话记忆（仅本机证据留存，与 _abtest/ 同策，不入库）
+workflows/文档/对比/
+workflows/脚本/_*cmp_*.png
+
+# CodeBuddy 会话记忆目录
+workflows/.workbuddy/
+
