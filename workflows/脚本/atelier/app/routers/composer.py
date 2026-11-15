@@ -26,8 +26,9 @@ from app.routers.jobs import (
     find_job_by_idempotency,
 )
 from app.config import settings
+from app.services.asset_meta import prompt_rating, prompt_ratings, is_hidden_in_safe_mode
 from app.services.fragment_syntax import (
-    FRAGMENT_TYPES, contains_nsfw_keyword, parse,
+    FRAGMENT_TYPES, parse,
 )
 from app.services import atomic_pilot
 from app.services.costume_policy import (
@@ -119,9 +120,10 @@ def _get_fragment_data(
     def content_key(ftype, content):
         return f"{ftype}||{content}"
 
+    overrides = prompt_ratings()
     for r in rows:
-        # 安全模式：整条提示词隐藏（其下所有碎片一起消失），只按 tags/note 判定。
-        if safe_mode and contains_nsfw_keyword(r.tags, r.note):
+        # 安全模式：显式 18+ 与「待确认」整条隐藏（其下所有碎片一起消失）。
+        if safe_mode and is_hidden_in_safe_mode(prompt_rating(r, overrides)):
             continue
         excluded = r.id in excluded_ids
         fragments = parse(r.prompt)
@@ -229,8 +231,9 @@ def get_random_recipe(
     excluded_ids = set(
         _prompt_ids_with_tag_name(RANDOM_EXCLUDE_TAG).scalars()
     )
+    overrides = prompt_ratings()
     for row in Prompt.select().order_by(Prompt.id.desc()):
-        if safe_mode and contains_nsfw_keyword(row.tags, row.note):
+        if safe_mode and is_hidden_in_safe_mode(prompt_rating(row, overrides)):
             continue
         if safe_mode and has_explicit_content(row.prompt):
             continue

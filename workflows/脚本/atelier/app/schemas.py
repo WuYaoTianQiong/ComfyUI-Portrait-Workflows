@@ -88,6 +88,8 @@ class HistoryItem(BaseModel):
     captured_at: str = ""
     source: str = ""
     prompt_name: str = ""
+    # 内容分级（nsfw / pending / safe）：派生值 —— 图片覆盖 > 来源提示词 > 安全
+    content_rating: str = "safe"
     prompt_params: Optional[dict[str, Any]] = None
     categories: list[CategoryRef] = Field(default_factory=list)
     tags: list[TagRef] = Field(default_factory=list)
@@ -158,6 +160,8 @@ class PromptListItem(BaseModel):
     is_pinned: bool = False
     rating: Optional[int] = None
     usage_count: int = 0
+    #: 统一内容分级：nsfw / safe / pending（待确认）
+    content_rating: str = ""
 
 
 class PromptListResponse(BaseModel):

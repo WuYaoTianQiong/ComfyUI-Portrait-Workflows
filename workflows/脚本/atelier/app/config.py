@@ -89,6 +89,33 @@ def _resolve_pose_extra_dir(library_root: Path, explicit: Path | None) -> Path |
     return None
 
 
+def _resolve_pose_vnccs_dir(library_root: Path, explicit: Path | None) -> Path | None:
+    """第三姿势来源（VNCCS PoseLibrary）根目录。
+
+    显式 `ATELIER_POSE_VNCCS_DIR` 优先；未配置时按 ComfyUI custom_nodes 常见
+    落点自动探测；都没有则返回 None（不加载该来源）。只认带
+    `repositories.user.json` 或 `local_user_poses/` 的目录。
+    """
+    if explicit is not None:
+        path = Path(explicit).expanduser()
+        if not path.is_absolute():
+            path = library_root / path
+        return path.absolute()
+
+    candidates = (
+        library_root.parent.parent / "custom_nodes" / "ComfyUI_VNCCS_Utils" / "PoseLibrary",
+        library_root.parent / "custom_nodes" / "ComfyUI_VNCCS_Utils" / "PoseLibrary",
+        library_root.parent.parent / "ComfyUI_VNCCS_Utils" / "PoseLibrary",
+    )
+    for path in candidates:
+        try:
+            if (path / "repositories.user.json").is_file() or (path / "local_user_poses").is_dir():
+                return path.absolute()
+        except OSError:
+            continue
+    return None
+
+
 def _resolve_hair_character_dir(
     library_root: Path, explicit: Path | None
 ) -> Path | None:
@@ -270,6 +297,9 @@ class Settings(BaseSettings):
     #: 第二姿势来源（pose-studio-lite）根；None = 禁用。
     #: `ATELIER_POSE_EXTRA_DIR` 显式覆盖；未配置时按 reference-assets 常见落点自动探测。
     pose_extra_dir: Path | None = None
+    #: 第三姿势来源（VNCCS PoseLibrary）根；None = 禁用。
+    #: `ATELIER_POSE_VNCCS_DIR` 显式覆盖；未配置时按 custom_nodes 常见落点自动探测。
+    pose_vnccs_dir: Path | None = None
     #: 角色创作库精选服装（全量 783 件）根；None = 禁用。
     #: `ATELIER_COSTUME_CHARACTER_DIR` 显式覆盖；未配置时自动探测。
     costume_character_dir: Path | None = None
@@ -317,6 +347,7 @@ class Settings(BaseSettings):
             self.library_root, self.comfyui_root, self.reference_root
         )
         self.pose_extra_dir = _resolve_pose_extra_dir(self.library_root, self.pose_extra_dir)
+        self.pose_vnccs_dir = _resolve_pose_vnccs_dir(self.library_root, self.pose_vnccs_dir)
         self.costume_character_dir = _resolve_costume_character_dir(
             self.library_root, self.costume_character_dir
         )

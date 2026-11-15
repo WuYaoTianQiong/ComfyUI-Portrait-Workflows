@@ -25,6 +25,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.config import settings
+from app.services import asset_meta
 from app.services.paths import (
     IMAGE_EXTENSIONS,
     _relative_parts,
@@ -75,7 +76,18 @@ TAB_BY_LIBRARY: dict[str, str] = {
 #: 每个来源有自己的根目录与元数据格式；合并只在内存里发生，不落盘。
 POSE_SOURCE_UPSTREAM = "upstream"
 POSE_SOURCE_PSL = "pose-studio-lite"
+POSE_SOURCE_VNCCS = "vnccs"
 PSL_ID_PREFIX = "psl-"
+VNCCS_ID_PREFIX = "vnccs-"
+
+#: VNCCS 姿势包：顶层目录 → (id 标签, 展示名)。未列出的目录按目录名兜底。
+VNCCS_REPO_META: dict[str, tuple[str, str]] = {
+    "local_user_poses": ("user", "用户姿势"),
+    "MIUProject__MySuperPoseRepo": ("miu-super", "MIU 超级姿势"),
+    "MIUProject__VNCCS_PoseLibrary_Main": ("miu-main", "MIU 主姿势库"),
+    "Totemistyk__Ballet_PoseStudio": ("ballet", "芭蕾姿势"),
+    "Totemistyk__General_Poses_PoseStudio": ("general", "通用姿势"),
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +105,8 @@ class PoseSource:
 POSE_SOURCE_BASELINES = {
     POSE_SOURCE_UPSTREAM: 1439,
     POSE_SOURCE_PSL: 280,
+    # VNCCS 与 qwen21 的姿势包是同一份数据（文件名与哈希一致），只索引一份。
+    POSE_SOURCE_VNCCS: 136,
 }
 
 #: 服装库的第二来源：角色创作库精选 60 件（本地只读包，带署名）。
@@ -187,17 +201,7 @@ PSL_PAIR_POSITION = {
 }
 
 
-#: 姿势可用性备注（2026-11-07 40 + 28 样本实测，见验证文档 §13.7 / §13.9）。
-#: 键为完整条目 ID；有备注即 `usable=False`：仍可手动选择，但列表降权、随机候选排除。
-POSE_USABILITY_NOTES: dict[str, str] = {
-    "psl-D046": "姿势不跟随：3/3 样本被模型改成并排站",
-    "psl-D042": "姿势跟随不稳定：2/4 样本未复现单脚后踢",
-}
-
-
-def _pose_usability(item_id: str) -> tuple[bool, str]:
-    note = POSE_USABILITY_NOTES.get(item_id, "")
-    return (not note, note)
+#: 姿势可用性备注已迁到 `asset_overrides`（迁移 v10）；这里不再保留硬编码。
 
 
 def _upstream_composition(group: str) -> str:
@@ -513,7 +517,8 @@ def _to_record(library: str, obj: dict[str, Any]) -> dict[str, Any] | None:
             else None
         )
 
-    usable, usable_note = _pose_usability(item_id) if library == "pose" else (True, "")
+    #: 可用性 / 人数风险的默认值由 asset_overrides 覆盖层提供（迁移 v10 起）
+    usable, usable_note = True, ""
     return {
         **fields,
         "thumb_url": thumb_url,
@@ -577,6 +582,21 @@ def _pose_sources() -> list[PoseSource]:
                 baseline=POSE_SOURCE_BASELINES[POSE_SOURCE_PSL],
             )
         )
+    vnccs = settings.pose_vnccs_dir
+    if vnccs is not None:
+        vnccs = Path(vnccs).expanduser().absolute()
+        sources.append(
+            PoseSource(
+                key=POSE_SOURCE_VNCCS,
+                label="VNCCS 姿势库",
+                root=vnccs,
+                metadata=vnccs,
+                kind="vnccs",
+                id_prefix=VNCCS_ID_PREFIX,
+                has_depth=False,
+                baseline=POSE_SOURCE_BASELINES[POSE_SOURCE_VNCCS],
+            )
+        )
     return sources
 
 
@@ -617,7 +637,8 @@ def _psl_to_record(source: PoseSource, obj: dict[str, Any]) -> dict[str, Any] | 
     thumb_rel = str(obj.get("thumb") or obj.get("file") or "").strip()
     image_rel = str(obj.get("file") or "").strip()
     subtitle = " · ".join(part for part in [raw_id, angle] if part)
-    usable, usable_note = _pose_usability(item_id)
+    #: 可用性默认 True；VNCCS 等来源在记录构造时显式给 False。
+    usable, usable_note = True, ""
     return {
         "id": item_id,
         "library": "pose",
@@ -671,11 +692,108 @@ def _log_source_count(source: PoseSource, count: int) -> None:
     logger.info("姿势来源 %s 加载完成：%d 条", source.label, count)
 
 
+def _slug(value: str) -> str:
+    """把目录名收敛成 id 片段：字母数字与中文保留，其余替换为 `-`。"""
+    out = "".join(ch if ch.isalnum() else "-" for ch in str(value or ""))
+    return out.strip("-").lower() or "misc"
+
+
+def _tree_mtime(path: Path) -> int | None:
+    """目录树内最新 mtime；新增 / 替换姿势文件后缓存能失效。"""
+    try:
+        latest = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    for child in path.rglob("*"):
+        try:
+            stamp = child.stat().st_mtime_ns
+        except OSError:
+            continue
+        if stamp > latest:
+            latest = stamp
+    return latest
+
+
+def _source_mtime(source: PoseSource) -> int | None:
+    if source.kind == "vnccs":
+        return _tree_mtime(source.root)
+    return _mtime_ns(source.metadata)
+
+
+def _vnccs_records(source: PoseSource) -> list[dict[str, Any]]:
+    """VNCCS PoseLibrary → 统一姿势 DTO。
+
+    该包只有骨骼 JSON 与白模 webp 预览，没有名称 / 分类元数据：
+    - `name` 取文件名；
+    - `group` 取顶层仓库包（`VNCCS_REPO_META` 映射中文）；
+    - 默认 `usable=False`：预览图能否作为出图参考尚未实测，先不进入候选池。
+    """
+    records: list[dict[str, Any]] = []
+    root = source.root
+    for path in sorted(root.rglob("*.webp")):
+        relative = path.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        parts = relative.parts
+        repo = parts[0] if len(parts) > 1 else ""
+        tag, label = VNCCS_REPO_META.get(
+            repo, (_slug(repo or "misc"), repo or "VNCCS"),
+        )
+        category = parts[1] if len(parts) > 2 else ""
+        facet = "" if category in ("", "Uncategorized") else category
+        stem = path.stem
+        item_id = (
+            f"{source.id_prefix}{tag}-{_slug(facet)}-{stem}"
+            if facet
+            else f"{source.id_prefix}{tag}-{stem}"
+        )
+        search_text = " ".join(part for part in (item_id, stem, label, facet) if part)
+        records.append({
+            "id": item_id,
+            "library": "pose",
+            "name": stem,
+            "subtitle": " · ".join(part for part in (tag, facet) if part),
+            "number": "",
+            "group": label,
+            "facet": facet,
+            "angle": "",
+            "tags": [label],
+            "keywords": "",
+            "source": source.key,
+            "source_label": source.label,
+            "composition": COMPOSITION_UNKNOWN,
+            "pose_type": "未分类",
+            "style": "标准",
+            "thumb_url": _image_url("pose", item_id, "thumb"),
+            "image_url": _image_url("pose", item_id, "image"),
+            "depth_url": None,
+            "depth_thumb_url": None,
+            "hot": False,
+            "featured": False,
+            "nsfw": False,
+            "has_depth": False,
+            "remote": False,
+            "source_url": None,
+            #: 默认不参与出图；实测通过后在姿势页签逐条打开
+            "usable": False,
+            "usable_note": "VNCCS 白模预览：尚未实测，默认不参与出图",
+            "search_text": search_text,
+            "_search": search_text.lower(),
+            "_thumb_rel": relative.as_posix(),
+            "_image_rel": relative.as_posix(),
+            "_root": source.root,
+            "_has_depth": False,
+            "_source": source.key,
+            "_source_label": source.label,
+        })
+    return records
+
+
 def _load_pose_source(source: PoseSource) -> list[dict[str, Any]]:
     """加载单个姿势来源并缓存；图片根/深度能力/来源标记随记录下发。"""
     if source.root is None:
         return []
-    mtime = _mtime_ns(source.metadata)
+    mtime = _source_mtime(source)
     if mtime is None:
         if source.kind == "upstream":
             logger.warning("姿势来源 %s 数据文件不存在：%s", source.label, source.metadata)
@@ -688,32 +806,37 @@ def _load_pose_source(source: PoseSource) -> list[dict[str, Any]]:
         if cached and cached.mtime_ns == mtime:
             return cached.items
 
-    try:
-        raw = json.loads(source.metadata.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        logger.warning("姿势来源 %s 读取/解析失败：%s", source.label, exc)
-        return []
-    rows = raw.get("items") if source.kind == "psl" and isinstance(raw, dict) else raw
-    if not isinstance(rows, list):
-        logger.warning("姿势来源 %s 顶层结构不是数组/items：%s", source.label, source.metadata)
-        return []
+    if source.kind == "vnccs":
+        records = _vnccs_records(source)
+    else:
+        try:
+            raw = json.loads(source.metadata.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("姿势来源 %s 读取/解析失败：%s", source.label, exc)
+            return []
+        rows = raw.get("items") if source.kind == "psl" and isinstance(raw, dict) else raw
+        if not isinstance(rows, list):
+            logger.warning(
+                "姿势来源 %s 顶层结构不是数组/items：%s", source.label, source.metadata,
+            )
+            return []
 
-    records: list[dict[str, Any]] = []
-    for obj in rows:
-        if not isinstance(obj, dict):
-            continue
-        record = (
-            _psl_to_record(source, obj)
-            if source.kind == "psl"
-            else _to_record("pose", obj)
-        )
-        if record is None:
-            continue
-        record["_root"] = source.root
-        record["_has_depth"] = source.has_depth
-        record["_source"] = source.key
-        record["_source_label"] = source.label
-        records.append(record)
+        records = []
+        for obj in rows:
+            if not isinstance(obj, dict):
+                continue
+            record = (
+                _psl_to_record(source, obj)
+                if source.kind == "psl"
+                else _to_record("pose", obj)
+            )
+            if record is None:
+                continue
+            record["_root"] = source.root
+            record["_has_depth"] = source.has_depth
+            record["_source"] = source.key
+            record["_source_label"] = source.label
+            records.append(record)
 
     _log_source_count(source, len(records))
     with _LOCK:
@@ -729,7 +852,7 @@ def _load_pose_merged() -> list[dict[str, Any]]:
     """合并所有姿势来源；任一来源 mtime 变化即重建合并缓存。"""
     sources = _pose_sources()
     stamps = tuple(
-        (str(source.metadata), _mtime_ns(source.metadata)) for source in sources
+        (str(source.metadata), _source_mtime(source)) for source in sources
     )
     key = ("__pose_merged__", "pose")
     stamp = hash(stamps)
@@ -1010,12 +1133,65 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _apply_override(
+    record: dict[str, Any], override: Any | None
+) -> dict[str, Any]:
+    """把覆盖层叠到只读记录上，返回副本（不污染按 mtime 缓存的原始数据）。
+
+    `rating` 是统一可见性口径；`nsfw` 保留给既有筛选 / 前端，恒等于
+    `rating == 'nsfw'`，避免两套字段漂移。
+    """
+    nsfw = bool(record.get("nsfw"))
+    rating = asset_meta.RATING_NSFW if nsfw else asset_meta.RATING_SAFE
+    usable = record.get("usable", True)
+    usable_note = record.get("usable_note", "")
+    risk = record.get("risk", "")
+    if override is not None:
+        if override.rating in asset_meta.VALID_RATINGS:
+            rating = override.rating
+            nsfw = rating == asset_meta.RATING_NSFW
+        if override.usable is not None:
+            usable = bool(override.usable)
+            usable_note = override.usable_note or ""
+        if override.risk:
+            risk = override.risk
+    return {
+        **record,
+        "nsfw": nsfw,
+        "rating": rating,
+        "usable": usable,
+        "usable_note": usable_note,
+        "risk": risk,
+    }
+
+
+def _items_with_overrides(library: str) -> list[dict[str, Any]]:
+    overrides = asset_meta.overrides_map(library)
+    return [
+        _apply_override(record, overrides.get(str(record.get("id"))))
+        for record in _load(library)
+    ]
+
+
 def _visible(record: dict[str, Any]) -> bool:
     return settings.reference_allow_nsfw or not record["nsfw"]
 
 
 def _visible_items(library: str) -> list[dict[str, Any]]:
-    return [r for r in _load(library) if _visible(r)]
+    return [r for r in _items_with_overrides(library) if _visible(r)]
+
+
+def rating_counts(library: str = "pose") -> dict[str, int]:
+    """按统一分级统计某库条数（不受 18+ 总闸影响，供管理视图使用）。"""
+    items = _items_with_overrides(library)
+    counts = {
+        "total": len(items),
+        asset_meta.RATING_NSFW: 0,
+        asset_meta.RATING_SAFE: 0,
+    }
+    for record in items:
+        counts[record["rating"]] += 1
+    return counts
 
 
 def _public(record: dict[str, Any]) -> dict[str, Any]:
@@ -1045,7 +1221,7 @@ def _facet_values(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]
 def library_stats() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for library in LIBRARIES:
-        all_items = _load(library)
+        all_items = _items_with_overrides(library)
         visible = [r for r in all_items if _visible(r)]
         source_stats: list[dict[str, Any]] | None = None
         if library == "pose":
@@ -1163,7 +1339,10 @@ def query_items(
 
 def get_item(library: str, item_id: str) -> dict[str, Any] | None:
     record = _find_record(library, item_id)
-    if record is None or not _visible(record):
+    if record is None:
+        return None
+    record = _apply_override(record, asset_meta.get_override(library, item_id))
+    if not _visible(record):
         return None
     return _public(record)
 
@@ -1192,7 +1371,7 @@ def find_item_by_path(raw_path: str) -> dict[str, str] | None:
         # 外链服装只有远端缓存，没有稳定的本地素材路径，不参与反查
         if library == "costume-anime":
             continue
-        for record in _load(library):
+        for record in _items_with_overrides(library):
             if not _visible(record) or record.get("remote"):
                 continue
             item_id = str(record.get("id") or "")
@@ -1287,7 +1466,10 @@ def resolve_image(library: str, item_id: str, kind: str) -> Path:
     if kind not in IMAGE_KINDS:
         raise ReferenceImageError(404, "不支持的图片类型")
     record = _find_record(library, item_id)
-    if record is None or not _visible(record):
+    if record is None:
+        raise ReferenceImageError(404, "参考条目不存在")
+    record = _apply_override(record, asset_meta.get_override(library, item_id))
+    if not _visible(record):
         raise ReferenceImageError(404, "参考条目不存在")
     if record["remote"]:
         # 外链库没有本地深度图：按 §3.3「kind 未命中 → 404」处理，不与"外链不提供本地图"混用。

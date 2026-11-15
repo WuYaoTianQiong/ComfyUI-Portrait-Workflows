@@ -547,18 +547,17 @@ def test_psl_taxonomy_mapping():
     assert rl._psl_pose_type_style(duo, "pair") == ("背向坐位", "性感")
 
 
-def test_pose_usability_notes_mark_known_unstable_poses():
-    """D046（0/3）与 D042（2/4）实测不稳定：标记不可用并带原因；其余默认可用。"""
-    usable, note = rl._pose_usability("psl-D046")
-    assert usable is False
-    assert "姿势不跟随" in note
+def test_pose_usability_and_risk_come_from_overrides_not_code(ref_root):
+    """可用性 / 人数风险已迁到覆盖表（迁移 v10），代码里不再有硬编码表。
 
-    usable, note = rl._pose_usability("psl-D042")
-    assert usable is False
-    assert "姿势跟随不稳定" in note
-
-    assert rl._pose_usability("psl-D026") == (True, "")
-    assert rl._pose_usability("P001_front") == (True, "")
+    记录构造只给默认值（可用、无风险），真实判定由 `asset_overrides` 叠加；
+    契约用例见 `tests/test_asset_overrides.py`。
+    """
+    assert not hasattr(rl, "_pose_usability")
+    assert not hasattr(rl, "POSE_USABILITY_NOTES")
+    records = rl._load("pose")
+    assert all(record["usable"] is True for record in records if record["source"] != "vnccs")
+    assert all(not record.get("risk") for record in records)
 
 
 def test_pose_extra_image_path_is_scoped(api, ref_root, pose_extra_root):

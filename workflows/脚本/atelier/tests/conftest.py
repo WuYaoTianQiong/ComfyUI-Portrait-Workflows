@@ -61,6 +61,7 @@ client = TestClient(app, raise_server_exceptions=False)
 _TABLES = [
     # 顺序 = 先删子表再删父表，否则外键约束会拦住（template_fragments → prompts/templates）
     "file_tombstones",
+    "asset_overrides",
     "prompt_categories",
     "prompt_tags",
     "entity_tags",

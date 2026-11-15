@@ -14,6 +14,7 @@ from app.models import (
     PromptCategory, PromptTag, auto_classify_prompt, get_or_create_system_category,
 )
 from app.services.fragment_syntax import parse
+from app.services import asset_meta
 from app.services.image_meta import get_image_metadata
 from app.services.tagging import set_prompt_tags_by_ids, split_tags, sync_prompt_tags
 
@@ -172,7 +173,7 @@ def _prompt_ids_with_tag_text(value: str, exact: bool = False):
 
 def _build_prompt_query(
     search, tag, category_id, tag_ids, sort, order, tag_match="all",
-    fragment_types="", fragment_match="has", fragment_kw="",
+    fragment_types="", fragment_match="has", fragment_kw="", content_rating="",
 ):
     """构造提示词筛选 + 排序后的查询（不含分页），供列表、定位、批量替换共用，保证三者一致。"""
     query = Prompt.select()
@@ -219,6 +220,12 @@ def _build_prompt_query(
                 for tid in tag_id_list:
                     query = query.where(_has(tid))
     # ================================================
+
+    # 内容分级：nsfw / safe / pending（待确认），口径见 services/asset_meta
+    if content_rating:
+        rated_ids = asset_meta.prompt_ids_by_rating(content_rating)
+        # 空集合必须显式变成假条件，避免 peewee 空 in_ 行为不确定
+        query = query.where(Prompt.id.in_(rated_ids) if rated_ids else (Prompt.id < 0))
 
     # ======== 排序逻辑 ========
     # 兼容旧版 sort 参数 + 新增 order 参数
@@ -286,17 +293,21 @@ def list_prompts(
     fragment_types: str = Query("", description="碎片类型，逗号分隔（如 人物面部,人物服饰）"),
     fragment_match: str = Query("has", description="has=含有所选类型, only=仅含所选类型"),
     fragment_kw: str = Query("", description="关键词需命中碎片正文"),
+    content_rating: str = Query(
+        "", description="内容分级：nsfw / safe / pending（待确认）；空 = 全部"
+    ),
 ):
     """搜索提示词列表，支持排序和分页"""
     query = _build_prompt_query(
         search, tag, category_id, tag_ids, sort, order, tag_match,
-        fragment_types, fragment_match, fragment_kw,
+        fragment_types, fragment_match, fragment_kw, content_rating,
     )
     total = query.count()
     
     offset = (page - 1) * page_size
     rows = query.offset(offset).limit(page_size)
 
+    overrides = asset_meta.prompt_ratings()
     prompts = []
     for r in rows:
         prompts.append({
@@ -314,6 +325,7 @@ def list_prompts(
             "rating": r.rating,
             "usage_count": r.usage_count,
             # ========================================
+            "content_rating": asset_meta.prompt_rating(r, overrides),
         })
     return {"prompts": prompts, "total": total, "page": page, "page_size": page_size}
 

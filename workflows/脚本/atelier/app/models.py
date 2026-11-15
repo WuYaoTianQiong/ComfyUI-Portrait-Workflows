@@ -226,6 +226,31 @@ class EntityTag(BaseModel):
         )
 
 
+class AssetOverride(BaseModel):
+    """资产元数据覆盖层：18+ 分级 / 姿势可用性 / 双人人数风险。
+
+    上游素材（JSON 与图片）只读，人工判定全部落在这张表：
+    - `asset_type`：参考库名（pose/costume/portrait/hair/costume-anime）
+      以及 `prompt` / `image` / `workflow`；
+    - `asset_key`：参考库条目 id、提示词/图片主键、工作流库内路径；
+    - `rating`：`nsfw` / `safe` / NULL（NULL = 继承素材自身默认）。
+    """
+    id = AutoField()
+    asset_type = TextField()
+    asset_key = TextField()
+    rating = TextField(null=True)
+    usable = BooleanField(null=True)
+    usable_note = TextField(default="")
+    risk = TextField(default="")
+    updated_at = DateTimeField(constraints=[SQL("DEFAULT CURRENT_TIMESTAMP")])
+
+    class Meta:
+        table_name = "asset_overrides"
+        indexes = (
+            (("asset_type", "asset_key"), True),
+        )
+
+
 def inherit_prompt_taxonomy(history_id: int, force: bool = False) -> int:
     """将来源提示词【当前】的分类/标签【快照拷贝】到图片。
     仅新增、绝不删除（尊重用户后续手动调整）。
@@ -463,6 +488,7 @@ def _ensure_tables():
     db.create_tables([Category, Tag, PromptCategory, PromptTag], safe=True)
     db.create_tables([ImageCategory, ImageTag, EntityTag], safe=True)
     db.create_tables([Template, TemplateFragment, FileTombstone], safe=True)
+    db.create_tables([AssetOverride], safe=True)
 
 
 # v1 迁移完成后必须存在的列：迁移里所有 `_migrate_column` 都靠"ALTER 报错就算已存在"
@@ -722,6 +748,107 @@ def _migrate_v8_job_idempotency(database):
     )
 
 
+def _migrate_v9_asset_overrides(database):
+    """v9：把提示词上显式的 `18+` 标签迁移成覆盖表分级。
+
+    只迁移「18+」这一个显式标签；命中「内衣 / 比基尼 / 泳装」等关键词的条目不迁移，
+    由 UI 以「待确认」态展示，避免把普通时装误判成 18+。标签文本保持原样。
+    """
+    try:
+        rows = database.execute_sql(
+            "SELECT DISTINCT et.entity_id FROM entity_tags et "
+            "JOIN tags t ON t.id = et.tag_id "
+            "WHERE et.entity_type = 'prompt' AND t.name = '18+'"
+        ).fetchall()
+    except Exception:
+        return  # 老库没有 entity_tags / tags 时跳过，下次启动重试
+    for (prompt_id,) in rows:
+        database.execute_sql(
+            "INSERT OR IGNORE INTO asset_overrides "
+            "(asset_type, asset_key, rating, usable, usable_note, risk, updated_at) "
+            "VALUES ('prompt', ?, 'nsfw', NULL, '', '', CURRENT_TIMESTAMP)",
+            (str(prompt_id),),
+        )
+
+
+#: 迁移 v10 种子数据：姿势可用性（原 reference_library.POSE_USABILITY_NOTES）。
+_POSE_USABILITY_SEEDS: dict[str, str] = {
+    "psl-D046": "姿势不跟随：3/3 样本被模型改成并排站",
+    "psl-D042": "姿势跟随不稳定：2/4 样本未复现单脚后踢",
+}
+
+#: 迁移 v10 种子数据：双人姿势人数风险（原 frontend slotView.PAIR_POSE_RISK，按精确 id）。
+_PAIR_POSE_RISK_SEEDS: dict[str, str] = {
+    "psl-D003": "multi",
+    "pair60_P063_front": "multi",
+    "psl-D005": "multi",
+    "pair60_P020_front": "multi",
+    "pair60_P030_front": "multi",
+    "pair60_P044_front": "multi",
+    "pair60_P005_front": "multi",
+    "psl-D040": "multi",
+    "pair60_P049_diag": "missing",
+    "psl-D011": "missing",
+    "psl-D028": "missing",
+    "pair60_P032_front": "missing",
+    "pair60_P042_front": "missing",
+    "pair60_P049_front": "missing",
+    "pair60_P004_front": "missing",
+    "pair60_P006_front": "missing",
+    "psl-D037": "unstable",
+    "pair60_P002_diag": "unstable",
+    "pair60_P042_diag": "unstable",
+    "pair60_P055_diag": "unstable",
+    "pair60_P057_diag": "unstable",
+    "psl-D008": "unstable",
+    "psl-D017": "unstable",
+    "psl-D034": "unstable",
+    "psl-D049": "unstable",
+    "psl-D035": "unstable",
+    "psl-D023": "unstable",
+    "psl-D025": "unstable",
+    "psl-D031": "unstable",
+    "pair60_P062_front": "unstable",
+    "psl-D006": "unstable",
+    "pair60_P041_front": "unstable",
+    "pair60_P053_front": "unstable",
+    "pair60_P013_front": "unstable",
+    "pair60_P015_front": "unstable",
+    "pair60_P018_front": "unstable",
+}
+
+
+def _migrate_v10_pose_metrics(database):
+    """v10：姿势可用性与双人人数风险从代码常量迁到覆盖表。
+
+    合并语义（不是纯 INSERT OR IGNORE）：已存在的人工判定永远优先，只补它
+    还没填的字段 —— 用户先标了 18+ 的条目不会因此丢掉人数风险；用户明确改过
+    的 `usable` / `usable_note` / `risk` 也不会被种子覆盖回原值。
+    """
+    for key, note in _POSE_USABILITY_SEEDS.items():
+        database.execute_sql(
+            "INSERT INTO asset_overrides "
+            "(asset_type, asset_key, rating, usable, usable_note, risk, updated_at) "
+            "VALUES ('pose', ?, NULL, 0, ?, '', CURRENT_TIMESTAMP) "
+            "ON CONFLICT(asset_type, asset_key) DO UPDATE SET "
+            "usable = CASE WHEN asset_overrides.usable IS NULL "
+            "THEN excluded.usable ELSE asset_overrides.usable END, "
+            "usable_note = CASE WHEN asset_overrides.usable_note = '' "
+            "THEN excluded.usable_note ELSE asset_overrides.usable_note END",
+            (key, note),
+        )
+    for key, risk in _PAIR_POSE_RISK_SEEDS.items():
+        database.execute_sql(
+            "INSERT INTO asset_overrides "
+            "(asset_type, asset_key, rating, usable, usable_note, risk, updated_at) "
+            "VALUES ('pose', ?, NULL, NULL, '', ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(asset_type, asset_key) DO UPDATE SET "
+            "risk = CASE WHEN asset_overrides.risk = '' "
+            "THEN excluded.risk ELSE asset_overrides.risk END",
+            (key, risk),
+        )
+
+
 # 有序迁移列表：(版本号, 说明, 函数)。已发布的条目不要再修改。
 MIGRATIONS = [
     (1, "v4.x 基线：gen_history 部分唯一索引 + prompt_params/favorite/captured_at/"
@@ -739,6 +866,10 @@ MIGRATIONS = [
         lambda database: _migrate_v7_category_system_key(database)),
     (8, "任务幂等键独立成列 + 唯一索引，防并发双击重复建 job",
         lambda database: _migrate_v8_job_idempotency(database)),
+    (9, "资产元数据覆盖层：提示词显式 18+ 标签迁移为覆盖表分级",
+        lambda database: _migrate_v9_asset_overrides(database)),
+    (10, "姿势可用性与双人人数风险从代码常量迁到覆盖表",
+        lambda database: _migrate_v10_pose_metrics(database)),
 ]
 
 

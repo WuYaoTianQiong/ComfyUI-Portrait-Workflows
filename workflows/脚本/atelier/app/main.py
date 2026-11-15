@@ -177,6 +177,7 @@ from app.routers.composition import router as composition_router
 from app.routers.templates import router as templates_router
 from app.routers.system import router as system_router
 from app.routers.editor import router as editor_router
+from app.routers.assets import router as assets_router
 from app.routers.reference_library import router as reference_library_router
 from app.routers.reference_upload import router as reference_upload_router
 from app.routers.reference_sheet import router as reference_sheet_router
@@ -194,6 +195,7 @@ app.include_router(composition_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
 app.include_router(editor_router, prefix="/api")
+app.include_router(assets_router, prefix="/api")
 
 # AI 参考图库：只读素材层。开关关闭时不注册路由（/api/reference/* 直接 404），
 # 回滚只需要 ATELIER_REFERENCE_ENABLED=0，无数据库变更。

@@ -86,6 +86,10 @@ class ReferenceItem(BaseModel):
     hot: bool = False
     featured: bool = False
     nsfw: bool = False
+    #: 统一内容分级（nsfw / safe）；由 asset_overrides 覆盖层决定，`nsfw` 与它保持同步
+    rating: str = ""
+    #: 仅 pose：实测的双人姿势人数风险（multi / missing / unstable）
+    risk: str = ""
     #: 该条目是否有深度变体；pose-studio-lite 等第二来源为 false
     has_depth: bool = False
     #: 仅 pose：可用性标记（`false` = 实测姿势不跟随，仍可手动选）
