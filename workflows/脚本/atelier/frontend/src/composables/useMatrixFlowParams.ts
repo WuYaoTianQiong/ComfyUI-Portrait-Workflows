@@ -38,5 +38,14 @@ export function useMatrixFlowParams() {
     return out
   }
 
-  return { flowParamsFor, overrides }
+  /** 统一条件：把同一比例/档位一次写到多个流；各流仍各存各的记忆。 */
+  function setRatio(paths: readonly string[], ratio: string) {
+    for (const path of paths) flowParamsFor(path).ratio.value = ratio
+  }
+
+  function setTier(paths: readonly string[], tier: string) {
+    for (const path of paths) flowParamsFor(path).tier.value = tier
+  }
+
+  return { flowParamsFor, overrides, setRatio, setTier }
 }

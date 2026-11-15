@@ -39,6 +39,20 @@ function wf(path: string, name: string) {
 const WORKFLOWS = [wf('/wf/a.json', 'A_文生图.json'), wf('/wf/b.json', 'B_文生图.json')]
 const EDIT_WF = { ...wf('/wf/edit.json', '编辑.json'), image_slots: 1 }
 
+/** 只支持部分比例的门派：用来验证统一比例时「不支持就单独提示」而不是静默改写。 */
+function wfWithRatios(path: string, name: string, ratios: string[]) {
+  const base = wf(path, name)
+  const size_preview: Record<string, Record<string, { width: number; height: number }>> = {}
+  for (const [tier, byRatio] of Object.entries(base.size_preview)) {
+    const sizes = byRatio as Record<string, { width: number; height: number }>
+    size_preview[tier] = Object.fromEntries(ratios.map((r) => [r, sizes[r] ?? sizes['2:3']]))
+  }
+  return { ...base, params: { ...base.params, aspect_ratios: ratios }, size_preview }
+}
+
+const U1 = wfWithRatios('/wf/u1.json', 'U1_文生图.json', ['2:3', '3:2'])
+const U2 = wfWithRatios('/wf/u2.json', 'U2_文生图.json', ['2:3'])
+
 /** 测试环境的 localStorage 不完整，给一个最小可用版。 */
 function stubStorage(extra: Record<string, string> = {}) {
   const store: Record<string, string> = {
@@ -99,7 +113,7 @@ describe('PromptTrialPanel 试跑工作台', () => {
       if (path.startsWith('/api/images')) {
         return { items: [{ id: 555, filename: 'trial.png', subfolder: '' }], total: 1 }
       }
-      return { workflows: [...WORKFLOWS, EDIT_WF], default: '/wf/a.json' }
+      return { workflows: [...WORKFLOWS, EDIT_WF, U1, U2], default: '/wf/a.json' }
     })
     stubStorage()
     // useSettings 是模块级单例，模块加载时就读过一次 localStorage，直接赋值。
@@ -269,5 +283,46 @@ describe('PromptTrialPanel 试跑工作台', () => {
     expect(link).toBeTruthy()
     expect(link![1]).toEqual({ image_ids: [555], prompt_id: 999 })
     expect(wrapper.emitted('created')?.[0]).toEqual([999])
+  })
+
+  it('持久化里的失效路径不再占一行（改名/删除后的旧路径）', async () => {
+    stubStorage({
+      'pb.trialMatrix': JSON.stringify({
+        enabled: true,
+        paths: ['/wf/a.json', '/wf/已改名.json', '/wf/已删除.json'],
+        align: 'native',
+      }),
+    })
+    const wrapper = await mountPanel()
+
+    expect(wrapper.findAll('.flow-row')).toHaveLength(1)
+    expect(wrapper.findAll('.wf-chip')).toHaveLength(1)
+  })
+
+  it('统一比例/分辨率一次设全部，不支持的流保持原值并单独提示', async () => {
+    stubStorage({
+      'pb.trialMatrix': JSON.stringify({ enabled: true, paths: ['/wf/u1.json', '/wf/u2.json'], align: 'native' }),
+    })
+    const wrapper = await mountPanel()
+
+    const selects = wrapper.findAll('.bulk select')
+    await selects[0].setValue('3:2')
+    await selects[1].setValue('0.5x')
+    await flushPromises()
+
+    // U2 只有 2:3：保持原值，并且提示是哪一档没吃到
+    expect(wrapper.findAll('.skip-line').map((n) => n.text()).join('\n'))
+      .toContain('U2 文生图 不支持 3:2，保持 2:3')
+
+    await wrapper.find('.big-text').setValue('统一条件')
+    await wrapper.findAll('.counts button')[0].trigger('click')
+    await findButton(wrapper, '跑')!.trigger('click')
+    await flushPromises()
+
+    const sent = bodies()
+    const u1 = sent.find((b) => b.workflow_path === '/wf/u1.json')!
+    const u2 = sent.find((b) => b.workflow_path === '/wf/u2.json')!
+    expect([u1.aspect_ratio, u1.quality]).toEqual(['3:2', '0.5x'])
+    expect([u2.aspect_ratio, u2.quality]).toEqual(['2:3', '0.5x'])
   })
 })

@@ -17,9 +17,14 @@ import { useGenerate } from '../composables/useGenerate'
 import { usePromptMatrix } from '../composables/usePromptMatrix'
 import { useImagePreview, resolveHistoryItems } from '../composables/useImagePreview'
 import { useToast } from '../composables/useToast'
+import { availableTiers } from '../composables/useWorkflowMatrix'
+import { CANONICAL_RATIOS, QUALITY_SCALES } from '../composables/useWorkflowCaps'
+import { normalizeQualityKey } from '../composables/useWorkflowQuality'
+import { workflowDisplayName } from '../composables/recipeModel'
 import { linkImagesToPrompt } from '../api/images'
 import { apiGet } from '../api/client'
 import type { HistoryItem, JobSnapshot } from '../api/types'
+import type { WorkflowRow } from '../composables/useWorkflows'
 import type { MatrixAlign, MatrixImage } from '../composables/useWorkflowMatrix'
 import type { MatrixBatch } from '../composables/usePromptMatrix'
 
@@ -64,7 +69,8 @@ const { workflows, allWorkflows } = useWorkflows()
  * 逐流参数的读写句柄：比例/画质都沿用「按工作流记忆」的同一份存储，
  * 计划层与逐流行读到的是同一组 ref，改一行只影响那一个工作流。
  */
-const { overrides: flowOverrides } = useMatrixFlowParams()
+const flowParams = useMatrixFlowParams()
+const { overrides: flowOverrides } = flowParams
 
 const { queue, error: runError, submitAndTrack, trackQueued } = useGenerate('prompt-trial', { queue: true })
 
@@ -151,10 +157,128 @@ const matrix = usePromptMatrix({
   },
 })
 
+/**
+ * 选择器里看不到的流（文件改名 / 被隐藏 / 已删除）不该继续占一行：
+ * 持久化的 paths 可能比现有工作流旧，芯片按可见列表反查会自然消失，
+ * 逐流参数行却是按原始 paths 铺的，不清理就会多出几行点不动的空行。
+ */
+const knownPaths = computed(() => new Set(workflows.value.map((wf) => wf.path)))
+const pickedPaths = computed(() => matrix.paths.filter((path) => knownPaths.value.has(path)))
+
+watch(
+  [() => workflows.value.map((wf) => wf.path).join('\n'), () => matrix.paths],
+  () => {
+    if (!workflows.value.length || !matrix.paths.length) return
+    if (pickedPaths.value.length !== matrix.paths.length) matrix.setPaths(pickedPaths.value)
+  },
+  { immediate: true },
+)
+
+const pickedWorkflows = computed(() =>
+  pickedPaths.value
+    .map((path) => allWorkflows.value.find((wf) => wf.path === path))
+    .filter((wf): wf is WorkflowRow => Boolean(wf)),
+)
+
+/** 统一比例：列各流支持比例的并集；不支持的流保持原值并单独提示。 */
+const unionRatios = computed(() => {
+  const set = new Set<string>()
+  for (const wf of pickedWorkflows.value) {
+    if (wf.caps && !wf.caps.orientation) continue
+    for (const ratio of wf.params?.aspect_ratios ?? []) set.add(ratio)
+  }
+  if (!set.size) {
+    // 探测没给 aspect_ratios 时，退回尺寸预演里出现过的比例
+    for (const wf of pickedWorkflows.value) {
+      for (const byRatio of Object.values(wf.size_preview ?? {})) {
+        for (const ratio of Object.keys(byRatio)) if (ratio !== '*') set.add(ratio)
+      }
+    }
+  }
+  return [
+    ...CANONICAL_RATIOS.filter((ratio) => set.has(ratio)),
+    ...[...set].filter((ratio) => !(CANONICAL_RATIOS as readonly string[]).includes(ratio)),
+  ]
+})
+
+/** 统一分辨率：档位统一是相对倍率，各流实际像素仍按自己的 size_preview 求解。 */
+const unionTiers = computed(() => {
+  const set = new Set<string>()
+  for (const wf of pickedWorkflows.value) {
+    const tiers = availableTiers(wf).map(normalizeQualityKey)
+    // 探测没给档位时按「全档可用」处理，与 resolveTier 的兜底一致
+    if (!tiers.length) return QUALITY_SCALES.map((tier) => tier.value)
+    for (const tier of tiers) set.add(tier)
+  }
+  return QUALITY_SCALES.map((tier) => tier.value).filter((value) => set.has(value))
+})
+
+const bulkRatio = ref('')
+const bulkTier = ref('')
+const ratioSkips = ref<string[]>([])
+const tierSkips = ref<string[]>([])
+
+function shortName(wf: WorkflowRow): string {
+  return workflowDisplayName(wf.name).replace(/_/g, ' ')
+}
+
+function storedRatio(wf: WorkflowRow): string {
+  return flowParams.flowParamsFor(wf.path).ratio.value || wf.params?.default_ratio || '原生'
+}
+
+function applyBulkRatio(ratio: string) {
+  bulkRatio.value = ratio
+  ratioSkips.value = []
+  if (!ratio) return
+  const ok: string[] = []
+  for (const wf of pickedWorkflows.value) {
+    const ratios = wf.params?.aspect_ratios ?? []
+    if ((wf.caps && !wf.caps.orientation) || !ratios.length) {
+      ratioSkips.value.push(`${shortName(wf)} 不支持可调比例，保持 ${storedRatio(wf)}`)
+    } else if (!ratios.includes(ratio)) {
+      ratioSkips.value.push(`${shortName(wf)} 不支持 ${ratio}，保持 ${storedRatio(wf)}`)
+    } else {
+      ok.push(wf.path)
+    }
+  }
+  flowParams.setRatio(ok, ratio)
+}
+
+function applyBulkTier(tier: string) {
+  bulkTier.value = tier
+  tierSkips.value = []
+  if (!tier) return
+  const ok: string[] = []
+  for (const wf of pickedWorkflows.value) {
+    const tiers = availableTiers(wf).map(normalizeQualityKey)
+    const current = flowParams.flowParamsFor(wf.path).tier.value
+    if (wf.caps && !wf.caps.quality) {
+      tierSkips.value.push(`${shortName(wf)} 不支持画质档，保持 ${current}`)
+    } else if (tiers.length && !tiers.includes(tier)) {
+      tierSkips.value.push(`${shortName(wf)} 不支持 ${tier}，保持 ${current}`)
+    } else {
+      ok.push(wf.path)
+    }
+  }
+  flowParams.setTier(ok, tier)
+}
+
+/** 与统一值不一致的流数：逐流微调入口直接把差异量报出来，改完不一目了然。 */
+const diffCount = computed(() => {
+  if (!bulkRatio.value && !bulkTier.value) return 0
+  return pickedWorkflows.value.filter((wf) => {
+    const refs = flowParams.flowParamsFor(wf.path)
+    return (
+      (Boolean(bulkRatio.value) && refs.ratio.value !== bulkRatio.value) ||
+      (Boolean(bulkTier.value) && refs.tier.value !== bulkTier.value)
+    )
+  }).length
+})
+
 /** 负向提示词至少有一个勾选流真正生效：逐流能力不同，不能只看单个工作流。 */
 const negativeEffective = computed(() => {
-  if (!matrix.paths.length) return true
-  return matrix.paths.some(
+  if (!pickedPaths.value.length) return true
+  return pickedPaths.value.some(
     (path) => allWorkflows.value.find((w) => w.path === path)?.caps?.negative_effective === true,
   )
 })
@@ -352,17 +476,55 @@ async function onCreated(id: number) {
               @update:selected="matrix.setPaths($event)"
             />
           </div>
-          <div class="flow-params">
-            <FlowParamsRow
-              v-for="path in matrix.paths"
-              :key="path"
-              :path="path"
-              :workflows="allWorkflows"
-            />
-            <p v-if="!matrix.paths.length" class="flow-empty">
-              勾选工作流后，这里逐个设置比例与分辨率。
-            </p>
+          <div class="bulk">
+            <label class="mini-field">
+              <span>统一比例</span>
+              <select
+                :value="bulkRatio"
+                :disabled="!unionRatios.length"
+                :title="unionRatios.length
+                  ? '一次设全部；不支持的流保持原值并在下面单独提示'
+                  : '所选工作流都没有可调比例'"
+                @change="applyBulkRatio(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ unionRatios.length ? '未统一（各流各自记忆）' : '不可调比例' }}</option>
+                <option v-for="ratio in unionRatios" :key="ratio" :value="ratio">{{ ratio }}</option>
+              </select>
+            </label>
+            <label class="mini-field">
+              <span>统一分辨率</span>
+              <select
+                :value="bulkTier"
+                :disabled="!unionTiers.length"
+                :title="unionTiers.length
+                  ? '相对倍率；各流实际像素仍不同，不支持的流保持原值并单独提示'
+                  : '所选工作流都没有可调分辨率'"
+                @change="applyBulkTier(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ unionTiers.length ? '未统一（各流各自记忆）' : '不可调分辨率' }}</option>
+                <option v-for="tier in unionTiers" :key="tier" :value="tier">{{ tier }}</option>
+              </select>
+            </label>
+            <span class="bulk-note">统一入口；个别流不支持时保持原值，并在下方单独提示。</span>
           </div>
+          <p v-for="(line, i) in ratioSkips" :key="`r${i}`" class="skip-line">{{ line }}</p>
+          <p v-for="(line, i) in tierSkips" :key="`t${i}`" class="skip-line">{{ line }}</p>
+          <details v-if="pickedPaths.length" class="flow-tune">
+            <summary>
+              逐流微调 · {{ pickedPaths.length }} 个流<template v-if="diffCount">（{{ diffCount }} 个与统一值不同）</template>
+            </summary>
+            <div class="flow-params">
+              <FlowParamsRow
+                v-for="path in pickedPaths"
+                :key="path"
+                :path="path"
+                :workflows="allWorkflows"
+              />
+            </div>
+          </details>
+          <p v-if="!pickedPaths.length" class="flow-empty">
+            勾选工作流后，这里统一设置比例与分辨率。
+          </p>
           <div class="control-row">
             <label class="mini-field">
               <span>尺寸对齐</span>
@@ -634,6 +796,42 @@ async function onCreated(id: number) {
   align-items: flex-end;
   flex-wrap: wrap;
   gap: var(--gap-sm);
+}
+
+/* 统一条件：一行批量设比例/分辨率，逐流微调收进折叠区 */
+.bulk {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.bulk-note {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
+}
+
+.skip-line {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-lg);
+}
+
+.flow-tune > summary {
+  width: fit-content;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.flow-tune > summary:hover {
+  color: var(--text);
+}
+
+.flow-tune[open] > summary {
+  margin-bottom: var(--gap-xs);
 }
 
 /* 逐流参数：一行一个工作流，选择器宽度不够时自然折行 */
