@@ -12,6 +12,8 @@
 #      不在基线的新巨型文件直接拦。拆分是正路，人工豁免 = 同 commit 更新基线并注明理由。
 #   3) 行尾  单个文件内 \r\n 与裸 \n 混存 = 被脚本批量替换改坏（README 约定：匹配要用 \r?\n）。
 #      暂存模式下代码扩展名 BLOCK，文档类（.md 等）只 WARN；全量模式只扫守卫范围。
+#      web/ 构建产物豁免：vite 从 CRLF 模板构建、注入行是 LF，产物 html 每次构建必然混合，
+#      属生成器行为而非源码损坏（HEAD 实证），守卫只盯源码。
 #
 # 退出码：0 = PASS；1 = FAIL（有 BLOCK 项）。
 
@@ -166,6 +168,14 @@ def mixed_endings(text: str) -> bool:
     return crlf > 0 and bare_lf > 0
 
 
+def atelier_rel_of(rel: str) -> str | None:
+    """仓库根相对路径 → atelier 相对路径；不在 atelier 内返回 None。"""
+    try:
+        return (REPO_ROOT / rel).relative_to(ATELIER_ROOT).as_posix()
+    except ValueError:
+        return None
+
+
 # ---------- 主流程 ----------
 
 def run(staged: bool) -> int:
@@ -202,11 +212,14 @@ def run(staged: bool) -> int:
                 fail(b)
         for m in prunable:
             warn(m)
-        # 3) 行尾：暂存的所有文本文件
+        # 3) 行尾：暂存的所有文本文件（web/ 产物豁免，见文件头注）
         mixed_block, mixed_warn = [], []
         for rel, t in contents.items():
             p = Path(rel)
             if p.suffix.lower() in CRLF_BINARY_SUFFIX or "\x00" in t:
+                continue
+            atelier_rel = atelier_rel_of(rel)
+            if atelier_rel and atelier_rel.startswith("web/"):
                 continue
             if mixed_endings(t):
                 (mixed_block if p.suffix.lower() in CRLF_BLOCK_SUFFIX else mixed_warn).append(rel)
