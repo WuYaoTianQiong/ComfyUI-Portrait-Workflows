@@ -1,0 +1,14 @@
+# 失败基线（known-failures baseline）
+# 口径：每次回归后 `python -m pytest -q`，与本文件做差集；差集新增 = 回归，必须处理，
+#       或更新本文件并注明原因与日期。已有条目消失 = 好事，同步划掉。
+# 建立：2026-11-21 全量 pytest 通过（0 失败 / 1 跳过，skip 为既有已知项）。
+#
+# 已知环境敏感（非 flaky，不算回归）：
+#   tests/test_openapi_snapshot.py::test_openapi_snapshot_is_up_to_date
+#     —— OpenAPI 输出随 FastAPI/Pydantic 版本变化（requirements 未锁这两个库的版本）。
+#     环境升级后该测试再红：先 `python tools/gen_api_types.py` 重生成并入库，再判断是否真回归。
+#     2026-11-21 重生成实例：ValidationError 增 ctx/input、上传参数 format:binary → contentMediaType，
+#     无真实契约变化（对应 commit ee16c9a9 的同类适配）。
+#
+# 当前已知失败：
+(none)
