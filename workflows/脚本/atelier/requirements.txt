@@ -1,4 +1,8 @@
-fastapi>=0.115.0
+# fastapi/pydantic 锁精确版本（生产与 CI 同为 pythoncore-3.12-64 口径）：
+# OpenAPI 输出随 fastapi 版本变，快照测试会跟着漂移（见 baseline-failures.txt / 状态文档 A4）。
+# 升级这两个库属于契约变更：先重生成快照再全量 ci.ps1。
+fastapi==0.115.12
+pydantic==2.11.2
 uvicorn[standard]>=0.30.0
 peewee>=3.17.0
 pydantic-settings>=2.5.0

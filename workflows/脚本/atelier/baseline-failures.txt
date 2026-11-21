@@ -5,13 +5,14 @@
 #
 # 已知环境敏感（非 flaky，不算回归）：
 #   tests/test_openapi_snapshot.py::test_openapi_snapshot_is_up_to_date
-#     根因：本机有两个 Python —— ci.ps1 用的 pythoncore-3.12-64（fastapi 0.115.12）与
-#     WindowsApps 商店版 3.12（fastapi 0.136.3）。OpenAPI 输出随 fastapi 版本变
-#     （0.136 会给 ValidationError 多出 ctx/input、上传参数 format:binary → contentMediaType）。
-#     用 `python`（商店版）直跑 pytest，本测试必红 —— 那是环境差异，不是回归。
-#     规则：快照一律用 ci.ps1 的解释器跑 gen_api_types.py 重生成再入库。
-#     历史案例：ee16c9a9（11-14）、a0992114（11-21 用错解释器，被 ci.ps1 首跑抓出后 91c913dd 批次修正）。
-#     根治选项（待拍板）：统一两个 Python，或在 requirements 锁 fastapi 精确版本。
+#     背景：OpenAPI 输出随 fastapi 版本变；本机曾有双 Python —— 生产/CI 的
+#     pythoncore-3.12-64（fastapi 0.115.12）与商店版 3.12（fastapi 0.136.3，只在交互
+#     shell 的 `python` 里命中）。2026-11-21 已根治：requirements.txt 锁
+#     fastapi==0.115.12 / pydantic==2.11.2（以生产在跑的为准，不给生产引升级风险），
+#     且快照测试失败消息自带「当前解释器 + 库版本」诊断。
+#     规则：快照一律用 ci.ps1 的解释器重生成再入库；用商店版 `python` 直跑若遇本测试
+#     红，看断言消息里的解释器事实——那是环境差异，不是回归。
+#     历史案例：ee16c9a9（11-14）、a0992114（11-21 用错解释器，被 ci.ps1 首跑抓出）。
 #
 # 当前已知失败：
 (none)
