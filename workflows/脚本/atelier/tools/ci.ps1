@@ -5,7 +5,9 @@
 #
 # 七道关，缺一不可：
 #   1) pytest            —— 后端契约/行为用例（迁移、标签、CRUD、upsert 语义）
-#   2) 硬编码颜色守护    —— frontend/src/**/*.vue 的 <style> 块里十六进制色值必须为 0
+#   2) 守卫三层          —— guard_limits.py --all：.vue <style> 硬编码色值=0、
+#                          >=1500 行巨型文件冻结在 file_size_baseline.txt（只减不增）、
+#                          单文件内 \r\n 与裸 \n 混存=0；另 style_lint.py 升门禁（2026-11-21）
 #   3) 契约类型同步      —— 重新生成 openapi.json/openapi.d.ts，工作区必须无差异
 #   4) vue-tsc --noEmit  —— 前端类型检查（TS strict 只在编辑器里生效过，命令行没人跑）
 #   5) vitest            —— 前端单测/组件测试
@@ -49,37 +51,24 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Step '2' '7' '硬编码颜色守护'
-$colorBaseline = 0
-$vueRoot = Join-Path $root 'frontend\src'
-$hardcodedColors = 0
-$offenders = @()
-if (Test-Path $vueRoot) {
-    foreach ($file in (Get-ChildItem -Path $vueRoot -Recurse -Filter *.vue -File)) {
-        $text = Get-Content -LiteralPath $file.FullName -Raw
-        if ($null -eq $text) { continue }
-        # 只看 <style> 块：<script> 里的色值可能是写库的数据色板
-        $count = 0
-        foreach ($block in [regex]::Matches($text, '(?s)<style[^>]*>(.*?)</style>')) {
-            $count += [regex]::Matches($block.Groups[1].Value, '#[0-9a-fA-F]{3,8}\b').Count
-        }
-        if ($count -eq 0) { continue }
-        $hardcodedColors += $count
-        $offenders += "$($file.Name)($count)"
-    }
-}
-if ($hardcodedColors -gt $colorBaseline) {
-    Write-Host "FAILED: .vue 的 <style> 里还有 $hardcodedColors 处硬编码颜色（基线 $colorBaseline）：$($offenders -join ', ')" -ForegroundColor Red
-    Write-Host '  改法：在 styles/tokens.css 加令牌，页面写 var(--token)' -ForegroundColor Yellow
+Step '2' '7' '守卫：颜色/体量/行尾'
+# 与 pre-commit 共用同一实现（workflows/脚本/atelier/tools/guard_limits.py），口径单一来源：
+#   颜色：.vue <style> 块硬编码色值基线 0（<script> 里的数据色板不算，2026-11-04 口径）；
+#   体量：>=1500 行文件冻结在 tools/file_size_baseline.txt，只减不增，拆分后 --write-baseline 重冻结；
+#   行尾：单文件内 \r\n 与裸 \n 混存 = 被脚本批量替换改坏（README 约定匹配要用 \r?\n）。
+# pre-commit 编辑时层：githooks/pre-commit → guard_limits.py --staged（启用：git config core.hooksPath githooks）。
+& $PY (Join-Path $root 'tools\guard_limits.py') --all
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'FAILED: 守卫（颜色/体量/行尾）' -ForegroundColor Red
     exit 1
 }
-Write-Host "硬编码颜色 $hardcodedColors 处（基线 $colorBaseline）" -ForegroundColor Gray
 
 # 样式事实守护（体检批次 4）：emoji/transition 简写/字阶下限/圆角方言/令牌对比度。
-# 目前只警告不阻断；升级成门禁待拍板（见 文档/归档/atelier_UI_unslop体检_20261114.md §6）。
+# 2026-11-21 升为门禁：当时唯一红灯（PoseManageBar 10.5px）已修成 var(--fs-xs)，红灯清零。
 & $PY tools\style_lint.py
 if ($LASTEXITCODE -ne 0) {
-    Write-Host 'WARNING: style_lint 有红灯（不阻断 CI；升级门禁待拍板）' -ForegroundColor Yellow
+    Write-Host 'FAILED: style_lint 有红灯' -ForegroundColor Red
+    exit 1
 }
 
 $frontend = Join-Path $root 'frontend'

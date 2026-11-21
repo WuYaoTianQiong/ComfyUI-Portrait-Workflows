@@ -1,0 +1,17 @@
+# 巨型文件冻结基线 —— tools/guard_limits.py 的判据
+# 规则：范围(frontend/src + app)内 >= 1500 行的文件逐个冻结，行数只减不增；
+#       新增超阈值文件会被拦。拆分后跑 --write-baseline 重新冻结。
+#       人工豁免：同 commit 更新本文件并在下面注明理由与日期。
+# 排除：*.spec.ts / *.d.ts（生成物）/ __pycache__；.py 仅 app/。
+# 冻结日期：2026-11-21（首次冻结；历史回潮见状态文档 §1.4 守卫小节）
+
+app/routers/images.py	1788
+app/services/reference_library.py	1503
+app/services/workflow_parser.py	1796
+frontend/src/components/BatchReplaceModal.vue	1760
+frontend/src/components/Lightbox.vue	2797
+frontend/src/composables/recipeModel.ts	1730
+frontend/src/composables/useReferenceRecipe.ts	2067
+frontend/src/composables/useReferenceRecipeDraft.ts	1940
+frontend/src/views/PromptView.vue	1521
+frontend/src/views/reference/ReferenceStudioTab.vue	3556

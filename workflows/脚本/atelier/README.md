@@ -168,8 +168,13 @@ python tools\smoke.py        # 真起 uvicorn（库副本 + 临时端口），�
 python tests\e2e\run_e2e.py  # Playwright 过主要页签（含批量超分）
 ```
 
-`tools/ci.ps1` 串起七道关：pytest → 硬编码颜色守护 → 契约类型同步 → vue-tsc → vitest → vite build → smoke（+ E2E）。
+`tools/ci.ps1` 串起七道关：pytest → 守卫（颜色/体量/行尾 + style_lint）→ 契约类型同步 → vue-tsc → vitest → vite build → smoke（+ E2E）。
 **静态检查发现不了启动期崩溃和运行期 500，改完后端必须跑 ci.ps1。**
+
+编辑时守卫（pre-commit，2026-11-21 起）：每次 commit 前自动跑 `tools/guard_limits.py --staged`——
+.vue `<style>` 硬编码色值 = 0、>=1500 行巨型文件冻结在 `tools/file_size_baseline.txt`（只减不增，拆分后 `--write-baseline` 重冻结）、
+单文件 `\r\n` 与裸 `\n` 混存 = 0。首次启用（每台机器一次）：`git config core.hooksPath githooks`；
+人工确认无误跳过单次用 `git commit --no-verify` 并注明。pytest 已知失败基线落盘 `baseline-failures.txt`，回归与它做差集。
 
 ---
 
@@ -182,3 +187,4 @@ python tests\e2e\run_e2e.py  # Playwright 过主要页签（含批量超分）
 - 仓库文件是 **CRLF**，写脚本做批量替换时要用 `\r?\n` 兼容，别只匹配 `\n`。
 - 前端 API 类型**不手写**：`schemas.py` → `frontend/openapi.json` → `frontend/src/api/openapi.d.ts` → `types.ts`（别名层）。
   改了 `schemas.py` 或路由后执行 `python tools/gen_api_types.py`；忘记时 `tests/test_openapi_snapshot.py` 会失败。
+- 提交前 pre-commit 自动跑编辑时守卫（颜色/体量/行尾，见「测试与 CI」）；体量超 1500 行先拆分，不放宽基线。

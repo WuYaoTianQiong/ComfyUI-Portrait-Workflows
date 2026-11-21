@@ -2683,8 +2683,8 @@ onMounted(async () => {
 }
 
 .char-remove:hover {
-  border-color: var(--danger, #cf6679);
-  color: var(--danger, #cf6679);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* B 组单人三槽：固定 3 列，不跟随 A 的 4 列（B 没有第 4 张） */

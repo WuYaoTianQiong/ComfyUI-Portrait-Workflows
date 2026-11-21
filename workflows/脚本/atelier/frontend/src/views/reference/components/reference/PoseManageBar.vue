@@ -84,7 +84,7 @@ const usableTitle = computed(() => {
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: var(--text-body-soft);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;

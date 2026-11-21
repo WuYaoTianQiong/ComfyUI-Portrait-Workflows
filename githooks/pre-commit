@@ -1,0 +1,9 @@
+#!/bin/sh
+# 编辑时守卫（V7 §1.10：编辑时钩子优先，CI 兜底）：
+#   硬编码颜色 / 巨型文件冻结 / 混合行尾，只查暂存内容，秒级。
+# 实现：workflows/脚本/atelier/tools/guard_limits.py --staged（口径与 ci.ps1 第 2 关同一实现）。
+# 一次性启用：git config core.hooksPath githooks（每台机器/每个 clone 一次）。
+# 人工确认无问题后可跳过单次：git commit --no-verify（并在提交信息注明原因）。
+root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$root" || exit 1
+"${PYTHON:-python}" "workflows/脚本/atelier/tools/guard_limits.py" --staged || exit 1
