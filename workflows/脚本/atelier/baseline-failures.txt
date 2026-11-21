@@ -1,14 +1,17 @@
 # 失败基线（known-failures baseline）
-# 口径：每次回归后 `python -m pytest -q`，与本文件做差集；差集新增 = 回归，必须处理，
-#       或更新本文件并注明原因与日期。已有条目消失 = 好事，同步划掉。
-# 建立：2026-11-21 全量 pytest 通过（0 失败 / 1 跳过，skip 为既有已知项）。
+# 口径：回归用 CI 同款解释器跑（ci.ps1 的 $PY = pythoncore-3.12-64），与本文件做差集；
+#       差集新增 = 回归，必须处理，或更新本文件并注明原因与日期。已有条目消失 = 好事，同步划掉。
+# 建立：2026-11-21（pythoncore 口径下全量 pytest 0 失败 / 1 跳过，skip 为既有已知项）。
 #
 # 已知环境敏感（非 flaky，不算回归）：
 #   tests/test_openapi_snapshot.py::test_openapi_snapshot_is_up_to_date
-#     —— OpenAPI 输出随 FastAPI/Pydantic 版本变化（requirements 未锁这两个库的版本）。
-#     环境升级后该测试再红：先 `python tools/gen_api_types.py` 重生成并入库，再判断是否真回归。
-#     2026-11-21 重生成实例：ValidationError 增 ctx/input、上传参数 format:binary → contentMediaType，
-#     无真实契约变化（对应 commit ee16c9a9 的同类适配）。
+#     根因：本机有两个 Python —— ci.ps1 用的 pythoncore-3.12-64（fastapi 0.115.12）与
+#     WindowsApps 商店版 3.12（fastapi 0.136.3）。OpenAPI 输出随 fastapi 版本变
+#     （0.136 会给 ValidationError 多出 ctx/input、上传参数 format:binary → contentMediaType）。
+#     用 `python`（商店版）直跑 pytest，本测试必红 —— 那是环境差异，不是回归。
+#     规则：快照一律用 ci.ps1 的解释器跑 gen_api_types.py 重生成再入库。
+#     历史案例：ee16c9a9（11-14）、a0992114（11-21 用错解释器，被 ci.ps1 首跑抓出后 91c913dd 批次修正）。
+#     根治选项（待拍板）：统一两个 Python，或在 requirements 锁 fastapi 精确版本。
 #
 # 当前已知失败：
 (none)

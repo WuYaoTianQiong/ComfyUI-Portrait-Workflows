@@ -2347,7 +2347,10 @@ export interface components {
         };
         /** Body_upload_reference_api_reference_uploads_post */
         Body_upload_reference_api_reference_uploads_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** CategoryCreate */
@@ -4398,10 +4401,6 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
