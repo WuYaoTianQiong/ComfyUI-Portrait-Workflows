@@ -19,5 +19,7 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['src/**/*.spec.ts'],
     globals: true,
+    // happy-dom 的全局 localStorage 是无方法空对象（见 src/test/setup.ts 头注）
+    setupFiles: ['src/test/setup.ts'],
   },
 })
