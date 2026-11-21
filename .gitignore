@@ -215,6 +215,13 @@ workflows/_tmp_wf.txt
 workflows/文档/对比/
 workflows/脚本/_*cmp_*.png
 
+# 2026-11-15 身材分级实测战役脚本与产物（与 _abtest/ 同策：结论已入文档/碎片库，
+# 脚本为 r1/r6 一次性专用，仅本机证据留存，不入库）
+workflows/脚本/_bench_body/
+
 # CodeBuddy 会话记忆目录
 workflows/.workbuddy/
+
+# 工具 ACL 恢复产物（acl-backup/acl-report，2026-11-21 归类为工具缓存）
+/.acl-recovery/
 
