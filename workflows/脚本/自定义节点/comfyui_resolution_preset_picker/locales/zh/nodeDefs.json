@@ -3,7 +3,8 @@
     "display_name": "画幅与倍率（下拉）",
     "inputs": {
       "aspect_ratio": { "name": "宽高比" },
-      "megapixels": { "name": "像素量(MiP)" },
+      "base_megapixels": { "name": "原生像素量(MiP)" },
+      "quality": { "name": "画质倍率" },
       "multiple": { "name": "取整倍数" }
     },
     "outputs": {

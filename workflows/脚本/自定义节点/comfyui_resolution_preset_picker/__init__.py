@@ -53,13 +53,14 @@ NODE_CLASS_MAPPINGS = {
 
 
 # ---------------------------------------------------------------------------
-# 画幅与倍率（下拉）：把 ComfyUI 原生 ResolutionSelector 的 megapixels 数字框
-# 换成下拉。宽高由「比例 × 像素量」算出，单位与 ResolutionSelector 一致：
-# megapixels 是 MiP（1024×1024），不是 100 万像素。
+# 画幅与倍率（下拉）：比例 + 原生像素量 + 画质倍率，三个都是下拉。
 #
-# 为什么要有它：原生节点要手动填 2.4 这种浮点，还得心算会出多大；两个下拉
-# 一眼可选。API 里 aspect_ratio / megapixels / multiple 的名称与原生节点一致，
-# Atelier 的 resolver 识别逻辑不用改（megapixels 仍是浮点数）。
+# 为什么不用原生 ResolutionSelector：它的 megapixels 是手填浮点，单位是 MiP
+# （1024×1024），还得自己心算会出多大。这里拆成「原生像素量（该工作流本来多大）」
+# × 「画质倍率（0.25x~2.0x）」——倍率与 Atelier 的画质档同名同义，1:1 对得上。
+#
+# 面积 = 原生面积 × 倍率²，所以 1.5x 是 2.25 倍面积，不是 1.5 倍。
+# API 里同时保留 aspect_ratio / multiple 名称，Atelier 的 resolver 识别照旧可用。
 # ---------------------------------------------------------------------------
 import math
 
@@ -74,19 +75,31 @@ _ASPECTS = {
     "21:9 (Cinematic)": (21, 9),
 }
 
-# 下拉里的像素量档位（MiP）。0.55 草稿 ~ 3.0 大图，覆盖 12G 卡的实际可用区间。
-MEGAPIXEL_STEPS = [0.4, 0.55, 0.75, 1.0, 1.25, 1.5, 1.8, 2.16, 2.34, 2.4, 3.0, 4.0]
+# 原生像素量（MiP）。1.5 / 2.16 / 2.34 / 2.4 是本机 5 个文生图工作流的实际原生值。
+BASE_MEGAPIXELS = [1.0, 1.25, 1.5, 1.8, 2.16, 2.34, 2.4, 3.0, 4.0]
+
+# 与 Atelier app/services/quality_keys.py 的 QUALITY_SCALES 保持一致
+QUALITY_SCALES = {
+    "0.25x": 0.25,
+    "0.5x": 0.5,
+    "0.75x": 0.75,
+    "1.0x": 1.0,
+    "1.25x": 1.25,
+    "1.5x": 1.5,
+    "2.0x": 2.0,
+}
 
 
 class ResolutionSizer:
-    """比例 + 倍率两个下拉 → 直接输出 width / height"""
+    """比例 × 原生像素量 × 画质倍率 → width / height"""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "aspect_ratio": (list(_ASPECTS.keys()), {"default": "9:16 (Portrait Widescreen)"}),
-                "megapixels": (MEGAPIXEL_STEPS, {"default": 2.4}),
+                "base_megapixels": (BASE_MEGAPIXELS, {"default": 2.4}),
+                "quality": (list(QUALITY_SCALES.keys()), {"default": "1.0x"}),
                 "multiple": ("INT", {"default": 8, "min": 1, "max": 256, "step": 1}),
             }
         }
@@ -96,10 +109,11 @@ class ResolutionSizer:
     FUNCTION = "size"
     CATEGORY = "utils"
 
-    def size(self, aspect_ratio, megapixels, multiple=8):
+    def size(self, aspect_ratio, base_megapixels, quality="1.0x", multiple=8):
         a, b = _ASPECTS.get(aspect_ratio, (9, 16))
-        unit = 1024 * 1024
-        w = math.sqrt(float(megapixels) * unit * a / b)
+        scale = QUALITY_SCALES.get(quality, 1.0)
+        mp = float(base_megapixels) * scale * scale
+        w = math.sqrt(mp * 1024 * 1024 * a / b)
         h = w * b / a
         m = max(1, int(multiple))
         return (max(m, int(round(w / m)) * m), max(m, int(round(h / m)) * m))

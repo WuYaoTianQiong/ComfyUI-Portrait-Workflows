@@ -1,0 +1,15 @@
+{
+  "ResolutionSizer": {
+    "display_name": "Aspect & Scale (Dropdown)",
+    "inputs": {
+      "aspect_ratio": { "name": "aspect_ratio" },
+      "base_megapixels": { "name": "base_megapixels(MiP)" },
+      "quality": { "name": "quality(scale)" },
+      "multiple": { "name": "multiple" }
+    },
+    "outputs": {
+      "0": { "name": "width" },
+      "1": { "name": "height" }
+    }
+  }
+}

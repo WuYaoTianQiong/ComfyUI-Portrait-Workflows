@@ -10,6 +10,11 @@ from app.services.comfyui_client import get_object_info
 from app.services.image_formats import convert_heif_to_png, is_heif
 from app.services.prompt_compiler import compile_for_submission
 from app.services.quality_keys import normalize_quality, quality_scale
+from app.services.latent_size import (  # 比例/尺寸纯计算已抽出，见该模块
+    CANONICAL_RATIOS, MAX_FINAL_LONG_SIDE, MAX_LATENT_SIDE, MIN_LATENT_SIDE,
+    _RATIO_VALUES, _cap_latent_to_final_long_side, _closest_ratio,
+    _fit_latent_size, _round_to, compute_aspect_size, normalize_aspect_ratio,
+)
 
 logger = logging.getLogger("atelier.workflow")
 
@@ -57,71 +62,15 @@ _IMAGE_INPUT_KEY_RE = re.compile(r"^(?:images\.image_(\d+)|image(\d+))$")
 #: LoadImage 实际像素尺寸缓存：{(绝对路径, mtime): (width, height) | None}
 _loadimage_size_cache: dict[tuple[str, float], tuple[int, int] | None] = {}
 
-# 项目统一比例；包含 ResolutionSelector 的 8 个选项 + 21:9 的竖版 9:21。
-CANONICAL_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "9:21")
-_RATIO_VALUES = {
-    ratio: int(ratio.split(":")[0]) / int(ratio.split(":")[1]) for ratio in CANONICAL_RATIOS
-}
-
 # ResolutionPresetPicker / ResolutionSelector 的真实选项；都没有 9:21。
 # 固定放大链路（ZIT 1.7×）不允许 App 再用字面量硬塞 9:21：实测 9:16 就已经
 # 有 1/3 底部拼贴，9:21 更差。单程工作流（Qwen/Krea2/Porn）才开放 9:21 扩展。
 NATIVE_PRESET_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9")
 NATIVE_RESOLVER_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9")
 
-# 第二程（post_scale）输出长边上限。超过后 ZIT 用固定 1.7× 硬拉会出现
-# 底部货架/地面拼贴；2048 是 9:16 三 seed 验证过的安全阈值。
-MAX_FINAL_LONG_SIDE = 2048
-
-# 单程 latent 边长上限：写进 EmptyLatentImage 的宽高统一截断到这个范围，
-# 避免高倍率档位把边长推到显存红线。**预演必须用同一个上限**，否则界面标注
-# 会比真实出图虚高（2.0× 长边 4.7k 实际只跑 4096）。
-MAX_LATENT_SIDE = 4096
-MIN_LATENT_SIDE = 256
-
 
 class RatioNotSupported(ValueError):
     """请求的比例超出工作流安全范围（例如 ZIT 预设链路 + 9:21）。"""
-
-
-def normalize_aspect_ratio(value: object) -> str | None:
-    """把 '9:16 (Portrait Widescreen)' / '640x960（2:3）' 归一到 8 个标准比例之一。"""
-    if not isinstance(value, str):
-        return None
-    m = _RATIO_RE.match(value) or _RATIO_RE.search(value)
-    if not m:
-        return None
-    a, b = float(m.group(1)), float(m.group(2))
-    if a <= 0 or b <= 0:
-        return None
-    got = a / b
-    for ratio in CANONICAL_RATIOS:
-        if abs(_RATIO_VALUES[ratio] - got) < 1e-6:
-            return ratio
-    return None
-
-
-def _closest_ratio(width: int, height: int) -> str:
-    if not width or not height:
-        return "1:1"
-    value = width / height
-    return min(CANONICAL_RATIOS, key=lambda r: abs(math.log(value / _RATIO_VALUES[r])))
-
-
-def _round_to(value: float, multiple: int) -> int:
-    return max(multiple, int(round(value / multiple)) * multiple)
-
-
-def compute_aspect_size(ratio: str, megapixels: float, multiple: int = 16,
-                        unit: int = 1_000_000) -> tuple[int, int]:
-    """按目标总像素和比例算宽高；对齐到 multiple，避免 VAE patch 非整除。
-
-    unit 是调用方的 MP 单位：字面量/preset 用 1e6，ResolutionSelector 用 1024²（MiP）。
-    """
-    r = _RATIO_VALUES.get(ratio, 1.0)
-    width = math.sqrt(max(0.01, megapixels) * unit * r)
-    height = width / r
-    return _round_to(width, multiple), _round_to(height, multiple)
 
 
 def _parse_preset(text: object) -> tuple[int, int, str] | None:
@@ -276,8 +225,27 @@ def _latent_info(api_workflow: dict) -> dict | None:
         ratio_raw = src_inputs.get("aspect_ratio") or src_inputs.get("resolution") or \
             src_inputs.get("size")
         ratio = normalize_aspect_ratio(ratio_raw)
-        mp = src_inputs.get("megapixels")
         raw_multiple = _as_int(src_inputs.get("multiple"))
+        # 倍率型节点（ResolutionSizer）：原生像素量 × 画质倍率²，倍率与 Atelier 同名同义
+        base_mp = src_inputs.get("base_megapixels")
+        q_key = src_inputs.get("quality")
+        if ratio and isinstance(base_mp, (int, float)) and not isinstance(base_mp, bool) \
+                and isinstance(q_key, str) and q_key in ("0.25x", "0.5x", "0.75x",
+                                                          "1.0x", "1.25x", "1.5x", "2.0x"):
+            multiple = raw_multiple or 8
+            unit = 1024 * 1024
+            scale = quality_scale(q_key)
+            mp_eff = float(base_mp) * scale * scale
+            width, height = compute_aspect_size(ratio, mp_eff, multiple, unit)
+            return {
+                "mode": "resolver", "id": node_id, "node": node, "src": src,
+                "width": width, "height": height, "megapixels": mp_eff,
+                "ratio": ratio, "multiple": multiple, "unit": unit,
+                "base_megapixels": float(base_mp), "quality_key": q_key,
+                "scale_driven": True,
+            }
+
+        mp = src_inputs.get("megapixels")
         if ratio and isinstance(mp, (int, float)) and not isinstance(mp, bool):
             multiple = raw_multiple or 8  # ResolutionSelector 的默认 multiple 是 8
             unit = 1024 * 1024
@@ -482,16 +450,6 @@ def _snap_to_combo(class_type: str, input_name: str, value: float) -> float:
     if not options or value in options:
         return value
     return min(options, key=lambda o: abs(o - float(value)))
-
-
-def _cap_latent_to_final_long_side(
-    width: float, height: float, post_scale: float, multiple: int,
-) -> tuple[int, int]:
-    """按第二程倍率反推第一程尺寸，保证成品长边不超过 MAX_FINAL_LONG_SIDE。"""
-    if post_scale <= 1.0 or max(width, height) * post_scale <= MAX_FINAL_LONG_SIDE:
-        return int(round(width)), int(round(height))
-    k = MAX_FINAL_LONG_SIDE / (max(width, height) * post_scale)
-    return _round_to(width * k, multiple), _round_to(height * k, multiple)
 
 
 def _reciprocal_ratio(ratio: str) -> str:
@@ -1284,8 +1242,8 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
     for tier in tiers:
         scale = quality_scale(tier)
         target_mp = base_mp * scale * scale
-        if info["mode"] == "resolver":
-            # 下拉档位有限：能用档位表达就吸附，差太多则按字面量算（与注入同一判据）
+        if info["mode"] == "resolver" and not info.get("scale_driven"):
+            # 绝对像素量下拉档位有限：能用档位表达就吸附，差太多则按字面量算
             target_mp = _resolver_mp(
                 (info.get("src") or {}).get("class_type", ""), target_mp)
         if info["mode"] == "resolution":
@@ -1321,35 +1279,6 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
             }
         preview[tier] = per_ratio
     return preview
-
-
-def _fit_latent_size(width: float, height: float, multiple: int) -> tuple[int, int]:
-    """把 latent 宽高收进 [MIN_LATENT_SIDE, MAX_LATENT_SIDE]，越界时**等比**缩放。
-
-    不能只截断超限的那一边：9:16 的 2352×4176 截成 2352×4096 只有 0.574，
-    用户选的比例被悄悄压走样，而档位本来只是相对倍率，少几个像素看不出来。
-    所以越界时整体缩放到长边正好 4096（或短边抬到 256），再对齐 multiple；
-    对齐若又顶出边界就逐格收回。未越界时保持原值，原生尺寸一个像素都不动。
-    """
-    longest, shortest = max(width, height), min(width, height)
-    if MIN_LATENT_SIDE <= shortest and longest <= MAX_LATENT_SIDE:
-        return int(round(width)), int(round(height))
-
-    k = (MAX_LATENT_SIDE / longest) if longest > MAX_LATENT_SIDE \
-        else (MIN_LATENT_SIDE / shortest)
-    out_w = _round_to(width * k, multiple)
-    out_h = _round_to(height * k, multiple)
-    while max(out_w, out_h) > MAX_LATENT_SIDE:
-        if out_w >= out_h:
-            out_w -= multiple
-        else:
-            out_h -= multiple
-    while min(out_w, out_h) < MIN_LATENT_SIDE:
-        if out_w <= out_h:
-            out_w += multiple
-        else:
-            out_h += multiple
-    return out_w, out_h
 
 
 def _set_latent_size(info: dict, width: float, height: float) -> None:
@@ -1431,6 +1360,14 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         picked = _pick_ratio_option(
             _get_combo_options(src.get("class_type", ""), "aspect_ratio"), requested,
         )
+        if info.get("scale_driven"):
+            # 倍率型节点：倍率就是离散档位，1:1 写入，不需要吸附/回退
+            src_inputs["aspect_ratio"] = picked
+            src_inputs["quality"] = quality_key
+            logger.info("分辨率：%s aspect_ratio=%s, quality=%s（原生 %s MiP）",
+                        src.get("class_type"), picked, quality_key,
+                        info.get("base_megapixels"))
+            return
         if picked and isinstance(src_inputs.get("megapixels"), (int, float)):
             width, height = compute_aspect_size(
                 requested, target_mp, info["multiple"], info["unit"],

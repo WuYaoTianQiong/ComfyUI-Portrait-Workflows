@@ -18,6 +18,9 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 WF_DIR = os.path.join(HERE, "..", "通用工作流")
 
+QUALITY_SCALES = {"0.25x": 0.25, "0.5x": 0.5, "0.75x": 0.75,
+                  "1.0x": 1.0, "1.25x": 1.25, "1.5x": 1.5, "2.0x": 2.0}
+
 RATIOS = [("1:1", 1, 1), ("2:3", 2, 3), ("3:2", 3, 2), ("3:4", 3, 4),
           ("4:3", 4, 3), ("9:16", 9, 16), ("16:9", 16, 9), ("21:9", 21, 9)]
 UNIT = 1024 * 1024  # ResolutionSelector 的 megapixels 单位是 MiP
@@ -53,25 +56,24 @@ def table_md(mps, current_mp, current_ratio):
     return "\n".join(lines)
 
 
-def note_t2i(name, ratio, mp, w, h):
-    mps = sorted({0.55, 1.0, 1.5, float(mp), 2.16, 2.4})
-    return """## 改出图尺寸：两个下拉，选完就完
+def note_t2i(name, ratio, base, quality, w, h):
+    return """## 改出图尺寸：三个下拉，选完就完
 
-画幅节点（`ResolutionSizer`，本机自定义节点）有**两个下拉**，不用手填数字：
+画幅节点（`ResolutionSizer`，本机自定义节点）三个下拉，不用手填数字：
 
-- **aspect_ratio**：比例（1:1 / 2:3 / 3:4 / 9:16 / 3:2 / 4:3 / 16:9 / 21:9）
-- **megapixels**：像素量档位（0.4 / 0.55 / 0.75 / 1.0 / 1.25 / 1.5 / 1.8 / 2.16 / 2.34 / 2.4 / 3.0 / 4.0）
-  单位是 MiP＝1024×1024，不是 100 万像素——所以 2.4 实际约 2.52 MP。
+- **宽高比**：1:1 / 2:3 / 3:4 / 9:16 / 3:2 / 4:3 / 16:9 / 21:9
+- **原生像素量**：本工作流的基准像素（当前 **%s MiP**，1.0× 就是它）
+- **画质倍率**：0.25x / 0.5x / 0.75x / **1.0x** / 1.25x / 1.5x / 2.0x
+  ——与 Atelier 的画质档同名同义；**面积按倍率平方走**，1.5× 是 2.25 倍面积
 
-%s
+**当前：%s · %s · %s → %d×%d**
 
-**当前：%s · %s → %d×%d**
+### 怎么选
 
-### 三个常改方向
-
-- 想快（草稿/试构图）：选 **0.55**，约 7~8 s/张
-- 想稳出大图：**2.16 ~ 2.4**（本机 12G 下 2.4 峰值约 11 GB）
-- 只换比例（像素量不变）：只动第一个下拉
+- 草稿/试构图：**0.5x**（约 1/4 像素，7~8 s/张）
+- 正常出图：**1.0x**
+- 要更大：1.25x / 1.5x —— 12G 上 1.5× 起很容易吃满显存，先用 1.25× 试
+- 只换方向：只动第一个下拉，倍率不用碰
 
 ### 两个坑
 
@@ -80,7 +82,7 @@ def note_t2i(name, ratio, mp, w, h):
 2. **本工作流没有 9:21（竖长图）**：`21:9` 出的是横图。真要 9:21，只能把空 latent 的
    width/height 右键 **「转换为输入」** 断开设画幅的连线，再手填 1024×2400 之类；
    或直接在 Atelier 里选 9:21（那边会用字面量下发）。
-""" % (table_md(mps, mp, ratio), ratio, mp, w, h)
+""" % (base, ratio, base, quality, w, h)
 
 
 def note_literal(name, w, h):
@@ -178,22 +180,25 @@ def main():
                     ("EmptyLatentImage", "EmptyFlux2LatentImage")), None)
 
         if name in TARGETS and sel:
-            opt, mp, mult = sel["widgets_values"][0], float(sel["widgets_values"][1]), int(sel["widgets_values"][2])
+            wv = sel["widgets_values"]
+            opt, base, quality, mult = wv[0], float(wv[1]), str(wv[2]), int(wv[3])
             info = ratio_from_option(opt)
             if not info:
                 print("[警告] 比例无法解析:", name, opt)
                 continue
             a, b, tag = info
+            scale = QUALITY_SCALES.get(quality, 1.0)
+            mp = base * scale * scale
             w, h = pixels(a, b, mp, mult)
             old_title = sel.get("title") or ""
             prefix = old_title.split("画幅")[0] if "画幅" in old_title else ""
             # 标题里不写具体像素：改下拉后标题不会跟着变，容易误读；尺寸由节点底部实时画
-            new_title = "%s画幅（比例 + 像素量，底部实时显示尺寸）" % prefix
-            print("%-46s %s -> %d×%d  (title: %s)" % (name, opt, w, h, new_title))
+            new_title = "%s画幅与倍率（底部实时显示尺寸）" % prefix
+            print("%-46s %s · %s · %s -> %d×%d" % (name, tag, base, quality, w, h))
             if args.check:
                 continue
             sel["title"] = new_title
-            append_note(d, note_t2i(name, tag, mp, w, h), sel.get("pos") or [0, 0])
+            append_note(d, note_t2i(name, tag, base, quality, w, h), sel.get("pos") or [0, 0])
 
         elif name in LITERAL and lat:
             w, h = lat["widgets_values"][0], lat["widgets_values"][1]
