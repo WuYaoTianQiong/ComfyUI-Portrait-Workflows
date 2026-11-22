@@ -1,0 +1,26 @@
+{
+  "ResolutionSizer": {
+    "display_name": "画幅与倍率（下拉）",
+    "inputs": {
+      "aspect_ratio": { "name": "宽高比" },
+      "megapixels": { "name": "像素量(MiP)" },
+      "multiple": { "name": "取整倍数" }
+    },
+    "outputs": {
+      "0": { "name": "宽度" },
+      "1": { "name": "高度" }
+    }
+  },
+  "ResolutionPresetPicker": {
+    "display_name": "分辨率预设选择器",
+    "inputs": {
+      "preset": { "name": "画面尺寸" },
+      "base_name": { "name": "文件名基名" }
+    },
+    "outputs": {
+      "0": { "name": "宽度" },
+      "1": { "name": "高度" },
+      "2": { "name": "文件名前缀" }
+    }
+  }
+}

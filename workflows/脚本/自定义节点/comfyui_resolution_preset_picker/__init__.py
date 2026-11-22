@@ -112,3 +112,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ResolutionSizer": "画幅与倍率（下拉）",
 }
 
+# 前端扩展：在节点底部实时显示当前下拉会出的像素（web/size_label.js）
+WEB_DIRECTORY = "./web"

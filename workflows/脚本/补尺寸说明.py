@@ -187,7 +187,8 @@ def main():
             w, h = pixels(a, b, mp, mult)
             old_title = sel.get("title") or ""
             prefix = old_title.split("画幅")[0] if "画幅" in old_title else ""
-            new_title = "%s画幅｜%s · %s → %d×%d" % (prefix, tag, mp, w, h)
+            # 标题里不写具体像素：改下拉后标题不会跟着变，容易误读；尺寸由节点底部实时画
+            new_title = "%s画幅（比例 + 像素量，底部实时显示尺寸）" % prefix
             print("%-46s %s -> %d×%d  (title: %s)" % (name, opt, w, h, new_title))
             if args.check:
                 continue
