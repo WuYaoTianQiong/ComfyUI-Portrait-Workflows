@@ -433,15 +433,33 @@ def _allowed_preset_ratios() -> list[str]:
     return ratios or list(NATIVE_PRESET_RATIOS)
 
 
-def _allowed_resolver_ratios() -> list[str]:
-    """ResolutionSelector 实际支持的比例；拿不到 object_info 时退回静态表。"""
-    options = _get_combo_options("ResolutionSelector", "aspect_ratio")
+def _allowed_resolver_ratios(class_type: str = "ResolutionSelector") -> list[str]:
+    """resolver 类节点实际支持的比例；拿不到 object_info 时退回静态表。
+
+    class_type 默认是原生 ResolutionSelector，也用于本机的 ResolutionSizer
+    （比例/像素量都改成下拉的自定义节点，见 custom_nodes/comfyui_resolution_preset_picker）。
+    """
+    options = _get_combo_options(class_type, "aspect_ratio")
     ratios: list[str] = []
     for option in options:
         ratio = normalize_aspect_ratio(option)
         if ratio and ratio not in ratios:
             ratios.append(ratio)
     return ratios or list(NATIVE_RESOLVER_RATIOS)
+
+
+def _snap_to_combo(class_type: str, input_name: str, value: float) -> float:
+    """把数值吸到该下拉节点的最近档位。
+
+    ResolutionSizer 把 megapixels 做成了下拉（档位是有限的浮点数），Atelier 按
+    画质档算出来的 4.86 这类值不在选项里会被 ComfyUI 校验拒绝，所以写入前先吸附；
+    拿不到 object_info（ComfyUI 未启动）时原值返回，不阻塞离线生成预览。
+    """
+    options = [o for o in _get_combo_options(class_type, input_name)
+               if isinstance(o, (int, float)) and not isinstance(o, bool)]
+    if not options or value in options:
+        return value
+    return min(options, key=lambda o: abs(float(o) - float(value)))
 
 
 def _cap_latent_to_final_long_side(
@@ -1147,7 +1165,8 @@ def detect_workflow_params(api_workflow: dict) -> dict:
         if info["mode"] == "preset":
             params["aspect_ratios"] = _allowed_preset_ratios()
         elif info["mode"] == "resolver" and post_scale > 1.0:
-            params["aspect_ratios"] = _allowed_resolver_ratios()
+            params["aspect_ratios"] = _allowed_resolver_ratios(
+                (info.get("src") or {}).get("class_type", "ResolutionSelector"))
         else:
             params["aspect_ratios"] = list(CANONICAL_RATIOS)
         params["multiple"] = info["multiple"]
@@ -1243,6 +1262,10 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
     for tier in tiers:
         scale = quality_scale(tier)
         target_mp = base_mp * scale * scale
+        if info["mode"] == "resolver":
+            # 下拉档位是有限的，预览必须先吸附，否则标签会比真实出图虚高
+            target_mp = _snap_to_combo(
+                (info.get("src") or {}).get("class_type", ""), "megapixels", target_mp)
         if info["mode"] == "resolution":
             # 比例跟随第一张参考图，只能给像素总量
             preview[tier] = {
@@ -1368,7 +1391,8 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         if info["mode"] == "preset":
             allowed = _allowed_preset_ratios()
         elif info["mode"] == "resolver":
-            allowed = _allowed_resolver_ratios()
+            allowed = _allowed_resolver_ratios(
+                (info.get("src") or {}).get("class_type", "ResolutionSelector"))
         else:
             allowed = None
         if allowed and requested not in allowed:
@@ -1396,7 +1420,8 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
             capped_mp = target_mp if (capped_w, capped_h) == (width, height) \
                 else (capped_w * capped_h) / info["unit"]
             src_inputs["aspect_ratio"] = picked
-            src_inputs["megapixels"] = round(max(0.1, min(16.0, capped_mp)), 3)
+            snapped_mp = _snap_to_combo(src.get("class_type", ""), "megapixels", capped_mp)
+            src_inputs["megapixels"] = round(max(0.1, min(16.0, snapped_mp)), 3)
             logger.info("分辨率：%s aspect_ratio=%s, megapixels=%s",
                         src.get("class_type"), picked, src_inputs["megapixels"])
             return

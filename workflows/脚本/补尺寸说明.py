@@ -55,13 +55,13 @@ def table_md(mps, current_mp, current_ratio):
 
 def note_t2i(name, ratio, mp, w, h):
     mps = sorted({0.55, 1.0, 1.5, float(mp), 2.16, 2.4})
-    return """## 改出图尺寸：只动「画幅」这一个节点
+    return """## 改出图尺寸：两个下拉，选完就完
 
-左边那个 **分辨率** 节点只有两个控件：
+画幅节点（`ResolutionSizer`，本机自定义节点）有**两个下拉**，不用手填数字：
 
-- **aspect_ratio**：比例下拉（1:1 / 2:3 / 3:4 / 9:16 / 3:2 / 4:3 / 16:9 / 21:9）
-- **megapixels**：总像素量。**单位是 MiP＝1024×1024**，不是 100 万像素——
-  填 2.4 实际约 2.52 MP，所以数字和出图尺寸不是直觉换算。
+- **aspect_ratio**：比例（1:1 / 2:3 / 3:4 / 9:16 / 3:2 / 4:3 / 16:9 / 21:9）
+- **megapixels**：像素量档位（0.4 / 0.55 / 0.75 / 1.0 / 1.25 / 1.5 / 1.8 / 2.16 / 2.34 / 2.4 / 3.0 / 4.0）
+  单位是 MiP＝1024×1024，不是 100 万像素——所以 2.4 实际约 2.52 MP。
 
 %s
 
@@ -69,9 +69,9 @@ def note_t2i(name, ratio, mp, w, h):
 
 ### 三个常改方向
 
-- 想快（草稿/试构图）：`megapixels` 改 **0.55**，约 7~8 s/张
-- 想稳出大图：保持 **2.16 ~ 2.4**（本机 12G 下 2.4 峰值约 11 GB）
-- 只换比例（尺寸不变）：只动 `aspect_ratio`，`megapixels` 不用碰
+- 想快（草稿/试构图）：选 **0.55**，约 7~8 s/张
+- 想稳出大图：**2.16 ~ 2.4**（本机 12G 下 2.4 峰值约 11 GB）
+- 只换比例（像素量不变）：只动第一个下拉
 
 ### 两个坑
 
@@ -120,8 +120,12 @@ def append_note(d, text, near_pos):
     for n in d["nodes"]:
         if n.get("type") in ("MarkdownNote", "Note"):
             cur = (n.get("widgets_values") or [""])[0]
-            if SECTION_MARK in cur:
-                cur = cur.split("\n\n---\n\n" + text.split("\n")[0])[0]
+            # 幂等：先砍掉末尾追加过的尺寸小节（标题换过版本也能砍干净）
+            for mark in ("\n\n---\n\n## 改出图尺寸", "\n\n---\n\n## 输出尺寸",
+                         "\n\n---\n\n## 改视频尺寸"):
+                if mark in cur:
+                    cur = cur.split(mark)[0]
+                    break
             n["widgets_values"] = [cur.rstrip() + "\n\n---\n\n" + text]
             w, h = (n.get("size") or [520, 600])[:2]
             n["size"] = [max(w, 520), max(h, 620)]
@@ -168,7 +172,8 @@ def main():
             print("[跳过] 不存在:", name)
             continue
         d = json.load(open(path, encoding="utf-8"))
-        sel = next((n for n in d["nodes"] if n.get("type") == "ResolutionSelector"), None)
+        sel = next((n for n in d["nodes"] if n.get("type") in
+                    ("ResolutionSelector", "ResolutionSizer")), None)
         lat = next((n for n in d["nodes"] if n.get("type") in
                     ("EmptyLatentImage", "EmptyFlux2LatentImage")), None)
 
