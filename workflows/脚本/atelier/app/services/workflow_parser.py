@@ -448,6 +448,21 @@ def _allowed_resolver_ratios(class_type: str = "ResolutionSelector") -> list[str
     return ratios or list(NATIVE_RESOLVER_RATIOS)
 
 
+def _resolver_mp(class_type: str, value: float, tol: float = 0.10) -> float | None:
+    """像素量落到下拉档位：偏差在 tol 内返回吸附值，否则 None（调用方退回字面量）。
+
+    下拉档位是有限集合（ResolutionSizer），而画质档是 0.25x~2.0x 的连续倍率，
+    算出来的 9.6 MiP 这类值没有对应档位。悄悄吸附会让「2.0×」实际出成 4.0 MiP，
+    所以超过容差就不走档位，直接写字面量宽高。
+    """
+    snapped = _snap_to_combo(class_type, "megapixels", value)
+    if not snapped or value <= 0:
+        return None
+    if abs(snapped - value) / value > tol:
+        return None
+    return snapped
+
+
 def _snap_to_combo(class_type: str, input_name: str, value: float) -> float:
     """把数值吸到该下拉节点的最近档位。
 
@@ -455,11 +470,18 @@ def _snap_to_combo(class_type: str, input_name: str, value: float) -> float:
     画质档算出来的 4.86 这类值不在选项里会被 ComfyUI 校验拒绝，所以写入前先吸附；
     拿不到 object_info（ComfyUI 未启动）时原值返回，不阻塞离线生成预览。
     """
-    options = [o for o in _get_combo_options(class_type, input_name)
-               if isinstance(o, (int, float)) and not isinstance(o, bool)]
+    # object_info 会把数值选项序列化成字符串（'2.4'），这里统一还原成 float 再比
+    options: list[float] = []
+    for o in _get_combo_options(class_type, input_name):
+        if isinstance(o, bool):
+            continue
+        try:
+            options.append(float(o))
+        except (TypeError, ValueError):
+            continue
     if not options or value in options:
         return value
-    return min(options, key=lambda o: abs(float(o) - float(value)))
+    return min(options, key=lambda o: abs(o - float(value)))
 
 
 def _cap_latent_to_final_long_side(
@@ -1263,9 +1285,9 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
         scale = quality_scale(tier)
         target_mp = base_mp * scale * scale
         if info["mode"] == "resolver":
-            # 下拉档位是有限的，预览必须先吸附，否则标签会比真实出图虚高
-            target_mp = _snap_to_combo(
-                (info.get("src") or {}).get("class_type", ""), "megapixels", target_mp)
+            # 下拉档位有限：能用档位表达就吸附，差太多则按字面量算（与注入同一判据）
+            target_mp = _resolver_mp(
+                (info.get("src") or {}).get("class_type", ""), target_mp)
         if info["mode"] == "resolution":
             # 比例跟随第一张参考图，只能给像素总量
             preview[tier] = {
@@ -1420,7 +1442,20 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
             capped_mp = target_mp if (capped_w, capped_h) == (width, height) \
                 else (capped_w * capped_h) / info["unit"]
             src_inputs["aspect_ratio"] = picked
-            snapped_mp = _snap_to_combo(src.get("class_type", ""), "megapixels", capped_mp)
+            snapped_mp = _resolver_mp(src.get("class_type", ""), capped_mp)
+            if snapped_mp is None:
+                # 档位表达不了这个像素量（如 2.0× 档要 9.6 MiP 但下拉最高 4.0）：
+                # 退回字面量写宽高，保证真实出图等于画质档，而不是被档位悄悄改小
+                width, height = compute_aspect_size(
+                    requested, target_mp, info["multiple"], info["unit"],
+                )
+                width, height = _cap_latent_to_final_long_side(
+                    width, height, post_scale, info["multiple"],
+                )
+                _set_latent_size(info, width, height)
+                logger.info("分辨率：%s 档位无法表达 %.3f MiP，改用字面量 %dx%d",
+                            src.get("class_type"), target_mp, width, height)
+                return
             src_inputs["megapixels"] = round(max(0.1, min(16.0, snapped_mp)), 3)
             logger.info("分辨率：%s aspect_ratio=%s, megapixels=%s",
                         src.get("class_type"), picked, src_inputs["megapixels"])

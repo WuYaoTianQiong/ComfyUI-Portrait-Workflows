@@ -7,7 +7,7 @@
 
 app/routers/images.py	1788
 app/services/reference_library.py	1503
-app/services/workflow_parser.py	1821
+app/services/workflow_parser.py	1856
 frontend/src/components/BatchReplaceModal.vue	1760
 frontend/src/components/Lightbox.vue	2797
 frontend/src/composables/recipeModel.ts	1730
