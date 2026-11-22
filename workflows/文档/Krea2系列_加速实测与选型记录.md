@@ -265,7 +265,7 @@
 | 文件 | 定位 | 输出 | 耗时 |
 |---|---|---|---|
 | `MoodyKrea2_V8SE_T2I_FP8_1Pass.json` | V8SE 最高画质直出 | 1128x2008（9:16, 2.26MP） | 17.9 s |
-| `PornMaster_Krea2V25_T2I_FP8_1Pass.json` | V25 最高画质直出 | 1192x2112（9:16, 2.52MP） | 36.2 s |
+| `PornMaster_Krea2V4_T2I_INT8_1Pass.json` | Krea2 主力直出（**2026-11-22 起底模为 V4 int8**；原 `PornMaster_Krea2V25_T2I_FP8_1Pass.json` 同名改此名） | 656x984（8 步）**6.1 s** / 1152x2048 **22.5 s**；旧 V25 fp8 同条件 10.1 s / 36.7 s |
 | `图片超分_SeedVR2_7B_源图命名_最高4K实测.json` | 手动超分，下拉切档 | 2K / 4K / 6K… | 12.6~42 s |
 
 ### 已归档到 `历史工作流/`
