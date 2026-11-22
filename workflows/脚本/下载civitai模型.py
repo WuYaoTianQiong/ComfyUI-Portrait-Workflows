@@ -6,12 +6,19 @@
   python 下载civitai模型.py --model-id 2382648 --prefer int8      # 指定版本名关键字
   python 下载civitai模型.py --version-id 3116481 --threads 16     # 直接指定版本 + 线程数
   python 下载civitai模型.py --version-id 3116481 --out D:\\models  # 指定输出目录
+  python 下载civitai模型.py --version-id 3373630 --file int8 --fp int8 --out <dir>  # 多文件版本取指定精度
+  python 下载civitai模型.py --version-id 3373630 --mirror red     # 强制走 civitai.red 镜像入口
 
 要点：
   1. API key 从环境变量 CIVITAI_API_KEY 或就近的 .env 读取（不硬编码）。
   2. 下载端点返回 307 → R2 预签名直链（24 小时有效）。必须手动处理重定向，
      因为自动跟随会把 Authorization 头也带给 R2，导致 AWS 签名校验失败。
   3. 支持多线程 Range 分块 + 断点续传（.partN 文件），完成后校验 SHA256。
+  4. 本机到官方 download 路径的 TLS 握手间歇性被重置（[SSL: UNEXPECTED_EOF_WHILE_READING]），
+     所以直链获取带 12 次重试，且 auto 模式在官方 / civitai.red 两个入口间轮换；
+     两者最终都落到同一个 R2 签名直链。
+  5. 版本内多精度（bf16 / int8 / int4 / fp8）时用 --fp 指明，否则会取默认主文件（常为 24G bf16）。
+  6. 付费版本（paidAccess）拿不到 R2 直链，端点只会 307 回模型页，脚本会明确报错退出。
 """
 import argparse
 import hashlib
@@ -25,8 +32,13 @@ import urllib.request
 
 API = "https://civitai.com/api/v1"
 DL = "https://civitai.com/api/download/models/%s?token=%s"
+# 镜像站（国内加速）：同样的 download 路径，返回的仍是官方 R2 预签名直链
+RED_API = "https://civitai.red/api/v1"
+RED_DL = "https://civitai.red/api/download/models/%s?token=%s"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 CHUNK = 1024 * 1024
+# 本机到 civitai 的 TLS 握手间歇性被重置（UNEXPECTED_EOF），单次失败不代表链路不可用
+SIGNED_RETRIES = 12
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -50,26 +62,43 @@ def find_env(start):
     return None
 
 
-def load_api_key():
-    key = (os.environ.get("CIVITAI_API_KEY") or "").strip()
-    if key:
-        return key
+def env_value(name):
+    """按环境变量 → 就近 .env 的顺序取一个配置值（取不到返回空串）"""
+    val = (os.environ.get(name) or "").strip()
+    if val:
+        return val
     env = find_env(os.path.dirname(os.path.abspath(__file__)))
     if env:
         with open(env, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("CIVITAI_API_KEY="):
+                if line.startswith(name + "="):
                     return line.split("=", 1)[1].strip()
+    return ""
+
+
+def load_api_key():
+    key = env_value("CIVITAI_API_KEY")
+    if key:
+        return key
     sys.exit("[错误] 未找到 CIVITAI_API_KEY（环境变量或 .env）")
 
 
-def api_get(path, key):
-    req = urllib.request.Request(
-        API + path, headers={"Authorization": "Bearer " + key, "User-Agent": UA}
-    )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read().decode("utf-8"))
+def api_get(path, key, retries=8):
+    """读 API；本机链路 TLS 握手约 50% 被重置，所以这里也带重试"""
+    last = None
+    for i in range(retries):
+        req = urllib.request.Request(
+            API + path, headers={"Authorization": "Bearer " + key, "User-Agent": UA}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            last = e
+            if i + 1 < retries:
+                time.sleep(1.5)
+    sys.exit("[错误] 查询 API 失败（已重试 %d 次）：%s: %s" % (retries, type(last).__name__, last))
 
 
 def default_out_dir():
@@ -106,23 +135,49 @@ def pick_file(version, prefer):
     return max(files, key=lambda f: f.get("sizeKB") or 0)
 
 
-def signed_url(version_id, key):
-    url = DL % (version_id, key)
-    try:
-        NO_REDIRECT.open(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60)
-        sys.exit("[错误] 下载端点没有返回重定向，无法获取直链")
-    except urllib.error.HTTPError as e:
-        loc = e.headers.get("Location") or e.headers.get("location") or ""
-        if loc.startswith("http"):
-            return loc
-        if e.code in (301, 302, 303, 307, 308):
-            sys.exit("[错误] 该资产需要浏览器登录（Location=%s）" % loc)
-        sys.exit("[错误] 请求下载端点失败：HTTP %s" % e.code)
-    except Exception as e:
-        sys.exit("[错误] 请求下载端点异常：%s: %s" % (type(e).__name__, e))
+def signed_url(version_id, key, file_id=None, mirror="auto"):
+    """换取 R2 预签名直链。
+
+    mirror: auto（官方优先，失败退镜像）/ official / red
+    file_id: 版本内多精度时用它精确指定文件；不传则取该版本默认主文件（常为 24G bf16）
+    本机实测：download 路径 TLS 握手约 50% 被重置，故带重试；官方与 civitai.red
+    两个入口最终都返回同一个 R2 直链，auto 模式下交替使用以提高命中率。
+    """
+    params = "fileId=%d" % file_id if file_id else ""
+    red_key = env_value("CIVITAI_RED_API_KEY") or key
+    if mirror == "red":
+        attempts = [RED_DL % (version_id, red_key)]
+    elif mirror == "official":
+        attempts = [DL % (version_id, key)]
+    else:
+        attempts = [DL % (version_id, key), RED_DL % (version_id, red_key)]
+
+    last = ""
+    for i in range(SIGNED_RETRIES):
+        url = attempts[i % len(attempts)] + ("&" + params if params else "")
+        try:
+            NO_REDIRECT.open(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60)
+            last = "下载端点没有返回重定向"
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location") or e.headers.get("location") or ""
+            if loc.startswith("http"):
+                return loc
+            if e.code in (401, 403):
+                sys.exit("[错误] 无权限下载（HTTP %d）：付费版本需先购买，或 token 无效" % e.code)
+            if e.code == 404:
+                sys.exit("[错误] HTTP 404：fileId / versionId 组合不存在，检查参数")
+            if e.code in (301, 302, 303, 307, 308):
+                last = "该资产需要购买或浏览器登录（Location=%s）" % loc
+                break  # 权限/门禁问题，重试无意义
+            last = "HTTP %s" % e.code
+        except Exception as e:
+            last = "%s: %s" % (type(e).__name__, e)
+        if i + 1 < SIGNED_RETRIES:
+            time.sleep(1.5)
+    sys.exit("[错误] 获取直链失败，已重试 %d 次：%s" % (SIGNED_RETRIES, last))
 
 
-def remote_size(url, retries=4):
+def remote_size(url, retries=8):
     last = None
     for _ in range(retries):
         try:
@@ -135,11 +190,49 @@ def remote_size(url, retries=4):
         except Exception as e:
             last = e
             time.sleep(2)
-    print("[提示] 远端大小探测失败（%s），改用 API 记录值" % last)
+    print("[提示] 远端大小探测失败（%s），改用 API 记录值（注意：API 值可能与真实体积差几字节）" % last)
     return 0
 
 
-def download_part(url, path, start, end, idx, state, lock, retries=6):
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(8 * 1024 * 1024)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest().upper()
+
+
+def repair_tail(url, target, want_total, retries=20):
+    """分块按探测到的 total 切分；若 total 比真实体积少几字节，合并后尾部会缺。
+    这里按真实总长补拉尾部字节，避免为一个字节重下 13 GB。"""
+    have = os.path.getsize(target)
+    if not want_total or have >= want_total:
+        return have
+    print("[补齐] 文件比远端短 %d 字节，补拉尾部 %d-%d" % (want_total - have, have, want_total - 1))
+    for i in range(retries):
+        have = os.path.getsize(target)
+        if have >= want_total:
+            break
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": UA, "Range": "bytes=%d-%d" % (have, want_total - 1)}
+            )
+            with urllib.request.urlopen(req, timeout=180) as r, open(target, "ab") as f:
+                while True:
+                    chunk = r.read(CHUNK)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception as e:
+            print("[提示] 尾部补拉第 %d 次失败：%s" % (i + 1, e))
+            time.sleep(2)
+    return os.path.getsize(target)
+
+
+def download_part(url, path, start, end, idx, state, lock, retries=12):
     total = end - start + 1
     have0 = os.path.getsize(path) if os.path.exists(path) else 0
     if have0:
@@ -196,6 +289,9 @@ def main():
     ap.add_argument("--file", default="", help="文件名关键字（多文件版本时用）")
     ap.add_argument("--out", default="", help="输出目录，默认 ComfyUI/models/diffusion_models")
     ap.add_argument("--threads", type=int, default=8, help="线程数，默认 8")
+    ap.add_argument("--fp", default="", help="版本内精度（多文件版本必填）：int8 / fp8 / int4 / bf16")
+    ap.add_argument("--mirror", default="auto", choices=["auto", "official", "red"],
+                    help="直链入口：默认 auto（官方优先，失败退 civitai.red 镜像）")
     args = ap.parse_args()
 
     if not args.model_id and not args.version_id:
@@ -211,7 +307,7 @@ def main():
         version = pick_version(args.model_id, key, args.prefer)
 
     ver_name = version.get("name") or "?"
-    f = pick_file(version, args.file)
+    f = pick_file(version, args.file or args.fp)
     filename = f.get("name") or ("civitai_%s.safetensors" % version.get("id"))
     size_kb = f.get("sizeKB") or 0
     sha256_want = ((f.get("hashes") or {}).get("SHA256") or "").upper()
@@ -230,9 +326,14 @@ def main():
         print("[跳过] 文件已存在且体积一致")
         return
 
-    url = signed_url(version.get("id"), key)
+    # 版本内多精度时用 API 给的 fileId 精确定位文件（fp=int8 这类参数会 404）
+    file_id = f.get("id")
+    url = signed_url(version.get("id"), key, file_id=file_id, mirror=args.mirror)
     total = remote_size(url) or int(size_kb * 1024)
     print("直链   : 已获取（R2 预签名，24 小时有效）")
+    if size_kb and abs(total / 1024 - size_kb) > 2048:
+        print("[警告] 直链体积(%.2f GB)与 API 记录(%.2f GB)不一致，可能落到了别的精度文件"
+              % (total / 1073741824, size_hint))
 
     threads = max(1, min(args.threads, 32))
     seg = (total + threads - 1) // threads
@@ -285,6 +386,17 @@ def main():
         return
 
     ok = merge(parts, target, sha256_want)
+    if not ok:
+        # merge 已按分块写完；此时若仍对不上，多半是探测到的 total 比真实体积少几字节
+        want_total = remote_size(url)
+        if want_total and os.path.getsize(target) < want_total:
+            repair_tail(url, target, want_total)
+            got = sha256_file(target)
+            if sha256_want and got == sha256_want.upper():
+                print("[校验] 补齐尾部后 SHA256 一致：%s" % got)
+                ok = True
+            else:
+                print("[警告] 补齐后仍不匹配：期望 %s，实际 %s" % (sha256_want, got))
     if ok:
         for p in parts:
             if os.path.exists(p):
