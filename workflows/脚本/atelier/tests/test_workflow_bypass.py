@@ -130,7 +130,7 @@ def test_missing_required_defaults_are_filled(monkeypatch):
             ("10", "11"), "12", "9",
         ),
         (
-            "PornMaster_Krea2V25_T2I_FP8_1Pass.json",
+            "PornMaster_Krea2V4_T2I_INT8_1Pass.json",
             ("175", "176"), "30", "63",
         ),
     ],

@@ -34,7 +34,7 @@ WORKFLOW_DIRS = (
 )
 
 WORKFLOWS = {
-    "porn": "PornMaster_Krea2V25_T2I_FP8_1Pass.json",
+    "porn": "PornMaster_Krea2V4_T2I_INT8_1Pass.json",
     "moody": "MoodyKrea2_V8SE_T2I_FP8_1Pass.json",
 }
 
