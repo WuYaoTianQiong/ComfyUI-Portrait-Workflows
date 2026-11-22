@@ -56,13 +56,35 @@ const emit = defineEmits<{
 }>()
 
 const TEXT_KEY = 'pb.trialDraft'
+/** 除文本外的面板设置：关掉弹窗再打开要能接着用，不能每次都回默认。 */
+const SETTINGS_KEY = 'pb.trialSettings'
 const settings = useSettings()
 const toast = useToast()
 const queryClient = useQueryClient()
 
+interface TrialSettings {
+  workflowPath?: string
+  orientation?: string
+  seed?: string
+  count?: number
+  lock?: boolean
+  linkArchive?: boolean
+}
+
+function readSettings(): TrialSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    return raw ? (JSON.parse(raw) as TrialSettings) : {}
+  } catch {
+    return {}
+  }
+}
+
+const savedSettings = readSettings()
+
 /** 本面板自己的工作流/方向：改这里不该顺带改掉详情页的单跑默认。 */
-const workflowPath = ref(settings.workflowPath.value)
-const orientation = ref(settings.orientation.value)
+const workflowPath = ref(savedSettings.workflowPath || settings.workflowPath.value)
+const orientation = ref(savedSettings.orientation || settings.orientation.value)
 const { workflows, allWorkflows } = useWorkflows()
 
 /**
@@ -89,8 +111,8 @@ const initialDraft = readDraft()
 const promptText = ref(initialDraft.prompt)
 const negative = ref(initialDraft.negative)
 const negativeExpanded = ref(Boolean(initialDraft.negative))
-const seedInput = ref('')
-const linkArchive = ref(false)
+const seedInput = ref(savedSettings.seed ?? '')
+const linkArchive = ref(Boolean(savedSettings.linkArchive) && Boolean(props.promptId))
 
 /** 文本落盘：关掉弹窗再打开还能接着改，不用重新粘一遍。 */
 watch([promptText, negative], () => {
@@ -156,6 +178,30 @@ const matrix = usePromptMatrix({
     else toast.info(message)
   },
 })
+
+// 张数 / 同种子锁定在组合式函数里，创建后套用上次的值（张数 1~4，由 setCount 夹紧）
+if (typeof savedSettings.count === 'number') matrix.setCount(savedSettings.count)
+if (typeof savedSettings.lock === 'boolean') matrix.lockSeed = savedSettings.lock
+
+/** 面板设置落盘：文本之外的每一项都记，重开弹窗不该回默认。 */
+watch(
+  [workflowPath, orientation, seedInput, () => matrix.count, () => matrix.lockSeed, linkArchive],
+  () => {
+    try {
+      const payload: TrialSettings = {
+        workflowPath: workflowPath.value,
+        orientation: orientation.value,
+        seed: seedInput.value,
+        count: matrix.count,
+        lock: matrix.lockSeed,
+        linkArchive: linkArchive.value,
+      }
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload))
+    } catch {
+      /* 隐私模式下忽略 */
+    }
+  },
+)
 
 /**
  * 选择器里看不到的流（文件改名 / 被隐藏 / 已删除）不该继续占一行：

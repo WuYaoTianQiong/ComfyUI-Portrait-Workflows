@@ -325,4 +325,21 @@ describe('PromptTrialPanel 试跑工作台', () => {
     expect([u1.aspect_ratio, u1.quality]).toEqual(['3:2', '0.5x'])
     expect([u2.aspect_ratio, u2.quality]).toEqual(['2:3', '0.5x'])
   })
+
+  it('关掉再打开保留张数 / 基准种子 / 同种子开关，不再回默认', async () => {
+    const first = await mountPanel()
+    // 张数改 4、种子填一个值、关掉同种子锁定
+    await first.findAll('.counts button')[3].trigger('click')
+    await first.find('label.seed input').setValue('20261122')
+    const lock = first.find('label.lock input')
+    await lock.setValue(false)
+    await flushPromises()
+    expect(first.find('.counts button.on').text()).toBe('4')
+    first.unmount()
+
+    const second = await mountPanel()
+    expect(second.find('.counts button.on').text()).toBe('4')
+    expect((second.find('label.seed input').element as HTMLInputElement).value).toBe('20261122')
+    expect((second.find('label.lock input').element as HTMLInputElement).checked).toBe(false)
+  })
 })
