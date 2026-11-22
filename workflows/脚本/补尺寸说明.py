@@ -112,17 +112,25 @@ def note_follow_input(name):
 """
 
 
-def upsert_note(d, title_hint, text, near_pos):
+SECTION_MARK = "改出图尺寸：只动"
+
+
+def append_note(d, text, near_pos):
+    """把尺寸说明**追加**到工作流原有说明卡末尾（绝不覆盖原内容）。"""
     for n in d["nodes"]:
         if n.get("type") in ("MarkdownNote", "Note"):
-            n["widgets_values"] = [text]
-            n["size"] = [560, 760]
+            cur = (n.get("widgets_values") or [""])[0]
+            if SECTION_MARK in cur:
+                cur = cur.split("\n\n---\n\n" + text.split("\n")[0])[0]
+            n["widgets_values"] = [cur.rstrip() + "\n\n---\n\n" + text]
+            w, h = (n.get("size") or [520, 600])[:2]
+            n["size"] = [max(w, 520), max(h, 620)]
             return n["id"], False
     nid = d.get("last_node_id", 0) + 1
     d["last_node_id"] = nid
     d["nodes"].append({
         "id": nid, "type": "MarkdownNote",
-        "pos": [near_pos[0], near_pos[1] + 200], "size": [560, 760],
+        "pos": [near_pos[0], near_pos[1] + 200], "size": [560, 700],
         "flags": {}, "order": len(d["nodes"]), "mode": 0,
         "inputs": [], "outputs": [],
         "properties": {"Node name for S&R": "MarkdownNote", "cnr_id": "comfy-core"},
@@ -179,7 +187,7 @@ def main():
             if args.check:
                 continue
             sel["title"] = new_title
-            upsert_note(d, "尺寸", note_t2i(name, tag, mp, w, h), sel.get("pos") or [0, 0])
+            append_note(d, note_t2i(name, tag, mp, w, h), sel.get("pos") or [0, 0])
 
         elif name in LITERAL and lat:
             w, h = lat["widgets_values"][0], lat["widgets_values"][1]
@@ -187,13 +195,13 @@ def main():
             if args.check:
                 continue
             lat["title"] = "输出尺寸（直接改这两个数）"
-            upsert_note(d, "尺寸", note_literal(name, w, h), lat.get("pos") or [0, 0])
+            append_note(d, note_literal(name, w, h), lat.get("pos") or [0, 0])
 
         elif name in FOLLOW:
             print("%-46s 跟随输入图" % name)
             if args.check:
                 continue
-            upsert_note(d, "尺寸", note_follow_input(name), [100, 100])
+            append_note(d, note_follow_input(name), [100, 100])
 
         else:
             print("[跳过] 结构不符:", name)
