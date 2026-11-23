@@ -64,6 +64,8 @@ const props = withDefaults(
     readonly?: boolean
     /** 是否显示「在画廊中查看」（画廊自己用不到，任务侧才需要）。 */
     canOpenGallery?: boolean
+    /** 是否显示「改参重跑」：需要父组件接 `rerun` 事件并把重跑弹层挂起来。 */
+    canRerun?: boolean
     /**
      * 文件类操作：下载原图 / 在资源管理器中打开目录 / 出片档案 / 存储位置。
      * 这些入口都依赖 ComfyUI input/output/temp 三目录内的 `filename`；
@@ -81,6 +83,8 @@ const emit = defineEmits<{
   (e: 'changed'): void
   /** 用这张图的记录重新出图（旧版 🔄）。 */
   (e: 'regenerate', item: HistoryItem): void
+  /** 用这张图的参数打开「改参重跑」（提示词 / 分辨率可编辑）。 */
+  (e: 'rerun', item: HistoryItem): void
   /** 跳到这条图片对应的提示词（旧版「跳到提示词」）。 */
   (e: 'jump-to-prompt', promptId: number): void
   /** 到画廊里按文件名定位这张图（任务侧打开时才有意义）。 */
@@ -838,6 +842,7 @@ const runParamRows = computed<ArchiveRow[]>(() => {
 })
 
 const QUALITY_SCALES: Record<string, number> = {
+  '0.1x': 0.1,
   '0.75x': 0.75,
   '1.0x': 1,
   '1.25x': 1.25,
@@ -1267,6 +1272,15 @@ function onKey(event: KeyboardEvent) {
         @click="emit('open-in-gallery', item.filename)"
       >
         <Icon name="crosshair" />
+      </button>
+      <button
+        v-if="canRegenerate && canRerun && !readonly"
+        class="tool"
+        data-tip="以这张图为模板重跑：改提示词 / 分辨率 / 种子"
+        aria-label="以这张图为模板重跑"
+        @click="emit('rerun', item)"
+      >
+        <Icon name="sliders-horizontal" />
       </button>
       <button
         v-if="canRegenerate && !readonly"

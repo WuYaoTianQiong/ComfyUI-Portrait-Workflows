@@ -373,6 +373,8 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
       quality: string
       orientation: string
       aspectRatio?: string
+      /** 挂回哪个提示词（画廊「以这张图重跑」用）；0 = 不关联。 */
+      sourcePromptId?: number | null
     },
   ) {
     error.value = ''
@@ -392,9 +394,11 @@ export function useGenerate(sessionKey = '', options: { queue?: boolean } = {}) 
         quality: options.quality,
         aspect_ratio: options.aspectRatio ?? '',
         seed: options.seed ?? null,
+        source_prompt_id: options.sourcePromptId ?? 0,
         output_subfolder: outputSubfolder.value,
       })
-      subscribe(result.job_id)
+      // 与 run() 走同一条登记路径：队列模式下提交即放行，否则订阅到终态
+      trackSubmitted(result.job_id)
     } catch (e) {
       error.value = formatApiError(e)
       busy.value = false

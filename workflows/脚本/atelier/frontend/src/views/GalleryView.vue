@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Lightbox from '../components/Lightbox.vue'
 import Icon from '../components/Icon.vue'
 import CompareModal from '../components/CompareModal.vue'
+import PromptTrialPanel from '../components/PromptTrialPanel.vue'
 import Modal from '../components/Modal.vue'
 import GalleryFilterSidebar from '../components/GalleryFilterSidebar.vue'
 import GalleryGrid from '../components/GalleryGrid.vue'
@@ -26,6 +27,7 @@ import { useToast } from '../composables/useToast'
 import { useWorkflows } from '../composables/useWorkflows'
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useGenerate } from '../composables/useGenerate'
+import { loadRerunInitial, type RerunInitial } from '../composables/useRerunDraft'
 import { findHistoryItem } from '../composables/useImagePreview'
 import { useSettings } from '../composables/useSettings'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
@@ -37,6 +39,7 @@ import { flattenCategories } from '../utils/categories'
 
 import { confirmDialog, confirmDialogWithCheckbox } from '../utils/naive'
 import { CONFIRM_PROMPTS } from '../utils/confirmKeys'
+import { formatApiError } from '../utils/errors'
 import { readSession, writeSession } from '../composables/useSessionState'
 
 /**
@@ -376,6 +379,7 @@ const {
   toggle: toggleSelect,
   selectAll,
   selectPage: selectAllOnPage,
+  invertPage: invertPageSelection,
   clear: clearSelection,
 } = useGallerySelection(() => items.value.map((it) => it.id))
 const selectingAll = ref(false)
@@ -485,6 +489,7 @@ const { workflowPath, orientation: outOrientation, deleteFiles, outputSubfolder 
 const quality = useWorkflowQuality(workflowPath)
 const aspectRatio = useWorkflowAspectRatio(workflowPath)
 const { revealImage } = useImageLocation()
+/** 出图提交：单任务订阅 —— `run` / `runText` 都跟踪到终态，busy 期间按钮转圈、防连点。 */
 const { run, runText, busy: regenerating, error: generateError } = useGenerate()
 
 /**
@@ -532,6 +537,26 @@ async function regenerate(target: HistoryItem) {
 const emit = defineEmits<{
   (e: 'jump-to-prompt', promptId: number): void
 }>()
+
+// ---------------- 以这张图为模板重跑 ----------------
+
+const trialRerunOpen = ref(false)
+const rerunInitial = ref<RerunInitial | null>(null)
+
+/**
+ * 用这张图的参数打开「临时试跑」弹窗（scope=rerun）。
+ *
+ * 每次打开都重新读取初值，不复用上一张图的结果，避免换图后参数串台。
+ * 灯箱保持打开，关掉弹窗就回到原图。
+ */
+async function openRerun(target: HistoryItem) {
+  try {
+    rerunInitial.value = await loadRerunInitial(target)
+    trialRerunOpen.value = true
+  } catch (e) {
+    toast.error(`读取这张图的参数失败：${formatApiError(e)}`)
+  }
+}
 
 /**
  * 批量给选中的图片打标签 / 分类（旧版 bulkAddTag / bulkAddCategory）。
@@ -995,7 +1020,10 @@ function clearFilters() {
 
       <div v-if="selectedCount" class="bulk">
         <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 张</span>
-        <button class="btn btn-sm" @click="selectAllOnPage">全选本页</button>
+        <button class="btn btn-sm" title="勾选本页全部" @click="selectAllOnPage">全选本页</button>
+        <button class="btn btn-sm" title="本页已选的取消、未选的勾上" @click="invertPageSelection">
+          反选本页
+        </button>
         <button class="btn btn-sm" @click="clearSelection">取消选择</button>
         <span class="spacer" />
         <button class="btn btn-sm" @click="openCompare">对比</button>
@@ -1034,13 +1062,25 @@ function clearFilters() {
         :index="lightboxIndex!"
         :workflows="workflows"
         :regenerating="regenerating"
+        can-rerun
         @update:index="lightboxIndex = $event"
         @close="closeLightbox"
         @regenerate="regenerate"
+        @rerun="openRerun"
         @jump-to-prompt="(id) => { closeLightbox(); emit('jump-to-prompt', id) }"
         @changed="queryClient.invalidateQueries({ queryKey: ['history'] })"
       />
     </Transition>
+
+    <PromptTrialPanel
+      :open="trialRerunOpen"
+      scope="rerun"
+      :initial="rerunInitial"
+      raised
+      :prompt-id="null"
+      prompt-name=""
+      @close="trialRerunOpen = false"
+    />
 
     <CompareModal
       :open="compareOpen"

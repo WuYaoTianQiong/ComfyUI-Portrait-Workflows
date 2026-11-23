@@ -3,8 +3,10 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PromptTrialPanel from './PromptTrialPanel.vue'
+import Modal from './Modal.vue'
 import { apiGet, apiPost } from '../api/client'
 import { useSettings } from '../composables/useSettings'
+import type { RerunInitial } from '../composables/useRerunDraft'
 
 vi.mock('../api/client', () => ({
   newIdempotencyKey: () => 'test-idem',
@@ -73,9 +75,24 @@ function stubStorage(extra: Record<string, string> = {}) {
   return store
 }
 
-async function mountPanel(props: { promptId?: number | null; promptName?: string } = {}) {
+async function mountPanel(
+  props: {
+    promptId?: number | null
+    promptName?: string
+    scope?: 'trial' | 'rerun'
+    initial?: RerunInitial | null
+    raised?: boolean
+  } = {},
+) {
   const wrapper = mount(PromptTrialPanel, {
-    props: { open: true, promptId: props.promptId ?? null, promptName: props.promptName ?? '' },
+    props: {
+      open: true,
+      promptId: props.promptId ?? null,
+      promptName: props.promptName ?? '',
+      scope: props.scope ?? 'trial',
+      initial: props.initial ?? null,
+      raised: props.raised ?? false,
+    },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
       stubs: { teleport: true },
@@ -341,5 +358,76 @@ describe('PromptTrialPanel 试跑工作台', () => {
     expect(second.find('.counts button.on').text()).toBe('4')
     expect((second.find('label.seed input').element as HTMLInputElement).value).toBe('20261122')
     expect((second.find('label.lock input').element as HTMLInputElement).checked).toBe(false)
+  })
+})
+
+const RERUN_INITIAL: RerunInitial = {
+  prompt: '来自画廊这张图的提示词',
+  negative: '低质量，模糊',
+  workflowPath: '/wf/b.json',
+  ratio: '3:2',
+  tier: '1.0x',
+  seed: 20261124,
+  count: 2,
+  sourcePromptId: 321,
+}
+
+describe('PromptTrialPanel 画廊「以这张图为模板重跑」', () => {
+  beforeEach(() => {
+    vi.mocked(apiPost).mockClear()
+    vi.mocked(apiGet).mockReset()
+    vi.mocked(apiGet).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/jobs/')) {
+        return {
+          id: 42, status: 'done', total: 1, done_count: 1, job_type: 'single',
+          created_at: '', updated_at: '', title: '',
+          items: [{
+            seed: 100, status: 'done', prompt_preview: '预览',
+            images: [{ filename: 'trial.png', subfolder: '', type: 'output' }],
+          }],
+        }
+      }
+      return { workflows: [...WORKFLOWS, EDIT_WF, U1, U2], default: '/wf/a.json' }
+    })
+    stubStorage()
+    useSettings().workflowPath.value = '/wf/a.json'
+  })
+
+  it('按 initial 预填文本/负向/工作流/种子/张数，提交时带来源提示词 id', async () => {
+    const wrapper = await mountPanel({ scope: 'rerun', initial: RERUN_INITIAL })
+
+    expect((wrapper.find('.pane-text .big-text').element as HTMLTextAreaElement).value).toBe(RERUN_INITIAL.prompt)
+    expect((wrapper.find('.neg-input').element as HTMLTextAreaElement).value).toBe(RERUN_INITIAL.negative)
+    expect(wrapper.findAll('.wf-chip')).toHaveLength(1)
+    expect(wrapper.find('.wf-trigger').text()).toContain('B')
+    expect((wrapper.find('label.seed input').element as HTMLInputElement).value).toBe('20261124')
+    expect(wrapper.find('.counts button.on').text()).toBe('2')
+    // rerun 入口没有归档下拉
+    expect(wrapper.find('.more').exists()).toBe(false)
+
+    await findButton(wrapper, '跑')!.trigger('click')
+    await flushPromises()
+
+    const sent = bodies()
+    expect(sent).toHaveLength(2)
+    expect(sent.every((b) => b.workflow_path === '/wf/b.json')).toBe(true)
+    expect(sent.every((b) => b.source_prompt_id === 321)).toBe(true)
+    expect(sent.map((b) => b.aspect_ratio)).toEqual(['3:2', '3:2'])
+  })
+
+  it('草稿按入口隔离：写 pb.rerunDraft，不动 pb.trialDraft', async () => {
+    const store = stubStorage({ 'pb.trialDraft': JSON.stringify({ prompt: '旧的试跑草稿', negative: '' }) })
+    const wrapper = await mountPanel({ scope: 'rerun', initial: RERUN_INITIAL })
+
+    await wrapper.find('.big-text').setValue('改过的重跑文本')
+    await flushPromises()
+
+    expect(JSON.parse(store['pb.rerunDraft']).prompt).toBe('改过的重跑文本')
+    expect(JSON.parse(store['pb.trialDraft']).prompt).toBe('旧的试跑草稿')
+  })
+
+  it('从灯箱打开时 raised 透传给 Modal', async () => {
+    const wrapper = await mountPanel({ scope: 'rerun', initial: RERUN_INITIAL, raised: true })
+    expect(wrapper.findComponent(Modal).props('raised')).toBe(true)
   })
 })

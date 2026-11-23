@@ -5,9 +5,26 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 
 import GalleryView from './GalleryView.vue'
 import Lightbox from '../components/Lightbox.vue'
+import PromptTrialPanel from '../components/PromptTrialPanel.vue'
 import { apiGet, apiPost } from '../api/client'
 import { useToast } from '../composables/useToast'
 import { useSettings } from '../composables/useSettings'
+
+/** 重跑初值读取走真实接口会很重，这里按传入的图片记录派生一份可断言的初值。 */
+vi.mock('../composables/useRerunDraft', () => ({
+  loadRerunInitial: vi.fn(
+    async (item: { id: number; filename: string; prompt_params?: { prompt?: string } | null }) => ({
+      prompt: item.prompt_params?.prompt ?? `来自图片 ${item.filename} 的提示词`,
+      negative: '',
+      workflowPath: '/wf/a.json',
+      ratio: '1:1',
+      tier: '1.0x',
+      seed: 12345,
+      count: 1,
+      sourcePromptId: item.id,
+    }),
+  ),
+}))
 
 vi.mock('../api/client', () => ({
   newIdempotencyKey: () => 'test-idem',
@@ -345,6 +362,34 @@ describe('GalleryView 清理失效', () => {
     expect(businessPostCalls()[1][1]).toMatchObject({ ids: [1], delete_files: true })
 
     confirmSpy.mockRestore()
+  })
+
+  it('灯箱里能打开「以这张图重跑」弹层', async () => {
+    localStorage.setItem('pb.session.gallery', JSON.stringify({ viewerId: 2 }))
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const lightbox = wrapper.findComponent(Lightbox)
+    expect(lightbox.props('canRerun')).toBe(true)
+
+    lightbox.vm.$emit('rerun', { id: 2, filename: 'b.png', prompt_id: null, prompt_params: null })
+    await flushPromises()
+
+    const panel = wrapper.findComponent(PromptTrialPanel)
+    expect(panel.props('open')).toBe(true)
+    expect(panel.props('scope')).toBe('rerun')
+    expect(panel.props('raised')).toBe(true)
+
+    const initial = panel.props('initial') as {
+      prompt: string
+      workflowPath: string
+      sourcePromptId: number
+    }
+    expect(initial.prompt).toContain('b.png')
+    expect(initial.workflowPath).toBe('/wf/a.json')
+    expect(initial.sourcePromptId).toBe(2)
+
+    localStorage.setItem('pb.session.gallery', JSON.stringify({ viewerId: null }))
   })
 
   it('刷新后按图片 id 恢复上次打开的灯箱', async () => {

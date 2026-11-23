@@ -15,6 +15,7 @@ import { useMatrixFlowParams } from '../composables/useMatrixFlowParams'
 import { useWorkflows, customWorkflowContent } from '../composables/useWorkflows'
 import { useGenerate } from '../composables/useGenerate'
 import { usePromptMatrix } from '../composables/usePromptMatrix'
+import { buildRunTextRequest } from '../composables/useRunParams'
 import { useImagePreview, resolveHistoryItems } from '../composables/useImagePreview'
 import { useToast } from '../composables/useToast'
 import { availableTiers } from '../composables/useWorkflowMatrix'
@@ -27,6 +28,7 @@ import type { HistoryItem, JobSnapshot } from '../api/types'
 import type { WorkflowRow } from '../composables/useWorkflows'
 import type { MatrixAlign, MatrixImage } from '../composables/useWorkflowMatrix'
 import type { MatrixBatch } from '../composables/usePromptMatrix'
+import type { RerunInitial } from '../composables/useRerunDraft'
 
 /**
  * 临时试跑工作台。
@@ -43,21 +45,35 @@ import type { MatrixBatch } from '../composables/usePromptMatrix'
  * 闭环：跑 → 满意 → 「存为提示词」新建一条并把**整批图**认领过去，
  * 否则新提示词的出图历史是空的。
  */
-const props = defineProps<{
-  open: boolean
-  /** 当前选中的提示词：只用于「归档到」选项，不当载体预填文本。 */
-  promptId: number | null
-  promptName: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    /** 当前选中的提示词：只用于「归档到」选项，不当载体预填文本。 */
+    promptId: number | null
+    promptName: string
+    /** 入口：试跑写自有草稿；rerun 从画廊「以这张图为模板重跑」打开，状态单独隔离。 */
+    scope?: 'trial' | 'rerun'
+    /** rerun 入口带入的图片参数；trial 为 null，仍读 localStorage 草稿。 */
+    initial?: RerunInitial | null
+    /** 开在灯箱里面时必须抬一层，否则被查看器盖住。 */
+    raised?: boolean
+  }>(),
+  { scope: 'trial', initial: null, raised: false },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'created', id: number): void
 }>()
 
-const TEXT_KEY = 'pb.trialDraft'
+const isRerun = computed(() => props.scope === 'rerun')
+
+/** 两个入口各存一份：trial 沿用旧键（旧数据不失效），rerun 独立，互不串台。 */
+const textKey = computed(() => (isRerun.value ? 'pb.rerunDraft' : 'pb.trialDraft'))
 /** 除文本外的面板设置：关掉弹窗再打开要能接着用，不能每次都回默认。 */
-const SETTINGS_KEY = 'pb.trialSettings'
+const settingsKey = computed(() => (isRerun.value ? 'pb.rerunSettings' : 'pb.trialSettings'))
+/** storeKey 在组合式函数创建时一次性读取；入口在实例生命周期内不变，按当前 scope 算即可。 */
+const matrixStoreKey = isRerun.value ? 'pb.rerunMatrix' : 'pb.trialMatrix'
 const settings = useSettings()
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -73,7 +89,7 @@ interface TrialSettings {
 
 function readSettings(): TrialSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY)
+    const raw = localStorage.getItem(settingsKey.value)
     return raw ? (JSON.parse(raw) as TrialSettings) : {}
   } catch {
     return {}
@@ -98,7 +114,7 @@ const { queue, error: runError, submitAndTrack, trackQueued } = useGenerate('pro
 
 function readDraft(): { prompt: string; negative: string } {
   try {
-    const raw = localStorage.getItem(TEXT_KEY)
+    const raw = localStorage.getItem(textKey.value)
     if (!raw) return { prompt: '', negative: '' }
     const parsed = JSON.parse(raw) as { prompt?: string; negative?: string }
     return { prompt: parsed.prompt ?? '', negative: parsed.negative ?? '' }
@@ -112,23 +128,17 @@ const promptText = ref(initialDraft.prompt)
 const negative = ref(initialDraft.negative)
 const negativeExpanded = ref(Boolean(initialDraft.negative))
 const seedInput = ref(savedSettings.seed ?? '')
-const linkArchive = ref(Boolean(savedSettings.linkArchive) && Boolean(props.promptId))
+/** rerun 入口没有归档下拉，linkArchive 从一开始就不参与任何判断。 */
+const linkArchive = ref(!isRerun.value && Boolean(savedSettings.linkArchive) && Boolean(props.promptId))
 
 /** 文本落盘：关掉弹窗再打开还能接着改，不用重新粘一遍。 */
 watch([promptText, negative], () => {
   try {
-    localStorage.setItem(TEXT_KEY, JSON.stringify({ prompt: promptText.value, negative: negative.value }))
+    localStorage.setItem(textKey.value, JSON.stringify({ prompt: promptText.value, negative: negative.value }))
   } catch {
     /* 隐私模式下忽略 */
   }
 })
-
-watch(
-  () => props.open,
-  (open) => {
-    if (open && !workflowPath.value) workflowPath.value = settings.workflowPath.value
-  },
-)
 
 /** 选中的提示词被切走/删掉时，归档选项必须跟着失效。 */
 watch(
@@ -139,8 +149,8 @@ watch(
 )
 
 const matrix = usePromptMatrix({
-  scope: () => 'trial',
-  storeKey: 'pb.trialMatrix',
+  scope: () => (isRerun.value ? 'rerun' : 'trial'),
+  storeKey: matrixStoreKey,
   promptText: () => promptText.value,
   negativeText: () => negative.value,
   savedSeed: () => null,
@@ -152,17 +162,22 @@ const matrix = usePromptMatrix({
   overrides: (paths) => flowOverrides(paths),
   orientation: () => orientation.value,
   submit: (req) =>
-    submitAndTrack<{ success: boolean; job_id?: number | null }>('/api/runs/text', {
-      prompt: req.prompt,
-      negative_prompt: req.negative,
-      workflow_path: req.path,
-      workflow_content: customWorkflowContent(req.path),
-      quality: req.tier,
-      orientation: req.orientation,
-      aspect_ratio: req.ratio,
-      seed: req.seed,
-      source_prompt_id: linkArchive.value && props.promptId ? props.promptId : 0,
-    }),
+    submitAndTrack<{ success: boolean; job_id?: number | null }>(
+      '/api/runs/text',
+      buildRunTextRequest({
+        prompt: req.prompt,
+        negativePrompt: req.negative,
+        workflowPath: req.path,
+        workflowContent: customWorkflowContent(req.path),
+        quality: req.tier,
+        orientation: req.orientation,
+        aspectRatio: req.ratio,
+        seed: req.seed,
+        sourcePromptId: isRerun.value
+          ? (props.initial?.sourcePromptId ?? 0)
+          : linkArchive.value && props.promptId ? props.promptId : 0,
+      }),
+    ),
   track: trackQueued,
   fetchJob: (id) => apiGet<JobSnapshot>(`/api/jobs/${id}`).catch(() => null),
   jobs: () => queue.value,
@@ -183,6 +198,39 @@ const matrix = usePromptMatrix({
 if (typeof savedSettings.count === 'number') matrix.setCount(savedSettings.count)
 if (typeof savedSettings.lock === 'boolean') matrix.lockSeed = savedSettings.lock
 
+/** rerun 入口：整套参数取自那张图，覆盖掉本入口上次的记忆。 */
+function applyInitial(initial: RerunInitial) {
+  promptText.value = initial.prompt
+  negative.value = initial.negative
+  negativeExpanded.value = Boolean(initial.negative)
+  workflowPath.value = initial.workflowPath || settings.workflowPath.value
+  seedInput.value = initial.seed === null ? '' : String(initial.seed)
+  matrix.lockSeed = true
+  matrix.setCount(initial.count || 1)
+
+  if (!initial.workflowPath) return
+  matrix.setPaths([initial.workflowPath])
+  if (initial.ratio) flowParams.setRatio([initial.workflowPath], initial.ratio)
+  if (initial.tier) flowParams.setTier([initial.workflowPath], initial.tier)
+}
+
+/**
+ * 每次打开按入口就位：带 initial（画廊「以这张图为模板重跑」）就整套预填，
+ * 否则维持试跑读草稿的老行为。
+ */
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) return
+    if (props.initial) {
+      applyInitial(props.initial)
+      return
+    }
+    if (!workflowPath.value) workflowPath.value = settings.workflowPath.value
+  },
+  { immediate: true },
+)
+
 /** 面板设置落盘：文本之外的每一项都记，重开弹窗不该回默认。 */
 watch(
   [workflowPath, orientation, seedInput, () => matrix.count, () => matrix.lockSeed, linkArchive],
@@ -196,7 +244,7 @@ watch(
         lock: matrix.lockSeed,
         linkArchive: linkArchive.value,
       }
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload))
+      localStorage.setItem(settingsKey.value, JSON.stringify(payload))
     } catch {
       /* 隐私模式下忽略 */
     }
@@ -447,18 +495,23 @@ async function onCreated(id: number) {
 <template>
   <Modal
     :open="open"
-    title="临时试跑"
+    :title="isRerun ? '以这张图为模板重跑' : '临时试跑'"
+    :raised="raised"
     width="min(1760px, 96vw)"
     height="88vh"
     @close="emit('close')"
   >
     <template #head>
-      <span class="head-sub">外来文本 · 多工作流横评 · 不写回提示词库</span>
+      <span class="head-sub">{{
+        isRerun
+          ? '参数取自这张图 · 改完只跑本次 · 不写回提示词库'
+          : '外来文本 · 多工作流横评 · 不写回提示词库'
+      }}</span>
     </template>
 
     <template #actions>
       <span v-if="linking" class="head-sub">正在认领图片…</span>
-      <details class="more">
+      <details v-if="!isRerun" class="more">
         <summary class="btn btn-sm">归档 ▾</summary>
         <div class="more-pop">
           <label class="radio">
