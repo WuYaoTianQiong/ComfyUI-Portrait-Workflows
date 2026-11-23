@@ -164,7 +164,7 @@ vi.mock('../api/client', () => ({
   apiDelete: vi.fn(),
 }))
 
-async function mountModal(selectedIds: number[] = []) {
+async function mountModal(selectedIds: number[] = [], lockPromptId: number | null = null) {
   const wrapper = mount(BatchReplaceModal, {
     props: {
       open: true,
@@ -176,6 +176,8 @@ async function mountModal(selectedIds: number[] = []) {
       fragmentMatch: 'has',
       selectedIds,
       workflowPath: 'F:/wf.json',
+      lockPromptId,
+      lockPromptName: lockPromptId !== null ? '锁定的提示词' : '',
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
@@ -394,5 +396,54 @@ describe('BatchReplaceModal', () => {
     expect(
       second.findAll('.missing-seg button').find((b) => b.text() === '在末尾追加')!.classes(),
     ).toContain('on')
+  })
+
+  it('批量与单条入口的替换清单互不串扰', async () => {
+    const bulk = await mountModal()
+    await prepare(bulk, '人物身材')
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(store.get('pb.batchReplace.rows.batch')).toContain('人物身材')
+    bulk.unmount()
+
+    // 单条入口：读自己的键，不能把批量配好的清单显示成"当前这条要替换的"
+    const single = await mountModal([], 1)
+    expect(single.findAll('.chip').length).toBe(0)
+    expect(single.text()).toContain('还没有替换项')
+
+    await prepare(single, '人物服饰')
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(store.get('pb.batchReplace.rows.single')).toContain('人物服饰')
+    single.unmount()
+
+    // 批量入口的清单没被单条入口的编辑覆盖
+    const bulkAgain = await mountModal()
+    expect(bulkAgain.findAll('.chip').length).toBe(1)
+    expect((bulkAgain.find('.type-select').element as HTMLSelectElement).value).toBe('人物身材')
+  })
+
+  it('旧版共享清单只在批量入口迁移一次', async () => {
+    store.set(
+      'pb.batchReplace',
+      JSON.stringify({ rows: [{ type: '场景环境', content: '夜晚街角', missing: 'skip' }] }),
+    )
+
+    const bulk = await mountModal()
+    expect((bulk.find('.type-select').element as HTMLSelectElement).value).toBe('场景环境')
+    expect(store.has('pb.batchReplace')).toBe(false)
+    bulk.unmount()
+
+    const single = await mountModal([], 1)
+    expect(single.findAll('.chip').length).toBe(0)
+  })
+
+  it('单条入口不会接回批量入口的最近任务', async () => {
+    store.set('pb.batchReplace.lastJob.batch', '999')
+    await mountModal([], 1)
+
+    // 只读自己那把键：批量入口记下的任务不能在这里被拉回来
+    const jobCalls = vi
+      .mocked(apiGet)
+      .mock.calls.filter(([path]) => String(path).includes('/api/jobs/'))
+    expect(jobCalls).toHaveLength(0)
   })
 })

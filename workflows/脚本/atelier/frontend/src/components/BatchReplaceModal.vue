@@ -16,6 +16,7 @@ import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { useWorkflowQuality } from '../composables/useWorkflowQuality'
 import { useWorkflowAspectRatio } from '../composables/useWorkflowAspectRatio'
 import { useJobStream } from '../composables/useJobStream'
+import { useReplaceRows, type ReplaceMode, type ReplaceRow } from '../composables/useReplaceRows'
 import { useImageLocation } from '../composables/useImageLocation'
 import { useImagePreview } from '../composables/useImagePreview'
 import type { JobSnapshot } from '../api/types'
@@ -98,18 +99,34 @@ const { caps, qualityOptions, aspectRatios, defaultRatio } = useWorkflowCaps(
 )
 
 // ---------------------------------------------------------------------------
+// 入口模式：批量 / 单条
+// ---------------------------------------------------------------------------
+//
+// 两个入口共用这个弹窗，但清单与最近任务必须各存一份：批量配好的「替换 8 类」
+// 不该出现在单条入口里。存储键的口径集中在 useReplaceRows 与 lastJobKey()。
+
+/** 单条入口锁定到一条提示词；该值决定清单与任务存到哪把键。 */
+const lockedId = computed(() => props.lockPromptId ?? null)
+const replaceMode = computed<ReplaceMode>(() => (lockedId.value !== null ? 'single' : 'batch'))
+const { rows, makeRow, load: loadRows, reset: resetRows } = useReplaceRows(() => replaceMode.value)
+
+// ---------------------------------------------------------------------------
 // 提交后的任务进度与结果
 // ---------------------------------------------------------------------------
 
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'stopped'])
-const LAST_JOB_KEY = 'pb.batchReplace.lastJobId'
 const tab = ref<'config' | 'job'>('config')
 const job = ref<JobSnapshot | null>(null)
 const jobLoading = ref(false)
 
+/** 最近任务 id 同样按入口分开：否则单条入口会接回批量的任务与结果。 */
+function lastJobKey(): string {
+  return `pb.batchReplace.lastJob.${replaceMode.value}`
+}
+
 function readLastJobId(): number | null {
   try {
-    const parsed = Number(localStorage.getItem(LAST_JOB_KEY) ?? '')
+    const parsed = Number(localStorage.getItem(lastJobKey()) ?? '')
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   } catch {
     return null
@@ -118,8 +135,8 @@ function readLastJobId(): number | null {
 
 function rememberLastJobId(id: number | null) {
   try {
-    if (id) localStorage.setItem(LAST_JOB_KEY, String(id))
-    else localStorage.removeItem(LAST_JOB_KEY)
+    if (id) localStorage.setItem(lastJobKey(), String(id))
+    else localStorage.removeItem(lastJobKey())
   } catch {
     /* localStorage 不可用时忽略 */
   }
@@ -213,20 +230,6 @@ const {
 const { revealImage } = useImageLocation()
 
 
-interface ReplaceRow {
-  key: number
-  type: string
-  content: string
-  missing: 'skip' | 'append'
-}
-
-let rowSeq = 0
-
-function makeRow(type = '', content = '', missing: 'skip' | 'append' = 'skip'): ReplaceRow {
-  return { key: ++rowSeq, type, content, missing }
-}
-
-const rows = ref<ReplaceRow[]>([])
 const activeKey = ref<number | null>(null)
 const fragQuery = ref('')
 const promptQuery = ref('')
@@ -282,62 +285,12 @@ const validReplacements = computed<ReplacementItem[]>(() =>
     .map((r) => ({ type: r.type, content: r.content.trim(), missing: r.missing })),
 )
 
-const OPTIONS_KEY = 'pb.batchReplace'
-
-interface SavedRow {
-  type: string
-  content: string
-  missing: 'skip' | 'append'
-}
-
-function readSavedRows(): SavedRow[] {
-  try {
-    const raw = localStorage.getItem(OPTIONS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as { rows?: unknown }
-    if (!Array.isArray(parsed.rows)) return []
-    const seen = new Set<string>()
-    const saved: SavedRow[] = []
-    for (const item of parsed.rows) {
-      if (!item || typeof item !== 'object') continue
-      const row = item as Partial<SavedRow>
-      if (typeof row.type !== 'string') continue
-      if (!(FRAGMENT_TYPES as readonly string[]).includes(row.type)) continue
-      if (seen.has(row.type)) continue
-      seen.add(row.type)
-      saved.push({
-        type: row.type,
-        content: typeof row.content === 'string' ? row.content : '',
-        missing: row.missing === 'append' ? 'append' : 'skip',
-      })
-    }
-    return saved
-  } catch {
-    return []
-  }
-}
-
-let saveTimer: number | undefined
-
-function scheduleSave() {
-  if (typeof window === 'undefined') return
-  window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    try {
-      localStorage.setItem(OPTIONS_KEY, JSON.stringify({
-        rows: rows.value.map((r) => ({ type: r.type, content: r.content, missing: r.missing })),
-      }))
-    } catch {
-      /* localStorage 不可用时忽略 */
-    }
-  }, 300)
-}
-
 watch(
   () => props.open,
   (open) => {
     if (!open) return
-    rows.value = readSavedRows().map((r) => makeRow(r.type, r.content, r.missing))
+    // 清单按入口分开读：批量与单条不会再互相串设置
+    loadRows()
     activeKey.value = rows.value[0]?.key ?? null
     // 范围不记忆：左侧勾选是本次打开时刚做出的明确选择，不能被上次的
     // 「当前筛选全部」盖掉，否则会出现"勾了 9 条却处理全部 304 条"。
@@ -350,21 +303,13 @@ watch(
   { immediate: true },
 )
 
-watch(rows, scheduleSave, { deep: true })
-
 function resetOptions() {
-  rows.value = []
+  resetRows()
   activeKey.value = null
   scope.value = props.selectedIds.length ? 'selected' : 'filtered'
   fullOpen.value = new Set()
-  try {
-    localStorage.removeItem(OPTIONS_KEY)
-  } catch {
-    /* localStorage 不可用时忽略 */
-  }
 }
 
-const lockedId = computed(() => props.lockPromptId ?? null)
 const usingSelected = computed(() => lockedId.value !== null || scope.value === 'selected')
 const effectiveIds = computed(() =>
   lockedId.value !== null ? [lockedId.value] : props.selectedIds,
