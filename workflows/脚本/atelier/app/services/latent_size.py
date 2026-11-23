@@ -22,6 +22,15 @@ MAX_FINAL_LONG_SIDE = 2048
 # 避免高倍率档位把边长推到显存红线；**预演必须用同一上限**，否则标注会虚高。
 MAX_LATENT_SIDE = 4096
 MIN_LATENT_SIDE = 256
+# 0.1x 极低档专用下限：0.1x 在 1.5MP 基准下目标短边约 100px，
+# 仍按 256 抬升会与 0.25x 夹成同一尺寸（0.1x 反而更大），档位就成摆设。
+# 只对 0.1x 及更低倍率生效，其它档位（含 0.25x）的产出保持原样。
+MIN_LATENT_SIDE_ULTRA_LOW = 128
+
+
+def min_latent_side_for_scale(scale: float) -> int:
+    """按倍率选 latent 短边下限：0.1x 及更小用 128，其它沿用 256。"""
+    return MIN_LATENT_SIDE_ULTRA_LOW if scale <= 0.1 + 1e-9 else MIN_LATENT_SIDE
 
 # 项目统一比例；包含 ResolutionSelector 的 8 个选项 + 21:9 的竖版 9:21。
 CANONICAL_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "9:21")
@@ -82,20 +91,23 @@ def _cap_latent_to_final_long_side(
     return _round_to(width * k, multiple), _round_to(height * k, multiple)
 
 
-def _fit_latent_size(width: float, height: float, multiple: int) -> tuple[int, int]:
-    """把 latent 宽高收进 [MIN_LATENT_SIDE, MAX_LATENT_SIDE]，越界时**等比**缩放。
+def _fit_latent_size(
+    width: float, height: float, multiple: int, min_side: int = MIN_LATENT_SIDE,
+) -> tuple[int, int]:
+    """把 latent 宽高收进 [min_side, MAX_LATENT_SIDE]，越界时**等比**缩放。
 
     不能只截断超限的那一边：9:16 的 2352×4176 截成 2352×4096 只有 0.574，
     用户选的比例被悄悄压走样，而档位本来只是相对倍率，少几个像素看不出来。
-    所以越界时整体缩放到长边正好 4096（或短边抬到 256），再对齐 multiple；
+    所以越界时整体缩放到长边正好 4096（或短边抬到 min_side），再对齐 multiple；
     对齐若又顶出边界就逐格收回。未越界时保持原值，原生尺寸一个像素都不动。
+    min_side 由调用方按倍率给（0.1x 档用 128，见 min_latent_side_for_scale）。
     """
     longest, shortest = max(width, height), min(width, height)
-    if MIN_LATENT_SIDE <= shortest and longest <= MAX_LATENT_SIDE:
+    if min_side <= shortest and longest <= MAX_LATENT_SIDE:
         return int(round(width)), int(round(height))
 
     k = (MAX_LATENT_SIDE / longest) if longest > MAX_LATENT_SIDE \
-        else (MIN_LATENT_SIDE / shortest)
+        else (min_side / shortest)
     out_w = _round_to(width * k, multiple)
     out_h = _round_to(height * k, multiple)
     while max(out_w, out_h) > MAX_LATENT_SIDE:
@@ -103,7 +115,7 @@ def _fit_latent_size(width: float, height: float, multiple: int) -> tuple[int, i
             out_w -= multiple
         else:
             out_h -= multiple
-    while min(out_w, out_h) < MIN_LATENT_SIDE:
+    while min(out_w, out_h) < min_side:
         if out_w <= out_h:
             out_w += multiple
         else:

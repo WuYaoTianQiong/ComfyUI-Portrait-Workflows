@@ -75,6 +75,8 @@ export const CANONICAL_RATIOS = [
 
 export const QUALITY_SCALES = [
   // 2026-11-08：新增 0.25x / 0.5x 低画质档，供快速验证与低配出图。
+  // 0.1x 是 2026-11-24 追加的极低档：批量替换时先看结构对不对，再换高档重跑。
+  { value: '0.1x', scale: 0.1 },
   { value: '0.25x', scale: 0.25 },
   { value: '0.5x', scale: 0.5 },
   { value: '0.75x', scale: 0.75 },

@@ -13,7 +13,8 @@ from app.services.quality_keys import normalize_quality, quality_scale
 from app.services.latent_size import (  # 比例/尺寸纯计算已抽出，见该模块
     CANONICAL_RATIOS, MAX_FINAL_LONG_SIDE, MAX_LATENT_SIDE, MIN_LATENT_SIDE,
     _RATIO_VALUES, _cap_latent_to_final_long_side, _closest_ratio,
-    _fit_latent_size, _round_to, compute_aspect_size, normalize_aspect_ratio,
+    _fit_latent_size, _round_to, compute_aspect_size, min_latent_side_for_scale,
+    normalize_aspect_ratio,
 )
 
 logger = logging.getLogger("atelier.workflow")
@@ -230,7 +231,7 @@ def _latent_info(api_workflow: dict) -> dict | None:
         base_mp = src_inputs.get("base_megapixels")
         q_key = src_inputs.get("quality")
         if ratio and isinstance(base_mp, (int, float)) and not isinstance(base_mp, bool) \
-                and isinstance(q_key, str) and q_key in ("0.25x", "0.5x", "0.75x",
+                and isinstance(q_key, str) and q_key in ("0.1x", "0.25x", "0.5x", "0.75x",
                                                           "1.0x", "1.25x", "1.5x", "2.0x"):
             multiple = raw_multiple or 8
             unit = 1024 * 1024
@@ -1155,10 +1156,12 @@ def detect_workflow_params(api_workflow: dict) -> dict:
     return params
 
 
-DEFAULT_QUALITY_TIERS = ("0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x")
+DEFAULT_QUALITY_TIERS = ("0.1x", "0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x")
 
 #: SeedVR 档位直接对应真实输出分辨率；与 _inject_resolution 的表保持一致。
+#: 0.1x 为该表线性外推的低档（256×512），避免缺键时回落到 1.0x 尺寸造成档位文案重名。
 _SEEDVR_SIZE_BY_QUALITY = {
+    "0.1x": (256, 512),
     "0.25x": (640, 1024), "0.5x": (1280, 2048),
     "0.75x": (2160, 3840), "1.0x": (2560, 4096),
     "1.25x": (3200, 5120), "1.5x": (3840, 6400),
@@ -1267,7 +1270,9 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
                 width, height, post_scale, multiple,
             )
             if info["mode"] != "resolver" or not _pick_ratio_option(resolver_options, ratio):
-                width, height = _fit_latent_size(width, height, multiple)
+                width, height = _fit_latent_size(
+                    width, height, multiple, min_latent_side_for_scale(scale),
+                )
             per_ratio[ratio] = {
                 "width": int(width),
                 "height": int(height),
@@ -1281,9 +1286,13 @@ def build_size_preview(api_workflow: dict, params: dict | None = None) -> dict:
     return preview
 
 
-def _set_latent_size(info: dict, width: float, height: float) -> None:
+def _set_latent_size(
+    info: dict, width: float, height: float, min_side: int = MIN_LATENT_SIDE,
+) -> None:
     inputs = info["node"].setdefault("inputs", {})
-    out_w, out_h = _fit_latent_size(width, height, int(info.get("multiple") or 16))
+    out_w, out_h = _fit_latent_size(
+        width, height, int(info.get("multiple") or 16), min_side,
+    )
     inputs["width"] = out_w
     inputs["height"] = out_h
 
@@ -1389,7 +1398,7 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
                 width, height = _cap_latent_to_final_long_side(
                     width, height, post_scale, info["multiple"],
                 )
-                _set_latent_size(info, width, height)
+                _set_latent_size(info, width, height, min_latent_side_for_scale(scale))
                 logger.info("分辨率：%s 档位无法表达 %.3f MiP，改用字面量 %dx%d",
                             src.get("class_type"), target_mp, width, height)
                 return
@@ -1402,7 +1411,7 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         width, height = _cap_latent_to_final_long_side(
             width, height, post_scale, info["multiple"],
         )
-        _set_latent_size(info, width, height)
+        _set_latent_size(info, width, height, min_latent_side_for_scale(scale))
         return
 
     # literal / preset / megapixels：默认比例 + 1.0× 保持原生尺寸，其余按比例重算
@@ -1410,7 +1419,7 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         width, height = _cap_latent_to_final_long_side(
             info["width"], info["height"], post_scale, info["multiple"],
         )
-        _set_latent_size(info, width, height)
+        _set_latent_size(info, width, height, min_latent_side_for_scale(scale))
         return
     # 旧调用只给横竖时，倒数比例 + 1.0× 仍是"原生宽高交换"，与历史输出逐像素一致
     if implicit_ratio and info["mode"] == "literal" and abs(scale - 1.0) < 1e-9 \
@@ -1418,13 +1427,13 @@ def _inject_resolution(api_workflow: dict, prompt_data: dict) -> None:
         width, height = _cap_latent_to_final_long_side(
             info["height"], info["width"], post_scale, info["multiple"],
         )
-        _set_latent_size(info, width, height)
+        _set_latent_size(info, width, height, min_latent_side_for_scale(scale))
         return
     width, height = compute_aspect_size(requested, target_mp, info["multiple"], info["unit"])
     width, height = _cap_latent_to_final_long_side(
         width, height, post_scale, info["multiple"],
     )
-    _set_latent_size(info, width, height)
+    _set_latent_size(info, width, height, min_latent_side_for_scale(scale))
 
 
 def resolve_seed(*candidates) -> int:

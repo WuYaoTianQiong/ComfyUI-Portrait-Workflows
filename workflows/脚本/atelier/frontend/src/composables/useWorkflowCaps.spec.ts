@@ -138,6 +138,11 @@ describe('档位过滤与回退', () => {
     expect(options.find((o) => o.value === '1.25x')?.label).toBe('1.25×')
   })
 
+  it('0.1x 是可选档：未声明档位的工作流也给出极低倍率（批量替换先验结构）', () => {
+    const options = optionsFor(SCALE_PARAMS)
+    expect(options.find((o) => o.value === '0.1x')?.label).toBe('0.1×')
+  })
+
   it('相同文案只保留一档', () => {
     const preview: SizePreview = {
       '1.5x': { '2:3': { width: 2048, height: 2048, megapixels: 4.19, scale: 1.5 } },

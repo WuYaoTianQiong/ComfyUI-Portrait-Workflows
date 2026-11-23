@@ -4,14 +4,26 @@
 #       人工豁免：同 commit 更新本文件并在下面注明理由与日期。
 # 排除：*.spec.ts / *.d.ts（生成物）/ __pycache__；.py 仅 app/。
 # 冻结日期：2026-11-21（首次冻结；历史回潮见状态文档 §1.4 守卫小节）
+#
+# 人工豁免记录：
+# 2026-11-24 Lightbox.vue 2797 → 2810（+13）：新增「以这张图为模板重跑」的入口
+#   （canRerun prop / rerun 事件 / 一个工具条按钮）。表单本身在独立文件
+#   ImageRerunModal.vue 里，灯箱只多这一个按钮，没有可再拆的整块结构。
+#   同批：BatchReplaceModal 1760 → 1705（清单持久化移入 useReplaceRows）、
+#   PromptView 1521 → 1517（多选逻辑移入 usePromptSelection）。
+# 2026-11-24 workflow_parser.py 1793 → 1802（+9）/ Lightbox.vue 2810 → 2811（+1）：
+#   新增 0.1x 画质档（批量替换先验结构用）。改动是档位白名单加一项、默认档位表
+#   加一项、SeedVR 表加一项、尺寸下限按倍率分流（_set_latent_size 多一个 min_side
+#   形参并在 5 个调用点透传）；尺寸计算本体仍留在 latent_size.py，未继续膨胀。
+#   Lightbox 仅给历史档案的倍率反算表补 '0.1x' 一行。
 
 app/routers/images.py	1788
 app/services/reference_library.py	1503
-app/services/workflow_parser.py	1793
-frontend/src/components/BatchReplaceModal.vue	1760
-frontend/src/components/Lightbox.vue	2797
+app/services/workflow_parser.py	1802
+frontend/src/components/BatchReplaceModal.vue	1705
+frontend/src/components/Lightbox.vue	2811
 frontend/src/composables/recipeModel.ts	1730
 frontend/src/composables/useReferenceRecipe.ts	2067
 frontend/src/composables/useReferenceRecipeDraft.ts	1940
-frontend/src/views/PromptView.vue	1521
+frontend/src/views/PromptView.vue	1517
 frontend/src/views/reference/ReferenceStudioTab.vue	3556
