@@ -8549,6 +8549,160 @@
         ]
       }
     },
+    "/api/prompts/ids": {
+      "get": {
+        "description": "当前筛选下的全部提示词 id（不分页），供「全选全部」跨页勾选。\n\n提示词页以前只能「全选本页」，要跨页批量就得逐页点一遍；这里复用列表\n同一份筛选条件（含分级 / 碎片筛选），保证\"筛出来的\"和\"选上的\"是同一批。\n只返回 id 与总数，不带正文 —— 批量替换要全文时另有 `/prompts/full`。",
+        "operationId": "list_prompt_ids_api_prompts_ids_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tag",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "newest",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_match",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Tag Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_types",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Types",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_match",
+            "required": false,
+            "schema": {
+              "default": "has",
+              "title": "Fragment Match",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fragment_kw",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fragment Kw",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "content_rating",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Content Rating",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Prompt Ids",
+        "tags": [
+          "提示词"
+        ]
+      }
+    },
     "/api/prompts/import": {
       "post": {
         "description": "批量导入提示词（JSON 格式）\n\n修复：PromptCreate 含 prompts 表不存在的字段（如 auto_categorize），\n直接 model_dump 建库会报错，需先剥离；并复用单条创建的自动类型分类逻辑。",

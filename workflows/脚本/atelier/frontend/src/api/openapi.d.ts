@@ -1271,6 +1271,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/prompts/ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Prompt Ids
+         * @description 当前筛选下的全部提示词 id（不分页），供「全选全部」跨页勾选。
+         *
+         *     提示词页以前只能「全选本页」，要跨页批量就得逐页点一遍；这里复用列表
+         *     同一份筛选条件（含分级 / 碎片筛选），保证"筛出来的"和"选上的"是同一批。
+         *     只返回 id 与总数，不带正文 —— 批量替换要全文时另有 `/prompts/full`。
+         */
+        get: operations["list_prompt_ids_api_prompts_ids_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/prompts/import": {
         parameters: {
             query?: never;
@@ -6866,6 +6890,47 @@ export interface operations {
                 fragment_match?: string;
                 fragment_kw?: string;
                 ids?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prompt_ids_api_prompts_ids_get: {
+        parameters: {
+            query?: {
+                search?: string;
+                tag?: string;
+                category_id?: number | null;
+                tag_ids?: string | null;
+                sort?: string;
+                order?: string;
+                tag_match?: string;
+                fragment_types?: string;
+                fragment_match?: string;
+                fragment_kw?: string;
+                content_rating?: string;
             };
             header?: never;
             path?: never;

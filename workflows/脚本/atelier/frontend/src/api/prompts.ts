@@ -6,10 +6,20 @@ export interface PromptHistoryRefs {
   items: Array<{ id: number }>
 }
 
+export interface PromptIdsPage {
+  ids: number[]
+  total: number
+}
+
 export const PROMPT_EXPORT_URL = '/api/prompts/export'
 
 export function listPrompts(params: QueryParams = {}) {
   return apiGet<PromptListPage>('/api/prompts', params)
+}
+
+/** 「全选全部」：当前筛选下的全部 id（不分页），不取正文。 */
+export function listPromptIds(params: QueryParams = {}) {
+  return apiGet<PromptIdsPage>('/api/prompts/ids', params)
 }
 
 export function getPrompt(id: number) {

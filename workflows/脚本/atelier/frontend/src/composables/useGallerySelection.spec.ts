@@ -25,6 +25,11 @@ describe('useGallerySelection', () => {
     selection.selectPage()
     expect(Array.from(selection.selected.value).sort()).toEqual([3, 4])
 
+    // 反选本页：3 取消、4 保留、5 勾上
+    pageIds = [3, 5]
+    selection.invertPage()
+    expect(Array.from(selection.selected.value).sort()).toEqual([4, 5])
+
     selection.clear()
     expect(selection.selectedCount.value).toBe(0)
   })

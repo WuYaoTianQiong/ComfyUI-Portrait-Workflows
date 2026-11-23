@@ -24,6 +24,7 @@ import {
   getPrompt,
   getPromptHistoryRefs,
   importPrompts,
+  listPromptIds,
   ratePrompt,
   setPromptFavorite,
   setPromptPinned,
@@ -44,6 +45,7 @@ import { useWorkflows, useWorkflowValidation, customWorkflowContent } from '../c
 import { useWorkflowCaps } from '../composables/useWorkflowCaps'
 import { usePromptWorkspace } from '../composables/usePromptWorkspace'
 import { usePromptList } from '../composables/usePromptList'
+import { usePromptSelection } from '../composables/usePromptSelection'
 import { usePromptMatrix } from '../composables/usePromptMatrix'
 import { useMatrixFlowParams } from '../composables/useMatrixFlowParams'
 import { resolveHistoryItems } from '../composables/useImagePreview'
@@ -106,8 +108,12 @@ const {
 const missingOpen = ref(false)
 const replaceOpen = ref(false)
 const replaceTargetId = ref<number | null>(null)
-/** 最近一次「替换碎片出图」的任务 id：弹窗靠它订阅进度、刷新后也能接回来。 */
-const replaceJobId = ref<number | null>(null)
+/**
+ * 两个入口各自的最近任务 id：「批量替换」与单条「替换碎片」共用弹窗，
+ * 但任务不是同一件事 —— 共用一份会把批量的任务与结果接回单条入口。
+ */
+const batchReplaceJobId = ref<number | null>(null)
+const singleReplaceJobId = ref<number | null>(null)
 /** 外部跳转的目标 id：列表变化时据此保留选中，不抢着改选第一条。 */
 const jumpTargetId = ref<number | null>(null)
 
@@ -121,6 +127,7 @@ const {
   listError,
   listErr,
   refetchList,
+  filterParams,
 } = usePromptList({
   page,
   pageSize,
@@ -712,27 +719,21 @@ async function deletePrompt() {
 
 // ---------------- 多选与批量 ----------------
 
-/** 批量替换弹窗要读"左侧勾选了哪些"，Set 在模板里不好直接展开。 */
-const selectedPromptIds = computed(() => Array.from(selectedIds.value))
-const selectedCount = computed(() => selectedIds.value.size)
-
-function toggleSelect(id: number) {
-  if (selectedIds.value.has(id)) selectedIds.value.delete(id)
-  else selectedIds.value.add(id)
-  selectedIds.value = new Set(selectedIds.value)
-}
-
-function selectAllOnPage() {
-  selectedIds.value = new Set(list.value.map((it) => it.id))
-}
+/** 勾选集合由 workspace 持有；追加式全选、反选本页、跨页全选都在组合式里实现。 */
+const {
+  selectedCount, selectedArray: selectedPromptIds, selectingAll,
+  toggle: toggleSelect, selectPage: selectAllOnPage, invertPage, selectAllMatching,
+  clear: clearSelection,
+} = usePromptSelection({
+  selectedIds,
+  pageIds: () => list.value.map((it) => it.id),
+  allIds: async () => (await listPromptIds(filterParams())).ids,
+  onNotify: (message, kind) => (kind === 'error' ? toast.error(message) : toast.info(message)),
+})
 
 function onPageSizeChange(size: number) {
   pageSize.value = size
   page.value = 1
-}
-
-function clearSelection() {
-  selectedIds.value = new Set()
 }
 
 const batchFavoriteMutation = useMutation({
@@ -860,7 +861,8 @@ async function onBatchReplace(payload: {
   })
   if (jobId) {
     // 弹窗不关：切到「任务与结果」页签，继续看进度与出图
-    replaceJobId.value = jobId
+    if (single) singleReplaceJobId.value = jobId
+    else batchReplaceJobId.value = jobId
     toast.success(`已提交 ${payload.items.length} 条替换任务`)
   }
 }
@@ -941,16 +943,6 @@ function onImported() {
 
 function selectCategory(id: number | null) {
   categoryId.value = id
-  page.value = 1
-}
-
-function onSearchInput(value: string) {
-  search.value = value
-  page.value = 1
-}
-
-function onSortChange(value: string) {
-  sort.value = value
   page.value = 1
 }
 
@@ -1100,9 +1092,9 @@ onBeforeUnmount(() => {
         :fragment-match="fragmentMatch"
         :content-rating="contentRating"
         @collapse="sidebarCollapsed = true"
-        @update:search="onSearchInput"
+        @update:search="search = $event; page = 1"
         @select-category="selectCategory"
-        @update:sort="onSortChange"
+        @update:sort="sort = $event; page = 1"
         @toggle-order="toggleOrder"
         @update:tag-match="onTagMatchChange"
         @toggle-tag="toggleTag"
@@ -1196,7 +1188,11 @@ onBeforeUnmount(() => {
         :page-size="pageSize"
         :selected-id="selectedId"
         :page-sizes="PAGE_SIZES"
+        :total="total"
+        :selecting-all="selectingAll"
         @select-all="selectAllOnPage"
+        @invert-page="invertPage"
+        @select-all-matching="selectAllMatching"
         @clear-selection="clearSelection"
         @batch-favorite="batchFavorite"
         @batch-replace="openReplaceForSelection"
@@ -1311,7 +1307,7 @@ onBeforeUnmount(() => {
       :workflow-path="workflowPath"
       :lock-prompt-id="replaceTargetId"
       :lock-prompt-name="replaceTargetId !== null ? (draft?.name ?? '') : ''"
-      :job-id="replaceJobId"
+      :job-id="replaceTargetId !== null ? singleReplaceJobId : batchReplaceJobId"
       @close="closeReplace"
       @submit="onBatchReplace"
       @go-jobs="closeReplace(); router.push('/jobs')"

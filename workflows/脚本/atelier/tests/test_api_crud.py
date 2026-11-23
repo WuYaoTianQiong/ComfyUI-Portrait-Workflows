@@ -119,6 +119,27 @@ def test_prompt_flag_endpoints(api):
     assert api.get(f"/api/prompts/{pid}/history").status_code == 200
 
 
+def test_prompt_ids_matches_list_scope(api, seed_prompt):
+    """「全选全部」拿到的 id 必须和列表同一口径：同筛选、不分页、不含已删。"""
+    keep = [seed_prompt(name=f"跨页{i}", prompt=f"【场景环境】跨页场景{i}") for i in range(3)]
+    seed_prompt(name="别的场景", prompt="【场景环境】室内")
+
+    listed = api.get("/api/prompts", params={"search": "跨页", "page_size": 1}).json()
+    assert listed["total"] == 3
+
+    ids = api.get("/api/prompts/ids", params={"search": "跨页"}).json()
+    assert sorted(ids["ids"]) == sorted(p.id for p in keep)
+    assert ids["total"] == 3
+
+    # 空筛选 = 全库（分页列表默认 50 条也在这里被绕开）
+    everything = api.get("/api/prompts/ids").json()
+    assert everything["total"] == 4
+
+    # 一个都不命中时返回空集合而不是报错
+    none = api.get("/api/prompts/ids", params={"search": "不存在的关键词"}).json()
+    assert none == {"ids": [], "total": 0}
+
+
 # ---------------------------------------------------------------------------
 # 图片动作
 # ---------------------------------------------------------------------------

@@ -376,6 +376,34 @@ def list_prompts_full(
     }
 
 
+@router.get("/prompts/ids")
+def list_prompt_ids(
+    search: str = Query(""),
+    tag: str = Query(""),
+    category_id: Optional[int] = Query(None),
+    tag_ids: Optional[str] = Query(None),
+    sort: str = Query("newest"),
+    order: str = Query("desc"),
+    tag_match: str = Query("all"),
+    fragment_types: str = Query(""),
+    fragment_match: str = Query("has"),
+    fragment_kw: str = Query(""),
+    content_rating: str = Query(""),
+):
+    """当前筛选下的全部提示词 id（不分页），供「全选全部」跨页勾选。
+
+    提示词页以前只能「全选本页」，要跨页批量就得逐页点一遍；这里复用列表
+    同一份筛选条件（含分级 / 碎片筛选），保证"筛出来的"和"选上的"是同一批。
+    只返回 id 与总数，不带正文 —— 批量替换要全文时另有 `/prompts/full`。
+    """
+    query = _build_prompt_query(
+        search, tag, category_id, tag_ids, sort, order, tag_match,
+        fragment_types, fragment_match, fragment_kw, content_rating,
+    )
+    ids = [r.id for r in query]
+    return {"ids": ids, "total": len(ids)}
+
+
 @router.get("/prompts/{prompt_id}", response_model=PromptDetail)
 def get_prompt(prompt_id: int):
     """获取单条提示词详情"""

@@ -9,10 +9,16 @@ defineProps<{
   pageSize: number
   selectedId: number | null
   pageSizes: number[]
+  /** 当前筛选下的总条数（「全选全部」按钮上要显示）。 */
+  total: number
+  /** 正在拉取跨页 id 集合。 */
+  selectingAll: boolean
 }>()
 
 defineEmits<{
   selectAll: []
+  invertPage: []
+  selectAllMatching: []
   clearSelection: []
   batchFavorite: []
   batchReplace: []
@@ -28,7 +34,24 @@ defineEmits<{
 <template>
   <div v-if="selectedCount" class="bulk">
     <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 条</span>
-    <button class="btn btn-sm" @click="$emit('selectAll')">全选本页</button>
+    <button
+      class="btn btn-sm"
+      title="勾选本页全部（不会冲掉其他页已勾选的条目）"
+      @click="$emit('selectAll')"
+    >
+      全选本页
+    </button>
+    <button class="btn btn-sm" title="本页已选的取消、未选的勾上；其他页不变" @click="$emit('invertPage')">
+      反选本页
+    </button>
+    <button
+      class="btn btn-sm"
+      :disabled="selectingAll || !total"
+      title="跨页勾选当前筛选下的全部提示词"
+      @click="$emit('selectAllMatching')"
+    >
+      {{ selectingAll ? '选取中…' : `全选全部 ${total} 条` }}
+    </button>
     <button class="btn btn-sm" @click="$emit('clearSelection')">取消</button>
     <span class="spacer" />
     <button class="btn btn-sm" @click="$emit('batchFavorite')">收藏</button>

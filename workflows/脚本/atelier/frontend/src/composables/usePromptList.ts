@@ -33,6 +33,20 @@ export function usePromptList(filters: PromptListFilters) {
     }
   }
 
+  /** 除分页外的全部筛选参数：「全选全部」也用它，保证与列表同一口径。 */
+  function filterParams() {
+    return {
+      search: filters.search.value.trim(),
+      category_id: filters.categoryId.value ?? undefined,
+      tag_ids: filters.tagIds.value.join(','),
+      tag_match: filters.tagMatch.value,
+      ...fragmentParams(),
+      sort: filters.sort.value,
+      order: filters.order.value,
+      content_rating: filters.contentRating.value,
+    }
+  }
+
   const listKey = computed(() => [
     'prompts',
     filters.page.value,
@@ -54,14 +68,7 @@ export function usePromptList(filters: PromptListFilters) {
       listPrompts({
         page: filters.page.value,
         page_size: filters.pageSize.value,
-        search: filters.search.value.trim(),
-        category_id: filters.categoryId.value ?? undefined,
-        tag_ids: filters.tagIds.value.join(','),
-        tag_match: filters.tagMatch.value,
-        ...fragmentParams(),
-        sort: filters.sort.value,
-        order: filters.order.value,
-        content_rating: filters.contentRating.value,
+        ...filterParams(),
       }),
     placeholderData: (prev) => prev,
   })
@@ -79,5 +86,6 @@ export function usePromptList(filters: PromptListFilters) {
     listError: isError,
     listErr: error,
     refetchList: refetch,
+    filterParams,
   }
 }

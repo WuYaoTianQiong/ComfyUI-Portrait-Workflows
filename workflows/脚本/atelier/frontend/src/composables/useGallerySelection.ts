@@ -21,6 +21,16 @@ export function useGallerySelection(getPageIds: () => number[]) {
     selected.value = new Set(getPageIds())
   }
 
+  /** 反选本页：本页已选的取消、未选的勾上；其他页的勾选不变。 */
+  function invertPage() {
+    const next = new Set(selected.value)
+    for (const id of getPageIds()) {
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+    }
+    selected.value = next
+  }
+
   function clear() {
     selected.value = new Set()
   }
@@ -29,5 +39,5 @@ export function useGallerySelection(getPageIds: () => number[]) {
     return selected.value.has(id)
   }
 
-  return { selected, selectedCount, toggle, selectAll, selectPage, clear, has }
+  return { selected, selectedCount, toggle, selectAll, selectPage, invertPage, clear, has }
 }
